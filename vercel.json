@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/management-review",
+      "schedule": "0 15 * * 1"
+    }
+  ]
+}
