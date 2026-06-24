@@ -1,8 +1,13 @@
 import { SectionCard } from "@/components/section-card";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function LoopSpecPage() {
-  const { spec } = getDemoWorkspace();
+export default async function LoopSpecPage({
+  params
+}: {
+  params: Promise<{ loopId: string }>;
+}) {
+  const { loopId } = await params;
+  const { spec } = await getWorkspace(loopId);
 
   return (
     <div className="grid gap-5">

@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { createLoopAction } from "./actions";
 
-export default function NewLoopPage() {
-  const workspace = getDemoWorkspace();
+export default async function NewLoopPage() {
+  const workspace = await getWorkspace();
   const marketing = workspace.templates.find((template) => template.key === "marketing");
 
   return (

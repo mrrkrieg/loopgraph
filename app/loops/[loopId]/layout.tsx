@@ -1,7 +1,7 @@
 import { LoopTabs } from "@/components/loop-tabs";
 import { PageHeader } from "@/components/page-header";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { titleCase } from "@/lib/loop-engineering-builder/demo-helpers";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
 export default async function LoopLayout({
   children,
@@ -11,7 +11,7 @@ export default async function LoopLayout({
   params: Promise<{ loopId: string }>;
 }) {
   const { loopId } = await params;
-  const workspace = getDemoWorkspace();
+  const workspace = await getWorkspace(loopId);
 
   return (
     <>

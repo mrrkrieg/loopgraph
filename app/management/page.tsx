@@ -2,10 +2,10 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function ManagementPage() {
-  const workspace = getDemoWorkspace();
+export default async function ManagementPage() {
+  const workspace = await getWorkspace();
 
   return (
     <>
@@ -16,8 +16,8 @@ export default function ManagementPage() {
       />
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Loop health" value="Good" note="Manual V1 mode with complete spec" />
-        <MetricCard label="Department status" value="Marketing" note="First loop implemented" />
-        <MetricCard label="Open escalations" value={workspace.loop.openReviews} note="Human review required" />
+        <MetricCard label="Department status" value={workspace.loops.length} note="Loops mapped" />
+        <MetricCard label="Open escalations" value={workspace.loops.reduce((sum, loop) => sum + loop.openReviews, 0)} note="Human review required" />
         <MetricCard label="Recent failures" value="0" note="Simulated run completed" />
       </div>
       <div className="mt-6 grid gap-5 lg:grid-cols-2">

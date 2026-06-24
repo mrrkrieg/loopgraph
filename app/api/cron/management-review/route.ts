@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
 export async function GET(request: NextRequest) {
   const configuredSecret = process.env.CRON_SECRET;
@@ -9,12 +9,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const workspace = getDemoWorkspace();
+  const workspace = await getWorkspace();
 
   return NextResponse.json({
     organizationId: workspace.organization.id,
     managementReview: workspace.managementReview,
-    activeLoops: [workspace.loop],
+    activeLoops: workspace.loops,
     recentRuns: [workspace.runBundle.run],
     failedRuns: [],
     openHumanReviews: workspace.runBundle.review ? [workspace.runBundle.review] : [],

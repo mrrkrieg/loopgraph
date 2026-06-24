@@ -3,9 +3,9 @@ import "./globals.css";
 import { AppShell } from "@/components/app-shell";
 
 export const metadata: Metadata = {
-  title: "Loop Engineering Builder",
+  title: "Loopgraph",
   description:
-    "Design, implement, run, review, and improve AI-human company loops."
+    "Map, run, review, and improve AI-human company loops."
 };
 
 export default function RootLayout({

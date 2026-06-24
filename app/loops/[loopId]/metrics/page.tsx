@@ -1,9 +1,14 @@
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/section-card";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function LoopMetricsPage() {
-  const workspace = getDemoWorkspace();
+export default async function LoopMetricsPage({
+  params
+}: {
+  params: Promise<{ loopId: string }>;
+}) {
+  const { loopId } = await params;
+  const workspace = await getWorkspace(loopId);
 
   return (
     <div className="grid gap-5">

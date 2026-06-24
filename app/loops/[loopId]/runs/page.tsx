@@ -1,16 +1,23 @@
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { formatDate } from "@/lib/loop-engineering-builder/demo-helpers";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { startLoopRunAction } from "./actions";
 
-export default function LoopRunsPage() {
-  const workspace = getDemoWorkspace();
+export default async function LoopRunsPage({
+  params
+}: {
+  params: Promise<{ loopId: string }>;
+}) {
+  const { loopId } = await params;
+  const workspace = await getWorkspace(loopId);
   const { run, steps } = workspace.runBundle;
 
   return (
     <div className="grid gap-5">
       <SectionCard title="Manual run V1" description="The starter simulates execution, records step traces, verifies output, and creates human review when escalation rules match.">
-        <form action={`/api/loops/${workspace.loop.id}/run`} method="post">
+        <form action={startLoopRunAction}>
+          <input name="loop_id" type="hidden" value={workspace.loop.id} />
           <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">
             Run loop
           </button>

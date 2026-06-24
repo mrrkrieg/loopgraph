@@ -3,11 +3,14 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { formatDate } from "@/lib/loop-engineering-builder/demo-helpers";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function DashboardPage() {
-  const workspace = getDemoWorkspace();
+export default async function DashboardPage() {
+  const workspace = await getWorkspace();
+  const activeLoops = workspace.loops.filter((loop) => loop.status === "active").length;
+  const openReviews = workspace.loops.reduce((sum, loop) => sum + loop.openReviews, 0);
+  const openImprovements = workspace.loops.reduce((sum, loop) => sum + loop.improvementItems, 0);
 
   return (
     <>
@@ -23,12 +26,12 @@ export default function DashboardPage() {
       />
 
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <MetricCard label="Total loops" value="1" note="Starter workspace" />
-        <MetricCard label="Active loops" value="0" note="Manual V1 mode" />
+        <MetricCard label="Total loops" value={workspace.loops.length} note="Mapped in topology" />
+        <MetricCard label="Active loops" value={activeLoops} note="Ready or running" />
         <MetricCard label="Need answers" value={workspace.progress.missing} note={`${workspace.progress.percent}% complete`} />
-        <MetricCard label="Human reviews" value={workspace.loop.openReviews} note="Pending judgment" />
-        <MetricCard label="Open improvements" value={workspace.improvements.length} note="From traces" />
-        <MetricCard label="Decisions needed" value="2" note="Weekly rollup" />
+        <MetricCard label="Human reviews" value={openReviews} note="Pending judgment" />
+        <MetricCard label="Open improvements" value={openImprovements} note="From traces" />
+        <MetricCard label="Decisions needed" value={workspace.managementReview.decisions.length} note="Weekly rollup" />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[1.25fr_0.75fr]">
@@ -44,16 +47,18 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-line bg-white">
-                <tr>
-                  <td className="px-4 py-3">
-                    <Link href={`/loops/${workspace.loop.id}/runs`} className="font-medium text-ink hover:underline">
-                      {workspace.loop.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3"><StatusPill>{workspace.runBundle.run.status}</StatusPill></td>
-                  <td className="px-4 py-3">{workspace.runBundle.run.triggerType}</td>
-                  <td className="px-4 py-3">{formatDate(workspace.runBundle.run.completedAt)}</td>
-                </tr>
+                {workspace.loops.slice(0, 5).map((loop) => (
+                  <tr key={loop.id}>
+                    <td className="px-4 py-3">
+                      <Link href={`/loops/${loop.id}/runs`} className="font-medium text-ink hover:underline">
+                        {loop.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3"><StatusPill>{loop.status}</StatusPill></td>
+                    <td className="px-4 py-3">manual</td>
+                    <td className="px-4 py-3">{formatDate(loop.lastRunAt)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

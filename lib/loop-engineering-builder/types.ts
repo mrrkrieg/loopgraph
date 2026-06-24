@@ -1,3 +1,5 @@
+import type { LoopSpec } from "./loop-spec-schema";
+
 export type DepartmentKey =
   | "marketing"
   | "sales"
@@ -108,6 +110,90 @@ export type GeneratedArtifact = {
   version: number;
 };
 
+export type LoopGraphNodeKind =
+  | "organization"
+  | "management_loop"
+  | "department"
+  | "loop"
+  | "data_source"
+  | "human_owner"
+  | "review"
+  | "metric"
+  | "improvement";
+
+export type LoopGraphEdgeKind =
+  | "observes"
+  | "data_flow"
+  | "escalates_to"
+  | "owned_by"
+  | "measured_by"
+  | "rolls_up_to"
+  | "improves";
+
+export type LoopGraphNode = {
+  id: string;
+  kind: LoopGraphNodeKind;
+  label: string;
+  subtitle?: string;
+  department?: DepartmentKey;
+  status?: string;
+  health?: number;
+  count?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type LoopGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  kind: LoopGraphEdgeKind;
+  label?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type LoopGraphViewState = {
+  selectedNodeId?: string;
+  mode: "topology" | "reviews" | "metrics" | "improvements";
+  filters: {
+    department?: DepartmentKey | "all";
+    status?: string | "all";
+    attentionOnly?: boolean;
+  };
+  inspectorTab: "overview" | "health" | "runs" | "signals" | "settings";
+};
+
+export type HiddenLaborMetrics = {
+  baselineMinutes: number;
+  loopExecutionMinutes: number;
+  reviewMinutes: number;
+  reworkMinutes: number;
+  botsittingMinutes: number;
+  escalationMinutes: number;
+  governanceMinutes: number;
+  relationshipRedeploymentMinutes: number;
+  qualityScore?: number;
+  businessOutcomeNotes?: string;
+};
+
+export type LoopHealthSummary = {
+  loopId: string;
+  healthScore: number;
+  status: string;
+  openReviews: number;
+  openImprovements: number;
+  netTimeSavedMinutes: number;
+  botsittingMinutes: number;
+  relationshipRedeploymentMinutes: number;
+  qualityScore?: number;
+};
+
+export type LoopGraph = {
+  nodes: LoopGraphNode[];
+  edges: LoopGraphEdge[];
+  health: LoopHealthSummary[];
+  view: LoopGraphViewState;
+};
+
 export type LoopRequirement = {
   category:
     | "data"
@@ -167,6 +253,7 @@ export type HumanReview = {
   recommendation: string;
   reviewerDecision?: string;
   reviewerNotes?: string;
+  hiddenLabor?: Partial<HiddenLaborMetrics>;
   createdAt: string;
   reviewedAt?: string;
 };
@@ -181,6 +268,55 @@ export type ImprovementItem = {
   status: "open" | "in_progress" | "done";
   owner: string;
   createdAt: string;
+};
+
+export type WorkspaceData = {
+  organization: {
+    id: string;
+    name: string;
+  };
+  profile: {
+    id: string;
+    email: string;
+    fullName: string;
+    role: string;
+  };
+  templates: DepartmentTemplate[];
+  loops: LoopRecord[];
+  loop: LoopRecord;
+  answers: Record<string, string>;
+  questions: Array<{
+    section: string;
+    questions: QuestionDefinition[];
+  }>;
+  progress: {
+    totalRequired: number;
+    answered: number;
+    missing: number;
+    percent: number;
+  };
+  spec: LoopSpec;
+  artifacts: GeneratedArtifact[];
+  runBundle: {
+    run: LoopRun;
+    steps: LoopRunStep[];
+    review?: HumanReview;
+  };
+  improvements: ImprovementItem[];
+  managementReview: {
+    period: string;
+    summary: string;
+    risks: string[];
+    decisions: string[];
+    bottlenecks: string[];
+    recommendations: string[];
+  };
+  metrics: Array<{
+    name: string;
+    value: string;
+    note: string;
+  }>;
+  graph: LoopGraph;
 };
 
 export const questionSections: QuestionSection[] = [

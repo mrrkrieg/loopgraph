@@ -1,9 +1,9 @@
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function TemplatesPage() {
-  const workspace = getDemoWorkspace();
+export default async function TemplatesPage() {
+  const workspace = await getWorkspace();
 
   return (
     <>

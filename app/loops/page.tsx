@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { StatusPill } from "@/components/status-pill";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { formatDate, titleCase } from "@/lib/loop-engineering-builder/demo-helpers";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function LoopsPage() {
-  const workspace = getDemoWorkspace();
+export default async function LoopsPage() {
+  const workspace = await getWorkspace();
 
   return (
     <>
@@ -36,22 +36,24 @@ export default function LoopsPage() {
             </tr>
           </thead>
           <tbody>
-            <tr className="border-t border-line">
-              <td className="px-4 py-3">
-                <Link className="font-semibold hover:underline" href={`/loops/${workspace.loop.id}`}>
-                  {workspace.loop.name}
-                </Link>
-              </td>
-              <td className="px-4 py-3">{titleCase(workspace.loop.department)}</td>
-              <td className="px-4 py-3">{titleCase(workspace.loop.loopType)}</td>
-              <td className="px-4 py-3"><StatusPill>{titleCase(workspace.loop.status)}</StatusPill></td>
-              <td className="px-4 py-3">{workspace.loop.owner}</td>
-              <td className="px-4 py-3">{titleCase(workspace.loop.autonomyLevel)}</td>
-              <td className="px-4 py-3">{workspace.loop.cadence}</td>
-              <td className="px-4 py-3">{formatDate(workspace.loop.lastRunAt)}</td>
-              <td className="px-4 py-3">{workspace.loop.openReviews}</td>
-              <td className="px-4 py-3">{workspace.loop.improvementItems}</td>
-            </tr>
+            {workspace.loops.map((loop) => (
+              <tr className="border-t border-line" key={loop.id}>
+                <td className="px-4 py-3">
+                  <Link className="font-semibold hover:underline" href={`/loops/${loop.id}`}>
+                    {loop.name}
+                  </Link>
+                </td>
+                <td className="px-4 py-3">{titleCase(loop.department)}</td>
+                <td className="px-4 py-3">{titleCase(loop.loopType)}</td>
+                <td className="px-4 py-3"><StatusPill>{titleCase(loop.status)}</StatusPill></td>
+                <td className="px-4 py-3">{loop.owner}</td>
+                <td className="px-4 py-3">{titleCase(loop.autonomyLevel)}</td>
+                <td className="px-4 py-3">{loop.cadence}</td>
+                <td className="px-4 py-3">{formatDate(loop.lastRunAt)}</td>
+                <td className="px-4 py-3">{loop.openReviews}</td>
+                <td className="px-4 py-3">{loop.improvementItems}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

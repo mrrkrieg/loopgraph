@@ -1,10 +1,15 @@
 import Link from "next/link";
 import { SectionCard } from "@/components/section-card";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { saveAnswersAndGenerateSpecAction } from "./actions";
 
-export default function LoopQuestionsPage() {
-  const workspace = getDemoWorkspace();
+export default async function LoopQuestionsPage({
+  params
+}: {
+  params: Promise<{ loopId: string }>;
+}) {
+  const { loopId } = await params;
+  const workspace = await getWorkspace(loopId);
 
   return (
     <div className="grid gap-5">

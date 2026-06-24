@@ -2,11 +2,16 @@ import Link from "next/link";
 import { MetricCard } from "@/components/metric-card";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { titleCase } from "@/lib/loop-engineering-builder/demo-helpers";
+import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 
-export default function LoopOverviewPage() {
-  const workspace = getDemoWorkspace();
+export default async function LoopOverviewPage({
+  params
+}: {
+  params: Promise<{ loopId: string }>;
+}) {
+  const { loopId } = await params;
+  const workspace = await getWorkspace(loopId);
 
   return (
     <div className="grid gap-5">

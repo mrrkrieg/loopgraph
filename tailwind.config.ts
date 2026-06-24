@@ -9,13 +9,18 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        ink: "#17202a",
-        paper: "#f7f2ea",
-        line: "#ded8cd",
-        signal: "#ef6f56",
-        sage: "#8fb996",
-        sky: "#8bb7d8",
-        plum: "#a98bc4"
+        ink: "#111111",
+        paper: "#f6f5f2",
+        line: "#dedbd2",
+        signal: "#f97316",
+        success: "#16a34a",
+        review: "#2563eb",
+        risk: "#dc2626",
+        improve: "#7c3aed",
+        amber: "#d97706",
+        teal: "#0f766e",
+        sky: "#2563eb",
+        plum: "#7c3aed"
       }
     }
   },

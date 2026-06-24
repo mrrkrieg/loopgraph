@@ -1,6 +1,6 @@
-# Loop Engineering Builder
+# Loopgraph
 
-Loop Engineering Builder is an open-source starter for designing, implementing, running, reviewing, and improving AI-human company loops.
+Loopgraph is an open-source starter for mapping, designing, implementing, running, reviewing, and improving AI-human company loops.
 
 The unit of design is a loop:
 
@@ -19,6 +19,7 @@ Improve from outcomes and human review
 - Next.js App Router application
 - TypeScript and Tailwind UI
 - Supabase schema and seed data
+- React Flow + ELK topology canvas for company loop management
 - Vercel cron route for weekly management review
 - Zod Loop Spec validation
 - Department templates for marketing, sales, product, engineering, customer success, operations and finance, HR, legal and security, management, and custom loops
@@ -26,11 +27,13 @@ Improve from outcomes and human review
 - Question engine for department-specific loop questions
 - Spec generator for structured Loop Specs
 - Implementation generator for Supabase, Vercel, cron, UI, agent prompt, verification rubric, and management review artifacts
-- Manual/simulated loop runs with traces, verification result, human review, metrics, and improvement items
+- Manual loop runs with traces, verification result, human review, metrics, hidden-labor accounting, and improvement items
+- Developer APIs for graph data and implementation-pack export
 
 ## Routes
 
 ```text
+/topology
 /dashboard
 /loops
 /loops/new
@@ -46,6 +49,8 @@ Improve from outcomes and human review
 /templates
 /settings
 /api/cron/management-review
+/api/loops/[loopId]/graph
+/api/loops/[loopId]/artifacts
 ```
 
 ## Getting started
@@ -69,6 +74,8 @@ npm run build
 ```
 
 ## Supabase
+
+Loopgraph runs as a zero-config demo when Supabase environment variables are missing. When Supabase is configured, new loops, answers, specs, artifacts, runs, reviews, improvements, graph relationships, and saved graph views are persisted.
 
 Apply the migration in:
 

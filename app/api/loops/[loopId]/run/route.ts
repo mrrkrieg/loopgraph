@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
-import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
+import { startLoopRun } from "@/lib/loop-engineering-builder/workspace";
 
-export async function POST() {
-  const workspace = getDemoWorkspace();
+export async function POST(
+  _request: Request,
+  { params }: { params: Promise<{ loopId: string }> }
+) {
+  const { loopId } = await params;
+  const runBundle = await startLoopRun(loopId);
 
   return NextResponse.json({
-    run: workspace.runBundle.run,
-    steps: workspace.runBundle.steps,
-    review: workspace.runBundle.review
+    run: runBundle.run,
+    steps: runBundle.steps,
+    review: runBundle.review
   });
 }

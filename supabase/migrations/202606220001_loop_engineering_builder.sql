@@ -235,6 +235,7 @@ create table human_reviews (
   recommendation text,
   reviewer_decision text,
   reviewer_notes text,
+  hidden_labor jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   reviewed_at timestamptz,
   constraint human_reviews_status_check check (
@@ -273,6 +274,43 @@ create table improvement_items (
 
 create trigger improvement_items_set_updated_at
 before update on improvement_items
+for each row execute function set_updated_at();
+
+create table loop_relationships (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid references organizations(id) on delete cascade,
+  source_loop_id uuid references loops(id) on delete cascade,
+  target_loop_id uuid references loops(id) on delete cascade,
+  relationship_type text not null,
+  label text,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  constraint loop_relationships_relationship_type_check check (
+    relationship_type in (
+      'observes',
+      'data_flow',
+      'escalates_to',
+      'owned_by',
+      'measured_by',
+      'rolls_up_to',
+      'improves'
+    )
+  )
+);
+
+create table loop_graph_views (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid references organizations(id) on delete cascade,
+  name text not null,
+  view_state jsonb not null default '{}'::jsonb,
+  is_default boolean not null default false,
+  created_by uuid references profiles(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create trigger loop_graph_views_set_updated_at
+before update on loop_graph_views
 for each row execute function set_updated_at();
 
 create table management_reviews (
@@ -320,4 +358,7 @@ create index loop_answers_loop_id_idx on loop_answers(loop_id);
 create index loop_runs_loop_id_started_at_idx on loop_runs(loop_id, started_at desc);
 create index human_reviews_loop_id_status_idx on human_reviews(loop_id, status);
 create index improvement_items_loop_id_status_idx on improvement_items(loop_id, status);
+create index loop_relationships_organization_id_idx on loop_relationships(organization_id);
+create index loop_relationships_source_loop_id_idx on loop_relationships(source_loop_id);
+create index loop_graph_views_organization_id_idx on loop_graph_views(organization_id);
 create index management_reviews_organization_period_idx on management_reviews(organization_id, period_start, period_end);
