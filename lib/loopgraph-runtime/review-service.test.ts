@@ -104,6 +104,38 @@ describe("review-service", () => {
     expect(decision.review.approvedFingerprints).toEqual([internal!.fingerprint]);
   });
 
+  it("completes run when customer-facing approval follows a separate internal approval", async () => {
+    const loaded = await loadLoopSpecFromPath(path.join(repoRoot, "examples/strategic-account-escalation"));
+    if (!loaded.ok) throw new Error("load failed");
+    const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph-test"));
+    const result = await simulateLoop({
+      spec: loaded.spec,
+      fixture: path.join(repoRoot, "fixtures/strategic-account-escalation/enterprise-outage-near-renewal.json"),
+      storage
+    });
+
+    const internal = result.trace.preparedActions.find((action) => !action.customerFacing && action.requiresApproval);
+    const customer = result.trace.preparedActions.find((action) => action.customerFacing && action.requiresApproval);
+    expect(internal).toBeDefined();
+    expect(customer).toBeDefined();
+
+    await applyReviewDecision(storage, {
+      runId: result.trace.id,
+      status: "approved",
+      approvedFingerprints: [internal!.fingerprint]
+    });
+
+    const decision = await applyReviewDecision(storage, {
+      runId: result.trace.id,
+      status: "approved",
+      approvedFingerprints: [customer!.fingerprint]
+    });
+
+    expect(decision.trace.status).toBe("COMPLETED");
+    expect(decision.review.approvedFingerprints).toEqual([customer!.fingerprint]);
+    expect(decision.trace.humanReviews).toHaveLength(2);
+  });
+
   it("records improvement signal when review is rejected", async () => {
     const loaded = await loadLoopSpecFromPath(path.join(repoRoot, "examples/github-issue-triage"));
     if (!loaded.ok) throw new Error("load failed");

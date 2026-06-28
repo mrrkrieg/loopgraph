@@ -85,7 +85,7 @@ loopgraph.yaml (source of truth)
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL=       # optional Design Studio persistence
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 OPENAI_API_KEY=                 # reserved / experimental
 CRON_SECRET=

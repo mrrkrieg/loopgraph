@@ -78,17 +78,18 @@ export async function applyReviewDecision(
 
   if (input.status === "approved") {
     assertValidFingerprintSelection(trace, approvedFingerprints);
+    const cumulativeApprovedFingerprints = getCumulativeApprovedFingerprints(trace);
     const pendingCustomerFacing = trace.preparedActions.some(
       (action) =>
         action.requiresApproval &&
         action.customerFacing &&
-        !validateApprovalBinding(action, approvedFingerprints)
+        !validateApprovalBinding(action, cumulativeApprovedFingerprints)
     );
     const pendingInternal = trace.preparedActions.some(
       (action) =>
         action.requiresApproval &&
         !action.customerFacing &&
-        !validateApprovalBinding(action, approvedFingerprints)
+        !validateApprovalBinding(action, cumulativeApprovedFingerprints)
     );
 
     if (pendingInternal && approvedFingerprints.length > 0) {
@@ -99,7 +100,7 @@ export async function applyReviewDecision(
       throw new ReviewServiceError("Select at least one prepared action fingerprint to approve");
     }
 
-    await commitApprovedActions(trace, approvedFingerprints);
+    await commitApprovedActions(trace, cumulativeApprovedFingerprints);
 
     if (pendingCustomerFacing || pendingInternal) {
       trace.status = "WAITING_FOR_REVIEW";
@@ -146,6 +147,18 @@ function mapReviewStatus(status: ReviewDecisionStatus): HumanReviewTrace["status
   }
 }
 
+function getCumulativeApprovedFingerprints(trace: LoopRunTrace): string[] {
+  const fingerprints = new Set<string>();
+  for (const review of trace.humanReviews) {
+    if (review.status === "approved") {
+      for (const fingerprint of review.approvedFingerprints) {
+        fingerprints.add(fingerprint);
+      }
+    }
+  }
+  return [...fingerprints];
+}
+
 function assertValidFingerprintSelection(trace: LoopRunTrace, approvedFingerprints: string[]) {
   for (const fingerprint of approvedFingerprints) {
     const match = trace.preparedActions.some((action) => action.fingerprint === fingerprint);
@@ -161,6 +174,11 @@ async function commitApprovedActions(trace: LoopRunTrace, approvedFingerprints: 
 
   const updatedCalls = [];
   for (const call of trace.toolCalls) {
+    if (call.status === "mock_committed" || call.status === "completed") {
+      updatedCalls.push(call);
+      continue;
+    }
+
     const prepared = trace.preparedActions.find((action) => action.toolKey === call.toolKey);
     if (!prepared) {
       updatedCalls.push(call);
