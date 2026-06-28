@@ -1,0 +1,18 @@
+{
+  "status": "WAITING_FOR_REVIEW",
+  "loopId": "github-issue-triage",
+  "idempotencyKey": "56e3df58e7683743",
+  "contextHash": "6d3aaeeaddd1e2c6",
+  "preparedActionCount": 2,
+  "preparedFingerprints": [
+    "1d427e388a3cdfa4",
+    "9a137a8ce2dee1ec"
+  ],
+  "escalationCaseIds": [
+    "case_26aee511a198"
+  ],
+  "escalationSeverity": "P1",
+  "policyBlocked": false,
+  "verificationFailed": false,
+  "humanReviewRequired": true
+}

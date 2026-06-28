@@ -1,108 +1,85 @@
 # Loopgraph
 
-Loopgraph is an open-source starter for mapping, designing, implementing, running, reviewing, and improving AI-human company loops.
+Open-source infrastructure for defining and operating recurring AI-human loops.
 
-The unit of design is a loop:
+A Loopgraph loop is more than a prompt or a tool chain. It defines what event starts work, what evidence it may observe, which actions it may propose, what policy and verification must pass, when a human must decide, and how the outcome is recorded.
 
-```text
-Observe state
-Compare state to a goal
-Execute routines through tools, agents, or humans
-Verify outputs
-Escalate judgment-heavy work
-Record traces
-Improve from outcomes and human review
-```
-
-## What the starter includes
-
-- Next.js App Router application
-- TypeScript and Tailwind UI
-- Supabase schema and seed data
-- React Flow + ELK topology canvas for company loop management
-- Vercel cron route for weekly management review
-- Zod Loop Spec validation
-- Department templates for marketing, sales, product, engineering, customer success, operations and finance, HR, legal and security, management, and custom loops
-- A polished Marketing Campaign Learning Loop example
-- Question engine for department-specific loop questions
-- Spec generator for structured Loop Specs
-- Implementation generator for Supabase, Vercel, cron, UI, agent prompt, verification rubric, and management review artifacts
-- Manual loop runs with traces, verification result, human review, metrics, hidden-labor accounting, and improvement items
-- Developer APIs for graph data and implementation-pack export
-
-## Routes
-
-```text
-/topology
-/dashboard
-/loops
-/loops/new
-/loops/[loopId]
-/loops/[loopId]/questions
-/loops/[loopId]/spec
-/loops/[loopId]/implementation
-/loops/[loopId]/runs
-/loops/[loopId]/reviews
-/loops/[loopId]/metrics
-/loops/[loopId]/improvements
-/management
-/templates
-/settings
-/api/cron/management-review
-/api/loops/[loopId]/graph
-/api/loops/[loopId]/artifacts
-```
-
-## Getting started
-
-Install dependencies:
+## First 10 minutes
 
 ```bash
+git clone <repo>
+cd loopgraph
 npm install
-```
 
-Run locally:
+npm run loopgraph -- validate examples/github-issue-triage
+npm run loopgraph -- simulate examples/github-issue-triage \
+  --fixture fixtures/github-issue-triage/security-issue.json
 
-```bash
+npm run loopgraph -- init github-issue-triage ./tmp/github-issue-triage
 npm run dev
 ```
 
-Build:
+Open the web UI for Design Studio and topology. CLI traces are stored under `.loopgraph/`.
+
+## What Loopgraph is
+
+- A versioned **LoopSpec** contract (`loopgraph/v1alpha1`)
+- A local **validate + simulate** runtime with deterministic fixtures
+- Reproducible **context snapshots** with provenance and hashes
+- **Prepared-action** approval binding (exact payload fingerprints)
+- A standardized **EscalationCase** handoff to management loops
+- A **Design Studio** and generated topology for blueprinting and debugging
+
+## What Loopgraph is not
+
+Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer. It provides the operating contract around recurring AI work: context, policy, evidence, approval, escalation, and outcome. See [docs/competitive-boundary.md](docs/competitive-boundary.md).
+
+## Hero templates
+
+1. **GitHub Issue Triage** — developer onboarding demo (`examples/github-issue-triage`)
+2. **Strategic Account Escalation** — company operating-system demo (`examples/strategic-account-escalation`)
+
+## CLI commands
 
 ```bash
-npm run build
+npm run loopgraph -- init <template> [dir]
+npm run loopgraph -- validate <path>
+npm run loopgraph -- simulate <path> --fixture <file>
+npm run loopgraph -- trace <runId>
+npm run loopgraph -- export-graph <path>
+npm run loopgraph -- adapter test
+npm run loopgraph -- review approve <runId> --actions <fingerprint>
+npm run loopgraph -- case show <caseId>
 ```
 
-## Supabase
-
-Loopgraph runs as a zero-config demo when Supabase environment variables are missing. When Supabase is configured, new loops, answers, specs, artifacts, runs, reviews, improvements, graph relationships, and saved graph views are persisted.
-
-Apply the migration in:
+## Architecture
 
 ```text
-supabase/migrations/202606220001_loop_engineering_builder.sql
+loopgraph.yaml (source of truth)
+  → lib/loopgraph-core (contracts)
+  → lib/loopgraph-runtime (simulate)
+  → scripts/loopgraph.ts (CLI)
+  → app/ (Design Studio + topology debugger)
 ```
 
-Seed built-in templates from:
+## Environment variables
 
 ```text
-supabase/seed.sql
-```
-
-Environment variables:
-
-```text
-NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_URL=       # optional Design Studio persistence
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-OPENAI_API_KEY=
+OPENAI_API_KEY=                 # reserved / experimental
 CRON_SECRET=
 ```
 
-## V1 scope
+## Docs
 
-V1 is intentionally focused. It proves that a user can start with a vague company goal, answer the right department-specific questions, and get a serious implementation blueprint for an AI-human operating loop.
+- [ADR-001](docs/ADR-001-v1-architecture.md)
+- [V1 Launch Context Plan](V1-LAUNCH-CONTEXT-PLAN.md)
+- [V1 Execution Plan](docs/V1-EXECUTION-PLAN.md)
+- [Competitive boundary](docs/competitive-boundary.md)
+- [Loop spec](docs/loop-spec.md)
 
-External system ingestion is not included in V1. Manual and simulated runs are used to prove the loop model, trace schema, verification, human review, measurement, and management rollup.
+## License
 
-The product also avoids presenting automation as free labor. Measurement includes review time, rework time, escalation time, governance time, botsitting time, quality, business value, and relationship-time redeployment.
+MIT

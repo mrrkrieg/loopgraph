@@ -1,0 +1,13 @@
+{
+  "eventId": "gh_evt_normal_bug_001",
+  "simulatedAt": "2026-06-27T12:00:00.000Z",
+  "issue": {
+    "title": "Button click handler throws on mobile",
+    "body": "On iOS Safari the submit button throws a TypeError after the latest release.",
+    "labels": ["bug"]
+  },
+  "repo": {
+    "name": "loopgraph/demo-app",
+    "policy": "Triage all issues within 24h. Never auto-close."
+  }
+}

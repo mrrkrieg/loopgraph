@@ -1,5 +1,6 @@
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
+import { ContextTracePanel } from "@/components/context-trace-panel";
 import { formatDate } from "@/lib/loop-engineering-builder/demo-helpers";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { startLoopRunAction } from "./actions";
@@ -15,7 +16,7 @@ export default async function LoopRunsPage({
 
   return (
     <div className="grid gap-5">
-      <SectionCard title="Manual run V1" description="The starter simulates execution, records step traces, verifies output, and creates human review when escalation rules match.">
+      <SectionCard title="Simulated runs (fixture)" description="Runs use deterministic fixtures when available. Traces include context snapshots, policy decisions, and prepared actions.">
         <form action={startLoopRunAction}>
           <input name="loop_id" type="hidden" value={workspace.loop.id} />
           <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">
@@ -52,6 +53,9 @@ export default async function LoopRunsPage({
             </tbody>
           </table>
         </div>
+      </SectionCard>
+      <SectionCard title="Context snapshot (simulated)">
+        <ContextTracePanel runId={run.id} />
       </SectionCard>
       <SectionCard title="Run detail">
         <div className="grid gap-4 lg:grid-cols-3">

@@ -1,6 +1,7 @@
 import type { GeneratedArtifact, LoopRequirement, LoopRecord } from "./types";
 import type { LoopSpec } from "./loop-spec-schema";
 import { validateLoopSpec } from "./loop-spec-schema";
+import { flatSpecToV1alpha1 } from "../loopgraph-core/studio-adapter";
 import type { AnswerMap } from "./question-engine";
 import { getDepartmentTemplate, getTemplateById } from "./templates";
 
@@ -196,4 +197,8 @@ function inferSourceType(source: string) {
   if (normalized.includes("github")) return "github";
   if (normalized.includes("linear")) return "linear";
   return "manual";
+}
+
+export function exportPublicLoopSpec(loop: LoopRecord, answers: AnswerMap) {
+  return flatSpecToV1alpha1(generateLoopSpec(loop, answers));
 }

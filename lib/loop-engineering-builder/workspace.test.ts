@@ -14,8 +14,9 @@ describe("workspace fallback", () => {
   it("can start a demo run without Supabase", async () => {
     const runBundle = await startLoopRun("loop_demo_marketing_campaign");
 
-    expect(runBundle.run.status).toBe("completed");
-    expect(runBundle.steps.map((step) => step.stepType)).toContain("verify");
+    expect(runBundle.run.humanReviewRequired).toBe(true);
+    expect(runBundle.steps.length).toBeGreaterThan(0);
+    expect(runBundle.steps.map((step) => step.stepType)).toContain("observe");
     expect(runBundle.review?.status).toBe("pending");
   });
 });

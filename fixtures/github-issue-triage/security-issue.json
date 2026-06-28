@@ -1,0 +1,13 @@
+{
+  "eventId": "gh_evt_security_001",
+  "simulatedAt": "2026-06-27T12:10:00.000Z",
+  "issue": {
+    "title": "Possible API token leak in logs",
+    "body": "We found a credential printed in debug logs after enabling verbose mode. Possible CVE exposure.",
+    "labels": ["security"]
+  },
+  "repo": {
+    "name": "loopgraph/demo-app",
+    "policy": "Security issues require maintainer review before any public response."
+  }
+}

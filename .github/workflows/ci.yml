@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, v1, "loopgraph/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+      - run: npm run loopgraph -- validate examples/github-issue-triage
+      - run: npm run loopgraph -- validate examples/strategic-account-escalation
+      - run: npm run loopgraph -- init github-issue-triage /tmp/loopgraph-init-check
+      - run: npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/normal-bug.json
+      - run: npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/security-issue.json
+      - run: npm run loopgraph -- simulate examples/strategic-account-escalation --fixture fixtures/strategic-account-escalation/enterprise-outage-near-renewal.json
+      - run: npm run loopgraph -- adapter test

@@ -1,19 +1,26 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
+import { TemplatePicker } from "@/components/template-picker";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { createLoopAction } from "./actions";
 
 export default async function NewLoopPage() {
   const workspace = await getWorkspace();
-  const marketing = workspace.templates.find((template) => template.key === "marketing");
+  const templateOptions = workspace.templates.flatMap((department) =>
+    department.commonLoops.map((loop) => ({
+      id: loop.id,
+      name: loop.name,
+      department: department.key
+    }))
+  );
 
   return (
     <>
       <PageHeader
-        eyebrow="Wizard"
+        eyebrow="Design Studio"
         title="Create a loop"
-        description="V1 starts with a department, a built-in template, a goal, department-specific questions, then a generated spec and implementation plan."
+        description="Optional blueprint builder: department, template, goal, questions, then a generated LoopSpec and implementation plan. Code-first loops live in examples/ and validate via the CLI."
       />
       <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
         <SectionCard title="Loop setup">
@@ -26,22 +33,11 @@ export default async function NewLoopPage() {
               Loop name
               <input name="loop_name" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue={workspace.loop.name} />
             </label>
-            <label className="block text-sm font-medium">
-              Department
-              <select name="department" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue="marketing">
-                {workspace.templates.map((template) => (
-                  <option key={template.key} value={template.key}>{template.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm font-medium">
-              Loop template
-              <select name="template_id" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue="marketing-campaign_learning">
-                {marketing?.commonLoops.map((template) => (
-                  <option key={template.id} value={template.id}>{template.name}</option>
-                ))}
-              </select>
-            </label>
+            <TemplatePicker
+              templates={templateOptions}
+              defaultDepartment="marketing"
+              defaultTemplateId="marketing-campaign_learning"
+            />
             <label className="block text-sm font-medium">
               Goal
               <textarea

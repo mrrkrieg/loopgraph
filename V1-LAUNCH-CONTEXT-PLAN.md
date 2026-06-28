@@ -1353,7 +1353,7 @@ The prior plan’s implementation work remains valid. It now supports both the D
 #### Acceptance criteria
 
 - A one-page architecture decision record exists for all ten decisions.
-- All docs use “Loopgraph”; remove or demote “LoopCraft” unless it is intentionally retained as an internal codename.
+- All docs use **Loopgraph** as the product name.
 - No open task contradicts the decisions above.
 
 ---

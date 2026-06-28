@@ -1,0 +1,8 @@
+{
+  "eventId": "acct_evt_lowrisk_001",
+  "simulatedAt": "2026-06-27T13:05:00.000Z",
+  "ticket": { "current": { "body": "How do I export a CSV from the analytics page?" } },
+  "account": { "id": "acct_small", "name": "Small Co", "segment": "smb", "renewalDaysRemaining": 200 },
+  "incident": { "category": "product_defect", "severity": "P3" },
+  "businessImpact": { "renewalRisk": "low", "summary": "Low-risk product question" }
+}

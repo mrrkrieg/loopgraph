@@ -6,3 +6,6 @@ node_modules
 *.tsbuildinfo
 dist
 coverage
+.loopgraph
+.loopgraph-test
+tmp

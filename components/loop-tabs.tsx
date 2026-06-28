@@ -13,7 +13,9 @@ const tabs = [
 
 export function LoopTabs({ loopId }: { loopId: string }) {
   return (
-    <div className="mb-6 flex flex-wrap gap-2">
+    <div className="mb-6">
+      <p className="mb-3 text-xs font-medium uppercase tracking-wide text-ink/50">Design Studio</p>
+      <div className="flex flex-wrap gap-2">
       {tabs.map((tab) => (
         <Link
           key={tab.href || "overview"}
@@ -23,6 +25,7 @@ export function LoopTabs({ loopId }: { loopId: string }) {
           {tab.label}
         </Link>
       ))}
+      </div>
     </div>
   );
 }

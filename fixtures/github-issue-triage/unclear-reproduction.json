@@ -1,0 +1,10 @@
+{
+  "eventId": "gh_evt_unclear_001",
+  "simulatedAt": "2026-06-27T12:15:00.000Z",
+  "issue": {
+    "title": "App broken",
+    "body": "It doesn't work.",
+    "labels": []
+  },
+  "repo": { "name": "loopgraph/demo-app", "policy": "Ask for reproduction steps when unclear." }
+}
