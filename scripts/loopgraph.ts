@@ -1,20 +1,24 @@
 #!/usr/bin/env tsx
-import { cp, mkdir, readFile } from "node:fs/promises";
+import "./load-env";
+import { cp, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { Command } from "commander";
 import { loadLoopSpecFromPath } from "../lib/loopgraph-runtime/loader";
 import { simulateLoop } from "../lib/loopgraph-runtime/simulator";
+import { executeLoop, isExecuteEnabled } from "../lib/loopgraph-runtime/executor";
 import { buildGraphFromSpecs } from "../lib/loopgraph-core/graph";
-import { FileStorageAdapter } from "../lib/loopgraph-sdk/storage";
 import { allMockAdapters } from "../lib/loopgraph-sdk/adapters/mock-adapters";
 import { runAdapterConformance } from "../lib/loopgraph-sdk/conformance";
-import { validateApprovalBinding } from "../lib/loopgraph-core/review";
 import { consumeEscalationCase } from "../lib/loopgraph-runtime/management-consumer";
+import { applyReviewDecision, ReviewServiceError } from "../lib/loopgraph-runtime/review-service";
+import { formatReviewPacket } from "../lib/loopgraph-runtime/review-packet";
+import { listEscalationCases, resolveCase } from "../lib/loopgraph-runtime/case-service";
+import { getStorageAdapter, getLoopgraphRoot } from "../lib/loopgraph-runtime/storage-resolver";
 import type { LoopRunTrace } from "../lib/loopgraph-core/trace";
 
 const program = new Command();
 const repoRoot = path.resolve(__dirname, "..");
-const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph"));
+const storage = getStorageAdapter({ rootDir: getLoopgraphRoot(repoRoot) });
 
 program.name("loopgraph").description("Loopgraph local validate/simulate CLI");
 
@@ -77,10 +81,10 @@ program
     }
     printTrace(trace);
     if (options.review && trace.status === "WAITING_FOR_REVIEW") {
-      console.log("\nPrepared actions:");
-      trace.preparedActions.forEach((action) => {
-        console.log(`- ${action.label} fingerprint=${action.fingerprint} customerFacing=${action.customerFacing}`);
-      });
+      const caseItem = trace.escalationCases[0]
+        ? await storage.getEscalationCase(trace.escalationCases[0])
+        : null;
+      console.log("\n" + formatReviewPacket(trace, caseItem));
     }
   });
 
@@ -124,7 +128,7 @@ review
   .requiredOption("--actions <fingerprints>", "Comma-separated fingerprints")
   .option("--comment <text>")
   .action(async (runId, options: { actions: string; comment?: string }) => {
-    await applyReviewDecision(runId, "approved", options.actions.split(","), options.comment);
+    await runReviewDecision(runId, "approved", options.actions.split(",").filter(Boolean), options.comment);
   });
 
 review
@@ -132,7 +136,7 @@ review
   .argument("<runId>")
   .option("--comment <text>")
   .action(async (runId, options: { comment?: string }) => {
-    await applyReviewDecision(runId, "rejected", [], options.comment);
+    await runReviewDecision(runId, "rejected", [], options.comment);
   });
 
 review
@@ -140,11 +144,81 @@ review
   .argument("<runId>")
   .option("--comment <text>")
   .action(async (runId, options: { comment?: string }) => {
-    await applyReviewDecision(runId, "request_evidence", [], options.comment);
+    await runReviewDecision(runId, "request_evidence", [], options.comment);
+  });
+
+review
+  .command("reassign")
+  .argument("<runId>")
+  .requiredOption("--to <role>", "Role or owner to reassign to")
+  .option("--comment <text>")
+  .action(async (runId, options: { to: string; comment?: string }) => {
+    await runReviewDecision(runId, "reassigned", [], options.comment, options.to);
+  });
+
+review
+  .command("packet")
+  .argument("<runId>", "Run ID")
+  .action(async (runId) => {
+    const trace = await storage.getRun(runId);
+    if (!trace) {
+      console.error(`Trace not found: ${runId}`);
+      process.exit(1);
+    }
+    const caseItem = trace.escalationCases[0]
+      ? await storage.getEscalationCase(trace.escalationCases[0])
+      : null;
+    console.log(formatReviewPacket(trace, caseItem));
   });
 
 program
-  .command("case")
+  .command("execute")
+  .argument("<specPath>", "Path to loopgraph.yaml or example directory")
+  .requiredOption("--event <file>", "Trigger event JSON path")
+  .action(async (specPath, options: { event: string }) => {
+    if (!isExecuteEnabled()) {
+      console.error("Execute mode disabled. Set LOOPGRAPH_EXECUTE_ENABLED=true");
+      process.exit(1);
+    }
+    const result = await loadLoopSpecFromPath(path.resolve(specPath));
+    if (!result.ok) {
+      console.error(result.errors.join("\n"));
+      process.exit(1);
+    }
+    const raw = await import("node:fs/promises").then((fs) => fs.readFile(path.resolve(options.event), "utf8"));
+    const payload = JSON.parse(raw) as Record<string, unknown>;
+    const eventId = String(payload.eventId ?? payload.id ?? `evt_${Date.now()}`);
+    const execution = await executeLoop({
+      spec: result.spec,
+      triggerPayload: payload,
+      eventId,
+      storage
+    });
+    console.log(execution.summary);
+  });
+
+const caseCmd = program.command("case").description("Escalation case commands");
+
+caseCmd
+  .command("list")
+  .action(async () => {
+    const cases = await listEscalationCases(storage);
+    console.log(JSON.stringify(cases, null, 2));
+  });
+
+caseCmd
+  .command("resolve")
+  .argument("<caseId>")
+  .requiredOption("--summary <text>", "Resolution summary")
+  .action(async (caseId, options: { summary: string }) => {
+    const updated = await resolveCase(storage, caseId, {
+      resolutionSummary: options.summary,
+      resolvedAt: new Date().toISOString()
+    });
+    console.log(JSON.stringify(updated, null, 2));
+  });
+
+caseCmd
   .command("show")
   .argument("<caseId>")
   .action(async (caseId) => {
@@ -179,41 +253,24 @@ function printTrace(trace: LoopRunTrace) {
   }, null, 2));
 }
 
-async function applyReviewDecision(runId: string, status: "approved" | "rejected" | "request_evidence", fingerprints: string[], comment?: string) {
-  const trace = await storage.getRun(runId);
-  if (!trace) {
-    console.error(`Trace not found: ${runId}`);
+async function runReviewDecision(
+  runId: string,
+  status: "approved" | "rejected" | "request_evidence" | "reassigned",
+  fingerprints: string[],
+  comment?: string,
+  reassignedTo?: string
+) {
+  try {
+    const result = await applyReviewDecision(storage, {
+      runId,
+      status,
+      approvedFingerprints: fingerprints,
+      comment,
+      reassignedTo
+    });
+    console.log(`Review ${status} recorded for ${runId} (trace status=${result.trace.status})`);
+  } catch (error) {
+    console.error(error instanceof ReviewServiceError ? error.message : String(error));
     process.exit(1);
   }
-
-  for (const prepared of trace.preparedActions) {
-    if (status === "approved" && prepared.requiresApproval && !validateApprovalBinding(prepared, fingerprints)) {
-      console.error(`Missing approved fingerprint for ${prepared.toolKey}`);
-      process.exit(1);
-    }
-  }
-
-  const reviewRecord = {
-    id: `review_${runId}`,
-    runId,
-    status,
-    role: "approver" as const,
-    approvedFingerprints: fingerprints,
-    rejectedFingerprints: status === "rejected" ? trace.preparedActions.map((a) => a.fingerprint) : [],
-    comment,
-    createdAt: trace.startedAt,
-    decidedAt: trace.startedAt
-  };
-
-  trace.humanReviews = [...trace.humanReviews, reviewRecord];
-  trace.status = status === "approved" ? "APPROVED" : status === "rejected" ? "REJECTED" : "WAITING_FOR_REVIEW";
-  if (status === "approved") {
-    trace.status = "COMMITTED";
-    trace.toolCalls = trace.toolCalls.map((call) => ({ ...call, status: "mock_committed" as const }));
-    trace.status = "COMPLETED";
-  }
-
-  await storage.saveReview(reviewRecord);
-  await storage.saveRun(trace);
-  console.log(`Review ${status} recorded for ${runId}`);
 }

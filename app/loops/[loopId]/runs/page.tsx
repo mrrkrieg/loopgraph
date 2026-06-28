@@ -1,8 +1,8 @@
+import Link from "next/link";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { ContextTracePanel } from "@/components/context-trace-panel";
 import { formatDate } from "@/lib/loop-engineering-builder/demo-helpers";
-import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 import { startLoopRunAction } from "./actions";
 
 export default async function LoopRunsPage({
@@ -11,65 +11,62 @@ export default async function LoopRunsPage({
   params: Promise<{ loopId: string }>;
 }) {
   const { loopId } = await params;
-  const workspace = await getWorkspace(loopId);
-  const { run, steps } = workspace.runBundle;
+  const storage = getStorageAdapter();
+  const runs = await storage.listRuns();
+  const traces = await Promise.all(
+    runs.map(async (run) => ({
+      index: run,
+      trace: await storage.getRun(run.id)
+    }))
+  );
 
   return (
     <div className="grid gap-5">
       <SectionCard title="Simulated runs (fixture)" description="Runs use deterministic fixtures when available. Traces include context snapshots, policy decisions, and prepared actions.">
         <form action={startLoopRunAction}>
-          <input name="loop_id" type="hidden" value={workspace.loop.id} />
+          <input name="loop_id" type="hidden" value={loopId} />
           <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">
             Run loop
           </button>
         </form>
       </SectionCard>
-      <SectionCard title="Runs">
+      <SectionCard title="Run history" description="Persisted traces from .loopgraph/ (shared with CLI simulate).">
         <div className="overflow-hidden rounded-lg border border-line">
           <table className="w-full text-left text-sm">
             <thead className="bg-paper text-xs uppercase tracking-[0.14em] text-ink/50">
               <tr>
                 <th className="px-4 py-3">Run ID</th>
+                <th className="px-4 py-3">Loop</th>
                 <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Trigger</th>
                 <th className="px-4 py-3">Started</th>
-                <th className="px-4 py-3">Completed</th>
-                <th className="px-4 py-3">Escalation</th>
                 <th className="px-4 py-3">Review</th>
-                <th className="px-4 py-3">Error</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              <tr className="border-t border-line">
-                <td className="px-4 py-3">{run.id}</td>
-                <td className="px-4 py-3"><StatusPill>{run.status}</StatusPill></td>
-                <td className="px-4 py-3">{run.triggerType}</td>
-                <td className="px-4 py-3">{formatDate(run.startedAt)}</td>
-                <td className="px-4 py-3">{formatDate(run.completedAt)}</td>
-                <td className="px-4 py-3">{run.escalationRequired ? "Yes" : "No"}</td>
-                <td className="px-4 py-3">{run.humanReviewRequired ? "Yes" : "No"}</td>
-                <td className="px-4 py-3">{run.error ?? "-"}</td>
-              </tr>
+              {traces.length === 0 && (
+                <tr className="border-t border-line">
+                  <td className="px-4 py-6 text-ink/60" colSpan={6}>
+                    No persisted runs yet. Click Run loop or use `npm run loopgraph -- simulate ...`.
+                  </td>
+                </tr>
+              )}
+              {traces.map(({ index, trace }) => (
+                <tr key={index.id} className="border-t border-line">
+                  <td className="px-4 py-3 font-mono text-xs">{index.id}</td>
+                  <td className="px-4 py-3">{trace?.loopId ?? index.loopId}</td>
+                  <td className="px-4 py-3"><StatusPill>{index.status}</StatusPill></td>
+                  <td className="px-4 py-3">{trace ? formatDate(trace.startedAt) : "-"}</td>
+                  <td className="px-4 py-3">{index.status === "WAITING_FOR_REVIEW" ? "Required" : "No"}</td>
+                  <td className="px-4 py-3">
+                    <Link className="font-semibold underline" href={`/loops/${loopId}/runs/${index.id}`}>
+                      View trace
+                    </Link>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        </div>
-      </SectionCard>
-      <SectionCard title="Context snapshot (simulated)">
-        <ContextTracePanel runId={run.id} />
-      </SectionCard>
-      <SectionCard title="Run detail">
-        <div className="grid gap-4 lg:grid-cols-3">
-          <pre className="overflow-auto rounded-md bg-ink p-3 text-xs text-white/85">{JSON.stringify(run.inputSnapshot, null, 2)}</pre>
-          <pre className="overflow-auto rounded-md bg-ink p-3 text-xs text-white/85">{JSON.stringify(run.outputSnapshot, null, 2)}</pre>
-          <pre className="overflow-auto rounded-md bg-ink p-3 text-xs text-white/85">{JSON.stringify(run.verificationResult, null, 2)}</pre>
-        </div>
-        <div className="mt-4 grid gap-3">
-          {steps.map((step) => (
-            <div key={step.id} className="rounded-md border border-line bg-paper p-3">
-              <div className="font-medium">{step.stepName}</div>
-              <div className="mt-1 text-sm text-ink/60">{step.stepType} · {step.status}</div>
-            </div>
-          ))}
         </div>
       </SectionCard>
     </div>

@@ -51,6 +51,23 @@ export function runVerifiers(input: {
         checks: [{ name: "approvalRequired", passed: !needsReview, message: needsReview ? "Review required" : undefined }]
       });
     }
+    if (verifier.type === "numeric_threshold") {
+      const policyKey = String(verifier.config?.policyInputKey ?? "");
+      const operator = String(verifier.config?.operator ?? ">=");
+      const threshold = Number(verifier.config?.threshold ?? NaN);
+      const policyInput = input.output.policyInputs.find((entry) => entry.key === policyKey);
+      const value = Number(policyInput?.value);
+      const passed = Number.isFinite(value) && Number.isFinite(threshold) && compareNumeric(value, threshold, operator);
+      results.push({
+        verifierId: verifier.id,
+        passed,
+        confidence: passed ? 1 : 0.5,
+        summary: passed
+          ? `${policyKey} ${operator} ${threshold}`
+          : `${policyKey}=${String(policyInput?.value)} failed ${operator} ${threshold}`,
+        checks: [{ name: "numericThreshold", passed }]
+      });
+    }
     if (verifier.type === "mock_judge") {
       results.push({
         verifierId: verifier.id,
@@ -67,4 +84,21 @@ export function runVerifiers(input: {
 
 export function allVerifiersPassed(results: VerificationResult[]): boolean {
   return results.every((result) => result.passed || result.verifierId.includes("mock_judge"));
+}
+
+function compareNumeric(value: number, threshold: number, operator: string): boolean {
+  switch (operator) {
+    case ">":
+      return value > threshold;
+    case ">=":
+      return value >= threshold;
+    case "<":
+      return value < threshold;
+    case "<=":
+      return value <= threshold;
+    case "==":
+      return value === threshold;
+    default:
+      return value >= threshold;
+  }
 }

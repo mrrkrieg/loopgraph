@@ -1,7 +1,7 @@
 import path from "node:path";
 import { loadLoopSpecFromPath } from "../loopgraph-runtime/loader";
 import { simulateLoop } from "../loopgraph-runtime/simulator";
-import { FileStorageAdapter } from "../loopgraph-sdk/storage";
+import { getLoopgraphRoot, getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
 import type { LoopRunTrace } from "../loopgraph-core/trace";
 import type { HumanReview, LoopRun, LoopRunStep } from "./types";
 
@@ -27,7 +27,7 @@ export async function simulateHeroLoop(loopId: string, repoRoot = process.cwd())
   const loaded = await loadLoopSpecFromPath(path.join(repoRoot, config.examplePath));
   if (!loaded.ok) return null;
 
-  const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph"));
+  const storage = getStorageAdapter({ rootDir: getLoopgraphRoot(repoRoot) });
   const result = await simulateLoop({
     spec: loaded.spec,
     fixture: path.join(repoRoot, config.defaultFixture),
@@ -45,7 +45,12 @@ export function mapTraceToRunBundle(trace: LoopRunTrace, loopId: string) {
   const run: LoopRun = {
     id: trace.id,
     loopId,
-    status: trace.status === "FAILED_VERIFICATION" || trace.status === "BLOCKED_BY_POLICY" ? "failed" : "completed",
+    status:
+      trace.status === "FAILED_VERIFICATION" || trace.status === "BLOCKED_BY_POLICY"
+        ? "failed"
+        : trace.status === "WAITING_FOR_REVIEW"
+          ? "running"
+          : "completed",
     triggerType: trace.mode === "simulate" ? "event" : "manual",
     startedAt: trace.startedAt,
     completedAt: trace.completedAt,
@@ -97,11 +102,9 @@ export function mapTraceToRunBundle(trace: LoopRunTrace, loopId: string) {
 }
 
 export async function listPersistedTraces(repoRoot = process.cwd()) {
-  const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph"));
-  return storage.listRuns();
+  return getStorageAdapter({ rootDir: getLoopgraphRoot(repoRoot) }).listRuns();
 }
 
 export async function getPersistedTrace(runId: string, repoRoot = process.cwd()) {
-  const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph"));
-  return storage.getRun(runId);
+  return getStorageAdapter({ rootDir: getLoopgraphRoot(repoRoot) }).getRun(runId);
 }

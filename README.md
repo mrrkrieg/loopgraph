@@ -21,6 +21,16 @@ npm run dev
 
 Open the web UI for Design Studio and topology. CLI traces are stored under `.loopgraph/`.
 
+## Simulated vs real
+
+| Mode | Command | What it does |
+|------|---------|--------------|
+| **Simulate** (default) | `loopgraph simulate --fixture …` | Deterministic fixtures + heuristic assessment. **No API keys. No external writes.** |
+| **Validate** | `loopgraph validate …` | Schema and policy checks only. |
+| **Execute** (experimental) | `LOOPGRAPH_EXECUTE_ENABLED=true loopgraph execute --event …` | Optional OpenAI assessment. Live GitHub writes only after human approval when configured. |
+
+For V1, treat **simulate + review + case resolve** as the supported code-first path.
+
 ## What Loopgraph is
 
 - A versioned **LoopSpec** contract (`loopgraph/v1alpha1`)
@@ -46,11 +56,20 @@ npm run loopgraph -- init <template> [dir]
 npm run loopgraph -- validate <path>
 npm run loopgraph -- simulate <path> --fixture <file>
 npm run loopgraph -- trace <runId>
+npm run loopgraph -- trace <runId> --review          # decision packet for review-required runs
+npm run loopgraph -- review packet <runId>           # full human review decision packet
+npm run loopgraph -- review approve <runId> --actions <fingerprint>[,...]
+npm run loopgraph -- review reject <runId> --comment "..."
+npm run loopgraph -- review request-evidence <runId>
+npm run loopgraph -- review reassign <runId> --to <role>
+npm run loopgraph -- case list
+npm run loopgraph -- case show <caseId>
+npm run loopgraph -- case resolve <caseId> --summary "..."
 npm run loopgraph -- export-graph <path>
 npm run loopgraph -- adapter test
-npm run loopgraph -- review approve <runId> --actions <fingerprint>
-npm run loopgraph -- case show <caseId>
 ```
+
+Experimental (requires env): `loopgraph execute <path> --event <file>` — see [docs/roadmap.md](docs/roadmap.md).
 
 ## Architecture
 
@@ -74,11 +93,16 @@ CRON_SECRET=
 
 ## Docs
 
-- [ADR-001](docs/ADR-001-v1-architecture.md)
+- [Current build state](docs/CURRENT-STATE.md)
+- [Dan walkthrough (CLI demo)](docs/DAN-WALKTHROUGH.md)
+- [Next priorities](docs/NEXT-PRIORITIES.md)
 - [V1 Launch Context Plan](V1-LAUNCH-CONTEXT-PLAN.md)
 - [V1 Execution Plan](docs/V1-EXECUTION-PLAN.md)
 - [Competitive boundary](docs/competitive-boundary.md)
 - [Loop spec](docs/loop-spec.md)
+- [Approval model](docs/approval-model.md)
+- [Escalation case](docs/escalation-case.md)
+- [Trace model](docs/trace-model.md)
 
 ## License
 

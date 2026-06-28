@@ -56,6 +56,24 @@ describe("loop-spec", () => {
     expect(errors.some((e) => e.includes("write_tool"))).toBe(true);
   });
 
+  it("fails escalation rule missing owner or deadline", () => {
+    const errors = collectLoopSpecSemanticErrors({
+      ...minimalSpec,
+      policy: {
+        ...minimalSpec.policy,
+        escalationRules: [{
+          id: "bad_rule",
+          when: { all: [] },
+          routeTo: { primaryOwner: "", reviewers: [], responseSla: "" },
+          requiresApproval: [],
+          decisionsRequired: ["Approve"]
+        }]
+      }
+    } as never);
+    expect(errors.some((e) => e.includes("missing routeTo.primaryOwner"))).toBe(true);
+    expect(errors.some((e) => e.includes("missing routeTo.responseSla"))).toBe(true);
+  });
+
   it("matches checked-in JSON Schema export", () => {
     const schemaPath = path.join(__dirname, "../../docs/schemas/loop-v1alpha1.json");
     const checkedIn = JSON.parse(readFileSync(schemaPath, "utf8"));

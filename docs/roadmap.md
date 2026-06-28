@@ -1,33 +1,37 @@
 # Roadmap
 
-Explicit boundaries for Loopgraph V1 and what comes next.
+Explicit boundaries for Loopgraph releases.
 
-## V1 (this release)
+## V1 (shipped on `v1`)
 
 - Code-first LoopSpec (`loopgraph/v1alpha1`) as source of truth
 - `validate` + deterministic `simulate` CLI
 - Reproducible ContextSnapshot, PreparedAction fingerprints, EscalationCase handoff, LoopRunTrace
 - Hero templates: GitHub Issue Triage, Strategic Account Escalation
-- Mock adapters and fixture provider only — no live integrations
+- Mock adapters and fixture provider
 - Design Studio as optional blueprint layer
 - File storage under `.loopgraph/`
 
-**Out of scope for V1:** distributed execution, live OAuth integrations, LLM-as-judge gates for P0/P1, auto-executing topology edges.
+## V1.1 (implemented)
 
-## V1.1 (near term)
+- Shared review service (CLI + UI fingerprint binding)
+- Run history + trace viewer (`/loops/[loopId]/runs`, `/runs/[runId]`)
+- `SupabaseStorageAdapter` + runtime migration when env configured
+- `AssessmentProvider` (fixture + OpenAI) with `execute` mode behind `LOOPGRAPH_EXECUTE_ENABLED`
+- Live `GitHubAdapter` + `/api/webhooks/github` with dedupe
+- `loopgraph execute`, `case list`, `case resolve`
+- Docs: [github-production-setup.md](./github-production-setup.md), [manual-qa-v1.1.md](./manual-qa-v1.1.md)
 
-- Supabase-backed persistence when configured
-- Run history UI from persisted traces
-- YAML export from Design Studio spec page
-- Expanded adapter conformance and `adapter test` coverage
-- Seed script for demo org without manual setup
+**Still optional for V1.1 polish:** Design Studio YAML export, Acme seed script, full Supabase auth/RBAC.
 
-## V2 (later)
+## V2 (partial foundations shipped)
 
-- Live integration adapters (GitHub, CRM, support)
-- Scheduled and webhook triggers with idempotent ingestion
-- Multi-loop orchestration and parent/child run depth enforcement at scale
-- Management review automation and improvement item writeback
-- Topology as derived view across specs, runs, and cases
+- Management review loop template + cron consumer of EscalationCase only
+- Hidden labor / net savings module (`lib/loopgraph-core/measurement.ts`)
+- Improvement signals from review rejections (`improvement-service.ts`)
+- Orchestration limits + informational vs semantic edges (`orchestration.ts`)
+- In-process job queue stub for resume-after-review (`job-queue.ts`)
+
+**Still deferred:** package extraction, durable external queue, live CRM/support adapters, auto-improving specs, marketplace, enterprise audit modes.
 
 See [competitive-boundary.md](./competitive-boundary.md) for positioning vs workflow and agent frameworks.
