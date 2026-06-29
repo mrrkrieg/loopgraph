@@ -1,0 +1,145 @@
+apiVersion: loopgraph/v1alpha1
+kind: Loop
+metadata:
+  id: github-issue-triage
+  name: GitHub Issue Triage
+  version: "1.0.0"
+  description: Classify incoming GitHub issues, propose labels and responses, and escalate security-sensitive items.
+  owner:
+    role: maintainer
+trigger:
+  type: webhook
+  source: github
+  event: issues.opened
+input:
+  schema:
+    type: object
+    required: [eventId, issue]
+    properties:
+      eventId: { type: string }
+      issue: { type: object }
+  fixtures:
+    - id: normal-bug
+      path: ../../fixtures/github-issue-triage/normal-bug.json
+    - id: security-issue
+      path: ../../fixtures/github-issue-triage/security-issue.json
+output:
+  schema:
+    type: object
+    required: [decisionSummary, proposedActions, evidence, policyInputs, verificationRequest]
+    properties:
+      decisionSummary: { type: string }
+      assumptions: { type: array }
+      proposedActions: { type: array }
+      evidence: { type: array }
+      policyInputs: { type: array }
+      verificationRequest: { type: object }
+context:
+  sources:
+    - id: repo_policy
+      type: policy
+      title: Repository policy
+      sensitivity: internal
+      trusted: true
+      precedence: 0
+    - id: issue_body
+      type: integration
+      adapterId: mock-github
+      variableKey: issue.body
+      title: Issue body
+      sensitivity: internal
+      trusted: false
+      precedence: 1
+    - id: issue_labels
+      type: integration
+      adapterId: mock-github
+      variableKey: issue.labels
+      title: Issue labels
+      sensitivity: public
+      trusted: true
+      precedence: 2
+  precedence:
+    - { sourceType: policy, rank: 0 }
+    - { sourceType: integration, rank: 1 }
+  redactionPolicy: restricted_only
+routine:
+  steps:
+    - id: step_1
+      name: Load issue context
+      stepType: observe
+      actor: system
+      description: Load repository policy and issue content
+    - id: step_2
+      name: Classify issue
+      stepType: assess
+      actor: agent
+      description: Produce structured triage assessment
+    - id: step_3
+      name: Prepare actions
+      stepType: prepare
+      actor: system
+      description: Prepare exact label/response actions
+tools:
+  - key: propose_labels
+    adapterId: mock-github
+    label: Propose labels
+    writeCapable: true
+    riskLevel: medium
+  - key: draft_response
+    adapterId: mock-github
+    label: Draft response
+    writeCapable: false
+    riskLevel: low
+  - key: create_follow_up
+    adapterId: mock-linear
+    label: Create follow-up task
+    writeCapable: true
+    riskLevel: low
+  - key: create_escalation_case
+    adapterId: mock-github
+    label: Create escalation case
+    writeCapable: true
+    riskLevel: high
+policy:
+  allowedActions:
+    - { toolKey: propose_labels, allowed: true, requiresApproval: false, customerFacing: false, riskLevel: low }
+    - { toolKey: draft_response, allowed: true, requiresApproval: false, customerFacing: false, riskLevel: low }
+    - { toolKey: create_follow_up, allowed: true, requiresApproval: false, customerFacing: false, riskLevel: low }
+    - { toolKey: create_escalation_case, allowed: true, requiresApproval: true, customerFacing: false, riskLevel: high }
+  forbiddenActions:
+    - { toolKey: close_issue, reason: Closing issues is forbidden in V1 }
+    - { toolKey: merge_pull_request, reason: Merging code is forbidden in V1 }
+  escalationRules:
+    - id: possible-security-issue
+      when:
+        any:
+          - "issue.labels contains": security
+          - "issue.body matches": "(credential|vulnerability|exploit|CVE|token leak)"
+      createEscalationCase:
+        category: security
+        severity: P1
+      routeTo:
+        primaryOwner: security_owner
+        reviewers: [maintainer]
+        responseSla: 30m
+      requiresApproval: [customer_or_public_response, issue_label_mutation]
+      decisionsRequired: [Approve security escalation package]
+verification:
+  - { id: schema, type: schema }
+  - { id: policy, type: policy }
+  - { id: evidence, type: evidence }
+  - { id: approval_required, type: approval_required }
+approval:
+  requireFingerprintMatch: true
+  separateCustomerFacingApproval: true
+  allowedRoles: [approver, reviewer, owner]
+persistence:
+  idempotency:
+    enabled: true
+trace:
+  captureContextSnapshot: true
+  captureToolInputOutput: true
+  evidenceRequired: true
+topology:
+  department: engineering
+  tags: [developer-demo, triage]

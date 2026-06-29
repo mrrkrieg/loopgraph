@@ -7,6 +7,7 @@ import {
   createHumanReview,
   startLoopRun as simulateLoopRun
 } from "./agent";
+import { simulateHeroLoop } from "./runtime-bridge";
 import {
   createLoopSpecArtifact,
   generateLoopRequirements,
@@ -133,14 +134,19 @@ export async function createLoop(input: {
   }
 
   const template = getTemplateById(input.templateId);
-  const { data: organization, error: organizationError } = await supabase
-    .from("organizations")
-    .insert({ name: input.organizationName || "Loopgraph workspace" })
-    .select("id, name")
-    .single();
+  const existingOrg = await getOrFallbackOrganization(supabase);
+  const organization = existingOrg
+    ? existingOrg
+    : (
+        await supabase
+          .from("organizations")
+          .insert({ name: input.organizationName || "Loopgraph workspace" })
+          .select("id, name")
+          .single()
+      ).data;
 
-  if (organizationError) {
-    throw organizationError;
+  if (!organization) {
+    throw new Error("Unable to resolve organization for new loop");
   }
 
   const { data: loop, error: loopError } = await supabase
@@ -260,7 +266,8 @@ export async function getLoopGraph(loopId?: string): Promise<LoopGraph> {
 export async function startLoopRun(loopId: string) {
   const supabase = createSupabaseAdminClient();
   const workspace = await getWorkspace(loopId);
-  const simulated = simulateLoopRun(workspace.loop);
+  const heroSimulation = await simulateHeroLoop(loopId);
+  const simulated = heroSimulation ?? simulateLoopRun(workspace.loop);
 
   if (!supabase) {
     return simulated;

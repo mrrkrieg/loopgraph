@@ -3,9 +3,14 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { FileStorageAdapter } from "@/lib/loopgraph-sdk/storage";
+import Link from "next/link";
+import path from "node:path";
 
 export default async function ManagementPage() {
   const workspace = await getWorkspace();
+  const storage = new FileStorageAdapter(path.join(process.cwd(), ".loopgraph"));
+  const cases = await storage.listCases();
 
   return (
     <>
@@ -17,7 +22,7 @@ export default async function ManagementPage() {
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Loop health" value="Good" note="Manual V1 mode with complete spec" />
         <MetricCard label="Department status" value={workspace.loops.length} note="Loops mapped" />
-        <MetricCard label="Open escalations" value={workspace.loops.reduce((sum, loop) => sum + loop.openReviews, 0)} note="Human review required" />
+        <MetricCard label="Open escalations" value={cases.filter((item) => item.status === "open").length || workspace.loops.reduce((sum, loop) => sum + loop.openReviews, 0)} note="Cases and human review required" />
         <MetricCard label="Recent failures" value="0" note="Simulated run completed" />
       </div>
       <div className="mt-6 grid gap-5 lg:grid-cols-2">
@@ -47,6 +52,23 @@ export default async function ManagementPage() {
               </div>
             ))}
           </div>
+        </SectionCard>
+        <SectionCard title="Escalation cases" description="Persisted cases from CLI simulate runs in .loopgraph/cases/">
+          {cases.length === 0 ? (
+            <p className="text-sm text-ink/60">Run `npm run loopgraph -- simulate ...` to create typed escalation cases.</p>
+          ) : (
+            <div className="space-y-2">
+              {cases.map((item) => (
+                <Link key={item.id} href={`/cases/${item.id}`} className="flex items-center justify-between gap-3 rounded-md border border-line bg-white px-3 py-2 text-sm hover:bg-paper">
+                  <span>{item.id}</span>
+                  <div className="flex items-center gap-2">
+                    <StatusPill>{item.severity}</StatusPill>
+                    <StatusPill>{item.status}</StatusPill>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
         </SectionCard>
       </div>
     </>

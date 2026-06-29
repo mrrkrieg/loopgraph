@@ -1,0 +1,18 @@
+{
+  "status": "WAITING_FOR_REVIEW",
+  "loopId": "strategic-account-escalation",
+  "idempotencyKey": "3311c9a7509417fb",
+  "contextHash": "15c81c31ea30806b",
+  "preparedActionCount": 2,
+  "preparedFingerprints": [
+    "05437111bacf29d0",
+    "3a223868a24b7c4b"
+  ],
+  "escalationCaseIds": [
+    "case_60f5d6d9121e"
+  ],
+  "escalationSeverity": "P1",
+  "policyBlocked": false,
+  "verificationFailed": false,
+  "humanReviewRequired": true
+}

@@ -1,0 +1,1901 @@
+﻿1. Product definition
+Loopgraph should be four things
+1. Loop topology builder
+A visual graph where users map:
+Company goal
+ → management loop
+   → department loops
+     → workflow loops
+       → task loops
+         → integrations, verifiers, human review, memory, metrics
+The screenshot already shows this direction: company topology, department loops, signal sources, management loop, human review, metrics, and improvement items.
+2. Loop specification system
+Each loop should become a structured, versioned object:
+goal
+signals
+context
+integrations
+routines
+agent instructions
+verification
+human review rules
+memory
+metrics
+budget
+risk limits
+trace schema
+3. Runtime engine
+The graph should not just be visual. It should execute:
+event arrives
+→ management loop evaluates company state
+→ calls relevant department loop
+→ department loop calls workflow loop
+→ workflow loop uses integrations/tools
+→ verifier checks output
+→ human review if needed
+→ trace is saved
+→ metrics update
+→ improvement loop learns from failures
+4. Open-source developer framework
+Developers should be able to add their own:
+backend
+database
+LLM provider
+integration adapters
+tools
+verifiers
+memory stores
+auth systems
+schedulers
+templates
+The open-source value is strongest if Loopgraph becomes a standard contract for defining and running organizational loops.
+________________
+
+
+2. Core primitives
+The product should be built around these primitives.
+2.1 Company
+The company is the root context.
+Company {
+ id: string
+ name: string
+ mission: string
+ northStarMetric?: string
+ strategy?: string
+ operatingPrinciples: string[]
+ riskAppetite: "low" | "medium" | "high"
+ defaultAutonomyLevel: AutonomyLevel
+ departments: Department[]
+ managementLoopId: string
+}
+The management loop needs company-level state because its job is to coordinate departmental loops and turn operational evidence into strategy, resource allocation, and organizational learning. The article describes the management loop as observing company state, detecting drift, identifying bottlenecks, routing decisions, allocating resources, monitoring outcomes, and updating operating assumptions.
+________________
+
+
+2.2 Department
+A department is a scoped operating domain.
+Department {
+ id: string
+ companyId: string
+ name: "Marketing" | "Sales" | "Product" | "Engineering" | "Customer Success" | "Ops" | "Finance" | "HR" | "Legal" | string
+ ownerId?: string
+ purpose: string
+ goals: Goal[]
+ systemsOfRecord: IntegrationBinding[]
+ loopIds: string[]
+ managementLoopId?: string
+}
+Each department should have:
+owner
+goals
+systems of record
+department context
+child loops
+metrics
+human review policies
+The article’s department model treats each function as loops with inputs, routines, verification criteria, human roles, and measurable outcomes.
+________________
+
+
+2.3 Loop
+The loop is the central object.
+Loop {
+ id: string
+ companyId: string
+ departmentId?: string
+ parentLoopId?: string
+
+
+ name: string
+ type: LoopType
+ status: "draft" | "active" | "paused" | "archived"
+
+
+ goal: Goal
+ trigger: TriggerSpec
+ signals: SignalSpec[]
+ context: ContextSpec
+ routine: RoutineSpec
+ integrations: IntegrationBinding[]
+ variables: VariableBinding[]
+ tools: ToolBinding[]
+ verifier: VerifierSpec
+ humanReview: HumanReviewSpec
+ memory: MemorySpec
+ metrics: MetricSpec[]
+ budget: BudgetSpec
+ risk: RiskSpec
+ schedule?: ScheduleSpec
+
+
+ agentSpec: AgentSpec
+ contextDocs: ContextDoc[]
+
+
+ createdAt: Date
+ updatedAt: Date
+ version: number
+}
+Loop types:
+type LoopType =
+ | "company_management"
+ | "department_management"
+ | "workflow"
+ | "task"
+ | "verification"
+ | "human_review"
+ | "improvement"
+ | "signal_source"
+ | "metric"
+ | "guardrail"
+The article distinguishes task loops, workflow loops, department loops, management loops, and improvement loops.
+________________
+
+
+2.4 Node and edge topology
+The canvas should be backed by a typed directed graph.
+LoopNode {
+ id: string
+ graphId: string
+ type:
+   | "company"
+   | "department"
+   | "management_loop"
+   | "department_loop"
+   | "workflow_loop"
+   | "task_loop"
+   | "signal_source"
+   | "integration"
+   | "verifier"
+   | "human_owner"
+   | "human_review"
+   | "memory"
+   | "metric"
+   | "guardrail"
+   | "improvement_item"
+
+
+ refId?: string
+ label: string
+ subtitle?: string
+ position: { x: number; y: number }
+ health?: number
+ metadata: Record<string, unknown>
+}
+
+LoopEdge {
+ id: string
+ graphId: string
+ sourceNodeId: string
+ targetNodeId: string
+ type:
+   | "owns"
+   | "contains"
+   | "observes"
+   | "calls"
+   | "reports_to"
+   | "escalates_to"
+   | "verifies_with"
+   | "writes_trace_to"
+   | "learns_from"
+   | "depends_on"
+   | "blocks"
+   | "updates_metric"
+   | "requires_approval"
+
+
+ label?: string
+ policy?: EdgePolicy
+}
+Important: edges must affect execution, not only layout.
+For example:
+management_loop --calls--> marketing_department_loop
+marketing_department_loop --calls--> campaign_learning_loop
+campaign_learning_loop --observes--> ad_platforms
+campaign_learning_loop --verifies_with--> brand_claim_verifier
+campaign_learning_loop --escalates_to--> marketing_owner
+campaign_learning_loop --writes_trace_to--> trace_store
+improvement_loop --learns_from--> campaign_learning_loop
+
+________________
+3. The loop execution model
+Every loop should run through the same canonical state machine.
+DRAFT
+ → CONFIGURED
+ → READY
+ → ACTIVE
+ → RUNNING
+ → WAITING_FOR_REVIEW
+ → VERIFIED
+ → COMPLETED
+ → LEARNING
+ → ACTIVE
+Failure states:
+FAILED_VERIFICATION
+ESCALATED
+PAUSED_BY_POLICY
+BUDGET_EXCEEDED
+INTEGRATION_ERROR
+NEEDS_CONFIGURATION
+Runtime sequence
+1. Trigger
+2. Hydrate context
+3. Load company / department / loop instructions
+4. Load integration variables
+5. Run planning step
+6. Execute routine
+7. Call tools
+8. Verify output
+9. Escalate if needed
+10. Commit approved action
+11. Save trace
+12. Update metrics
+13. Write memory
+14. Feed improvement loop
+15. Report summary to parent loop
+In pseudocode:
+async function runLoop(loopId: string, event: LoopEvent) {
+ const loop = await loopStore.get(loopId)
+
+
+ const context = await contextCompiler.compile({
+   companyId: loop.companyId,
+   departmentId: loop.departmentId,
+   loopId,
+   event,
+ })
+
+
+ const run = await traceStore.startRun({ loopId, event, context })
+
+
+ const plan = await agent.plan({ loop, context, event })
+
+
+ for (const step of plan.steps) {
+   const result = await toolRunner.execute(step)
+   await traceStore.recordToolCall(run.id, step, result)
+
+
+   if (result.requiresEscalation) {
+     return await humanReview.create({ runId: run.id, reason: result.reason })
+   }
+ }
+
+
+ const verification = await verifier.verify({ loop, run })
+
+
+ if (!verification.passed) {
+   await traceStore.recordVerification(run.id, verification)
+   return await escalationPolicy.handle({ loop, run, verification })
+ }
+
+
+ await outputCommitter.commit({ loop, run })
+ await memory.writeFromRun(run.id)
+ await metrics.updateFromRun(run.id)
+ await improvement.enqueue(run.id)
+
+
+ return await traceStore.finishRun(run.id)
+}
+
+________________
+4. Context system
+This is one of the most important pieces.
+You described it as:
+context docs that point the LLM in the right direction, like agent.md, for what it needs to do within a specific management loop.
+That should become a first-class feature.
+4.1 Context hierarchy
+Context should compile in this order:
+Global system instructions
+→ organization policy
+→ company goal
+→ management loop context
+→ department context
+→ loop context
+→ integration variable docs
+→ recent traces
+→ relevant memory
+→ current event
+→ available tools
+→ verifier rubric
+→ escalation rules
+4.2 Context docs
+Each loop should generate and store docs like:
+/company.md
+/departments/marketing.md
+/loops/campaign-learning/agent.md
+/loops/campaign-learning/routine.md
+/loops/campaign-learning/verifier.md
+/loops/campaign-learning/escalation.md
+/loops/campaign-learning/metrics.md
+/loops/campaign-learning/memory.md
+/loops/campaign-learning/tools.md
+Example agent.md:
+# Campaign Learning Loop Agent
+
+
+## Loop Goal
+
+
+Reduce cost per qualified customer by improving campaign learning velocity.
+
+
+## Department
+
+
+Marketing.
+
+
+## Company Goal
+
+
+Increase qualified pipeline without reducing brand trust or customer fit.
+
+
+## Inputs
+
+
+- Ad platform performance
+- Web analytics
+- CRM qualified lead status
+- Campaign spend
+- Landing page conversion data
+
+
+## Allowed Actions
+
+
+- Summarize campaign performance
+- Generate campaign hypotheses
+- Recommend budget changes
+- Draft experiment brief
+- Request human approval for spend or brand-sensitive copy
+
+
+## Forbidden Actions
+
+
+- Launch external campaigns without approval
+- Increase budget without human review
+- Make unsupported claims
+- Change attribution definitions
+
+
+## Verification
+
+
+Output must include:
+- source data references
+- cost per qualified customer
+- hypothesis
+- expected measurement window
+- risk level
+- required human approval if spend changes
+
+
+## Escalation
+
+
+Escalate when:
+- budget change exceeds threshold
+- claim is legally or brand sensitive
+- data is inconsistent
+- confidence is low
+4.3 Context compiler
+Implement:
+ContextCompiler {
+ compile(input: {
+   companyId: string
+   departmentId?: string
+   loopId: string
+   event?: LoopEvent
+   runId?: string
+ }): Promise<CompiledContext>
+}
+
+CompiledContext {
+ system: string
+ company: string
+ department?: string
+ loop: string
+ tools: ToolContext[]
+ variables: VariableContext[]
+ memory: MemoryContext[]
+ recentTraces: TraceSummary[]
+ verifier: string
+ escalation: string
+ policy: string
+ tokenEstimate: number
+}
+The open-source value here is huge: developers can inspect exactly what context is being given to the agent.
+________________
+
+
+5. Onboarding flow
+The onboarding should not start with “create node.” It should start with company operating intent.
+5.1 Company onboarding
+Ask:
+What does the company do?
+What is the company’s current primary goal?
+What is the north-star metric?
+What are the current departments?
+Which systems of record does the company use?
+What actions should AI never take without approval?
+What actions can AI recommend but not execute?
+What work is currently repetitive or high-friction?
+What are the most important risks?
+Who owns final judgment?
+Output:
+CompanyContext
+DepartmentDraft[]
+ManagementLoopDraft
+InitialTopology
+
+________________
+5.2 Department onboarding
+For each department:
+What is this department responsible for?
+Who owns it?
+What metrics matter?
+What recurring workflows exist?
+What signals does the team monitor?
+What tools/systems does it use?
+What decisions are repetitive?
+What decisions require human judgment?
+What outputs are reviewed?
+What failures are costly?
+Output:
+DepartmentContext
+DepartmentManagementLoop
+WorkflowLoopDraft[]
+SuggestedIntegrations[]
+
+________________
+5.3 Loop onboarding
+For each loop:
+What is the goal of this loop?
+What event or schedule should trigger it?
+What state should it observe?
+What tools can it call?
+What output should it produce?
+How should the output be verified?
+When should it ask a human?
+What memory should it keep?
+What metric proves it is working?
+What budget limits apply?
+What risk level does it have?
+Output:
+LoopSpec
+ContextDocs
+VerifierSpec
+HumanReviewSpec
+MetricSpec[]
+IntegrationBindings
+
+________________
+5.4 Integration onboarding
+For each integration:
+Which backend owns this data?
+What variables does this integration expose?
+What actions does it support?
+Is it read-only or read-write?
+What permissions are required?
+What secrets are required?
+What rate limits apply?
+What test event can verify it works?
+Output:
+IntegrationAdapterConfig
+VariableBinding[]
+ToolBinding[]
+SignalSpec[]
+
+________________
+6. Integration and backend plugin system
+This is the main thing that makes the open-source release valuable.
+Developers should be able to add their own backends by implementing a contract.
+6.1 Integration adapter interface
+export interface IntegrationAdapter {
+ id: string
+ name: string
+ version: string
+
+
+ getConfigSchema(): JSONSchema
+ getAuthSchema(): JSONSchema
+
+
+ listVariables(config: IntegrationConfig): Promise<VariableDefinition[]>
+ listActions(config: IntegrationConfig): Promise<ActionDefinition[]>
+ listSignals(config: IntegrationConfig): Promise<SignalDefinition[]>
+
+
+ readVariable(input: ReadVariableInput): Promise<VariableValue>
+ executeAction(input: ExecuteActionInput): Promise<ActionResult>
+ subscribe?(input: SubscribeInput): AsyncIterable<LoopEvent>
+
+
+ healthCheck(config: IntegrationConfig): Promise<HealthCheckResult>
+}
+6.2 Variable definition
+VariableDefinition {
+ key: string
+ label: string
+ description: string
+ type: "string" | "number" | "boolean" | "object" | "array" | "date"
+ source: string
+ sensitivity: "public" | "internal" | "confidential" | "restricted"
+ freshness: "realtime" | "hourly" | "daily" | "manual"
+ example?: unknown
+}
+Example variables:
+crm.qualified_leads
+crm.pipeline_value
+ads.spend
+ads.cost_per_qualified_lead
+analytics.conversion_rate
+support.open_tickets
+product.feedback_clusters
+finance.budget_remaining
+hr.open_roles
+6.3 Action definition
+ActionDefinition {
+ key: string
+ label: string
+ description: string
+ inputSchema: JSONSchema
+ outputSchema: JSONSchema
+ riskLevel: "low" | "medium" | "high" | "critical"
+ requiresApproval: boolean
+}
+Example actions:
+crm.create_task
+crm.update_opportunity
+slack.send_draft
+ads.propose_budget_change
+linear.create_issue
+notion.update_page
+github.open_pr
+zendesk.draft_reply
+calendar.create_event
+6.4 Open-source adapter examples
+Ship these as reference adapters:
+Slack adapter
+HubSpot or Salesforce mock adapter
+Google Sheets adapter
+GitHub adapter
+Linear adapter
+Notion adapter
+CSV/local file adapter
+Webhook adapter
+The most important one is the mock/local adapter, because developers need to run Loopgraph without enterprise accounts.
+________________
+
+
+7. Agent runtime
+The runtime should be provider-agnostic.
+7.1 LLM provider interface
+export interface LLMProvider {
+ id: string
+
+
+ generate(input: LLMGenerateInput): Promise<LLMGenerateOutput>
+
+
+ generateObject<T>(
+   input: LLMStructuredInput,
+   schema: JSONSchema
+ ): Promise<T>
+}
+Support:
+OpenAI-compatible APIs
+Anthropic-compatible APIs
+local models
+custom HTTP model endpoint
+dry-run/test model
+7.2 Agent spec
+AgentSpec {
+ id: string
+ name: string
+ providerId: string
+ model: string
+ temperature: number
+ maxTokens: number
+ mode: "recommend" | "draft" | "execute_with_approval" | "execute_autonomous"
+ toolPolicy: ToolPolicy
+ contextPolicy: ContextPolicy
+}
+7.3 Agent output contract
+Every agent run should return structured output:
+AgentRunOutput {
+ summary: string
+ reasoningSummary?: string
+ proposedActions: ProposedAction[]
+ toolCalls: ToolCall[]
+ evidence: EvidenceRef[]
+ verificationRequest: VerificationRequest
+ escalationRequest?: EscalationRequest
+ memoryWrites: MemoryWrite[]
+ metricUpdates: MetricUpdate[]
+}
+Do not rely on raw prose.
+________________
+
+
+8. Verification and human review
+The article is explicit that autonomous company systems need verification, governance, audit logs, permission boundaries, approval thresholds, and rollback mechanisms because loops act repeatedly and may touch real systems.
+8.1 Verifier interface
+export interface Verifier {
+ id: string
+ name: string
+
+
+ verify(input: VerificationInput): Promise<VerificationResult>
+}
+
+VerificationResult {
+ passed: boolean
+ confidence: number
+ checks: VerificationCheck[]
+ requiredHumanReview: boolean
+ riskFlags: RiskFlag[]
+ summary: string
+}
+Verifier types:
+schema verifier
+policy verifier
+source citation verifier
+budget verifier
+brand voice verifier
+legal/risk verifier
+numeric reconciliation verifier
+human-review-required verifier
+LLM judge verifier
+custom code verifier
+8.2 Human review queue
+HumanReview {
+ id: string
+ runId: string
+ loopId: string
+ assignedToUserId?: string
+ status: "open" | "approved" | "rejected" | "needs_changes" | "expired"
+ reason: string
+ riskLevel: RiskLevel
+ question: string
+ proposedOutput: unknown
+ evidence: EvidenceRef[]
+ reviewerComment?: string
+ decisionTrace: DecisionTrace
+}
+Human review is not just a checkbox. The article emphasizes that “human in the loop” is too vague; humans can be reviewers, teachers, owners, approvers, strategists, or accountability holders.
+So the product needs explicit review roles:
+approver
+reviewer
+owner
+teacher
+executor
+accountability holder
+
+________________
+9. Trace, memory, and improvement loop
+This is where Loopgraph becomes defensible.
+9.1 Trace schema
+Every run should record:
+LoopRunTrace {
+ id: string
+ companyId: string
+ loopId: string
+ parentRunId?: string
+ triggeredBy: TriggerRef
+
+
+ startedAt: Date
+ completedAt?: Date
+ status: RunStatus
+
+
+ contextSnapshotId: string
+ inputSignals: SignalSnapshot[]
+ variablesRead: VariableRead[]
+ toolCalls: ToolCallTrace[]
+ outputs: OutputArtifact[]
+ verificationResults: VerificationResult[]
+ humanReviews: HumanReviewTrace[]
+ escalations: EscalationTrace[]
+ memoryReads: MemoryRead[]
+ memoryWrites: MemoryWrite[]
+ metricUpdates: MetricUpdate[]
+ cost: RunCost
+ errors: RunError[]
+}
+The article states that traceability is the governance backbone and that every loop run should record inputs, context, actions, tool calls, generated outputs, verification results, human interventions, escalations, and outcomes.
+9.2 Memory
+Memory should be scoped.
+MemoryEntry {
+ id: string
+ companyId: string
+ departmentId?: string
+ loopId?: string
+ scope: "company" | "department" | "loop" | "user"
+ key: string
+ value: string
+ sourceTraceId: string
+ confidence: number
+ expiresAt?: Date
+ createdAt: Date
+}
+Types:
+company memory
+department memory
+loop memory
+customer/account memory
+policy memory
+failure memory
+rubric memory
+integration memory
+9.3 Improvement loop
+The improvement loop reads traces and proposes changes.
+ImprovementItem {
+ id: string
+ loopId: string
+ sourceTraceIds: string[]
+ type:
+   | "missing_context"
+   | "bad_verifier"
+   | "weak_prompt"
+   | "bad_metric"
+   | "unhelpful_escalation"
+   | "tool_failure"
+   | "policy_conflict"
+   | "memory_update"
+   | "template_improvement"
+
+
+ proposedChange: string
+ status: "open" | "accepted" | "rejected" | "implemented"
+}
+The article describes the improvement loop as reading traces to find recurring failure modes, ambiguous goals, missing context, brittle tools, weak rubrics, unhelpful escalations, and human corrections, then proposing changes to prompts, routines, tools, policies, evaluation criteria, memory structures, or ownership boundaries.
+________________
+
+
+10. Measurement model
+Your UI already has metrics like:
+Health
+Open Reviews
+Net Saved
+Botsitting
+That is exactly right. The article argues that gross time savings are not enough and must subtract review, rework, escalation, governance, and botsitting costs.
+10.1 Metrics to implement
+At the loop level:
+LoopMetrics {
+ healthScore: number
+ runs: number
+ successRate: number
+ verificationPassRate: number
+ humanReviewRate: number
+ escalationRate: number
+ averageRunCost: number
+ averageLatencySeconds: number
+ grossTimeSavedMinutes: number
+ reviewMinutes: number
+ reworkMinutes: number
+ botsittingMinutes: number
+ escalationMinutes: number
+ governanceMinutes: number
+ netSavedMinutes: number
+ qualityScore?: number
+ relationshipRedeploymentMinutes?: number
+}
+10.2 Net saved formula
+gross_saved =
+ baseline_minutes_per_item * items_processed
+
+
+hidden_cost =
+ review_minutes
+ + rework_minutes
+ + botsitting_minutes
+ + escalation_minutes
+ + governance_minutes
+
+
+net_saved =
+ gross_saved - hidden_cost
+10.3 Quality-adjusted productivity
+quality_adjusted_output =
+ sum(outputs * quality_score * business_weight) / total_human_minutes
+10.4 Relationship redeployment
+relationship_redeployment =
+ min(net_saved, observed_relationship_hour_increase)
+This matters because saved time should not be assumed to become higher-value human work; it must be observed through calendars, CRM logs, project systems, time diaries, and management review.
+________________
+
+
+11. Backend architecture
+I would implement this as a TypeScript-first monorepo.
+loopgraph/
+ apps/
+   web/
+     app/
+     components/
+     routes/
+     graph/
+     onboarding/
+     loops/
+     reviews/
+     metrics/
+
+
+   api/
+     src/
+       routes/
+       services/
+       workers/
+
+
+ packages/
+   core/
+     src/
+       schemas/
+       graph/
+       loop-spec/
+       context/
+       policies/
+       metrics/
+
+
+   runtime/
+     src/
+       scheduler/
+       runner/
+       event-bus/
+       verifier/
+       trace/
+       memory/
+       improvement/
+
+
+   sdk/
+     src/
+       integration-adapter.ts
+       llm-provider.ts
+       verifier.ts
+       storage-adapter.ts
+       template.ts
+
+
+   connectors/
+     slack/
+     github/
+     linear/
+     google-sheets/
+     webhook/
+     mock-crm/
+     mock-ads/
+     mock-analytics/
+
+
+   templates/
+     marketing/
+     sales/
+     product/
+     engineering/
+     customer-success/
+     operations/
+     finance/
+     hr/
+     legal/
+     management/
+
+
+ examples/
+   demo-company/
+   local-only/
+   b2b-saas/
+
+
+ docs/
+   getting-started.md
+   loop-spec.md
+   adapter-sdk.md
+   context-docs.md
+   governance.md
+   deployment.md
+Recommended stack:
+Next.js / React
+React Flow or custom canvas graph
+TypeScript
+Postgres
+Drizzle or Prisma
+Redis / BullMQ for jobs
+OpenTelemetry-style tracing
+Zod for schemas
+MDX or Markdown context docs
+Docker Compose for local dev
+
+________________
+12. Database schema
+At minimum:
+companies
+users
+departments
+loops
+loop_versions
+loop_nodes
+loop_edges
+goals
+integrations
+integration_accounts
+variables
+tools
+context_docs
+runs
+run_events
+run_tool_calls
+run_outputs
+verifications
+human_reviews
+memory_entries
+metrics
+metric_snapshots
+improvement_items
+audit_logs
+templates
+Important tables:
+loops (
+ id uuid primary key,
+ company_id uuid not null,
+ department_id uuid,
+ parent_loop_id uuid,
+ name text not null,
+ type text not null,
+ status text not null,
+ goal jsonb not null,
+ trigger jsonb not null,
+ verifier jsonb not null,
+ human_review jsonb not null,
+ memory jsonb not null,
+ metrics jsonb not null,
+ budget jsonb not null,
+ risk jsonb not null,
+ agent_spec jsonb not null,
+ version int not null,
+ created_at timestamptz not null,
+ updated_at timestamptz not null
+)
+
+runs (
+ id uuid primary key,
+ loop_id uuid not null,
+ parent_run_id uuid,
+ status text not null,
+ trigger jsonb not null,
+ context_snapshot_id uuid,
+ started_at timestamptz not null,
+ completed_at timestamptz,
+ cost jsonb not null,
+ summary text
+)
+
+run_tool_calls (
+ id uuid primary key,
+ run_id uuid not null,
+ tool_key text not null,
+ input jsonb not null,
+ output jsonb,
+ status text not null,
+ started_at timestamptz not null,
+ completed_at timestamptz
+)
+
+human_reviews (
+ id uuid primary key,
+ run_id uuid not null,
+ loop_id uuid not null,
+ status text not null,
+ reason text not null,
+ risk_level text not null,
+ proposed_output jsonb,
+ reviewer_id uuid,
+ reviewer_comment text,
+ created_at timestamptz not null,
+ decided_at timestamptz
+)
+
+________________
+13. API surface
+Core API endpoints:
+POST   /api/companies
+GET    /api/companies/:id
+
+
+POST   /api/onboarding/company
+POST   /api/onboarding/department
+POST   /api/onboarding/loop
+
+
+GET    /api/graphs/:companyId
+POST   /api/graphs/:companyId/nodes
+POST   /api/graphs/:companyId/edges
+PATCH  /api/graphs/:companyId/layout
+
+
+GET    /api/loops/:id
+POST   /api/loops
+PATCH  /api/loops/:id
+POST   /api/loops/:id/activate
+POST   /api/loops/:id/pause
+POST   /api/loops/:id/run
+POST   /api/loops/:id/dry-run
+
+
+GET    /api/loops/:id/context
+POST   /api/loops/:id/context/regenerate
+PATCH  /api/context-docs/:id
+
+
+GET    /api/integrations
+POST   /api/integrations/:adapterId/connect
+GET    /api/integrations/:id/variables
+GET    /api/integrations/:id/actions
+POST   /api/integrations/:id/test
+
+
+GET    /api/runs/:id
+GET    /api/loops/:id/runs
+GET    /api/runs/:id/trace
+
+
+GET    /api/reviews
+POST   /api/reviews/:id/approve
+POST   /api/reviews/:id/reject
+POST   /api/reviews/:id/request-changes
+
+
+GET    /api/metrics/company/:companyId
+GET    /api/metrics/loops/:loopId
+
+
+GET    /api/improvements
+POST   /api/improvements/:id/accept
+POST   /api/improvements/:id/reject
+
+________________
+14. UI implementation
+14.1 Topology screen
+The current screenshot should become the main “operating map.”
+Required functionality:
+create node
+create edge
+drag layout
+filter by department
+filter by needs attention
+select loop
+inspect loop
+show health
+show open reviews
+show net saved
+show botsitting
+show missing measurements
+show guardrail gaps
+Node actions:
+open loop
+run loop
+pause loop
+edit context
+view traces
+add integration
+add verifier
+add human review
+add child loop
+remove from topology
+
+________________
+14.2 Onboarding wizard
+Pages:
+Company setup
+Department setup
+Loop discovery
+Loop definition
+Integration setup
+Variable mapping
+Context docs generation
+Verification setup
+Human review setup
+Dry run
+Activate
+
+________________
+14.3 Loop detail page
+Tabs:
+Overview
+Goal
+Context
+Signals
+Integrations
+Routine
+Verifier
+Human Review
+Memory
+Metrics
+Runs
+Traces
+Improvements
+Settings
+
+________________
+14.4 Human review inbox
+View:
+pending reviews
+risk level
+loop
+department
+proposed output
+evidence
+trace
+approve/reject/request changes
+review time tracking
+
+________________
+14.5 Measurement dashboard
+Metrics:
+gross saved
+review time
+rework time
+botsitting
+escalation time
+governance time
+net saved
+quality score
+relationship redeployment
+loop health
+department health
+management bottlenecks
+
+________________
+15. Templates to ship in open source
+This will make Loopgraph immediately valuable.
+15.1 Company templates
+B2B SaaS company
+Agency
+E-commerce company
+Dev tools company
+Marketplace
+Internal ops team
+15.2 Department templates
+Marketing department loop
+Sales department loop
+Product department loop
+Engineering quality loop
+Customer success health loop
+Ops/finance efficiency loop
+People ops engagement loop
+Risk/compliance loop
+Management loop
+15.3 Workflow loop templates
+Marketing:
+campaign learning loop
+SEO refresh loop
+landing page experiment loop
+competitor monitoring loop
+brand claim review loop
+Sales:
+lead enrichment loop
+follow-up latency loop
+proposal drafting loop
+CRM hygiene loop
+objection learning loop
+Product:
+feedback clustering loop
+spec drafting loop
+release learning loop
+customer evidence loop
+Customer success:
+churn risk loop
+QBR prep loop
+ticket escalation loop
+knowledge-base maintenance loop
+Management:
+weekly operating review loop
+dependency bottleneck loop
+OKR drift loop
+resource allocation loop
+decision memo loop
+
+________________
+16. CLI for developers
+The open-source package should include a CLI.
+loopgraph init
+loopgraph dev
+loopgraph validate
+loopgraph run-loop LOOP_ID
+loopgraph dry-run LOOP_ID
+loopgraph list-adapters
+loopgraph create-adapter my-crm
+loopgraph export-graph
+loopgraph import-graph
+loopgraph generate-context LOOP_ID
+loopgraph test-integration INTEGRATION_ID
+Example:
+loopgraph init demo-company
+cd demo-company
+loopgraph dev
+This should start:
+web UI
+API server
+worker
+Postgres
+Redis
+mock integrations
+
+________________
+17. Open-source release structure
+The README should make the value obvious in the first 20 seconds.
+README positioning
+# Loopgraph
+
+
+Open-source infrastructure for designing, running, tracing, and improving company loops.
+
+
+Loopgraph lets teams model a company as a graph of management, department, workflow, verification, human-review, memory, and improvement loops. Developers can connect their own systems of record, define loop context, run agents safely, and measure net value after review, rework, escalation, governance, and botsitting costs.
+What to emphasize
+Not another chatbot.
+Not another workflow automation builder.
+Not just an agent framework.
+Not just a graph editor.
+
+
+A loop operating layer for AI-human company workflows.
+
+________________
+18. Implementation milestones
+Milestone 1: Core loop schema and graph model
+Implement:
+Company
+Department
+Loop
+LoopNode
+LoopEdge
+Goal
+Signal
+Routine
+Verifier
+HumanReview
+Memory
+Metric
+Trace
+Integration
+Deliver:
+schemas
+Zod types
+validation
+sample graph JSON
+demo company seed
+
+________________
+Milestone 2: Topology UI
+Implement:
+graph canvas
+node inspector
+left outline
+department filter
+needs-attention filter
+node health
+edge labels
+node actions
+Deliver:
+visual graph backed by real database objects
+
+________________
+Milestone 3: Onboarding wizard
+Implement:
+company questions
+department questions
+loop questions
+integration questions
+context-doc generation
+dry-run activation
+Deliver:
+create a company loopgraph from onboarding
+
+________________
+Milestone 4: Integration SDK
+Implement:
+adapter interface
+mock CRM
+mock ads
+mock analytics
+mock ticketing
+webhook adapter
+local JSON/CSV adapter
+Deliver:
+developers can add custom backends
+
+________________
+Milestone 5: Runtime engine
+Implement:
+event bus
+scheduler
+loop runner
+context compiler
+agent runner
+tool runner
+verifier runner
+human review routing
+trace writer
+Deliver:
+a loop can actually execute
+
+________________
+Milestone 6: Measurement and governance
+Implement:
+trace dashboard
+human review inbox
+net saved model
+botsitting tracking
+approval thresholds
+permission boundaries
+audit log
+risk controls
+Deliver:
+Loopgraph can explain what happened and whether it helped
+
+________________
+Milestone 7: Improvement loop
+Implement:
+trace analyzer
+failure mode detection
+missing context detection
+unhelpful escalation detection
+improvement item creation
+accept/reject improvement flow
+Deliver:
+loops can improve from traces
+
+________________
+19. Exact Codex task
+Give Codex this as the next implementation task.
+Implement Loopgraph Open Source Core v0.1.
+
+
+Goal:
+Build the open-source core for Loopgraph: a system for defining, visualizing, executing, tracing, and measuring company management loops. Loopgraph models a company as a graph of company, department, management, workflow, task, integration, verifier, human-review, memory, metric, guardrail, and improvement nodes.
+
+
+The core concept:
+A loop is not a prompt. A loop is a recurring AI-human feedback system with goal, signals, context, integrations, routines, verification, escalation, memory, metrics, budget, risk, and trace learning.
+
+
+Implement the following:
+
+
+1. Monorepo structure
+
+
+Create:
+
+
+apps/web
+apps/api
+packages/core
+packages/runtime
+packages/sdk
+packages/connectors
+packages/templates
+examples/demo-company
+docs
+
+
+Use TypeScript.
+
+
+2. Core schemas
+
+
+In packages/core, implement Zod schemas and TypeScript types for:
+
+
+Company
+Department
+Loop
+LoopNode
+LoopEdge
+Goal
+TriggerSpec
+SignalSpec
+ContextSpec
+RoutineSpec
+IntegrationBinding
+VariableBinding
+ToolBinding
+VerifierSpec
+HumanReviewSpec
+MemorySpec
+MetricSpec
+BudgetSpec
+RiskSpec
+AgentSpec
+ContextDoc
+LoopRunTrace
+HumanReview
+MemoryEntry
+ImprovementItem
+
+
+3. Loop graph model
+
+
+Implement a typed directed graph where nodes have types:
+
+
+company
+department
+management_loop
+department_loop
+workflow_loop
+task_loop
+signal_source
+integration
+verifier
+human_owner
+human_review
+memory
+metric
+guardrail
+improvement_item
+
+
+Edges have types:
+
+
+owns
+contains
+observes
+calls
+reports_to
+escalates_to
+verifies_with
+writes_trace_to
+learns_from
+depends_on
+blocks
+updates_metric
+requires_approval
+
+
+Edges must be semantic, not only visual.
+
+
+4. Demo company seed
+
+
+Create examples/demo-company with a B2B SaaS company graph containing:
+
+
+Company management loop
+Marketing department
+Sales department
+Product department
+Customer Success department
+Engineering department
+Ops/Finance department
+Risk/Compliance department
+People Ops department
+
+
+Add workflow loops:
+
+
+Campaign Learning Loop
+Sales Pipeline Learning Loop
+Product Discovery Loop
+Customer Success Health Loop
+Engineering Quality Loop
+Ops/Finance Efficiency Loop
+Risk & Compliance Loop
+People Ops Engagement Loop
+
+
+Add signal source nodes:
+
+
+Ad Platforms
+Web Analytics
+CRM
+
+
+Add human review node.
+Add improvement items:
+Add downstream quality guardrail
+Track human review minutes
+
+
+5. Context docs system
+
+
+Implement ContextDoc objects and a ContextCompiler.
+
+
+Context compiler should compile context in this order:
+
+
+system instructions
+company context
+department context
+parent loop context
+current loop context
+integration variables
+recent trace summaries
+memory entries
+current event
+available tools
+verifier rubric
+escalation rules
+
+
+Generate these docs for each loop:
+
+
+agent.md
+routine.md
+verifier.md
+escalation.md
+metrics.md
+memory.md
+tools.md
+
+
+6. Integration SDK
+
+
+In packages/sdk, define:
+
+
+IntegrationAdapter
+LLMProvider
+Verifier
+StorageAdapter
+
+
+IntegrationAdapter must support:
+
+
+getConfigSchema
+getAuthSchema
+listVariables
+listActions
+listSignals
+readVariable
+executeAction
+subscribe optional
+healthCheck
+
+
+7. Mock connectors
+
+
+Implement mock connectors:
+
+
+mock-crm
+mock-ads
+mock-analytics
+mock-ticketing
+webhook
+local-json
+
+
+Each connector should expose variables and actions.
+
+
+Examples:
+
+
+crm.qualified_leads
+crm.pipeline_value
+ads.spend
+ads.cost_per_qualified_lead
+analytics.conversion_rate
+support.open_tickets
+
+
+8. Runtime engine
+
+
+In packages/runtime, implement:
+
+
+EventBus
+Scheduler
+LoopRunner
+ContextCompiler integration
+AgentRunner
+ToolRunner
+VerifierRunner
+HumanReviewRouter
+TraceWriter
+MetricUpdater
+MemoryWriter
+ImprovementQueue
+
+
+The runtime should support dry-run first.
+
+
+9. Agent output contract
+
+
+AgentRunner should expect structured output:
+
+
+summary
+proposedActions
+toolCalls
+evidence
+verificationRequest
+escalationRequest
+memoryWrites
+metricUpdates
+
+
+Do not rely only on raw prose.
+
+
+10. Verification and review
+
+
+Implement verifier contract and basic verifiers:
+
+
+schema verifier
+policy verifier
+source citation verifier
+approval-required verifier
+numeric threshold verifier
+mock LLM judge verifier
+
+
+Implement HumanReview object with statuses:
+
+
+open
+approved
+rejected
+needs_changes
+expired
+
+
+11. Trace schema
+
+
+Every loop run trace should record:
+
+
+input signals
+context snapshot
+variables read
+tool calls
+outputs
+verification results
+human reviews
+escalations
+memory reads
+memory writes
+metric updates
+cost
+errors
+
+
+12. Measurement model
+
+
+Implement metric calculation:
+
+
+gross_saved_minutes
+review_minutes
+rework_minutes
+botsitting_minutes
+escalation_minutes
+governance_minutes
+net_saved_minutes
+quality_score
+health_score
+
+
+Net saved:
+
+
+net_saved =
+ gross_saved
+ - review_minutes
+ - rework_minutes
+ - botsitting_minutes
+ - escalation_minutes
+ - governance_minutes
+
+
+13. Web UI
+
+
+In apps/web, implement:
+
+
+left navigation
+topology page
+graph canvas
+node inspector
+department filter
+needs-attention filter
+outline list
+loop detail page
+context docs editor
+integration binding UI
+human review inbox
+run trace page
+metrics dashboard
+
+
+The topology UI should resemble the current Loopgraph screenshot:
+left nav, middle graph canvas, right inspector with health, open reviews, net saved, botsitting, human review, and measurement cards.
+
+
+14. API
+
+
+In apps/api, implement endpoints:
+
+
+POST /companies
+GET /companies/:id
+
+
+GET /graphs/:companyId
+POST /graphs/:companyId/nodes
+POST /graphs/:companyId/edges
+PATCH /graphs/:companyId/layout
+
+
+GET /loops/:id
+POST /loops
+PATCH /loops/:id
+POST /loops/:id/run
+POST /loops/:id/dry-run
+POST /loops/:id/activate
+POST /loops/:id/pause
+
+
+GET /loops/:id/context
+POST /loops/:id/context/regenerate
+
+
+GET /integrations
+POST /integrations/:adapterId/connect
+GET /integrations/:id/variables
+GET /integrations/:id/actions
+POST /integrations/:id/test
+
+
+GET /runs/:id
+GET /loops/:id/runs
+GET /runs/:id/trace
+
+
+GET /reviews
+POST /reviews/:id/approve
+POST /reviews/:id/reject
+POST /reviews/:id/request-changes
+
+
+GET /metrics/company/:companyId
+GET /metrics/loops/:loopId
+
+
+GET /improvements
+POST /improvements/:id/accept
+POST /improvements/:id/reject
+
+
+15. CLI
+
+
+Implement loopgraph CLI:
+
+
+loopgraph init
+loopgraph dev
+loopgraph validate
+loopgraph run-loop LOOP_ID
+loopgraph dry-run LOOP_ID
+loopgraph list-adapters
+loopgraph create-adapter NAME
+loopgraph export-graph
+loopgraph import-graph
+loopgraph generate-context LOOP_ID
+loopgraph test-integration INTEGRATION_ID
+
+
+16. Documentation
+
+
+Create docs:
+
+
+getting-started.md
+loop-spec.md
+graph-model.md
+adapter-sdk.md
+context-docs.md
+runtime.md
+governance.md
+measurement.md
+templates.md
+deployment.md
+
+
+17. Acceptance criteria
+
+
+- pnpm install works
+- pnpm dev starts web, API, and worker
+- demo company loads
+- topology graph renders
+- selecting a node opens inspector
+- loop detail page works
+- context docs are generated
+- mock integrations expose variables
+- dry-run loop execution works
+- run trace is recorded
+- human review can be created and approved
+- metrics calculate net_saved_minutes
+- improvement item can be created from trace
+- CLI validates the demo graph
+- tests pass
+
+________________
+20. What to build first
+The very first implementation slice should be:
+LoopSpec schema
+Graph schema
+Demo company topology
+Context docs compiler
+Mock integrations
+Dry-run runtime
+Trace writer
+Topology UI inspector
+That gives you a real open-source artifact quickly.
+Do not start with complex real integrations. The killer first release is:
+Clone repo
+Run demo
+See company loopgraph
+Open Campaign Learning Loop
+Inspect context docs
+Run dry-run
+See trace
+See human review
+See net saved / botsitting model
+Create custom adapter
+

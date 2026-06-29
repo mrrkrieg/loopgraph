@@ -1,0 +1,8 @@
+{
+  "eventId": "acct_evt_exec_001",
+  "simulatedAt": "2026-06-27T13:15:00.000Z",
+  "ticket": { "current": { "body": "CEO escalation: outage is blocking executive reporting." } },
+  "account": { "id": "acct_exec", "name": "Exec Corp", "segment": "enterprise", "renewalDaysRemaining": 30 },
+  "incident": { "category": "service_outage", "severity": "P0" },
+  "businessImpact": { "renewalRisk": "high", "summary": "Executive escalation with high renewal risk" }
+}

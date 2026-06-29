@@ -1,0 +1,21 @@
+{
+  "eventId": "acct_evt_outage_001",
+  "simulatedAt": "2026-06-27T13:00:00.000Z",
+  "ticket": {
+    "current": {
+      "body": "Your platform has been failing intermittently all morning. We have our board meeting tomorrow and cannot use the reporting dashboard."
+    },
+    "history": [{ "id": "t-101", "subject": "Dashboard export failed" }]
+  },
+  "account": {
+    "id": "acct_acme",
+    "name": "Acme Corp",
+    "segment": "enterprise",
+    "renewalDaysRemaining": 48,
+    "arr": 180000
+  },
+  "incident": { "category": "service_outage", "severity": "P1" },
+  "incidents": { "current": [{ "id": "inc-77", "component": "reporting-dashboard" }] },
+  "businessImpact": { "renewalRisk": "high", "summary": "$180,000 ARR at risk with renewal in 48 days" },
+  "usage_30d": { "deltaPercent": -31 }
+}

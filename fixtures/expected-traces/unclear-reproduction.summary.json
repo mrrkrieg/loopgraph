@@ -1,0 +1,16 @@
+{
+  "status": "COMPLETED",
+  "loopId": "github-issue-triage",
+  "idempotencyKey": "c3593736c06e6abd",
+  "contextHash": "48c0ff0de549d219",
+  "preparedActionCount": 2,
+  "preparedFingerprints": [
+    "ace97ff00a6bb226",
+    "cf47f64343d4b4a8"
+  ],
+  "escalationCaseIds": [],
+  "escalationSeverity": null,
+  "policyBlocked": false,
+  "verificationFailed": false,
+  "humanReviewRequired": false
+}

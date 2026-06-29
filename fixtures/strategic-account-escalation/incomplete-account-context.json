@@ -1,0 +1,5 @@
+{
+  "eventId": "acct_evt_incomplete_001",
+  "simulatedAt": "2026-06-27T13:20:00.000Z",
+  "ticket": { "current": { "body": "We may need to evaluate alternatives if this keeps happening." } }
+}
