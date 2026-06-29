@@ -76,10 +76,11 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
     [hiddenParam]
   );
   const activeFilter = searchParams.get("department") ?? "all";
+  const activeSearch = searchParams.get("q") ?? "";
   const attentionOnly = searchParams.get("attention") === "1";
   const filteredGraphBase = useMemo(
-    () => filterGraph(graph, activeFilter, attentionOnly, requestedSelectedNodeId),
-    [activeFilter, attentionOnly, graph, requestedSelectedNodeId]
+    () => filterGraph(graph, activeFilter, attentionOnly, activeSearch, requestedSelectedNodeId),
+    [activeFilter, activeSearch, attentionOnly, graph, requestedSelectedNodeId]
   );
   const filteredGraph = useMemo(
     () => hideGraphNodes(filteredGraphBase, hiddenNodeIds),
@@ -227,6 +228,15 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
               ))}
             </select>
           </label>
+          <label className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
+            Search
+            <input
+              className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-ink"
+              onChange={(event) => updateParams({ q: event.target.value })}
+              placeholder="Find loop, metric, owner"
+              value={activeSearch}
+            />
+          </label>
           <label className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-sm font-medium">
             Needs attention
             <input
@@ -290,6 +300,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
           <div className="flex items-center gap-2 text-xs text-ink/60">
             <span className="rounded-md border border-line px-2 py-1">Layered layout</span>
             <span className="rounded-md border border-line px-2 py-1">URL state</span>
+            <span className="rounded-md border border-line px-2 py-1">{graph.sourceLabel ?? "Workspace"}</span>
             <span className="rounded-md border border-line px-2 py-1">{isPending ? "Syncing" : "Ready"}</span>
           </div>
         </div>
@@ -299,7 +310,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
             elementsSelectable
             fitView
             fitViewOptions={{ padding: 0.16, maxZoom: 0.95 }}
-            key={`${nodes.length}:${edges.length}:${activeFilter}:${attentionOnly}`}
+            key={`${nodes.length}:${edges.length}:${activeFilter}:${activeSearch}:${attentionOnly}`}
             maxZoom={1.8}
             minZoom={0.2}
             nodes={nodes}
@@ -426,13 +437,38 @@ function InspectorBody({
   health?: LoopHealthSummary;
   node?: LoopGraphNode;
 }) {
+  const source = node?.metadata?.source as string | undefined;
+  const sourcePath = node?.metadata?.sourcePath as string | undefined;
+  const runtimeLevel = node?.metadata?.runtimeLevel as string | undefined;
+  const dataSources = (node?.metadata?.dataSources as string[] | undefined) ?? [];
+  const owners = (node?.metadata?.owners as string[] | undefined) ?? [];
+  const metrics = (node?.metadata?.metrics as string[] | undefined) ?? [];
+
   return (
     <div className="mt-4 space-y-4">
+      {source || runtimeLevel || sourcePath ? (
+        <div className="rounded-md border border-line p-3">
+          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Source</div>
+          <div className="mt-2 grid gap-2 text-xs text-ink/65">
+            {source ? <InspectorLine label="Origin" value={source.replace(/_/g, " ")} /> : null}
+            {runtimeLevel ? <InspectorLine label="Template" value={runtimeLevel.replace(/_/g, " ")} /> : null}
+            {sourcePath ? <InspectorLine label="Spec path" value={sourcePath} /> : null}
+          </div>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-3">
         <InspectorMetric label="Health" value={`${health?.healthScore ?? node?.health ?? 72}`} />
         <InspectorMetric label="Open Reviews" value={`${health?.openReviews ?? node?.metadata?.openReviews ?? 0}`} />
         <InspectorMetric label="Net Saved" value={formatMinutes(health?.netTimeSavedMinutes ?? 0)} />
         <InspectorMetric label="Botsitting" value={formatMinutes(health?.botsittingMinutes ?? 0)} />
+      </div>
+      <div className="rounded-md border border-line p-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Connections</div>
+        <div className="mt-2 grid gap-2 text-sm leading-6 text-ink/70">
+          <InspectorLine label="Data" value={dataSources.slice(0, 4).join(", ") || "Not defined"} />
+          <InspectorLine label="Owners" value={owners.slice(0, 3).join(", ") || "Not defined"} />
+          <InspectorLine label="Metrics" value={metrics.slice(0, 3).join(", ") || "Not defined"} />
+        </div>
       </div>
       <div className="rounded-md border border-line p-3">
         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Human Review</div>
@@ -450,6 +486,15 @@ function InspectorBody({
   );
 }
 
+function InspectorLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <span className="font-semibold text-ink">{label}:</span>{" "}
+      <span className="break-words">{value}</span>
+    </div>
+  );
+}
+
 function InspectorMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-line bg-paper px-3 py-3">
@@ -463,6 +508,7 @@ function filterGraph(
   graph: LoopGraph,
   department: string,
   attentionOnly: boolean,
+  search: string,
   selectedNodeId?: string
 ): LoopGraph {
   const selectedLoopId = selectedNodeId?.startsWith("loop:")
@@ -474,7 +520,8 @@ function filterGraph(
       .map((item) => item.loopId)
   );
   const nodes = graph.nodes.filter((node) => {
-    const isCore = ["management_loop", "loop"].includes(node.kind);
+    const isCore = ["organization", "management_loop", "department", "loop"].includes(node.kind);
+    const isAlwaysVisible = ["organization", "management_loop"].includes(node.kind);
     const nodeLoopId = node.metadata?.loopId as string | undefined;
     const isSelectedContext =
       Boolean(selectedLoopId) &&
@@ -488,9 +535,15 @@ function filterGraph(
           );
         }));
     const matchesDepartment =
-      department === "all" || node.department === department || isCore || isSelectedContext;
-    const matchesAttention = !attentionOnly || isCore || (nodeLoopId && attentionLoopIds.has(nodeLoopId));
-    return (isCore || isSelectedContext) && matchesDepartment && matchesAttention;
+      department === "all" || node.department === department || isAlwaysVisible || isSelectedContext;
+    const matchesAttention = !attentionOnly || isAlwaysVisible || (nodeLoopId && attentionLoopIds.has(nodeLoopId));
+    const normalizedSearch = search.trim().toLowerCase();
+    const matchesSearch =
+      normalizedSearch.length === 0 ||
+      isAlwaysVisible ||
+      isSelectedContext ||
+      `${node.label} ${node.subtitle ?? ""} ${node.department ?? ""}`.toLowerCase().includes(normalizedSearch);
+    return (isCore || isSelectedContext) && matchesDepartment && matchesAttention && matchesSearch;
   });
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));

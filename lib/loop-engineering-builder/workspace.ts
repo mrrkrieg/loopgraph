@@ -1,6 +1,6 @@
 import { createSupabaseAdminClient } from "../db/supabase";
 import { createDefaultAnswers, generateQuestions, type AnswerMap } from "./question-engine";
-import { buildLoopGraph } from "./graph";
+import { buildGraphFromRegisteredSpecs, buildLoopGraph, loopRecordFromRegisteredSpec } from "./graph";
 import { getDemoWorkspace } from "./demo-data";
 import { questionProgress } from "./demo-helpers";
 import {
@@ -14,7 +14,9 @@ import {
   generateLoopSpec
 } from "./spec-generator";
 import { generateImplementationArtifacts } from "./implementation-generator";
+import { createLocalDesignStudioSpec, getRegisteredLoopSpecs } from "./local-workspace";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
+import { v1alpha1ToFlat } from "../loopgraph-core/studio-adapter";
 import type {
   DepartmentKey,
   GeneratedArtifact,
@@ -51,12 +53,12 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
   const supabase = createSupabaseAdminClient();
 
   if (!supabase) {
-    return selectDemoWorkspace(selectedLoopId);
+    return selectLocalWorkspace(selectedLoopId);
   }
 
   const organization = await getOrFallbackOrganization(supabase);
   if (!organization) {
-    return selectDemoWorkspace(selectedLoopId);
+    return selectLocalWorkspace(selectedLoopId);
   }
 
   const { data: loopRows } = await supabase
@@ -66,7 +68,7 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     .order("created_at", { ascending: true });
 
   if (!loopRows || loopRows.length === 0) {
-    return selectDemoWorkspace(selectedLoopId);
+    return selectLocalWorkspace(selectedLoopId);
   }
 
   const loops = await Promise.all(loopRows.map((row) => mapLoopRecord(supabase, row as LoopRow)));
@@ -88,7 +90,8 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     loops,
     reviews,
     improvements,
-    selectedNodeId: `loop:${selectedLoop.id}`
+    selectedNodeId: `loop:${selectedLoop.id}`,
+    sourceLabel: "Supabase"
   });
 
   return {
@@ -130,7 +133,12 @@ export async function createLoop(input: {
   const supabase = createSupabaseAdminClient();
 
   if (!supabase) {
-    return getDemoWorkspace().loop.id;
+    const created = await createLocalDesignStudioSpec({
+      templateId: input.templateId,
+      name: input.name,
+      goal: input.goal
+    });
+    return created.id;
   }
 
   const template = getTemplateById(input.templateId);
@@ -589,6 +597,57 @@ async function ensureQuestion(
   return data.id as string;
 }
 
+async function selectLocalWorkspace(selectedLoopId?: string) {
+  if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY === "true") {
+    return selectDemoWorkspace(selectedLoopId);
+  }
+
+  const registeredSpecs = await getRegisteredLoopSpecs();
+  if (registeredSpecs.length === 0) {
+    return selectDemoWorkspace(selectedLoopId);
+  }
+
+  const organization = {
+    id: "local_workspace",
+    name: "Local Loopgraph workspace"
+  };
+  const loops = registeredSpecs.map((item) => loopRecordFromRegisteredSpec(item, organization.id));
+  const selectedLoop = loops.find((item) => item.id === selectedLoopId) ?? loops[0];
+  const selectedSpec = registeredSpecs.find((item) => item.spec.metadata.id === selectedLoop.id) ?? registeredSpecs[0];
+  const answers = createDefaultAnswers(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
+  const questions = generateQuestions(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
+  const progress = questionProgress(questions, answers);
+  const spec = v1alpha1ToFlat(selectedSpec.spec);
+  const graph = buildGraphFromRegisteredSpecs({
+    organization,
+    specs: registeredSpecs,
+    selectedNodeId: `loop:${selectedLoop.id}`
+  });
+
+  return {
+    organization,
+    profile: {
+      id: "profile_local",
+      email: "operator@example.com",
+      fullName: "Loop Operator",
+      role: "owner"
+    },
+    templates: getDepartmentTemplates(),
+    loops,
+    loop: selectedLoop,
+    answers,
+    questions,
+    progress,
+    spec,
+    artifacts: generateImplementationArtifacts(spec),
+    runBundle: simulateLoopRun(selectedLoop),
+    improvements: [],
+    managementReview: summarizeManagement(loops, graph),
+    metrics: summarizeMetrics(graph, selectedLoop.id),
+    graph
+  };
+}
+
 function selectDemoWorkspace(selectedLoopId?: string) {
   const workspace = getDemoWorkspace();
   const loop = workspace.loops.find((item) => item.id === selectedLoopId) ?? workspace.loop;
@@ -605,7 +664,8 @@ function selectDemoWorkspace(selectedLoopId?: string) {
       loops: workspace.loops,
       reviews: workspace.runBundle.review ? [workspace.runBundle.review] : [],
       improvements: workspace.improvements,
-      selectedNodeId: `loop:${loop.id}`
+      selectedNodeId: `loop:${loop.id}`,
+      sourceLabel: workspace.graph.sourceLabel
     })
   };
 }

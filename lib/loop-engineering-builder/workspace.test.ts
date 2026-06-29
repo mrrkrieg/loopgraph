@@ -1,7 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getWorkspace, startLoopRun } from "./workspace";
 
 describe("workspace fallback", () => {
+  const originalDisableLocalRegistry = process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY;
+
+  beforeEach(() => {
+    process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY = "true";
+  });
+
+  afterEach(() => {
+    if (originalDisableLocalRegistry === undefined) {
+      delete process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY;
+    } else {
+      process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY = originalDisableLocalRegistry;
+    }
+  });
+
   it("returns a zero-config Loopgraph workspace with topology data", async () => {
     const workspace = await getWorkspace();
 

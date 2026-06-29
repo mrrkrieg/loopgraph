@@ -1,7 +1,8 @@
 #!/usr/bin/env tsx
 import "./load-env";
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import YAML from "yaml";
 import { Command } from "commander";
 import { loadLoopSpecFromPath } from "../lib/loopgraph-runtime/loader";
 import { simulateLoop } from "../lib/loopgraph-runtime/simulator";
@@ -14,6 +15,9 @@ import { applyReviewDecision, ReviewServiceError } from "../lib/loopgraph-runtim
 import { formatReviewPacket } from "../lib/loopgraph-runtime/review-packet";
 import { listEscalationCases, resolveCase } from "../lib/loopgraph-runtime/case-service";
 import { getStorageAdapter, getLoopgraphRoot } from "../lib/loopgraph-runtime/storage-resolver";
+import { createSpecFromTemplate } from "../lib/loop-engineering-builder/template-spec";
+import { getDepartmentTemplates, getTemplateById, getTemplateCatalog } from "../lib/loop-engineering-builder/templates";
+import { registerLoopSpec } from "../lib/loop-engineering-builder/local-workspace";
 import type { LoopRunTrace } from "../lib/loopgraph-core/trace";
 
 const program = new Command();
@@ -24,16 +28,81 @@ program.name("loopgraph").description("Loopgraph local validate/simulate CLI");
 
 program
   .command("init")
-  .argument("<template>", "github-issue-triage | strategic-account-escalation")
+  .argument("<template>", "Template id")
   .argument("[targetDir]", "Destination directory", ".")
-  .action(async (template, targetDir) => {
-    const source = path.join(repoRoot, "examples", template);
+  .option("--register", "Register the initialized spec in .loopgraph/workspace.json")
+  .action(async (templateId, targetDir, options: { register?: boolean }) => {
+    const template = getTemplateById(templateId);
+    if (!template) {
+      console.error(`Unknown template: ${templateId}`);
+      process.exit(1);
+    }
+
     const dest = path.resolve(targetDir);
+    const outputDir = path.join(dest, template.id);
     await mkdir(dest, { recursive: true });
-    await cp(source, path.join(dest, template), { recursive: true });
-    const fixtureSource = path.join(repoRoot, "fixtures", template);
-    await cp(fixtureSource, path.join(dest, "fixtures", template), { recursive: true });
-    console.log(`Initialized ${template} in ${dest}`);
+
+    if (template.runtimeLevel === "runnable" && template.examplePath) {
+      const source = path.join(repoRoot, template.examplePath);
+      await cp(source, outputDir, { recursive: true, force: true });
+      const fixtureSource = path.join(repoRoot, "fixtures", template.id);
+      try {
+        await cp(fixtureSource, path.join(dest, "fixtures", template.id), { recursive: true, force: true });
+      } catch {
+        // Some runnable examples, such as management review, do not need fixtures yet.
+      }
+    } else {
+      await mkdir(outputDir, { recursive: true });
+      const spec = createSpecFromTemplate(template.id);
+      await writeFile(path.join(outputDir, "loopgraph.yaml"), YAML.stringify(spec));
+    }
+
+    const specPath = path.join(outputDir, "loopgraph.yaml");
+    if (options.register) {
+      const entry = await registerLoopSpec(specPath, repoRoot);
+      console.log(`Registered ${entry.name} (${entry.id})`);
+    }
+    console.log(`Initialized ${template.id} in ${outputDir}`);
+  });
+
+const templates = program.command("templates").description("Template catalog commands");
+
+templates
+  .command("list")
+  .option("--json", "Print raw JSON")
+  .action((options: { json?: boolean }) => {
+    const catalog = getTemplateCatalog();
+    if (options.json) {
+      console.log(JSON.stringify(catalog, null, 2));
+      return;
+    }
+
+    for (const department of getDepartmentTemplates()) {
+      console.log(`\n${department.name}`);
+      for (const template of department.commonLoops) {
+        console.log(`- ${template.id} [${template.runtimeLevel}] ${template.name}`);
+      }
+    }
+  });
+
+templates
+  .command("show")
+  .argument("<templateId>", "Template id")
+  .action((templateId) => {
+    const template = getTemplateById(templateId);
+    if (!template) {
+      console.error(`Unknown template: ${templateId}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(template, null, 2));
+  });
+
+program
+  .command("register")
+  .argument("<specPath>", "Path to loopgraph.yaml or example directory")
+  .action(async (specPath) => {
+    const entry = await registerLoopSpec(specPath, repoRoot);
+    console.log(`Registered ${entry.name} (${entry.id}) from ${entry.path}`);
   });
 
 program
