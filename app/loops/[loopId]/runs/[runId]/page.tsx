@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { StatusPill } from "@/components/status-pill";
 import { ContextTracePanel } from "@/components/context-trace-panel";
+import { TraceModeBadge } from "@/components/trace-mode-badge";
 import { TraceViewer } from "@/components/trace-viewer";
 import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 
@@ -36,6 +37,8 @@ export default async function LoopRunDetailPage({
           </Link>
         </div>
       </div>
+
+      <TraceModeBadge trace={trace} />
 
       <ContextTracePanel runId={runId} />
       <TraceViewer trace={trace} />

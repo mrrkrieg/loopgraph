@@ -11,7 +11,7 @@ describe("case-service", () => {
   it("writes case outcome and improvement signal back to source trace", async () => {
     const loaded = await loadLoopSpecFromPath(path.join(repoRoot, "examples/strategic-account-escalation"));
     if (!loaded.ok) throw new Error("load failed");
-    const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph-test"));
+    const storage = new FileStorageAdapter(path.join(repoRoot, ".loopgraph-test", "case-service-isolated"));
     const result = await simulateLoop({
       spec: loaded.spec,
       fixture: path.join(repoRoot, "fixtures/strategic-account-escalation/enterprise-outage-near-renewal.json"),

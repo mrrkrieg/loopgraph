@@ -92,6 +92,7 @@ export function buildLoopGraph(input: {
   improvements?: ImprovementItem[];
   selectedNodeId?: string;
   sourceLabel?: string;
+  hiddenLaborByLoopId?: Record<string, Partial<HiddenLaborMetrics>>;
 }): LoopGraph {
   const reviews = input.reviews ?? [];
   const improvements = input.improvements ?? [];
@@ -100,10 +101,14 @@ export function buildLoopGraph(input: {
     const loopReviews = reviews.filter((review) => review.loopId === loop.id && review.status === "pending");
     const loopImprovements = improvements.filter((item) => item.loopId === loop.id && item.status !== "done");
     const template = getTemplateById(loop.templateId);
+    const traceLabor = input.hiddenLaborByLoopId?.[loop.id];
+    const laborSource =
+      traceLabor ??
+      (loopReviews.length > 0 ? mergeHiddenLabor(loopReviews) : template?.defaultHiddenLabor);
     return calculateHiddenLaborSummary(
       loop.id,
       loop.status,
-      loopReviews.length > 0 ? mergeHiddenLabor(loopReviews) : template?.defaultHiddenLabor,
+      laborSource,
       loop.openReviews || loopReviews.length,
       loop.improvementItems || loopImprovements.length
     );

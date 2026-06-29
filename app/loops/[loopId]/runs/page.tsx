@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
+import { TraceModeBadge } from "@/components/trace-mode-badge";
 import { formatDate } from "@/lib/loop-engineering-builder/demo-helpers";
+import { filterRunsForLoop } from "@/lib/loopgraph-runtime/run-filters";
 import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 import { startLoopRunAction } from "./actions";
 
@@ -12,7 +14,8 @@ export default async function LoopRunsPage({
 }) {
   const { loopId } = await params;
   const storage = getStorageAdapter();
-  const runs = await storage.listRuns();
+  const allRuns = await storage.listRuns();
+  const runs = filterRunsForLoop(allRuns, loopId);
   const traces = await Promise.all(
     runs.map(async (run) => ({
       index: run,
@@ -37,6 +40,7 @@ export default async function LoopRunsPage({
               <tr>
                 <th className="px-4 py-3">Run ID</th>
                 <th className="px-4 py-3">Loop</th>
+                <th className="px-4 py-3">Mode</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Started</th>
                 <th className="px-4 py-3">Review</th>
@@ -46,7 +50,7 @@ export default async function LoopRunsPage({
             <tbody>
               {traces.length === 0 && (
                 <tr className="border-t border-line">
-                  <td className="px-4 py-6 text-ink/60" colSpan={6}>
+                  <td className="px-4 py-6 text-ink/60" colSpan={7}>
                     No persisted runs yet. Click Run loop or use `npm run loopgraph -- simulate ...`.
                   </td>
                 </tr>
@@ -55,6 +59,7 @@ export default async function LoopRunsPage({
                 <tr key={index.id} className="border-t border-line">
                   <td className="px-4 py-3 font-mono text-xs">{index.id}</td>
                   <td className="px-4 py-3">{trace?.loopId ?? index.loopId}</td>
+                  <td className="px-4 py-3">{trace?.mode ?? "-"}</td>
                   <td className="px-4 py-3"><StatusPill>{index.status}</StatusPill></td>
                   <td className="px-4 py-3">{trace ? formatDate(trace.startedAt) : "-"}</td>
                   <td className="px-4 py-3">{index.status === "WAITING_FOR_REVIEW" ? "Required" : "No"}</td>
@@ -69,6 +74,9 @@ export default async function LoopRunsPage({
           </table>
         </div>
       </SectionCard>
+      {traces[0]?.trace && (
+        <TraceModeBadge trace={traces[0].trace} />
+      )}
     </div>
   );
 }

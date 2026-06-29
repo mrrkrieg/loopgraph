@@ -2,20 +2,38 @@ import type { LoopSpec } from "../loopgraph-core/loop-spec";
 import type { ContextSnapshot, ContextSnapshotEntry } from "../loopgraph-core/context";
 import { contentHash } from "../loopgraph-core/hash";
 import { allMockAdapters } from "../loopgraph-sdk/adapters/mock-adapters";
+import { githubAdapter } from "../loopgraph-sdk/adapters/github";
+import type { IntegrationAdapter } from "../loopgraph-sdk/adapters";
 import type { SimulationFixture } from "./fixture-loader";
+
+export function isGitHubAdapterConfigured() {
+  const token = process.env.GITHUB_TOKEN ?? process.env.LOOPGRAPH_GITHUB_TOKEN;
+  const owner = process.env.GITHUB_OWNER ?? process.env.LOOPGRAPH_GITHUB_OWNER;
+  const repo = process.env.GITHUB_REPO ?? process.env.LOOPGRAPH_GITHUB_REPO;
+  return Boolean(token && owner && repo);
+}
+
+function resolveAdapter(adapterId: string, mode: "simulate" | "execute"): IntegrationAdapter | undefined {
+  if (mode === "execute" && adapterId === "github" && isGitHubAdapterConfigured()) {
+    return githubAdapter;
+  }
+  return allMockAdapters.find((item) => item.id === adapterId);
+}
 
 export async function compileContextSnapshot(input: {
   spec: LoopSpec;
   fixture: SimulationFixture;
+  mode?: "simulate" | "execute";
 }): Promise<ContextSnapshot> {
+  const mode = input.mode ?? "simulate";
   const entries: ContextSnapshotEntry[] = [];
-  const simulatedAt = input.fixture.simulatedAt;
+  const simulatedAt = input.fixture.simulatedAt ?? new Date().toISOString();
 
   for (const source of input.spec.context.sources) {
-    const adapter = allMockAdapters.find((item) => item.id === source.adapterId);
+    const adapter = source.adapterId ? resolveAdapter(source.adapterId, mode) : undefined;
     let value: unknown = null;
     let trusted = source.trusted;
-    let freshness: ContextSnapshotEntry["freshness"] = "fixture";
+    let freshness: ContextSnapshotEntry["freshness"] = mode === "execute" ? "realtime" : "fixture";
 
     if (adapter && source.variableKey) {
       const variable = await adapter.readVariable(source.variableKey, input.fixture as Record<string, unknown>);

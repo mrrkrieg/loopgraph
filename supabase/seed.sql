@@ -43,3 +43,42 @@ values
   ('management', 'decision_memo', 'Decision Memo Loop', 'Turn ambiguous signals into decision options with tradeoffs.', '{}'::jsonb, true),
   ('management', 'resource_allocation', 'Resource Allocation Loop', 'Match goals, bottlenecks, capacity, and constraints.', '{}'::jsonb, true),
   ('management', 'improvement', 'Improvement Loop', 'Convert loop failures and human corrections into system changes.', '{}'::jsonb, true);
+
+-- Optional Design Studio workspace seed (org + starter loop)
+insert into organizations (name)
+select 'Acme Loops'
+where not exists (select 1 from organizations where name = 'Acme Loops');
+
+insert into loops (
+  organization_id,
+  template_id,
+  name,
+  department,
+  loop_type,
+  status,
+  autonomy_level,
+  goal,
+  target_metric,
+  business_outcome,
+  cadence
+)
+select
+  org.id,
+  tmpl.id,
+  'Campaign Learning Loop',
+  'marketing',
+  'campaign_learning',
+  'active',
+  'draft_for_review',
+  'Acquire qualified customers at a sustainable CAC.',
+  'Cost per qualified customer',
+  'More qualified activated customers from scalable channels.',
+  'Weekly'
+from organizations org
+cross join loop_templates tmpl
+where org.name = 'Acme Loops'
+  and tmpl.department = 'marketing'
+  and tmpl.loop_type = 'campaign_learning'
+  and not exists (
+    select 1 from loops where organization_id = org.id and name = 'Campaign Learning Loop'
+  );

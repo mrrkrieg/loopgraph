@@ -147,7 +147,7 @@ function mapReviewStatus(status: ReviewDecisionStatus): HumanReviewTrace["status
   }
 }
 
-function getCumulativeApprovedFingerprints(trace: LoopRunTrace): string[] {
+export function getCumulativeApprovedFingerprints(trace: LoopRunTrace): string[] {
   const fingerprints = new Set<string>();
   for (const review of trace.humanReviews) {
     if (review.status === "approved") {

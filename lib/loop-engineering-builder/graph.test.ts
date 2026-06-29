@@ -28,6 +28,36 @@ describe("Loopgraph topology", () => {
     expect(health.healthScore).toBeLessThan(90);
   });
 
+  it("uses trace hidden labor override when provided", () => {
+    const workspace = getDemoWorkspace();
+    const lowLabor = buildLoopGraph({
+      organization: workspace.organization,
+      loops: workspace.loops,
+      reviews: [],
+      improvements: [],
+      hiddenLaborByLoopId: {
+        [workspace.loop.id]: {
+          baselineMinutes: 600,
+          loopExecutionMinutes: 100,
+          reviewMinutes: 200,
+          reworkMinutes: 100,
+          botsittingMinutes: 50,
+          escalationMinutes: 50,
+          governanceMinutes: 50
+        }
+      }
+    });
+    const defaultGraph = buildLoopGraph({
+      organization: workspace.organization,
+      loops: workspace.loops,
+      reviews: [],
+      improvements: []
+    });
+    const lowHealth = lowLabor.health.find((item) => item.loopId === workspace.loop.id)?.healthScore ?? 0;
+    const defaultHealth = defaultGraph.health.find((item) => item.loopId === workspace.loop.id)?.healthScore ?? 0;
+    expect(lowHealth).toBeLessThan(defaultHealth);
+  });
+
   it("builds management, department, loop, data, review, and improvement relationships", () => {
     const workspace = getDemoWorkspace();
     const graph = buildLoopGraph({

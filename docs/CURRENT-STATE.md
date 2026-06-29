@@ -1,10 +1,10 @@
 # Loopgraph current build state
 
-Last updated: 2026-06-28 · Branch: `v1`
+Last updated: 2026-06-29 · Branch: `loopgraph/canvas-first`
 
 ## One-line summary
 
-Loopgraph is a **code-first, fixture-driven** loop runtime: define `loopgraph.yaml`, simulate events locally, inspect traces, approve exact action fingerprints, and resolve escalation cases — **without API keys or live integrations** in the default path.
+Loopgraph is a **code-first, fixture-driven** loop runtime with **browser governance**: define `loopgraph.yaml`, simulate locally, inspect traces, approve fingerprints in CLI or UI, resolve escalation cases — **without API keys** in the default simulate path.
 
 ---
 
@@ -55,14 +55,21 @@ CLI loads `.env` via `scripts/load-env.ts` (optional keys for execute only).
 
 ### Tests & CI
 
-- **46 vitest tests** (loop-spec, simulators, review-service, case-service, review-packet, verifiers, snapshots)
+- **54+ vitest tests** (includes run-filters, execute-path, graph hidden-labor)
 - `npm run typecheck`, `npm run build` pass
 
-### Web UI (partial — not required for code-first demo)
+### Web UI (governance path on file storage)
 
-- Run history, trace detail, reviews with fingerprint checkboxes
-- Reads same `.loopgraph/` storage as CLI when Supabase is not configured
-- Design Studio / topology / management pages still mix demo workspace data
+- Run history (filtered by loop), trace detail with mode badges, reviews with partial approval UX
+- Case page with resolve form + management consumer
+- Workspace mode banner (demo / local / persisted / empty)
+- Design Studio topology still mixes catalog loops; Supabase parity partial
+
+### Execute (experimental)
+
+- Context compiler uses live GitHub adapter when `LOOPGRAPH_EXECUTE_ENABLED` + GitHub env
+- `LOOPGRAPH_ASSESSMENT_PROVIDER=fixture` for execute without OpenAI
+- See [github-production-setup.md](./github-production-setup.md)
 
 ### V1.1 scaffolding (in repo, not production-complete)
 

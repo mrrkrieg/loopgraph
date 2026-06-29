@@ -3,13 +3,12 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
-import { FileStorageAdapter } from "@/lib/loopgraph-sdk/storage";
+import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 import Link from "next/link";
-import path from "node:path";
 
 export default async function ManagementPage() {
   const workspace = await getWorkspace();
-  const storage = new FileStorageAdapter(path.join(process.cwd(), ".loopgraph"));
+  const storage = getStorageAdapter();
   const cases = await storage.listCases();
 
   return (
