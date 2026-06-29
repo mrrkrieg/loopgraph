@@ -3,17 +3,31 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { TemplatePicker } from "@/components/template-picker";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { getTemplateById } from "@/lib/loop-engineering-builder/templates";
 import { createLoopAction } from "./actions";
 
-export default async function NewLoopPage() {
+export default async function NewLoopPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ template?: string }>;
+}) {
+  const params = await searchParams;
   const workspace = await getWorkspace();
   const templateOptions = workspace.templates.flatMap((department) =>
     department.commonLoops.map((loop) => ({
       id: loop.id,
       name: loop.name,
-      department: department.key
+      department: department.key,
+      description: loop.description,
+      runtimeLevel: loop.runtimeLevel,
+      primaryMetric: loop.primaryMetric,
+      dataSources: loop.requiredDataSources ?? department.commonDataSources,
+      owners: loop.defaultOwners ?? ["Loop owner"]
     }))
   );
+  const selectedTemplate = getTemplateById(params?.template ?? "") ?? getTemplateById("marketing-campaign_learning");
+  const defaultDepartment = selectedTemplate?.department ?? "marketing";
+  const defaultTemplateId = selectedTemplate?.id ?? "marketing-campaign_learning";
 
   return (
     <>
@@ -35,8 +49,8 @@ export default async function NewLoopPage() {
             </label>
             <TemplatePicker
               templates={templateOptions}
-              defaultDepartment="marketing"
-              defaultTemplateId="marketing-campaign_learning"
+              defaultDepartment={defaultDepartment}
+              defaultTemplateId={defaultTemplateId}
             />
             <label className="block text-sm font-medium">
               Goal

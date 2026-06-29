@@ -61,19 +61,22 @@ const loop = (
   department: DepartmentKey,
   loopType: string,
   name: string,
-  description: string
+  description: string,
+  runtimeLevel: LoopTemplate["runtimeLevel"] = "spec_stub"
 ): LoopTemplate => ({
   id: `${department}-${loopType}`,
   department,
   loopType,
   name,
-  description
+  description,
+  runtimeLevel
 });
 
 export const marketingCampaignLearningLoop: LoopTemplate = {
   id: "marketing-campaign_learning",
   department: "marketing",
   loopType: "campaign_learning",
+  runtimeLevel: "spec_stub",
   name: "Campaign Learning Loop",
   description:
     "Observe funnel and cohort quality, generate experiment hypotheses, verify against downstream metrics, and feed learning into a reusable message and channel library.",
@@ -150,6 +153,92 @@ export const marketingCampaignLearningLoop: LoopTemplate = {
   ]
 };
 
+const githubIssueTriageTemplate: LoopTemplate = {
+  id: "github-issue-triage",
+  department: "engineering",
+  loopType: "github_issue_triage",
+  runtimeLevel: "runnable",
+  name: "GitHub Issue Triage",
+  description:
+    "Classify incoming GitHub issues, propose labels and responses, and escalate security-sensitive items with exact action approval.",
+  goal: "Turn incoming issues into trustworthy triage decisions without unsafe repository mutations.",
+  businessOutcome: "Maintainers spend less time sorting issues while security-sensitive items reach the right owner faster.",
+  primaryMetric: "Triage latency",
+  secondaryMetrics: ["Escalation accuracy", "Maintainer review minutes", "False positive rate"],
+  observes: ["Issue title", "Issue body", "Labels", "Repository policy", "Security keywords"],
+  requiredDataSources: ["GitHub", "Repository policy", "Maintainer rules"],
+  routine: [
+    "Load issue and repository policy context",
+    "Classify issue type and risk",
+    "Prepare labels, response draft, or escalation case",
+    "Verify evidence and policy constraints",
+    "Route sensitive actions to human review"
+  ],
+  verification: ["Schema is valid", "Evidence references issue content", "Forbidden actions are blocked", "Security escalation policy is respected"],
+  escalation: ["Issue suggests credentials, exploit, CVE, or vulnerability", "Public response requires security judgment"],
+  examplePath: "examples/github-issue-triage",
+  fixturePaths: [
+    "fixtures/github-issue-triage/normal-bug.json",
+    "fixtures/github-issue-triage/security-issue.json"
+  ]
+};
+
+const strategicAccountEscalationTemplate: LoopTemplate = {
+  id: "strategic-account-escalation",
+  department: "customer_success",
+  loopType: "strategic_account_escalation",
+  runtimeLevel: "runnable",
+  name: "Strategic Account Escalation",
+  description:
+    "Turn customer-risk signals into evidence-backed escalation cases with accountable ownership and separate customer-facing approval.",
+  goal: "Escalate strategic account risk with complete evidence, owner routing, and approved response actions.",
+  businessOutcome: "At-risk revenue gets faster human attention without generic customer communication.",
+  primaryMetric: "Escalation response time",
+  secondaryMetrics: ["Renewal risk surfaced", "Customer-facing review minutes", "Case resolution time"],
+  observes: ["Support ticket", "CRM account", "Renewal date", "Incident severity", "Business impact"],
+  requiredDataSources: ["Support system", "CRM", "Status page", "Account notes"],
+  routine: [
+    "Assemble ticket and account context",
+    "Assess escalation severity and business impact",
+    "Prepare internal task and customer-facing draft separately",
+    "Require approval for risky actions",
+    "Write outcome back to the trace"
+  ],
+  verification: ["Account context is current", "Evidence is cited", "Customer-facing action is separately approved", "Case has an owner and SLA"],
+  escalation: ["Strategic customer outage", "Renewal risk", "Executive escalation", "Commercial commitment"],
+  examplePath: "examples/strategic-account-escalation",
+  fixturePaths: [
+    "fixtures/strategic-account-escalation/enterprise-outage-near-renewal.json",
+    "fixtures/strategic-account-escalation/executive-escalation.json"
+  ]
+};
+
+const managementReviewTemplate: LoopTemplate = {
+  id: "management-review",
+  department: "management",
+  loopType: "management_review",
+  runtimeLevel: "runnable",
+  name: "Management Review Loop",
+  description:
+    "Consume loop health, escalation cases, hidden labor, and improvement signals to prepare leadership decisions.",
+  goal: "Turn operational traces and escalation cases into clear management decisions and follow-up ownership.",
+  businessOutcome: "Leadership attention moves to the loops, owners, and decisions that most affect company outcomes.",
+  primaryMetric: "Decision latency",
+  secondaryMetrics: ["Open escalations", "Loop health drift", "Improvement throughput"],
+  observes: ["Loop traces", "Escalation cases", "Human reviews", "Improvement items", "Hidden labor"],
+  requiredDataSources: ["Loopgraph traces", "Case registry", "Metrics warehouse", "Project system"],
+  routine: [
+    "Read loop health and unresolved cases",
+    "Summarize risks, bottlenecks, and decisions",
+    "Route management decisions to accountable owners",
+    "Track whether improvement work closes repeated failure modes"
+  ],
+  verification: ["Evidence links to traces", "Decision owner is clear", "No raw customer data is overexposed", "Recommendations name tradeoffs"],
+  escalation: ["Cross-functional ownership conflict", "High-risk loop degradation", "Capital allocation decision"],
+  examplePath: "examples/management-review",
+  fixturePaths: []
+};
+
 const departments: DepartmentTemplate[] = [
   {
     key: "marketing",
@@ -193,7 +282,8 @@ const departments: DepartmentTemplate[] = [
       loop("product", "feedback_to_problem", "Feedback to Problem Loop", "Cluster feedback and convert repeated pain into well-formed product problems."),
       loop("product", "problem_to_product_bet", "Problem to Product Bet Loop", "Turn a validated problem into a scoped product bet."),
       loop("product", "release_learning", "Release Learning Loop", "Compare shipped releases against adoption and customer outcome signals."),
-      loop("product", "bug_cluster_to_problem", "Bug Cluster to Product Problem Loop", "Detect repeated bugs that point to deeper product or UX problems.")
+      loop("product", "bug_cluster_to_problem", "Bug Cluster to Product Problem Loop", "Detect repeated bugs that point to deeper product or UX problems."),
+      loop("product", "roadmap_signal", "Roadmap Signal Loop", "Compare customer demand, strategy, and capacity before roadmap review.")
     ],
     requiredQuestions: baseQuestions("product"),
     commonDataSources: ["linear", "github", "posthog", "analytics", "slack", "custom_api"],
@@ -210,10 +300,12 @@ const departments: DepartmentTemplate[] = [
     description:
       "Loops for health monitoring, support triage, renewal risk, and proactive customer outreach.",
     commonLoops: [
+      strategicAccountEscalationTemplate,
       loop("customer_success", "customer_health_risk", "Customer Health Risk Loop", "Detect risk from usage, sentiment, tickets, and renewal context."),
       loop("customer_success", "support_triage", "Support Triage Loop", "Classify, route, and draft support responses with human escalation."),
       loop("customer_success", "renewal_risk", "Renewal Risk Loop", "Surface renewal risk early and generate account intervention plans."),
-      loop("customer_success", "proactive_outreach", "Proactive Outreach Loop", "Identify moments where proactive human outreach matters.")
+      loop("customer_success", "proactive_outreach", "Proactive Outreach Loop", "Identify moments where proactive human outreach matters."),
+      loop("customer_success", "qbr_preparation", "QBR Preparation Loop", "Prepare evidence-backed business review packets for high-value accounts.")
     ],
     requiredQuestions: baseQuestions("customer success"),
     commonDataSources: ["hubspot", "salesforce", "slack", "gmail", "calendar", "analytics"],
@@ -233,7 +325,8 @@ const departments: DepartmentTemplate[] = [
       loop("sales", "lead_qualification", "Lead Qualification Loop", "Score and route leads using fit, intent, and readiness signals."),
       loop("sales", "account_research", "Account Research Loop", "Prepare concise account context and likely buying triggers."),
       loop("sales", "follow_up", "Follow-up Loop", "Keep next steps moving after meetings without losing personalization."),
-      loop("sales", "crm_hygiene", "CRM Hygiene Loop", "Detect stale opportunities and missing fields.")
+      loop("sales", "crm_hygiene", "CRM Hygiene Loop", "Detect stale opportunities and missing fields."),
+      loop("sales", "deal_risk", "Deal Risk Loop", "Detect stalled strategic deals and prepare manager intervention options.")
     ],
     requiredQuestions: baseQuestions("sales"),
     commonDataSources: ["hubspot", "salesforce", "gmail", "calendar", "slack", "custom_api"],
@@ -250,10 +343,12 @@ const departments: DepartmentTemplate[] = [
     description:
       "Loops for issue planning, review prep, quality checklists, and incident learning.",
     commonLoops: [
+      githubIssueTriageTemplate,
       loop("engineering", "issue_to_plan", "Issue to Implementation Plan Loop", "Turn accepted issues into scoped implementation plans."),
       loop("engineering", "pr_review_prep", "PR Review Prep Loop", "Summarize risk, tests, and reviewer context before review."),
       loop("engineering", "qa_checklist", "QA Checklist Loop", "Generate release-specific QA checks and trace outcomes."),
-      loop("engineering", "incident_learning", "Incident Learning Loop", "Convert incidents into root-cause learning and prevention items.")
+      loop("engineering", "incident_learning", "Incident Learning Loop", "Convert incidents into root-cause learning and prevention items."),
+      loop("engineering", "release_readiness", "Release Readiness Loop", "Check tests, migrations, rollback, docs, and owner readiness before release.")
     ],
     requiredQuestions: baseQuestions("engineering"),
     commonDataSources: ["github", "linear", "slack", "postgres", "custom_api"],
@@ -273,7 +368,8 @@ const departments: DepartmentTemplate[] = [
       loop("operations_finance", "approval_bottleneck", "Approval Bottleneck Loop", "Detect stuck approvals and route decisions."),
       loop("operations_finance", "forecast_variance", "Forecast Variance Loop", "Explain changes in forecast and recommend action."),
       loop("operations_finance", "vendor_review", "Vendor Review Loop", "Review spend, usage, renewals, and ownership."),
-      loop("operations_finance", "close_readiness", "Close Readiness Loop", "Track month-end close blockers and evidence.")
+      loop("operations_finance", "close_readiness", "Close Readiness Loop", "Track month-end close blockers and evidence."),
+      loop("operations_finance", "cash_collection", "Cash Collection Loop", "Detect invoice risk, owner follow-up, and customer communication needs.")
     ],
     requiredQuestions: baseQuestions("operations and finance"),
     commonDataSources: ["stripe", "postgres", "supabase", "calendar", "custom_api"],
@@ -293,7 +389,8 @@ const departments: DepartmentTemplate[] = [
       loop("hr", "candidate_pipeline", "Candidate Pipeline Loop", "Track candidate stage, missing feedback, and next action."),
       loop("hr", "onboarding_progress", "Onboarding Progress Loop", "Detect onboarding gaps and route manager actions."),
       loop("hr", "manager_coaching", "Manager Coaching Loop", "Summarize recurring team signals into coaching prompts."),
-      loop("hr", "retention_signal", "Retention Signal Loop", "Surface retention risks with privacy and fairness controls.")
+      loop("hr", "retention_signal", "Retention Signal Loop", "Surface retention risks with privacy and fairness controls."),
+      loop("hr", "performance_review_prep", "Performance Review Prep Loop", "Prepare fair, evidence-backed review packets for managers.")
     ],
     requiredQuestions: baseQuestions("HR and talent"),
     commonDataSources: ["calendar", "gmail", "slack", "custom_api"],
@@ -313,7 +410,8 @@ const departments: DepartmentTemplate[] = [
       loop("legal_security", "contract_triage", "Contract Triage Loop", "Extract clauses, compare to playbook, and route exceptions."),
       loop("legal_security", "policy_drift", "Policy Drift Loop", "Detect changes that require policy or control review."),
       loop("legal_security", "access_review", "Access Review Loop", "Track access exceptions and owner approvals."),
-      loop("legal_security", "incident_evidence", "Incident Evidence Loop", "Collect incident evidence and prepare review summaries.")
+      loop("legal_security", "incident_evidence", "Incident Evidence Loop", "Collect incident evidence and prepare review summaries."),
+      loop("legal_security", "security_questionnaire", "Security Questionnaire Loop", "Draft evidence-backed security questionnaire responses for review.")
     ],
     requiredQuestions: baseQuestions("legal and security"),
     commonDataSources: ["github", "slack", "gmail", "calendar", "postgres", "custom_api"],
@@ -330,11 +428,13 @@ const departments: DepartmentTemplate[] = [
     description:
       "Loops for weekly anomaly review, department loop health, decision memos, resource allocation, and improvement governance.",
     commonLoops: [
+      managementReviewTemplate,
       loop("management", "weekly_anomaly_review", "Weekly Anomaly Review Loop", "Detect important company metric drift and prepare decisions."),
       loop("management", "department_loop_review", "Department Loop Review", "Roll up loop health, bottlenecks, reviews, and improvement work."),
       loop("management", "decision_memo", "Decision Memo Loop", "Turn ambiguous signals into decision options with tradeoffs."),
       loop("management", "resource_allocation", "Resource Allocation Loop", "Match goals, bottlenecks, capacity, and constraints."),
-      loop("management", "improvement", "Improvement Loop", "Convert loop failures and human corrections into system changes.")
+      loop("management", "improvement", "Improvement Loop", "Convert loop failures and human corrections into system changes."),
+      loop("management", "operating_rhythm", "Operating Rhythm Loop", "Keep recurring leadership cadences connected to trace-backed decisions.")
     ],
     requiredQuestions: baseQuestions("management"),
     commonDataSources: ["postgres", "supabase", "analytics", "hubspot", "linear", "custom_api"],
@@ -351,7 +451,7 @@ const departments: DepartmentTemplate[] = [
     description:
       "A blank loop template for teams with a specific recurring workflow that does not fit a built-in department.",
     commonLoops: [
-      loop("custom", "custom_company_loop", "Custom Company Loop", "Design a specific observable, goal-driven, verified, improvable loop.")
+      loop("custom", "custom_company_loop", "Custom Company Loop", "Design a specific observable, goal-driven, verified, improvable loop.", "catalog")
     ],
     requiredQuestions: baseQuestions("custom"),
     commonDataSources: ["manual", "postgres", "supabase", "custom_api"],
@@ -364,7 +464,40 @@ const departments: DepartmentTemplate[] = [
   }
 ];
 
-export const departmentTemplates = departments;
+const departmentOwners: Record<DepartmentKey, string[]> = {
+  marketing: ["Marketing lead", "Growth owner"],
+  sales: ["Sales manager", "Account executive"],
+  product: ["Product lead", "Design partner"],
+  engineering: ["Engineering lead", "Incident owner"],
+  customer_success: ["Customer success owner", "Account owner"],
+  operations_finance: ["Operations owner", "Finance controller"],
+  hr: ["People lead", "Hiring manager"],
+  legal_security: ["Security owner", "Legal reviewer"],
+  management: ["Leadership team", "Operating owner"],
+  custom: ["Loop owner"]
+};
+
+const hiddenLaborDefaults: Record<DepartmentKey, LoopTemplate["defaultHiddenLabor"]> = {
+  marketing: { baselineMinutes: 420, loopExecutionMinutes: 160, reviewMinutes: 42, reworkMinutes: 28, botsittingMinutes: 22, escalationMinutes: 18, governanceMinutes: 10, relationshipRedeploymentMinutes: 90, qualityScore: 84 },
+  sales: { baselineMinutes: 360, loopExecutionMinutes: 150, reviewMinutes: 34, reworkMinutes: 24, botsittingMinutes: 18, escalationMinutes: 26, governanceMinutes: 8, relationshipRedeploymentMinutes: 100, qualityScore: 82 },
+  product: { baselineMinutes: 390, loopExecutionMinutes: 168, reviewMinutes: 44, reworkMinutes: 32, botsittingMinutes: 24, escalationMinutes: 28, governanceMinutes: 12, relationshipRedeploymentMinutes: 72, qualityScore: 83 },
+  engineering: { baselineMinutes: 330, loopExecutionMinutes: 144, reviewMinutes: 46, reworkMinutes: 36, botsittingMinutes: 26, escalationMinutes: 20, governanceMinutes: 10, relationshipRedeploymentMinutes: 54, qualityScore: 81 },
+  customer_success: { baselineMinutes: 410, loopExecutionMinutes: 172, reviewMinutes: 48, reworkMinutes: 26, botsittingMinutes: 20, escalationMinutes: 34, governanceMinutes: 12, relationshipRedeploymentMinutes: 110, qualityScore: 85 },
+  operations_finance: { baselineMinutes: 380, loopExecutionMinutes: 156, reviewMinutes: 38, reworkMinutes: 22, botsittingMinutes: 18, escalationMinutes: 24, governanceMinutes: 20, relationshipRedeploymentMinutes: 46, qualityScore: 86 },
+  hr: { baselineMinutes: 340, loopExecutionMinutes: 150, reviewMinutes: 44, reworkMinutes: 26, botsittingMinutes: 20, escalationMinutes: 28, governanceMinutes: 18, relationshipRedeploymentMinutes: 82, qualityScore: 82 },
+  legal_security: { baselineMinutes: 420, loopExecutionMinutes: 190, reviewMinutes: 64, reworkMinutes: 30, botsittingMinutes: 28, escalationMinutes: 42, governanceMinutes: 28, relationshipRedeploymentMinutes: 48, qualityScore: 88 },
+  management: { baselineMinutes: 300, loopExecutionMinutes: 116, reviewMinutes: 52, reworkMinutes: 18, botsittingMinutes: 16, escalationMinutes: 40, governanceMinutes: 24, relationshipRedeploymentMinutes: 60, qualityScore: 84 },
+  custom: { baselineMinutes: 300, loopExecutionMinutes: 144, reviewMinutes: 36, reworkMinutes: 24, botsittingMinutes: 18, escalationMinutes: 20, governanceMinutes: 12, relationshipRedeploymentMinutes: 48, qualityScore: 80 }
+};
+
+export const departmentTemplates: DepartmentTemplate[] = departments.map((department) => ({
+  ...department,
+  commonLoops: department.commonLoops.map((template) => enrichTemplate(department, template))
+}));
+
+export function getTemplateCatalog() {
+  return departmentTemplates.flatMap((department) => department.commonLoops);
+}
 
 export function getDepartmentTemplates() {
   return departmentTemplates;
@@ -375,11 +508,57 @@ export function getDepartmentTemplate(department: DepartmentKey) {
 }
 
 export function getTemplateById(templateId: string) {
-  return departmentTemplates
-    .flatMap((department) => department.commonLoops)
-    .find((template) => template.id === templateId);
+  return getTemplateCatalog().find((template) => template.id === templateId);
 }
 
 export function getTemplatesForDepartment(department: DepartmentKey) {
   return getDepartmentTemplate(department)?.commonLoops ?? [];
+}
+
+function enrichTemplate(department: DepartmentTemplate, template: LoopTemplate): LoopTemplate {
+  const metrics = template.defaultMetrics ?? [
+    template.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
+    ...(template.secondaryMetrics ?? department.commonMetrics.slice(1, 3))
+  ];
+  const owners = template.defaultOwners ?? departmentOwners[department.key];
+  const dataSources = template.requiredDataSources ?? department.commonDataSources;
+
+  return {
+    ...template,
+    primaryMetric: template.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
+    defaultMetrics: Array.from(new Set(metrics)).slice(0, 5),
+    defaultOwners: owners,
+    defaultHiddenLabor: {
+      ...hiddenLaborDefaults[department.key],
+      ...template.defaultHiddenLabor
+    },
+    connections: template.connections ?? [
+      ...dataSources.slice(0, 4).map((source) => ({
+        kind: "data_source" as const,
+        target: titleCase(source),
+        label: "observes"
+      })),
+      ...owners.slice(0, 2).map((owner) => ({
+        kind: "owner" as const,
+        target: owner,
+        label: "owned by"
+      })),
+      ...Array.from(new Set(metrics)).slice(0, 3).map((metric) => ({
+        kind: "metric" as const,
+        target: metric,
+        label: "measured by"
+      })),
+      {
+        kind: "rollup" as const,
+        target: "Management Loop",
+        label: "rolls up"
+      }
+    ]
+  };
+}
+
+function titleCase(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

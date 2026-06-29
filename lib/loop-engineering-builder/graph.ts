@@ -11,7 +11,8 @@ import type {
   LoopRecord,
   WorkspaceData
 } from "./types";
-import { getDepartmentTemplate } from "./templates";
+import { getDepartmentTemplate, getTemplateById, getTemplateCatalog } from "./templates";
+import type { LoadedRegisteredLoopSpec } from "./local-workspace";
 
 const defaultView: LoopGraphViewState = {
   mode: "topology",
@@ -90,6 +91,7 @@ export function buildLoopGraph(input: {
   reviews?: HumanReview[];
   improvements?: ImprovementItem[];
   selectedNodeId?: string;
+  sourceLabel?: string;
 }): LoopGraph {
   const reviews = input.reviews ?? [];
   const improvements = input.improvements ?? [];
@@ -97,10 +99,11 @@ export function buildLoopGraph(input: {
   const health = input.loops.map((loop) => {
     const loopReviews = reviews.filter((review) => review.loopId === loop.id && review.status === "pending");
     const loopImprovements = improvements.filter((item) => item.loopId === loop.id && item.status !== "done");
+    const template = getTemplateById(loop.templateId);
     return calculateHiddenLaborSummary(
       loop.id,
       loop.status,
-      mergeHiddenLabor(loopReviews),
+      loopReviews.length > 0 ? mergeHiddenLabor(loopReviews) : template?.defaultHiddenLabor,
       loop.openReviews || loopReviews.length,
       loop.improvementItems || loopImprovements.length
     );
@@ -126,6 +129,7 @@ export function buildLoopGraph(input: {
     ...input.loops.map((loop) => loopNode(loop, health.find((item) => item.loopId === loop.id))),
     ...dataSourceNodes(input.loops),
     ...ownerNodes(input.loops),
+    ...metricNodes(input.loops),
     ...reviewNodes(reviews),
     ...improvementNodes(improvements)
   ];
@@ -152,8 +156,64 @@ export function buildLoopGraph(input: {
     nodes,
     edges,
     health,
-    view: getDefaultGraphView(input.selectedNodeId ?? `loop:${input.loops[0]?.id ?? "management"}`)
+    view: getDefaultGraphView(input.selectedNodeId ?? `loop:${input.loops[0]?.id ?? "management"}`),
+    sourceLabel: input.sourceLabel
   };
+}
+
+export function buildGraphFromCatalog(input: {
+  organization?: WorkspaceData["organization"];
+  selectedNodeId?: string;
+} = {}): LoopGraph {
+  const organization = input.organization ?? { id: "org_demo", name: "Acme Loops" };
+  const loops = createCatalogLoopRecords(organization.id);
+
+  return buildLoopGraph({
+    organization,
+    loops,
+    improvements: createCatalogImprovementItems(loops),
+    selectedNodeId: input.selectedNodeId,
+    sourceLabel: "Demo catalog"
+  });
+}
+
+export function buildGraphFromRegisteredSpecs(input: {
+  organization?: WorkspaceData["organization"];
+  specs: LoadedRegisteredLoopSpec[];
+  selectedNodeId?: string;
+}): LoopGraph {
+  const organization = input.organization ?? { id: "local_workspace", name: "Local Loopgraph workspace" };
+  return buildLoopGraph({
+    organization,
+    loops: input.specs.map((item) => loopRecordFromRegisteredSpec(item, organization.id)),
+    selectedNodeId: input.selectedNodeId,
+    sourceLabel: "Local LoopSpec"
+  });
+}
+
+export function createCatalogLoopRecords(organizationId = "org_demo"): LoopRecord[] {
+  return getTemplateCatalog().map((template, index) => ({
+    id: catalogLoopId(template.id),
+    organizationId,
+    templateId: template.id,
+    name: template.name,
+    department: template.department,
+    loopType: template.loopType,
+    status: index % 9 === 0 ? "needs_attention" : "active",
+    autonomyLevel: template.runtimeLevel === "runnable" ? "execute_with_approval" : "draft_for_review",
+    owner: template.defaultOwners?.[0] ?? "Department owner",
+    goal: template.goal ?? `${template.name} improves ${template.primaryMetric?.toLowerCase() ?? "quality-adjusted output"} with reviewable evidence.`,
+    targetMetric: template.primaryMetric ?? template.defaultMetrics?.[0] ?? "Quality-adjusted output",
+    businessOutcome: template.businessOutcome ?? "A measurable business outcome improves while hidden labor remains visible.",
+    cadence: template.department === "management" ? "Weekly review" : "Weekly",
+    specGenerated: template.runtimeLevel !== "catalog",
+    implementationGenerated: template.runtimeLevel === "runnable",
+    lastRunAt: index % 4 === 0 ? "2026-06-22T17:00:00.000Z" : undefined,
+    openReviews: template.runtimeLevel === "runnable" || index % 7 === 0 ? 1 : 0,
+    improvementItems: index % 5 === 0 ? 1 : 0,
+    source: "demo_catalog",
+    runtimeLevel: template.runtimeLevel
+  }));
 }
 
 function departmentNode(department: DepartmentKey, loops: LoopRecord[]): LoopGraphNode {
@@ -173,6 +233,7 @@ function departmentNode(department: DepartmentKey, loops: LoopRecord[]): LoopGra
 }
 
 function loopNode(loop: LoopRecord, health?: LoopHealthSummary): LoopGraphNode {
+  const template = getTemplateById(loop.templateId);
   return {
     id: `loop:${loop.id}`,
     kind: loop.department === "management" ? "management_loop" : "loop",
@@ -183,8 +244,16 @@ function loopNode(loop: LoopRecord, health?: LoopHealthSummary): LoopGraphNode {
     health: health?.healthScore,
     metadata: {
       loopId: loop.id,
+      templateId: loop.templateId,
+      runtimeLevel: loop.runtimeLevel ?? template?.runtimeLevel,
+      source: loop.source ?? "supabase",
+      sourcePath: loop.sourcePath,
       autonomyLevel: loop.autonomyLevel,
       cadence: loop.cadence,
+      purpose: template?.description,
+      dataSources: inferredDataSources(loop),
+      owners: template?.defaultOwners ?? [loop.owner],
+      metrics: inferredMetrics(loop),
       openReviews: health?.openReviews ?? loop.openReviews,
       openImprovements: health?.openImprovements ?? loop.improvementItems,
       netTimeSavedMinutes: health?.netTimeSavedMinutes ?? 0,
@@ -204,12 +273,25 @@ function dataSourceNodes(loops: LoopRecord[]): LoopGraphNode[] {
 }
 
 function ownerNodes(loops: LoopRecord[]): LoopGraphNode[] {
-  const owners = Array.from(new Set(loops.map((loop) => loop.owner).filter(Boolean)));
+  const owners = Array.from(new Set(loops.flatMap((loop) => {
+    const template = getTemplateById(loop.templateId);
+    return template?.defaultOwners?.length ? template.defaultOwners : [loop.owner];
+  }).filter(Boolean)));
   return owners.map((owner) => ({
     id: `owner:${slug(owner)}`,
     kind: "human_owner",
     label: owner,
     subtitle: "Human owner"
+  }));
+}
+
+function metricNodes(loops: LoopRecord[]): LoopGraphNode[] {
+  const metrics = Array.from(new Set(loops.flatMap((loop) => inferredMetrics(loop))));
+  return metrics.map((metric) => ({
+    id: `metric:${slug(metric)}`,
+    kind: "metric",
+    label: metric,
+    subtitle: "Metric"
   }));
 }
 
@@ -278,6 +360,14 @@ function loopEdges(
       label: "trace learning"
     }));
 
+  const metricEdges = inferredMetrics(loop).map((metric) => ({
+    id: `edge:${loop.id}:metric:${slug(metric)}`,
+    source: `loop:${loop.id}`,
+    target: `metric:${slug(metric)}`,
+    kind: "measured_by" as const,
+    label: "measured by"
+  }));
+
   return [
     {
       id: `edge:department:${loop.department}:${loop.id}`,
@@ -301,6 +391,7 @@ function loopEdges(
       label: "owned by"
     },
     ...sourceEdges,
+    ...metricEdges,
     ...pendingReviewEdges,
     ...improvementEdges
   ];
@@ -341,6 +432,16 @@ function managementHealth(health: LoopHealthSummary[]) {
 }
 
 function inferredDataSources(loop: LoopRecord) {
+  const template = getTemplateById(loop.templateId);
+  if (template?.requiredDataSources?.length) {
+    return template.requiredDataSources;
+  }
+  const connectionSources = template?.connections
+    ?.filter((connection) => connection.kind === "data_source")
+    .map((connection) => connection.target);
+  if (connectionSources?.length) {
+    return connectionSources;
+  }
   const dataSources = loop.department === "marketing"
     ? ["Ad Platforms", "Web Analytics", "CRM"]
     : loop.department === "customer_success"
@@ -354,6 +455,77 @@ function inferredDataSources(loop: LoopRecord) {
             : ["Workspace Signals"];
 
   return dataSources;
+}
+
+function inferredMetrics(loop: LoopRecord) {
+  const template = getTemplateById(loop.templateId);
+  return Array.from(new Set([
+    loop.targetMetric,
+    ...(template?.defaultMetrics ?? template?.secondaryMetrics ?? [])
+  ].filter(Boolean))).slice(0, 4);
+}
+
+export function loopRecordFromRegisteredSpec(
+  item: LoadedRegisteredLoopSpec,
+  organizationId: string
+): LoopRecord {
+  const template = getTemplateById(item.templateId);
+  const extension = item.spec.studioExtension as Record<string, unknown> | undefined;
+  const metrics = Array.isArray(extension?.metrics) ? extension.metrics.map(String) : [];
+
+  return {
+    id: item.spec.metadata.id,
+    organizationId,
+    templateId: item.templateId,
+    name: item.spec.metadata.name,
+    department: item.department,
+    loopType: template?.loopType ?? String(item.spec.topology?.tags?.[1] ?? "custom_loop"),
+    status: "active",
+    autonomyLevel: "draft_for_review",
+    owner: item.spec.metadata.owner?.role ?? template?.defaultOwners?.[0] ?? "Loop owner",
+    goal: String(extension?.goal ?? item.spec.metadata.description ?? `${item.spec.metadata.name} runs from a registered LoopSpec.`),
+    targetMetric: metrics[0] ?? template?.primaryMetric ?? "Quality-adjusted output",
+    businessOutcome: String(extension?.businessOutcome ?? template?.businessOutcome ?? "Registered LoopSpec is visible in the operating map."),
+    cadence: item.spec.trigger.type === "schedule" ? item.spec.trigger.schedule ?? "Scheduled" : "Manual",
+    specGenerated: true,
+    implementationGenerated: item.spec.metadata.labels?.runtimeLevel === "runnable",
+    openReviews: item.spec.policy.allowedActions.some((action) => action.requiresApproval) ? 1 : 0,
+    improvementItems: 0,
+    source: "local_spec",
+    sourcePath: item.sourcePath,
+    runtimeLevel: template?.runtimeLevel ?? "spec_stub"
+  };
+}
+
+export function createCatalogImprovementItems(loops: LoopRecord[]): ImprovementItem[] {
+  return loops
+    .filter((loop) => loop.improvementItems > 0)
+    .slice(0, 12)
+    .map((loop, index) => ({
+      id: `catalog_improvement_${index + 1}`,
+      loopId: loop.id,
+      title: "Tighten verification rubric",
+      description: `${loop.name} needs trace-backed rubric improvements before autonomy increases.`,
+      failureMode: getDepartmentTemplate(loop.department)?.failureModes[0] ?? "review burden",
+      recommendation: "Review the latest traces, add deterministic checks, and reduce repeated human correction.",
+      status: "open",
+      owner: loop.owner,
+      createdAt: "2026-06-22T16:00:00.000Z"
+    }));
+}
+
+function catalogLoopId(templateId: string) {
+  const legacyIds: Record<string, string> = {
+    "marketing-campaign_learning": "loop_demo_marketing_campaign",
+    "sales-follow_up": "loop_demo_sales_pipeline",
+    "product-feedback_to_problem": "loop_demo_product_discovery",
+    "customer_success-customer_health_risk": "loop_demo_customer_health",
+    "engineering-qa_checklist": "loop_demo_engineering_quality",
+    "operations_finance-approval_bottleneck": "loop_demo_ops_efficiency",
+    "hr-manager_coaching": "loop_demo_people_engagement",
+    "legal_security-policy_drift": "loop_demo_risk_compliance"
+  };
+  return legacyIds[templateId] ?? `catalog_${slug(templateId)}`;
 }
 
 function titleCase(value: string) {

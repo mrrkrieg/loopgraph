@@ -40,12 +40,15 @@ export type QuestionDefinition = {
   sortOrder: number;
 };
 
+export type LoopTemplateRuntimeLevel = "runnable" | "spec_stub" | "catalog";
+
 export type LoopTemplate = {
   id: string;
   department: DepartmentKey;
   loopType: string;
   name: string;
   description: string;
+  runtimeLevel: LoopTemplateRuntimeLevel;
   goal?: string;
   businessOutcome?: string;
   primaryMetric?: string;
@@ -55,6 +58,16 @@ export type LoopTemplate = {
   routine?: string[];
   verification?: string[];
   escalation?: string[];
+  connections?: Array<{
+    kind: "data_source" | "owner" | "metric" | "review" | "improvement" | "rollup";
+    target: string;
+    label?: string;
+  }>;
+  defaultMetrics?: string[];
+  defaultOwners?: string[];
+  defaultHiddenLabor?: Partial<HiddenLaborMetrics>;
+  examplePath?: string;
+  fixturePaths?: string[];
 };
 
 export type DepartmentTemplate = {
@@ -91,6 +104,9 @@ export type LoopRecord = {
   lastRunAt?: string;
   openReviews: number;
   improvementItems: number;
+  source?: "demo_catalog" | "local_spec" | "supabase";
+  sourcePath?: string;
+  runtimeLevel?: LoopTemplateRuntimeLevel;
 };
 
 export type GeneratedArtifact = {
@@ -192,6 +208,22 @@ export type LoopGraph = {
   edges: LoopGraphEdge[];
   health: LoopHealthSummary[];
   view: LoopGraphViewState;
+  sourceLabel?: string;
+};
+
+export type RegisteredLoopSpec = {
+  id: string;
+  name: string;
+  path: string;
+  templateId: string;
+  department: DepartmentKey;
+  addedAt: string;
+};
+
+export type LoopgraphWorkspaceRegistry = {
+  version: 1;
+  registeredSpecs: RegisteredLoopSpec[];
+  demoCatalogEnabled: boolean;
 };
 
 export type LoopRequirement = {
