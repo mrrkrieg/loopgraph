@@ -5,9 +5,11 @@ import { describe, expect, it } from "vitest";
 import { buildGraphFromRegisteredSpecs } from "./graph";
 import {
   createLocalDesignStudioSpec,
+  getStudioAnswers,
   getRegisteredLoopSpecs,
   readWorkspaceRegistry,
-  registerLoopSpec
+  registerLoopSpec,
+  unregisterLoopSpec
 } from "./local-workspace";
 
 describe("Loopgraph local workspace registry", () => {
@@ -33,5 +35,28 @@ describe("Loopgraph local workspace registry", () => {
     expect(graph.sourceLabel).toBe("Local LoopSpec");
     expect(graph.nodes.some((node) => node.id === `loop:${created.id}`)).toBe(true);
     expect(graph.edges.some((edge) => edge.kind === "data_flow")).toBe(true);
+  });
+
+  it("stores design-studio question answers and can remove loops from the registry", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-registry-"));
+    const created = await createLocalDesignStudioSpec({
+      projectRoot,
+      templateId: "marketing-campaign_learning",
+      name: "Campaign Learning Loop",
+      goal: "Improve campaign learning quality."
+    });
+
+    const [registeredSpec] = await getRegisteredLoopSpecs(projectRoot);
+    const answers = getStudioAnswers(registeredSpec.spec);
+
+    expect(answers.initial_goal_summary).toBe("Improve campaign learning quality.");
+    expect(answers.proxy_metrics_to_distrust).toContain("Upstream engagement metrics");
+    expect(registeredSpec.spec.studioExtension?.questionGroups).toBeDefined();
+
+    await expect(unregisterLoopSpec(created.id, projectRoot)).resolves.toBe(true);
+    await expect(unregisterLoopSpec(created.id, projectRoot)).resolves.toBe(false);
+
+    const registry = await readWorkspaceRegistry(projectRoot);
+    expect(registry.registeredSpecs).toHaveLength(0);
   });
 });

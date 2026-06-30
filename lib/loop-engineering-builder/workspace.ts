@@ -14,7 +14,14 @@ import {
   generateLoopSpec
 } from "./spec-generator";
 import { generateImplementationArtifacts } from "./implementation-generator";
-import { createLocalDesignStudioSpec, getRegisteredLoopSpecs } from "./local-workspace";
+import {
+  createLocalDesignStudioSpec,
+  getRegisteredLoopSpecs,
+  getStudioAnswers,
+  getStudioGeneratedSpec,
+  unregisterLoopSpec,
+  updateLocalLoopLogic
+} from "./local-workspace";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
 import { v1alpha1ToFlat } from "../loopgraph-core/studio-adapter";
 import type {
@@ -131,12 +138,16 @@ export async function createLoop(input: {
   goal: string;
 }) {
   const supabase = createSupabaseAdminClient();
+  const questions = generateQuestions(input.department, input.templateId, input.goal);
+  const answers = createDefaultAnswers(input.department, input.templateId, input.goal);
 
   if (!supabase) {
     const created = await createLocalDesignStudioSpec({
       templateId: input.templateId,
       name: input.name,
-      goal: input.goal
+      goal: input.goal,
+      answers,
+      questionGroups: questions
     });
     return created.id;
   }
@@ -182,13 +193,19 @@ export async function createLoop(input: {
     throw loopError;
   }
 
-  return loop.id as string;
+  const loopId = loop.id as string;
+  await saveLoopAnswers(loopId, answers);
+
+  return loopId;
 }
 
 export async function saveLoopAnswers(loopId: string, answers: AnswerMap) {
   const supabase = createSupabaseAdminClient();
 
   if (!supabase) {
+    const loop = await getLoop(loopId);
+    const questions = generateQuestions(loop.department, loop.templateId, loop.goal);
+    await updateLocalLoopLogic({ loopId, answers, questionGroups: questions });
     return;
   }
 
@@ -260,10 +277,38 @@ export async function generateAndPersistLoopSpec(loopId: string) {
     }
   }
 
+  if (!supabase) {
+    await updateLocalLoopLogic({
+      loopId,
+      answers: workspace.answers,
+      questionGroups: workspace.questions,
+      generatedSpec: spec
+    });
+  }
+
   return {
     spec,
     artifacts
   };
+}
+
+export async function deleteLoop(loopId: string) {
+  const supabase = createSupabaseAdminClient();
+
+  if (!supabase) {
+    return unregisterLoopSpec(loopId);
+  }
+
+  const { error } = await supabase
+    .from("loops")
+    .delete()
+    .eq("id", loopId);
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
 }
 
 export async function getLoopGraph(loopId?: string): Promise<LoopGraph> {
@@ -614,10 +659,15 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   const loops = registeredSpecs.map((item) => loopRecordFromRegisteredSpec(item, organization.id));
   const selectedLoop = loops.find((item) => item.id === selectedLoopId) ?? loops[0];
   const selectedSpec = registeredSpecs.find((item) => item.spec.metadata.id === selectedLoop.id) ?? registeredSpecs[0];
-  const answers = createDefaultAnswers(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
+  const storedAnswers = getStudioAnswers(selectedSpec.spec);
+  const answers = {
+    ...createDefaultAnswers(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal),
+    ...storedAnswers
+  };
   const questions = generateQuestions(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
   const progress = questionProgress(questions, answers);
-  const spec = v1alpha1ToFlat(selectedSpec.spec);
+  const spec = getStudioGeneratedSpec(selectedSpec.spec) ??
+    (Object.keys(storedAnswers).length > 0 ? generateLoopSpec(selectedLoop, answers) : v1alpha1ToFlat(selectedSpec.spec));
   const graph = buildGraphFromRegisteredSpecs({
     organization,
     specs: registeredSpecs,
