@@ -1,66 +1,17 @@
 "use client";
 
-import "@xyflow/react/dist/style.css";
-
-import ELK from "elkjs/lib/elk.bundled.js";
-import {
-  Background,
-  Controls,
-  Handle,
-  Position,
-  ReactFlow,
-  applyNodeChanges,
-  type Edge,
-  type Node,
-  type NodeChange,
-  type NodeProps
-} from "@xyflow/react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useTransition } from "react";
+import { LoopGraphView } from "@/components/loop-graph-view";
+import { buildTopologyVisualGraph } from "@/lib/loop-engineering-builder/loop-graph-visualization";
 import type {
   LoopGraph,
-  LoopGraphEdge,
   LoopGraphNode,
-  LoopGraphNodeKind,
   LoopHealthSummary
 } from "@/lib/loop-engineering-builder/types";
 
 type TopologyWorkspaceProps = {
   graph: LoopGraph;
-};
-
-type TopologyNodeData = LoopGraphNode & {
-  selected: boolean;
-};
-
-const elk = new ELK();
-
-const nodeWidthByKind: Record<LoopGraphNodeKind, number> = {
-  organization: 190,
-  management_loop: 220,
-  department: 180,
-  loop: 230,
-  data_source: 132,
-  human_owner: 150,
-  review: 170,
-  metric: 150,
-  improvement: 180
-};
-
-const nodeHeightByKind: Record<LoopGraphNodeKind, number> = {
-  organization: 76,
-  management_loop: 122,
-  department: 70,
-  loop: 94,
-  data_source: 46,
-  human_owner: 54,
-  review: 64,
-  metric: 54,
-  improvement: 66
-};
-
-const nodeTypes = {
-  topology: TopologyNode
 };
 
 export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
@@ -86,8 +37,6 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
     () => hideGraphNodes(filteredGraphBase, hiddenNodeIds),
     [filteredGraphBase, hiddenNodeIds]
   );
-  const [nodes, setNodes] = useState<Node<TopologyNodeData>[]>([]);
-  const [edges, setEdges] = useState<Edge[]>([]);
   const selectedNode =
     filteredGraph.nodes.find((node) => node.id === requestedSelectedNodeId) ??
     filteredGraph.nodes[0] ??
@@ -96,83 +45,13 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
   const selectedHealth = selectedNode?.metadata?.loopId
     ? graph.health.find((item) => item.loopId === selectedNode.metadata?.loopId)
     : graph.health[0];
-
-  function handleNodesChange(changes: NodeChange<Node<TopologyNodeData>>[]) {
-    setNodes((currentNodes) => applyNodeChanges(changes, currentNodes));
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function layoutGraph() {
-      const topologyLayout = positionTopology(filteredGraph.nodes, selectedNodeId);
-      if (topologyLayout) {
-        setNodes(
-          filteredGraph.nodes.map<Node<TopologyNodeData>>((node) => ({
-            id: node.id,
-            type: "topology",
-            position: topologyLayout[node.id] ?? { x: 0, y: 0 },
-            data: {
-              ...node,
-              selected: node.id === selectedNodeId
-            }
-          }))
-        );
-        setEdges(toFlowEdges(filteredGraph.edges));
-        return;
-      }
-
-      const layout = await elk.layout({
-        id: "root",
-        layoutOptions: {
-          "elk.algorithm": "layered",
-          "elk.direction": "DOWN",
-          "elk.spacing.nodeNode": "48",
-          "elk.layered.spacing.nodeNodeBetweenLayers": "70",
-          "elk.edgeRouting": "ORTHOGONAL"
-        },
-        children: filteredGraph.nodes.map((node) => ({
-          id: node.id,
-          width: nodeWidthByKind[node.kind],
-          height: nodeHeightByKind[node.kind]
-        })),
-        edges: filteredGraph.edges.map((edge) => ({
-          id: edge.id,
-          sources: [edge.source],
-          targets: [edge.target]
-        }))
-      });
-
-      if (cancelled) {
-        return;
-      }
-
-      const laidOutNodes = filteredGraph.nodes.map<Node<TopologyNodeData>>((node) => {
-        const layoutNode = layout.children?.find((child) => child.id === node.id);
-        return {
-          id: node.id,
-          type: "topology",
-          position: {
-            x: layoutNode?.x ?? 0,
-            y: layoutNode?.y ?? 0
-          },
-          data: {
-            ...node,
-            selected: node.id === selectedNodeId
-          }
-        };
-      });
-
-      const laidOutEdges = toFlowEdges(filteredGraph.edges);
-      setNodes(laidOutNodes);
-      setEdges(laidOutEdges);
-    }
-
-    layoutGraph();
-    return () => {
-      cancelled = true;
-    };
-  }, [filteredGraph, selectedNodeId]);
+  const visualGraph = useMemo(
+    () => ({
+      ...buildTopologyVisualGraph(filteredGraph),
+      selectedNodeId
+    }),
+    [filteredGraph, selectedNodeId]
+  );
 
   function updateParams(next: Record<string, string | undefined>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -298,31 +177,21 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
             <div className="text-lg font-semibold">Company Loopgraph</div>
           </div>
           <div className="flex items-center gap-2 text-xs text-ink/60">
-            <span className="rounded-md border border-line px-2 py-1">Layered layout</span>
+            <span className="rounded-md border border-line px-2 py-1">Interactive graph</span>
             <span className="rounded-md border border-line px-2 py-1">URL state</span>
             <span className="rounded-md border border-line px-2 py-1">{graph.sourceLabel ?? "Workspace"}</span>
             <span className="rounded-md border border-line px-2 py-1">{isPending ? "Syncing" : "Ready"}</span>
           </div>
         </div>
         <div className="min-h-0 flex-1">
-          <ReactFlow
-            edges={edges}
-            elementsSelectable
-            fitView
-            fitViewOptions={{ padding: 0.16, maxZoom: 0.95 }}
-            key={`${nodes.length}:${edges.length}:${activeFilter}:${activeSearch}:${attentionOnly}`}
-            maxZoom={1.8}
-            minZoom={0.2}
-            nodes={nodes}
-            nodesDraggable
-            nodeTypes={nodeTypes}
-            onNodeClick={(_, node) => updateParams({ node: node.id })}
-            onNodesChange={handleNodesChange}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background color="#e7e2d8" gap={22} size={1} />
-            <Controls position="bottom-right" />
-          </ReactFlow>
+          <LoopGraphView
+            className="h-full"
+            graph={visualGraph}
+            onSelectNode={(nodeId) => updateParams({ node: nodeId })}
+            selectedNodeId={selectedNodeId}
+            showToggles
+            variant="topology"
+          />
         </div>
         <TraceRail graph={filteredGraph} health={selectedHealth} node={selectedNode} />
       </section>
@@ -356,40 +225,6 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
 
         <InspectorBody health={selectedHealth} node={selectedNode} />
       </aside>
-    </div>
-  );
-}
-
-function TopologyNode({ data }: NodeProps<Node<TopologyNodeData>>) {
-  const selected = data.selected;
-  const isManagement = data.kind === "management_loop";
-  return (
-    <div
-      className={`cursor-grab rounded-md border bg-white px-4 py-3 shadow-sm active:cursor-grabbing ${
-        selected ? "border-ink ring-2 ring-ink/10" : "border-line"
-      } ${isManagement ? "min-w-52 text-center" : "min-w-40"}`}
-    >
-      <Handle className="opacity-0" position={Position.Top} type="target" />
-      <div className="flex items-start gap-3">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-sm font-bold text-white"
-          style={{ background: nodeColor(data.kind, data.department) }}
-        >
-          {nodeIcon(data)}
-        </div>
-        <div className={isManagement ? "mx-auto" : "min-w-0"}>
-          <div className="text-sm font-semibold leading-5">{data.label}</div>
-          {data.subtitle ? (
-            <div className="mt-1 line-clamp-2 text-xs leading-4 text-ink/55">{data.subtitle}</div>
-          ) : null}
-          {typeof data.health === "number" ? (
-            <div className="mt-2 inline-flex rounded-full bg-paper px-2 py-0.5 text-[11px] font-semibold text-ink/70">
-              Health {data.health}
-            </div>
-          ) : null}
-        </div>
-      </div>
-      <Handle className="opacity-0" position={Position.Bottom} type="source" />
     </div>
   );
 }
@@ -514,12 +349,13 @@ function filterGraph(
   const selectedLoopId = selectedNodeId?.startsWith("loop:")
     ? selectedNodeId.replace("loop:", "")
     : undefined;
+  const normalizedSearch = search.trim().toLowerCase();
   const attentionLoopIds = new Set(
     graph.health
       .filter((item) => item.healthScore < 78 || item.openReviews > 0 || item.openImprovements > 0)
       .map((item) => item.loopId)
   );
-  const nodes = graph.nodes.filter((node) => {
+  const coreNodes = graph.nodes.filter((node) => {
     const isCore = ["organization", "management_loop", "department", "loop"].includes(node.kind);
     const isAlwaysVisible = ["organization", "management_loop"].includes(node.kind);
     const nodeLoopId = node.metadata?.loopId as string | undefined;
@@ -537,14 +373,29 @@ function filterGraph(
     const matchesDepartment =
       department === "all" || node.department === department || isAlwaysVisible || isSelectedContext;
     const matchesAttention = !attentionOnly || isAlwaysVisible || (nodeLoopId && attentionLoopIds.has(nodeLoopId));
-    const normalizedSearch = search.trim().toLowerCase();
     const matchesSearch =
       normalizedSearch.length === 0 ||
       isAlwaysVisible ||
       isSelectedContext ||
       `${node.label} ${node.subtitle ?? ""} ${node.department ?? ""}`.toLowerCase().includes(normalizedSearch);
-    return (isCore || isSelectedContext) && matchesDepartment && matchesAttention && matchesSearch;
+    return isCore && matchesDepartment && matchesAttention && matchesSearch;
   });
+  const coreNodeIds = new Set(coreNodes.map((node) => node.id));
+  const visibleLoopNodeIds = new Set(
+    coreNodes
+      .filter((node) => ["loop", "management_loop"].includes(node.kind) && node.metadata?.loopId)
+      .map((node) => node.id)
+  );
+  const contextNodeIds = new Set<string>();
+  for (const edge of graph.edges) {
+    if (visibleLoopNodeIds.has(edge.source)) {
+      contextNodeIds.add(edge.target);
+    }
+    if (visibleLoopNodeIds.has(edge.target)) {
+      contextNodeIds.add(edge.source);
+    }
+  }
+  const nodes = graph.nodes.filter((node) => coreNodeIds.has(node.id) || contextNodeIds.has(node.id));
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
 
@@ -581,206 +432,12 @@ function serializeHiddenNodeIds(hiddenNodeIds: Set<string>) {
   return Array.from(hiddenNodeIds).sort().join(",");
 }
 
-function positionTopology(nodes: LoopGraphNode[], selectedNodeId?: string) {
-  const loopNodes = nodes.filter((node) => node.kind === "loop");
-  const management = nodes.find((node) => node.kind === "management_loop");
-  if (!management || loopNodes.length === 0 || nodes.length > 24) {
-    return null;
-  }
-
-  const selectedLoopNode = nodes.find(
-    (node) => node.id === selectedNodeId && node.kind === "loop"
-  );
-  const contextNodes = nodes.filter((node) => !["loop", "management_loop"].includes(node.kind));
-  const dataSources = contextNodes.filter((node) => node.kind === "data_source");
-  const humanOwners = contextNodes.filter((node) => node.kind === "human_owner");
-  const departments = contextNodes.filter((node) => node.kind === "department");
-  const reviews = contextNodes.filter((node) => node.kind === "review");
-  const metrics = contextNodes.filter((node) => node.kind === "metric");
-  const improvements = contextNodes.filter((node) => node.kind === "improvement");
-  const otherContext = contextNodes.filter(
-    (node) =>
-      !["data_source", "human_owner", "department", "review", "metric", "improvement"].includes(node.kind)
-  );
-  const loopSlots: Record<string, { x: number; y: number }> = {
-    marketing: { x: 110, y: 250 },
-    sales: { x: 420, y: 250 },
-    product: { x: 730, y: 250 },
-    legal_security: { x: 110, y: 410 },
-    customer_success: { x: 890, y: 410 },
-    hr: { x: 110, y: 570 },
-    operations_finance: { x: 420, y: 570 },
-    engineering: { x: 730, y: 570 }
-  };
-  const departmentOrder = Object.keys(loopSlots);
-  const loopSlotCounts: Record<string, number> = {};
-  let fallbackSlot = 0;
-  const positions: Record<string, { x: number; y: number }> = {
-    [management.id]: { x: 500, y: 410 }
-  };
-
-  [...loopNodes].sort(sortByDepartment(departmentOrder)).forEach((node) => {
-    const department = String(node.department ?? "unknown");
-    const baseSlot = loopSlots[department];
-    if (!baseSlot) {
-      const column = fallbackSlot % 3;
-      const row = Math.floor(fallbackSlot / 3);
-      fallbackSlot += 1;
-      positions[node.id] = {
-        x: 160 + column * 310,
-        y: 250 + row * 160
-      };
-      return;
-    }
-
-    const slotIndex = loopSlotCounts[department] ?? 0;
-    loopSlotCounts[department] = slotIndex + 1;
-    positions[node.id] = {
-      x: baseSlot.x + slotIndex * 34,
-      y: baseSlot.y + slotIndex * 104
-    };
-  });
-
-  const selectedAnchor = selectedLoopNode
-    ? positions[selectedLoopNode.id]
-    : positions[loopNodes[0]?.id] ?? positions[management.id];
-  const contextCenterX = clamp(selectedAnchor.x + 110, 220, 900);
-
-  placeRow(positions, dataSources, {
-    centerX: contextCenterX,
-    gap: 180,
-    minX: 20,
-    y: 20
-  });
-  placeRow(positions, [...departments, ...humanOwners], {
-    centerX: contextCenterX,
-    gap: 230,
-    minX: 20,
-    y: 135
-  });
-  placeRow(positions, reviews, {
-    centerX: 580,
-    gap: 300,
-    minX: 160,
-    y: 735
-  });
-  placeRow(positions, [...metrics, ...improvements], {
-    centerX: 580,
-    gap: 320,
-    minX: 160,
-    y: 840
-  });
-  placeRow(positions, otherContext, {
-    centerX: 580,
-    gap: 210,
-    minX: 160,
-    y: 945
-  });
-
-  return positions;
-}
-
-function sortByDepartment(departmentOrder: string[]) {
-  return (left: LoopGraphNode, right: LoopGraphNode) => {
-    const leftIndex = departmentOrder.indexOf(String(left.department ?? ""));
-    const rightIndex = departmentOrder.indexOf(String(right.department ?? ""));
-    const normalizedLeftIndex = leftIndex === -1 ? departmentOrder.length : leftIndex;
-    const normalizedRightIndex = rightIndex === -1 ? departmentOrder.length : rightIndex;
-
-    if (normalizedLeftIndex !== normalizedRightIndex) {
-      return normalizedLeftIndex - normalizedRightIndex;
-    }
-
-    return left.label.localeCompare(right.label);
-  };
-}
-
-function placeRow(
-  positions: Record<string, { x: number; y: number }>,
-  nodes: LoopGraphNode[],
-  options: {
-    centerX: number;
-    gap: number;
-    minX: number;
-    y: number;
-  }
-) {
-  const startX = options.centerX - ((nodes.length - 1) * options.gap) / 2;
-
-  nodes.forEach((node, index) => {
-    positions[node.id] = {
-      x: Math.max(options.minX, startX + index * options.gap),
-      y: options.y
-    };
-  });
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
-}
-
-function toFlowEdges(edges: LoopGraphEdge[]): Edge[] {
-  return edges.map<Edge>((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label,
-    animated: edge.kind === "improves" || edge.kind === "escalates_to",
-    type: "smoothstep",
-    className: `loopgraph-edge loopgraph-edge-${edge.kind}`,
-    style: {
-      stroke: edgeColor(edge.kind),
-      strokeWidth: edge.kind === "rolls_up_to" ? 2.5 : 1.8
-    },
-    labelStyle: {
-      fill: "#5f5b53",
-      fontSize: 10,
-      fontWeight: 600
-    }
-  }));
-}
-
 function departmentOptions(nodes: LoopGraphNode[]) {
   const departments = Array.from(new Set(nodes.map((node) => node.department).filter(Boolean)));
   return departments.map((department) => ({
     value: String(department),
     label: String(department).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
   }));
-}
-
-function nodeColor(kind: LoopGraphNodeKind, department?: string) {
-  if (kind === "management_loop") return "#111111";
-  if (kind === "review") return "#2563eb";
-  if (kind === "improvement") return "#7c3aed";
-  if (kind === "data_source") return "#6f6a60";
-  if (kind === "human_owner") return "#d97706";
-  if (department === "marketing") return "#f97316";
-  if (department === "sales") return "#16a34a";
-  if (department === "product") return "#2563eb";
-  if (department === "customer_success") return "#0f766e";
-  if (department === "engineering") return "#0284c7";
-  if (department === "operations_finance") return "#dc2626";
-  if (department === "hr") return "#d97706";
-  if (department === "legal_security") return "#7c3aed";
-  return "#111111";
-}
-
-function edgeColor(kind: LoopGraphEdge["kind"]) {
-  if (kind === "escalates_to") return "#2563eb";
-  if (kind === "improves") return "#7c3aed";
-  if (kind === "data_flow") return "#9a948a";
-  if (kind === "owned_by") return "#d97706";
-  if (kind === "measured_by") return "#16a34a";
-  return "#111111";
-}
-
-function nodeIcon(node: LoopGraphNode) {
-  if (node.kind === "management_loop") return "M";
-  if (node.kind === "review") return "R";
-  if (node.kind === "improvement") return "I";
-  if (node.kind === "data_source") return "D";
-  if (node.kind === "human_owner") return "H";
-  return node.label.slice(0, 1);
 }
 
 function formatMinutes(minutes: number) {

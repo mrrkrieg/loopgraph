@@ -1,14 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { LoopGraphView } from "@/components/loop-graph-view";
+import { buildTemplateLoopGraph } from "@/lib/loop-engineering-builder/loop-graph-visualization";
+import type { LoopTemplate } from "@/lib/loop-engineering-builder/types";
 
-type TemplateOption = {
-  id: string;
-  name: string;
-  department: string;
-  description: string;
-  runtimeLevel: "runnable" | "spec_stub" | "catalog";
-  primaryMetric?: string;
+type TemplateOption = LoopTemplate & {
   dataSources: string[];
   owners: string[];
 };
@@ -106,6 +103,8 @@ function TemplateCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const previewGraph = useMemo(() => buildTemplateLoopGraph(template), [template]);
+
   return (
     <label
       className={`block cursor-pointer rounded-md border p-3 transition ${
@@ -132,6 +131,14 @@ function TemplateCard({
         }`}>
           {runtimeLabel(template.runtimeLevel)}
         </span>
+      </span>
+      <span className="mt-3 block h-24 overflow-hidden rounded-md">
+        <LoopGraphView
+          appearance={selected ? "onDark" : "light"}
+          graph={previewGraph}
+          interactive={false}
+          variant="mini"
+        />
       </span>
       <span className={`mt-3 grid gap-1 text-[11px] ${selected ? "text-white/70" : "text-ink/55"}`}>
         <span>Metric: {template.primaryMetric ?? "Quality-adjusted output"}</span>

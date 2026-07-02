@@ -15,12 +15,8 @@ export default async function NewLoopPage({
   const workspace = await getWorkspace();
   const templateOptions = workspace.templates.flatMap((department) =>
     department.commonLoops.map((loop) => ({
-      id: loop.id,
-      name: loop.name,
+      ...loop,
       department: department.key,
-      description: loop.description,
-      runtimeLevel: loop.runtimeLevel,
-      primaryMetric: loop.primaryMetric,
       dataSources: loop.requiredDataSources ?? department.commonDataSources,
       owners: loop.defaultOwners ?? ["Loop owner"]
     }))
