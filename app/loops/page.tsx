@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { LoopGraphView } from "@/components/loop-graph-view";
 import { PageHeader } from "@/components/page-header";
 import { StatusPill } from "@/components/status-pill";
 import { formatDate, titleCase } from "@/lib/loop-engineering-builder/demo-helpers";
+import { buildLoopSpecGraph } from "@/lib/loop-engineering-builder/loop-graph-visualization";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { deleteLoopAction } from "./actions";
 
@@ -107,6 +109,7 @@ export default async function LoopsPage({
 
 function LogicPreview({ workspace }: { workspace: Awaited<ReturnType<typeof getWorkspace>> }) {
   const { loop, spec } = workspace;
+  const graph = buildLoopSpecGraph({ loop, spec });
   const questionAnswers = workspace.questions.flatMap((group) =>
     group.questions.map((question) => ({
       ...question,
@@ -126,6 +129,10 @@ function LogicPreview({ workspace }: { workspace: Awaited<ReturnType<typeof getW
       </div>
 
       <p className="mt-3 text-sm leading-6 text-ink/70">{spec.goal}</p>
+
+      <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
+        <LoopGraphView graph={graph} showToggles variant="template" />
+      </div>
 
       <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-1">
         <LogicFact label="Cadence" value={spec.cadence} />
