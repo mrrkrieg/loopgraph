@@ -22,8 +22,17 @@ import {
   unregisterLoopSpec,
   updateLocalLoopLogic
 } from "./local-workspace";
+import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
 import { v1alpha1ToFlat } from "../loopgraph-core/studio-adapter";
+import {
+  buildSemanticTopology,
+  type SemanticTopology,
+  type TopologyImprovementItem,
+  type TopologyMetricInput
+} from "../loopgraph-core/graph";
+import type { LoopSpec as CoreLoopSpec } from "../loopgraph-core/loop-spec";
+import type { LoopRunTrace } from "../loopgraph-core/trace";
 import type {
   DepartmentKey,
   GeneratedArtifact,
@@ -314,6 +323,46 @@ export async function deleteLoop(loopId: string) {
 export async function getLoopGraph(loopId?: string): Promise<LoopGraph> {
   const workspace = await getWorkspace(loopId);
   return workspace.graph;
+}
+
+export async function getSemanticTopology(loopId?: string): Promise<SemanticTopology> {
+  if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY !== "true") {
+    const registeredSpecs = await getRegisteredLoopSpecs();
+    if (registeredSpecs.length > 0) {
+      const selectedSpec =
+        registeredSpecs.find((item) => item.spec.metadata.id === loopId) ?? registeredSpecs[0];
+      return buildSemanticTopology({
+        loopSpecs: registeredSpecs.map((item) => withSourcePathLabel(item.spec, item.sourcePath)),
+        options: {
+          companyName: "Local Loopgraph workspace",
+          sourceLabel: "Registered LoopSpecs",
+          selectedLoopId: selectedSpec.spec.metadata.id,
+          generatedAt: new Date(0).toISOString()
+        }
+      });
+    }
+  }
+
+  const workspace = await getWorkspace(loopId);
+  const liveLoops = workspace.loops.filter((loop) => loop.source !== "demo_catalog");
+  const loopsForTopology = liveLoops.length > 0 ? liveLoops : [workspace.loop];
+  const loopSpecs = loopsForTopology.flatMap((loop) => coreSpecFromLoopRecord(loop));
+  const selectedLoopId = loopSpecs.some((spec) => spec.metadata.id === workspace.loop.id)
+    ? workspace.loop.id
+    : loopSpecs[0]?.metadata.id;
+
+  return buildSemanticTopology({
+    loopSpecs,
+    traces: selectedLoopId ? [traceFromWorkspaceRun(workspace, selectedLoopId)] : [],
+    metrics: selectedLoopId ? metricInputsFromWorkspace(workspace, selectedLoopId) : [],
+    improvements: improvementInputsFromWorkspace(workspace.improvements),
+    options: {
+      companyName: workspace.organization.name,
+      sourceLabel: workspace.graph.sourceLabel ?? "Workspace",
+      selectedLoopId,
+      generatedAt: new Date(0).toISOString()
+    }
+  });
 }
 
 export async function startLoopRun(loopId: string) {
@@ -718,6 +767,114 @@ function selectDemoWorkspace(selectedLoopId?: string) {
       sourceLabel: workspace.graph.sourceLabel
     })
   };
+}
+
+function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSpec {
+  return {
+    ...spec,
+    metadata: {
+      ...spec.metadata,
+      labels: {
+        ...(spec.metadata.labels ?? {}),
+        sourcePath
+      }
+    }
+  };
+}
+
+function coreSpecFromLoopRecord(loop: LoopRecord): CoreLoopSpec[] {
+  try {
+    return [
+      createSpecFromTemplate(loop.templateId, {
+        id: loop.id,
+        name: loop.name,
+        goal: loop.goal,
+        ownerRole: loop.owner
+      })
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function traceFromWorkspaceRun(workspace: WorkspaceData, loopId: string): LoopRunTrace {
+  const run = workspace.runBundle.run;
+  const status = run.status === "completed"
+    ? "COMPLETED"
+    : run.status === "failed"
+      ? "FAILED_VALIDATION"
+      : "SIMULATING";
+
+  return {
+    id: run.id,
+    loopId,
+    loopSpecVersion: "workspace",
+    loopSpecHash: run.id,
+    mode: "simulate",
+    status,
+    trigger: {
+      type: run.triggerType,
+      source: "workspace",
+      event: run.triggerType,
+      eventId: run.id,
+      receivedAt: run.startedAt
+    },
+    idempotencyKey: run.id,
+    contextSnapshot: {
+      id: `${run.id}:context`,
+      loopId,
+      loopSpecVersion: "workspace",
+      createdAt: run.startedAt,
+      contentHash: run.id,
+      tokenEstimate: 0,
+      entries: []
+    },
+    inputs: [],
+    proposedActions: [],
+    preparedActions: [],
+    toolCalls: workspace.runBundle.steps.flatMap((step) =>
+      step.toolCalls.map((toolCall, index) => ({
+        id: `${step.id}:tool:${index + 1}`,
+        toolKey: String(toolCall.tool ?? step.stepName),
+        input: (toolCall.input as Record<string, unknown>) ?? {},
+        output: toolCall.output,
+        status: step.status === "failed" ? "failed" : "completed",
+        startedAt: step.startedAt,
+        completedAt: step.completedAt
+      }))
+    ),
+    policyDecisions: [],
+    verificationResults: [],
+    escalationCases: [],
+    humanReviews: [],
+    outputs: [],
+    metrics: [],
+    errors: run.error
+      ? [{ code: "workspace_run_error", message: run.error, at: run.completedAt ?? run.startedAt }]
+      : [],
+    startedAt: run.startedAt,
+    completedAt: run.completedAt
+  };
+}
+
+function metricInputsFromWorkspace(workspace: WorkspaceData, loopId: string): TopologyMetricInput[] {
+  return workspace.metrics.map((metric) => ({
+    id: metric.name,
+    loopId,
+    name: metric.name,
+    value: metric.value,
+    status: "active"
+  }));
+}
+
+function improvementInputsFromWorkspace(items: ImprovementItem[]): TopologyImprovementItem[] {
+  return items.map((item) => ({
+    id: item.id,
+    loopId: item.loopId,
+    title: item.title,
+    status: item.status,
+    failureMode: item.failureMode
+  }));
 }
 
 function mapRun(row: Record<string, unknown>): LoopRun {

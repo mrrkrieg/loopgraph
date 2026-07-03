@@ -213,9 +213,10 @@ export function LoopGraphView({
           selectable: false,
           interactionWidth: 12,
           style: {
-            stroke: appearance === "onDark" ? "rgba(255,255,255,0.42)" : "#c9c5bc",
+            stroke: edgeStroke(edge, appearance),
             strokeOpacity: activeNodeId ? (isConnected ? 0.72 : 0.12) : isMini ? 0.42 : 0.5,
-            strokeWidth: isConnected ? 1.25 : 0.9
+            strokeWidth: edge.metadata?.executable ? (isConnected ? 1.7 : 1.1) : isConnected ? 1.25 : 0.9,
+            strokeDasharray: edgeDashArray(edge)
           }
         };
       }),
@@ -505,6 +506,10 @@ function layoutNodes(
   selectedNodeId: string | undefined,
   variant: LoopGraphViewVariant
 ): Record<string, XYPosition> {
+  if (nodes.some((node) => node.metadata?.layout === "ego-center")) {
+    return layoutEgoNodes(nodes, selectedNodeId, variant);
+  }
+
   const primaryNode =
     nodes.find((node) => node.id === selectedNodeId) ??
     nodes.find((node) => node.kind === "loop" || node.kind === "management") ??
@@ -555,6 +560,55 @@ function layoutNodes(
       y: roundCoord(anchor.y + Math.sin(angle) * localRadius * 0.78)
     };
   });
+
+  return layout;
+}
+
+function layoutEgoNodes(
+  nodes: LoopGraphVisualNode[],
+  selectedNodeId: string | undefined,
+  variant: LoopGraphViewVariant
+): Record<string, XYPosition> {
+  const config = layoutConfig(variant);
+  const layout: Record<string, XYPosition> = {};
+  const centerNode =
+    nodes.find((node) => node.id === selectedNodeId) ??
+    nodes.find((node) => node.metadata?.ring === "center") ??
+    nodes[0];
+  const centerNodeId = centerNode?.id;
+
+  if (centerNodeId) {
+    layout[centerNodeId] = { x: 0, y: 0 };
+  }
+
+  const ringGroups = new Map<string, LoopGraphVisualNode[]>();
+  for (const node of nodes) {
+    if (node.id === centerNodeId) {
+      continue;
+    }
+    const ring = String(node.metadata?.ring ?? "inner");
+    const key = `${ring}:${node.kind}`;
+    ringGroups.set(key, [...(ringGroups.get(key) ?? []), node]);
+  }
+
+  for (const [key, group] of ringGroups) {
+    const [ring, kind] = key.split(":") as [string, LoopGraphVisualNodeKind];
+    const radius = ring === "outer" ? config.coreRadius + config.ringGap : config.coreRadius * 0.72;
+    const baseAngle = egoAngle(kind);
+    const spread = Math.min(Math.PI / 3, 0.34 + group.length * 0.08);
+
+    group
+      .sort((left, right) => left.label.localeCompare(right.label))
+      .forEach((node, index) => {
+        const centeredIndex = index - (group.length - 1) / 2;
+        const angle = baseAngle + centeredIndex * (spread / Math.max(group.length, 1));
+        const jitter = (deterministicFloat(node.id) - 0.5) * 18;
+        layout[node.id] = {
+          x: roundCoord(Math.cos(angle) * (radius + jitter)),
+          y: roundCoord(Math.sin(angle) * (radius + jitter) * 0.78)
+        };
+      });
+  }
 
   return layout;
 }
@@ -672,6 +726,53 @@ function dotSize(node: LoopGraphVisualNode, variant: LoopGraphViewVariant, selec
   const variantScale = variant === "mini" ? 0.72 : variant === "template" ? 0.92 : 1;
   const weighted = baseByKind[node.kind] + Math.max((node.weight ?? 1) - 2, 0) * 2.4;
   return Math.round((weighted + (selected ? 5 : 0)) * variantScale);
+}
+
+function edgeStroke(
+  edge: { kind?: string; metadata?: Record<string, unknown> },
+  appearance: LoopGraphAppearance
+) {
+  if (edge.metadata?.semantic === false) {
+    return appearance === "onDark" ? "rgba(255,255,255,0.25)" : "#b8b0a4";
+  }
+  if (edge.kind === "requires_approval" || edge.kind === "escalates_to") {
+    return "#0f766e";
+  }
+  if (edge.kind === "writes_trace_to" || edge.kind === "learns_from") {
+    return "#7c3aed";
+  }
+  if (edge.kind === "contains") {
+    return appearance === "onDark" ? "rgba(255,255,255,0.5)" : "#8b867d";
+  }
+  return appearance === "onDark" ? "rgba(255,255,255,0.42)" : "#c9c5bc";
+}
+
+function edgeDashArray(edge: { metadata?: Record<string, unknown> }) {
+  if (edge.metadata?.style === "dashed") {
+    return "6 5";
+  }
+  if (edge.metadata?.style === "dotted") {
+    return "2 6";
+  }
+  return undefined;
+}
+
+function egoAngle(kind: LoopGraphVisualNodeKind) {
+  const angles: Record<LoopGraphVisualNodeKind, number> = {
+    organization: -Math.PI / 2,
+    management: Math.PI / 2,
+    department: -Math.PI * 0.72,
+    loop: 0,
+    data_source: Math.PI,
+    action: -Math.PI / 4,
+    verification: 0,
+    owner: Math.PI / 3,
+    metric: Math.PI * 0.72,
+    review: Math.PI / 5,
+    improvement: Math.PI * 0.86,
+    rollup: Math.PI / 2
+  };
+  return angles[kind];
 }
 
 function graphBounds(

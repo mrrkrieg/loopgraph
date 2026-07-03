@@ -1,5 +1,10 @@
 import type { LoopSpec } from "./loop-spec-schema";
 import type {
+  LoopEgoGraph,
+  SemanticTopology,
+  TopologyNodeType
+} from "../loopgraph-core/graph";
+import type {
   LoopGraph,
   LoopGraphNode,
   LoopGraphNodeKind,
@@ -40,6 +45,7 @@ export type LoopGraphVisualEdge = {
   target: string;
   label?: string;
   kind?: string;
+  metadata?: Record<string, unknown>;
 };
 
 export type LoopGraphVisual = {
@@ -380,10 +386,76 @@ export function buildTopologyVisualGraph(graph: LoopGraph): LoopGraphVisual {
   };
 }
 
+export function buildSemanticTopologyVisualGraph(
+  topology: SemanticTopology | LoopEgoGraph
+): LoopGraphVisual {
+  return {
+    id: topology.id,
+    title: topology.id.startsWith("ego:")
+      ? "Selected Loop Logic"
+      : "Semantic Company Topology",
+    valueLabel: `${topology.filterCounts.total} semantic nodes`,
+    selectedNodeId: "centerNodeId" in topology
+      ? topology.centerNodeId
+      : topology.selectedLoopId
+        ? `loop:${topology.selectedLoopId}`
+        : topology.managementLoopId,
+    nodes: topology.nodes.map((node) => ({
+      id: node.id,
+      sourceNodeId: node.id,
+      kind: visualKindForSemanticTopology(node.type),
+      label: node.label,
+      subtitle: node.subtitle,
+      department: node.department,
+      weight: node.weight,
+      metadata: {
+        ...node.metadata,
+        semanticType: node.type,
+        semanticLayer: node.layer,
+        status: node.status,
+        refId: node.refId,
+        refType: node.refType,
+        loopId: node.loopId,
+        parentId: node.parentId,
+        visibleByDefault: node.visibleByDefault,
+        isOrphan: node.isOrphan
+      }
+    })),
+    edges: topology.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      kind: edge.kind,
+      label: edge.label,
+      metadata: {
+        semantic: edge.semantic,
+        executable: edge.executable,
+        style: edge.style
+      }
+    }))
+  };
+}
+
 export function visualKindForTopology(kind: LoopGraphNodeKind): LoopGraphVisualNodeKind {
   if (kind === "management_loop") return "management";
   if (kind === "human_owner") return "owner";
   return kind;
+}
+
+export function visualKindForSemanticTopology(type: TopologyNodeType): LoopGraphVisualNodeKind {
+  if (type === "company") return "organization";
+  if (type === "management_loop") return "management";
+  if (type === "department_loop") return "department";
+  if (type === "workflow_loop" || type === "task_loop") return "loop";
+  if (type === "signal_source" || type === "integration" || type === "context_source" || type === "memory") {
+    return "data_source";
+  }
+  if (type === "tool_action") return "action";
+  if (type === "verifier") return "verification";
+  if (type === "human_owner") return "owner";
+  if (type === "human_review" || type === "escalation_case") return "review";
+  if (type === "metric") return "metric";
+  return "improvement";
 }
 
 function topologyWeight(node: LoopGraphNode) {
