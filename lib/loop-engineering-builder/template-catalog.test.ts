@@ -29,10 +29,20 @@ describe("Loopgraph template catalog", () => {
     for (const template of templates) {
       expect(template.id).toBeTruthy();
       expect(template.loopType).toBeTruthy();
+      expect(template.goal).toBeTruthy();
+      expect(template.businessOutcome).toBeTruthy();
       expect(template.primaryMetric).toBeTruthy();
       expect(template.defaultOwners?.length).toBeGreaterThan(0);
-      expect(template.defaultMetrics?.length).toBeGreaterThan(0);
+      expect(template.defaultMetrics?.length).toBeGreaterThanOrEqual(3);
+      expect(template.requiredDataSources?.length).toBeGreaterThanOrEqual(3);
+      expect(template.routine?.length).toBeGreaterThanOrEqual(4);
+      expect(template.verification?.length).toBeGreaterThanOrEqual(3);
+      expect(template.escalation?.length).toBeGreaterThanOrEqual(2);
       expect(template.connections?.length).toBeGreaterThan(0);
+      expect(template.businessOutcome).not.toContain("A measurable business outcome improves");
+      expect(template.routine).not.toContain("Draft next action");
+      expect(template.verification).not.toContain("Verify output");
+      expect(template.requiredDataSources).not.toContain("Workspace signals");
     }
   });
 
