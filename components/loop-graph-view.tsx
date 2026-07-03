@@ -94,6 +94,9 @@ export function LoopGraphView({
   const [positionOverrides, setPositionOverrides] = useState<Record<string, XYPosition>>({});
   const [flowInstance, setFlowInstance] =
     useState<ReactFlowInstance<Node<LoopGraphDotNodeData>, Edge> | null>(null);
+  const [layoutAnchorNodeId, setLayoutAnchorNodeId] = useState(
+    selectedNodeId ?? graph.selectedNodeId ?? graph.nodes[0]?.id
+  );
 
   useEffect(() => {
     setIsMounted(true);
@@ -118,18 +121,23 @@ export function LoopGraphView({
     () => graph.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)),
     [graph.edges, visibleNodeIds]
   );
+  const graphNodeKey = useMemo(
+    () => `${graph.id}:${variant}:${graph.nodes.map((node) => node.id).join("|")}`,
+    [graph.id, graph.nodes, variant]
+  );
   const activeNodeId = visibleNodeIds.has(localSelectedNodeId ?? "")
     ? localSelectedNodeId
     : visibleNodeIds.has(graph.selectedNodeId ?? "")
       ? graph.selectedNodeId
       : visibleNodes[0]?.id;
+  const layoutPrimaryNodeId = variant === "topology" ? layoutAnchorNodeId : activeNodeId;
   const connectedNodeIds = useMemo(
     () => directConnections(activeNodeId, visibleEdges),
     [activeNodeId, visibleEdges]
   );
   const layout = useMemo(
-    () => layoutNodes(visibleNodes, visibleEdges, activeNodeId, variant),
-    [activeNodeId, variant, visibleEdges, visibleNodes]
+    () => layoutNodes(visibleNodes, visibleEdges, layoutPrimaryNodeId, variant),
+    [layoutPrimaryNodeId, variant, visibleEdges, visibleNodes]
   );
   const layoutTopY = useMemo(() => {
     const yPositions = visibleNodes
@@ -137,14 +145,21 @@ export function LoopGraphView({
       .filter((position): position is number => typeof position === "number");
     return yPositions.length > 0 ? Math.min(...yPositions) : 0;
   }, [layout, visibleNodes]);
-  const layoutKey = useMemo(
-    () => `${graph.id}:${variant}:${visibleNodes.map((node) => node.id).join("|")}`,
-    [graph.id, variant, visibleNodes]
-  );
-
   useEffect(() => {
     setPositionOverrides({});
-  }, [layoutKey]);
+  }, [graphNodeKey]);
+
+  useEffect(() => {
+    setLayoutAnchorNodeId((current) => {
+      if (current && visibleNodeIds.has(current)) {
+        return current;
+      }
+      if (graph.selectedNodeId && visibleNodeIds.has(graph.selectedNodeId)) {
+        return graph.selectedNodeId;
+      }
+      return visibleNodes[0]?.id;
+    });
+  }, [graph.selectedNodeId, graphNodeKey, visibleNodeIds, visibleNodes]);
 
   const flowNodes = useMemo<Node<LoopGraphDotNodeData>[]>(
     () =>
@@ -208,7 +223,7 @@ export function LoopGraphView({
   );
 
   useEffect(() => {
-    if (!flowInstance || !isMounted || variant !== "topology" || flowNodes.length === 0) {
+    if (!flowInstance || !isMounted || variant !== "topology" || graph.nodes.length === 0) {
       return;
     }
 
@@ -226,7 +241,7 @@ export function LoopGraphView({
     });
 
     return () => window.cancelAnimationFrame(frame);
-  }, [flowEdges.length, flowInstance, flowNodes.length, isMounted, layoutTopY, variant]);
+  }, [flowInstance, graph.nodes.length, graphNodeKey, isMounted, layoutTopY, variant]);
 
   function handleNodesChange(changes: NodeChange<Node<LoopGraphDotNodeData>>[]) {
     if (!isInteractive) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useMemo, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { LoopGraphView } from "@/components/loop-graph-view";
 import { buildTopologyVisualGraph } from "@/lib/loop-engineering-builder/loop-graph-visualization";
 import type {
@@ -21,6 +21,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
   const [isPending, startTransition] = useTransition();
   const requestedSelectedNodeId =
     searchParams.get("node") ?? graph.view.selectedNodeId ?? graph.nodes[0]?.id;
+  const [localSelectedNodeId, setLocalSelectedNodeId] = useState(requestedSelectedNodeId);
   const hiddenParam = searchParams.get("hidden") ?? "";
   const hiddenNodeIds = useMemo(
     () => new Set(hiddenParam.split(",").filter(Boolean)),
@@ -30,15 +31,15 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
   const activeSearch = searchParams.get("q") ?? "";
   const attentionOnly = searchParams.get("attention") === "1";
   const filteredGraphBase = useMemo(
-    () => filterGraph(graph, activeFilter, attentionOnly, activeSearch, requestedSelectedNodeId),
-    [activeFilter, activeSearch, attentionOnly, graph, requestedSelectedNodeId]
+    () => filterGraph(graph, activeFilter, attentionOnly, activeSearch, localSelectedNodeId),
+    [activeFilter, activeSearch, attentionOnly, graph, localSelectedNodeId]
   );
   const filteredGraph = useMemo(
     () => hideGraphNodes(filteredGraphBase, hiddenNodeIds),
     [filteredGraphBase, hiddenNodeIds]
   );
   const selectedNode =
-    filteredGraph.nodes.find((node) => node.id === requestedSelectedNodeId) ??
+    filteredGraph.nodes.find((node) => node.id === localSelectedNodeId) ??
     filteredGraph.nodes[0] ??
     graph.nodes[0];
   const selectedNodeId = selectedNode?.id;
@@ -53,8 +54,14 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
     [filteredGraph, selectedNodeId]
   );
 
+  useEffect(() => {
+    setLocalSelectedNodeId(requestedSelectedNodeId);
+  }, [requestedSelectedNodeId]);
+
   function updateParams(next: Record<string, string | undefined>) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(
+      typeof window === "undefined" ? searchParams.toString() : window.location.search
+    );
     for (const [key, value] of Object.entries(next)) {
       if (!value || value === "all") {
         params.delete(key);
@@ -62,7 +69,19 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
         params.set(key, value);
       }
     }
-    startTransition(() => router.replace(`${pathname}?${params.toString()}`, { scroll: false }));
+    const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+    const keys = Object.keys(next);
+
+    if (Object.prototype.hasOwnProperty.call(next, "node")) {
+      setLocalSelectedNodeId(next.node ?? graph.view.selectedNodeId ?? graph.nodes[0]?.id);
+    }
+
+    if (keys.length === 1 && keys[0] === "node" && typeof window !== "undefined") {
+      window.history.replaceState(window.history.state, "", nextUrl);
+      return;
+    }
+
+    startTransition(() => router.replace(nextUrl, { scroll: false }));
   }
 
   function removeSelectedNode() {
