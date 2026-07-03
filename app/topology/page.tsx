@@ -1,5 +1,5 @@
 import { TopologyWorkspace } from "@/components/topology-workspace";
-import { getLoopGraph } from "@/lib/loop-engineering-builder/workspace";
+import { getSemanticTopology } from "@/lib/loop-engineering-builder/workspace";
 
 export default async function TopologyPage({
   searchParams
@@ -8,7 +8,7 @@ export default async function TopologyPage({
 }) {
   const { node } = await searchParams;
   const loopId = node?.startsWith("loop:") ? node.replace("loop:", "") : undefined;
-  const graph = await getLoopGraph(loopId);
+  const topology = await getSemanticTopology(loopId);
 
-  return <TopologyWorkspace graph={graph} />;
+  return <TopologyWorkspace topology={topology} />;
 }
