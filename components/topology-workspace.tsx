@@ -79,8 +79,8 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-3rem)] gap-4 lg:grid-cols-[230px_minmax(620px,1fr)_290px]">
-      <aside className="order-2 rounded-md border border-line bg-white p-4 lg:order-none lg:min-h-[calc(100vh-3rem)]">
+    <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[220px_minmax(0,1fr)_280px] lg:overflow-hidden 2xl:grid-cols-[230px_minmax(620px,1fr)_290px]">
+      <aside className="order-2 flex flex-col rounded-md border border-line bg-white p-4 lg:order-none lg:h-full lg:min-h-0 lg:overflow-hidden">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Snapshot</div>
@@ -137,7 +137,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
           ) : null}
         </div>
 
-        <div className="mt-6">
+        <div className="mt-6 min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Outline</div>
           <div className="mt-3 space-y-1">
             {filteredGraph.nodes
@@ -160,7 +160,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
           </div>
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
+        <div className="mt-6 grid shrink-0 grid-cols-2 gap-2 text-xs">
           {legendItems.map((item) => (
             <div className="flex items-center gap-2 rounded-md border border-line px-2 py-2" key={item.label}>
               <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
@@ -170,7 +170,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
         </div>
       </aside>
 
-      <section className="order-1 flex min-h-[680px] flex-col overflow-hidden rounded-md border border-line bg-white lg:order-none lg:min-h-[calc(100vh-3rem)]">
+      <section className="order-1 flex min-h-[680px] flex-col overflow-hidden rounded-md border border-line bg-white lg:order-none lg:h-full lg:min-h-0">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Canvas</div>
@@ -196,7 +196,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
         <TraceRail graph={filteredGraph} health={selectedHealth} node={selectedNode} />
       </section>
 
-      <aside className="order-3 rounded-md border border-line bg-white p-4 lg:order-none lg:min-h-[calc(100vh-3rem)]">
+      <aside className="order-3 rounded-md border border-line bg-white p-4 lg:order-none lg:h-full lg:min-h-0 lg:overflow-y-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Inspector</div>

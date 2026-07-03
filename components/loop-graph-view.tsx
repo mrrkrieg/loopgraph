@@ -12,6 +12,7 @@ import {
   type Node,
   type NodeChange,
   type NodeProps,
+  type ReactFlowInstance,
   type XYPosition
 } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
@@ -91,6 +92,8 @@ export function LoopGraphView({
     selectedNodeId ?? graph.selectedNodeId ?? graph.nodes[0]?.id
   );
   const [positionOverrides, setPositionOverrides] = useState<Record<string, XYPosition>>({});
+  const [flowInstance, setFlowInstance] =
+    useState<ReactFlowInstance<Node<LoopGraphDotNodeData>, Edge> | null>(null);
 
   useEffect(() => {
     setIsMounted(true);
@@ -128,6 +131,12 @@ export function LoopGraphView({
     () => layoutNodes(visibleNodes, visibleEdges, activeNodeId, variant),
     [activeNodeId, variant, visibleEdges, visibleNodes]
   );
+  const layoutTopY = useMemo(() => {
+    const yPositions = visibleNodes
+      .map((node) => layout[node.id]?.y)
+      .filter((position): position is number => typeof position === "number");
+    return yPositions.length > 0 ? Math.min(...yPositions) : 0;
+  }, [layout, visibleNodes]);
   const layoutKey = useMemo(
     () => `${graph.id}:${variant}:${visibleNodes.map((node) => node.id).join("|")}`,
     [graph.id, variant, visibleNodes]
@@ -198,6 +207,27 @@ export function LoopGraphView({
     [activeNodeId, appearance, isMini, visibleEdges]
   );
 
+  useEffect(() => {
+    if (!flowInstance || !isMounted || variant !== "topology" || flowNodes.length === 0) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      Promise.resolve(flowInstance.fitView({ duration: 0, maxZoom: 0.92, padding: 0.12 })).then(() => {
+        const viewport = flowInstance.getViewport();
+        flowInstance.setViewport(
+          {
+            ...viewport,
+            y: 42 - layoutTopY * viewport.zoom
+          },
+          { duration: 0 }
+        );
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [flowEdges.length, flowInstance, flowNodes.length, isMounted, layoutTopY, variant]);
+
   function handleNodesChange(changes: NodeChange<Node<LoopGraphDotNodeData>>[]) {
     if (!isInteractive) {
       return;
@@ -236,7 +266,7 @@ export function LoopGraphView({
         appearance === "onDark" ? "bg-transparent" : "bg-white"
       } ${className}`}
       data-testid={`loop-graph-${variant}`}
-      style={{ height: defaultHeight, minHeight: variant === "topology" ? 520 : undefined }}
+      style={{ height: defaultHeight }}
     >
       {!isMounted ? (
         <StaticGraphPreview
@@ -281,18 +311,18 @@ export function LoopGraphView({
         <ReactFlow
           edges={flowEdges}
           elementsSelectable={isInteractive}
-          fitView
+          fitView={variant !== "topology"}
           fitViewOptions={{
             padding: variant === "topology" ? 0.22 : isMini ? 0.12 : 0.18,
             maxZoom: variant === "topology" ? 0.92 : isMini ? 1.25 : 1.08
           }}
-          key={`${graph.id}:${variant}:${flowNodes.length}:${flowEdges.length}`}
           maxZoom={isMini ? 1.6 : 2.1}
           minZoom={isMini ? 0.25 : 0.18}
           nodes={flowNodes}
           nodesConnectable={false}
           nodesDraggable={isInteractive}
           nodeTypes={stableNodeTypes}
+          onInit={setFlowInstance}
           onNodeClick={(_, node) => handleSelect(node.id)}
           onNodesChange={handleNodesChange}
           panOnDrag={isInteractive}

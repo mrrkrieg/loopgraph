@@ -239,6 +239,515 @@ const managementReviewTemplate: LoopTemplate = {
   fixturePaths: []
 };
 
+const templateDetailsById: Record<string, Partial<LoopTemplate>> = {
+  "marketing-channel_allocation": {
+    goal: "Move budget toward channels producing qualified pipeline and durable activation, not just cheaper clicks.",
+    businessOutcome: "Marketing spend compounds into higher-quality pipeline with fewer wasted experiments.",
+    primaryMetric: "Qualified pipeline per dollar",
+    secondaryMetrics: ["CAC payback", "Activation rate", "Channel saturation", "Spend waste avoided"],
+    observes: ["Channel spend", "Qualified leads", "Opportunity source", "Activation", "Payback period"],
+    requiredDataSources: ["Ad platforms", "CRM", "Product analytics", "Finance spend report"],
+    routine: ["Compare channel spend to qualified downstream outcomes", "Identify overfunded and underfunded channels", "Draft allocation changes with confidence and risk", "Route material budget moves to review", "Record the decision and next measurement window"],
+    verification: ["Attribution window is comparable", "Pipeline quality improved downstream", "Spend change respects budget limits"],
+    escalation: ["Budget move exceeds approval threshold", "Attribution conflicts across systems", "Strategic channel would be paused"]
+  },
+  "marketing-creative_testing": {
+    goal: "Find creative messages that improve qualified conversion while protecting brand and claim accuracy.",
+    businessOutcome: "The team learns faster which messages produce customers who activate and retain.",
+    primaryMetric: "Qualified creative conversion",
+    secondaryMetrics: ["Creative fatigue", "Activation rate", "Review rework minutes", "Learning velocity"],
+    observes: ["Creative variant", "Audience", "Click-through rate", "Qualified conversion", "Reviewer edits"],
+    requiredDataSources: ["Ad platforms", "Creative library", "Analytics", "CRM", "Brand guidelines"],
+    routine: ["Detect underperforming or fatigued creatives", "Generate variants tied to the current constraint", "Check claims against brand and product facts", "Prepare launch packet for approval", "Save results to the message library"],
+    verification: ["Claim is factually supported", "Variant maps to one hypothesis", "Sample size can support a decision"],
+    escalation: ["Creative includes a factual claim", "Brand risk is flagged", "Winning variant worsens customer quality"]
+  },
+  "marketing-landing_page_conversion": {
+    goal: "Improve landing page conversion while preserving ICP fit and downstream activation.",
+    businessOutcome: "More qualified visitors become activated customers without increasing low-quality lead volume.",
+    primaryMetric: "Qualified landing page conversion",
+    secondaryMetrics: ["Form completion", "Activation rate", "Bounce rate", "Sales accepted lead rate"],
+    observes: ["Landing page visits", "Form submissions", "ICP fields", "Activation events", "Sales feedback"],
+    requiredDataSources: ["Web analytics", "Form data", "Product analytics", "CRM", "Session recordings"],
+    routine: ["Find the largest landing page drop-off", "Draft copy or flow changes for one hypothesis", "Check messaging and qualification criteria", "Queue approved experiment", "Compare conversion to downstream quality"],
+    verification: ["Experiment changes one main variable", "Tracking events fire correctly", "Conversion gain does not lower qualification quality"],
+    escalation: ["Pricing or legal claims change", "Tracking is broken", "Conversion rises while activation falls"]
+  },
+  "marketing-icp_messaging_learning": {
+    goal: "Turn sales and customer evidence into sharper ICP, pain, and message hypotheses.",
+    businessOutcome: "Marketing and sales align on who the company should target and what proof matters.",
+    primaryMetric: "Message-to-opportunity fit",
+    secondaryMetrics: ["Sales accepted lead rate", "Win reason frequency", "Objection recurrence", "Persona clarity"],
+    observes: ["Sales notes", "Call summaries", "Closed-won reasons", "Lost reasons", "Customer success notes"],
+    requiredDataSources: ["CRM", "Call transcripts", "Sales notes", "Customer success notes", "Message library"],
+    routine: ["Cluster repeated pains and objections", "Identify ICP patterns in won and retained accounts", "Draft message hypotheses with evidence", "Review with sales and customer success", "Update message and ICP library"],
+    verification: ["Evidence comes from real customer interactions", "ICP segment is specific", "Hypothesis has a measurable test"],
+    escalation: ["Message conflicts with positioning", "Evidence is thin or anecdotal", "Sales and marketing disagree on ICP"]
+  },
+  "product-feedback_to_problem": {
+    goal: "Convert recurring customer feedback into specific product problems with evidence and priority context.",
+    businessOutcome: "Product decisions start from validated customer pain instead of scattered requests.",
+    primaryMetric: "Validated problem rate",
+    secondaryMetrics: ["Feedback cluster size", "Affected revenue", "Support burden", "Problem clarity"],
+    observes: ["Support tickets", "Customer interviews", "Sales notes", "Product usage", "Churn reasons"],
+    requiredDataSources: ["Support system", "CRM", "Product analytics", "Interview notes", "Slack"],
+    routine: ["Cluster feedback by pain and customer segment", "Separate symptoms from underlying problem", "Attach impact and frequency evidence", "Draft problem brief", "Route ambiguous clusters to product review"],
+    verification: ["Problem statement names user and context", "Evidence spans more than one source", "Impact is measurable"],
+    escalation: ["Strategic customer impact", "Evidence conflicts by segment", "Problem implies roadmap change"]
+  },
+  "product-problem_to_product_bet": {
+    goal: "Turn validated problems into scoped product bets with clear assumptions, risks, and success measures.",
+    businessOutcome: "Teams commit to product work with tighter scope and clearer learning goals.",
+    primaryMetric: "Bet validation cycle time",
+    secondaryMetrics: ["Assumption confidence", "Expected adoption", "Engineering effort", "Decision latency"],
+    observes: ["Problem briefs", "Usage data", "Customer segment impact", "Design notes", "Engineering estimates"],
+    requiredDataSources: ["Product analytics", "Design docs", "Linear", "Customer evidence", "Roadmap"],
+    routine: ["Review validated problem evidence", "Draft solution options and assumptions", "Estimate effort and reversibility", "Select learning metric", "Prepare bet review packet"],
+    verification: ["Problem evidence is linked", "Bet scope is reversible", "Success metric is observable"],
+    escalation: ["Bet affects roadmap commitments", "Capacity tradeoff is material", "Assumption risk is high"]
+  },
+  "product-release_learning": {
+    goal: "Measure whether shipped releases created the intended customer and business outcome.",
+    businessOutcome: "Release decisions improve because adoption, retention, and support signals feed the next product loop.",
+    primaryMetric: "Release outcome attainment",
+    secondaryMetrics: ["Feature adoption", "Retention lift", "Support deflection", "Regression reports"],
+    observes: ["Feature flags", "Usage events", "Support tickets", "Release notes", "Customer feedback"],
+    requiredDataSources: ["Feature flag system", "Product analytics", "Support system", "GitHub", "Release notes"],
+    routine: ["Compare release goals to observed usage", "Check support and regression signals", "Summarize customer outcome", "Recommend continue, adjust, or rollback", "Feed learning into roadmap review"],
+    verification: ["Measurement window is valid", "Usage events match release scope", "Support signals are not ignored"],
+    escalation: ["Release harms key accounts", "Regression risk rises", "Rollback or roadmap change is recommended"]
+  },
+  "product-bug_cluster_to_problem": {
+    goal: "Detect repeated bugs that reveal a deeper product, UX, or reliability problem.",
+    businessOutcome: "Engineering and product fix root causes instead of repeatedly treating symptoms.",
+    primaryMetric: "Recurring bug reduction",
+    secondaryMetrics: ["Duplicate bug rate", "Affected users", "Support burden", "Root-cause closure"],
+    observes: ["Bug reports", "Support tickets", "Session data", "Error logs", "Customer impact"],
+    requiredDataSources: ["GitHub", "Support system", "Error tracking", "Product analytics", "Session recordings"],
+    routine: ["Cluster bugs by workflow and user impact", "Identify shared root-cause hypotheses", "Draft product problem brief", "Prioritize by frequency and severity", "Track whether fix reduces recurrence"],
+    verification: ["Cluster is not only keyword similarity", "Affected workflow is clear", "Root-cause hypothesis is testable"],
+    escalation: ["Bug affects strategic accounts", "Security or data loss is possible", "Ownership crosses teams"]
+  },
+  "product-roadmap_signal": {
+    goal: "Compare customer demand, strategy, and capacity before roadmap review.",
+    businessOutcome: "Roadmap choices become evidence-backed tradeoffs rather than a queue of loud requests.",
+    primaryMetric: "Roadmap evidence coverage",
+    secondaryMetrics: ["Revenue represented", "Strategic fit", "Capacity confidence", "Decision age"],
+    observes: ["Customer requests", "Revenue impact", "Strategic goals", "Engineering capacity", "Win/loss notes"],
+    requiredDataSources: ["CRM", "Roadmap", "Linear", "Product analytics", "Customer notes"],
+    routine: ["Gather demand and impact signals", "Score each theme against strategy and capacity", "Name tradeoffs and missing evidence", "Prepare roadmap decision memo", "Track decisions and revisit dates"],
+    verification: ["Revenue and customer counts are current", "Capacity estimate has an owner", "Tradeoffs are explicit"],
+    escalation: ["Executive priority conflict", "Major capacity mismatch", "High-value customer commitment"]
+  },
+  "customer_success-customer_health_risk": {
+    goal: "Detect account health risk early from usage, sentiment, ticket, and renewal signals.",
+    businessOutcome: "Customer teams intervene before risk becomes churn or executive escalation.",
+    primaryMetric: "Risk detection lead time",
+    secondaryMetrics: ["Health score recovery", "Churn risk", "Relationship hours", "Escalation accuracy"],
+    observes: ["Product usage", "Support volume", "Sentiment", "Renewal date", "QBR notes"],
+    requiredDataSources: ["Product analytics", "Support system", "CRM", "Customer notes", "Calendar"],
+    routine: ["Combine usage, support, and renewal context", "Identify risk reason and severity", "Draft account intervention plan", "Route high-risk accounts to owner", "Track health score recovery"],
+    verification: ["Risk reason is evidence-backed", "Owner and next action are clear", "Sensitive customer context is minimized"],
+    escalation: ["Strategic account risk", "Renewal inside threshold", "Negative executive sentiment"]
+  },
+  "customer_success-support_triage": {
+    goal: "Classify support requests, draft accurate responses, and route issues to the right owner.",
+    businessOutcome: "Customers get faster helpful responses while complex cases reach humans sooner.",
+    primaryMetric: "Time to useful response",
+    secondaryMetrics: ["First contact resolution", "Escalation accuracy", "CSAT", "Reviewer edits"],
+    observes: ["Ticket body", "Account plan", "Product area", "Severity", "Past interactions"],
+    requiredDataSources: ["Support system", "Knowledge base", "CRM", "Product status", "Slack"],
+    routine: ["Classify issue type and severity", "Fetch relevant account and knowledge context", "Draft response or internal handoff", "Verify answer against source material", "Escalate uncertain or sensitive cases"],
+    verification: ["Answer cites current knowledge", "Tone fits customer context", "Product status is checked"],
+    escalation: ["Customer is upset", "Bug or outage suspected", "Billing, legal, or security issue"]
+  },
+  "customer_success-renewal_risk": {
+    goal: "Surface renewal risk early and prepare targeted retention actions.",
+    businessOutcome: "Renewal conversations happen with evidence, owner accountability, and enough time to recover.",
+    primaryMetric: "Renewal risk surfaced days before renewal",
+    secondaryMetrics: ["At-risk ARR", "Save plan completion", "Executive alignment", "Churn probability"],
+    observes: ["Renewal date", "Usage trend", "Support burden", "Champion engagement", "Contract notes"],
+    requiredDataSources: ["CRM", "Product analytics", "Support system", "Contract system", "Calendar"],
+    routine: ["Rank renewals by risk and time remaining", "Identify risk drivers", "Draft save plan and owner actions", "Route executive or commercial risks", "Track action completion"],
+    verification: ["ARR and renewal date are current", "Risk driver is specific", "Save plan has accountable owner"],
+    escalation: ["Executive sponsor needed", "Commercial concession requested", "Renewal risk is high"]
+  },
+  "customer_success-proactive_outreach": {
+    goal: "Identify moments where proactive human outreach can create value or prevent risk.",
+    businessOutcome: "Relationship time moves to accounts where it changes adoption, trust, or expansion.",
+    primaryMetric: "Proactive outreach conversion",
+    secondaryMetrics: ["Expansion signal", "Usage milestone", "Risk prevented", "Relationship hours"],
+    observes: ["Usage milestones", "Feature adoption", "Support patterns", "Upcoming meetings", "Customer goals"],
+    requiredDataSources: ["Product analytics", "CRM", "Calendar", "Customer notes", "Support system"],
+    routine: ["Detect milestone, risk, or opportunity triggers", "Match trigger to customer goal", "Draft personalized outreach brief", "Route to account owner", "Record outcome and next signal"],
+    verification: ["Outreach reason is customer-specific", "Timing is appropriate", "No generic automation is sent"],
+    escalation: ["High-value account", "Sensitive relationship context", "Unclear customer goal"]
+  },
+  "customer_success-qbr_preparation": {
+    goal: "Prepare evidence-backed QBR packets for high-value accounts.",
+    businessOutcome: "Business reviews focus on outcomes, risks, and next commitments instead of manual reporting.",
+    primaryMetric: "QBR prep time saved",
+    secondaryMetrics: ["Outcome evidence coverage", "Action item completion", "Executive engagement", "Expansion opportunities"],
+    observes: ["Usage outcomes", "Support history", "Commercial notes", "Goals", "Previous QBR actions"],
+    requiredDataSources: ["CRM", "Product analytics", "Support system", "Slides or docs", "Calendar"],
+    routine: ["Gather usage, value, and risk evidence", "Summarize goal progress and open commitments", "Draft QBR narrative and agenda", "Route to account owner for edits", "Capture next actions after meeting"],
+    verification: ["Metrics match account goals", "Claims are source-backed", "Sensitive notes are excluded"],
+    escalation: ["Executive attendee joins", "Value story is weak", "Commercial risk appears"]
+  },
+  "sales-lead_qualification": {
+    goal: "Score and route leads using fit, intent, readiness, and risk signals.",
+    businessOutcome: "Sales spends time on accounts with real potential and clear next actions.",
+    primaryMetric: "Qualified meeting conversion",
+    secondaryMetrics: ["Speed to lead", "Disqualification accuracy", "Pipeline quality", "AE review minutes"],
+    observes: ["Form fields", "Firmographics", "Intent signals", "Product usage", "CRM history"],
+    requiredDataSources: ["CRM", "Enrichment provider", "Product analytics", "Website forms", "Email engagement"],
+    routine: ["Assemble lead fit and intent context", "Score qualification and confidence", "Draft routing reason and next action", "Send uncertain cases to sales review", "Measure meeting and opportunity outcomes"],
+    verification: ["Qualification criteria are explicit", "Routing territory is correct", "Disqualification is explainable"],
+    escalation: ["Enterprise or strategic account", "Conflicting ownership", "Low confidence but high potential"]
+  },
+  "sales-account_research": {
+    goal: "Prepare concise account context and likely buying triggers before outreach.",
+    businessOutcome: "Outbound and meeting prep become more relevant without adding manual research load.",
+    primaryMetric: "Research-to-meeting conversion",
+    secondaryMetrics: ["Personalization accuracy", "Prep time saved", "Reply rate", "Opportunity creation"],
+    observes: ["Account firmographics", "Website activity", "CRM notes", "News signals", "Role context"],
+    requiredDataSources: ["CRM", "Company website", "Enrichment provider", "Email history", "Calendar"],
+    routine: ["Collect account context and recent signals", "Identify likely business trigger", "Draft short account brief", "Generate personalized talking points", "Log evidence and reviewer edits"],
+    verification: ["Personalization is factual", "Trigger is relevant to buyer role", "No unsupported claims are used"],
+    escalation: ["Strategic account", "Sensitive company news", "Existing relationship owner conflict"]
+  },
+  "sales-follow_up": {
+    goal: "Keep meeting next steps moving with timely, accurate, personalized follow-up.",
+    businessOutcome: "Deals progress because commitments, objections, and owners are not lost after calls.",
+    primaryMetric: "Follow-up latency",
+    secondaryMetrics: ["Next-step completion", "Meeting-to-opportunity conversion", "Reply rate", "CRM completeness"],
+    observes: ["Meeting transcript", "Calendar event", "CRM opportunity", "Buyer objections", "Action items"],
+    requiredDataSources: ["Calendar", "CRM", "Call notes", "Email", "Proposal docs"],
+    routine: ["Extract commitments and objections from meeting notes", "Draft follow-up with next steps", "Update CRM fields and tasks", "Route sensitive claims to seller review", "Track whether next step completes"],
+    verification: ["Names and commitments are correct", "Tone fits relationship stage", "CRM update is traceable"],
+    escalation: ["Pricing or legal terms mentioned", "Executive buyer involved", "Seller confidence is low"]
+  },
+  "sales-crm_hygiene": {
+    goal: "Detect stale opportunities, missing fields, and inconsistent CRM state before pipeline review.",
+    businessOutcome: "Forecast and pipeline conversations use cleaner data with less seller admin burden.",
+    primaryMetric: "CRM completeness",
+    secondaryMetrics: ["Stale opportunity rate", "Forecast accuracy", "Admin time saved", "Manager review minutes"],
+    observes: ["Opportunity stage", "Close date", "Next step", "Activity history", "Forecast category"],
+    requiredDataSources: ["CRM", "Calendar", "Email", "Call notes", "Forecast sheet"],
+    routine: ["Scan opportunities for missing or stale fields", "Suggest updates from recent activity", "Create seller review queue", "Apply approved CRM changes", "Report hygiene risk to manager"],
+    verification: ["Suggested update cites recent activity", "Forecast fields match policy", "No customer-facing action is automated"],
+    escalation: ["Forecast-impacting update", "Conflicting activity evidence", "Strategic deal lacks next step"]
+  },
+  "sales-deal_risk": {
+    goal: "Detect stalled strategic deals and prepare manager intervention options.",
+    businessOutcome: "Sales leadership focuses on deal risks that can still be changed.",
+    primaryMetric: "Stalled deal recovery rate",
+    secondaryMetrics: ["Deal velocity", "Risk age", "Executive coverage", "Forecast movement"],
+    observes: ["Stage age", "Buyer engagement", "Next step", "Objections", "Competition"],
+    requiredDataSources: ["CRM", "Email engagement", "Calendar", "Call notes", "Mutual action plan"],
+    routine: ["Identify deals with stalled motion or missing buyer action", "Classify risk reason", "Draft intervention options", "Route manager or executive action", "Track whether risk clears"],
+    verification: ["Risk is tied to observable deal evidence", "Recommended action has an owner", "Forecast impact is explicit"],
+    escalation: ["Large forecast impact", "Executive relationship needed", "Commercial exception requested"]
+  },
+  "engineering-issue_to_plan": {
+    goal: "Turn accepted issues into scoped implementation plans with tests, risks, and owners.",
+    businessOutcome: "Engineering starts work with less ambiguity and fewer review surprises.",
+    primaryMetric: "Planning cycle time",
+    secondaryMetrics: ["Rework rate", "Test coverage identified", "Blocked issue age", "Review readiness"],
+    observes: ["Issue description", "Acceptance criteria", "Related code areas", "Dependencies", "Bug reports"],
+    requiredDataSources: ["GitHub", "Linear", "Codebase", "Docs", "CI history"],
+    routine: ["Read accepted issue and context", "Identify affected surfaces and risks", "Draft implementation plan and test plan", "Route ambiguous requirements to owner", "Update issue with scoped next step"],
+    verification: ["Acceptance criteria are explicit", "Test plan covers risky paths", "Dependencies are named"],
+    escalation: ["Security or data migration risk", "Requirements conflict", "Owner is unclear"]
+  },
+  "engineering-pr_review_prep": {
+    goal: "Summarize PR risk, tests, and reviewer context before review.",
+    businessOutcome: "Reviewers spend less time reconstructing intent and more time catching real risk.",
+    primaryMetric: "Review time saved",
+    secondaryMetrics: ["Review turnaround", "Defect escape rate", "Test evidence coverage", "Reviewer load"],
+    observes: ["PR diff", "Test output", "Linked issue", "Changed files", "Deployment risk"],
+    requiredDataSources: ["GitHub", "CI", "Issue tracker", "Codebase", "Docs"],
+    routine: ["Read PR diff and linked context", "Summarize behavior change and risk", "Collect test evidence", "Suggest reviewers and questions", "Track review corrections"],
+    verification: ["Summary matches diff", "Tests are real and current", "Risk areas are not hidden"],
+    escalation: ["Security-sensitive change", "Migration or rollback risk", "No clear owner"]
+  },
+  "engineering-qa_checklist": {
+    goal: "Generate release-specific QA checks and trace outcomes.",
+    businessOutcome: "Releases ship with clearer quality evidence and fewer escaped defects.",
+    primaryMetric: "Escaped defect rate",
+    secondaryMetrics: ["QA coverage", "Checklist completion", "Regression risk", "Release confidence"],
+    observes: ["Release scope", "Changed files", "Known risks", "Past incidents", "Test results"],
+    requiredDataSources: ["GitHub", "CI", "Release notes", "Incident log", "Test management"],
+    routine: ["Map release scope to user workflows", "Generate targeted QA checks", "Prioritize risky paths", "Record pass/fail evidence", "Feed misses into improvement work"],
+    verification: ["Checklist covers changed behavior", "Critical paths are included", "Results are traceable"],
+    escalation: ["Critical path fails", "Regression risk remains high", "Release owner missing"]
+  },
+  "engineering-incident_learning": {
+    goal: "Convert incidents into root-cause learning and prevention items.",
+    businessOutcome: "Repeated incidents decline because post-incident work turns into owned system changes.",
+    primaryMetric: "Incident recurrence rate",
+    secondaryMetrics: ["Action item closure", "Mean time to learning", "Blast radius", "Detection gap"],
+    observes: ["Incident timeline", "Alerts", "Logs", "Customer impact", "Postmortem actions"],
+    requiredDataSources: ["Incident tracker", "Observability", "GitHub", "Status page", "Customer reports"],
+    routine: ["Build incident timeline from evidence", "Identify contributing factors", "Draft prevention actions", "Assign owners and dates", "Check recurrence after fix"],
+    verification: ["Timeline cites sources", "Action items address root causes", "Customer impact is represented accurately"],
+    escalation: ["Customer data or security impact", "Ownership conflict", "Repeated severe incident"]
+  },
+  "engineering-release_readiness": {
+    goal: "Check tests, migrations, rollback, docs, and owner readiness before release.",
+    businessOutcome: "Release decisions become explicit and reversible instead of hopeful.",
+    primaryMetric: "Readiness pass rate",
+    secondaryMetrics: ["Rollback confidence", "Migration risk", "Documentation completeness", "Release delay avoided"],
+    observes: ["CI status", "Migration plan", "Rollback plan", "Feature flags", "Owner approvals"],
+    requiredDataSources: ["CI", "GitHub", "Deployment platform", "Docs", "Runbooks"],
+    routine: ["Collect readiness evidence", "Check release gates", "Draft risk and rollback summary", "Route missing owners or blockers", "Record go or no-go decision"],
+    verification: ["Rollback path exists", "Migration has review", "Critical owners approved"],
+    escalation: ["Data migration risk", "Rollback unavailable", "Customer-facing outage risk"]
+  },
+  "operations_finance-approval_bottleneck": {
+    goal: "Detect stuck approvals and route the next decision to the accountable owner.",
+    businessOutcome: "Operational work moves faster without bypassing policy or audit requirements.",
+    primaryMetric: "Approval latency",
+    secondaryMetrics: ["Blocked request age", "Policy exception rate", "Owner response time", "Cycle time saved"],
+    observes: ["Approval status", "Request amount", "Policy threshold", "Owner", "SLA"],
+    requiredDataSources: ["Approval system", "Finance policy", "Slack", "Calendar", "Procurement records"],
+    routine: ["Find approvals older than SLA", "Identify blocker and policy path", "Draft owner-specific decision request", "Escalate threshold exceptions", "Track time to unblock"],
+    verification: ["Policy threshold is correct", "Approver is accountable", "Audit trail is preserved"],
+    escalation: ["Spend threshold exceeded", "Missing approver", "Policy exception requested"]
+  },
+  "operations_finance-forecast_variance": {
+    goal: "Explain material forecast changes and recommend accountable follow-up.",
+    businessOutcome: "Leadership sees forecast movement early enough to make decisions.",
+    primaryMetric: "Forecast variance explained",
+    secondaryMetrics: ["Forecast accuracy", "Variance age", "Revenue at risk", "Decision latency"],
+    observes: ["Forecast changes", "Pipeline movement", "Bookings", "Churn risk", "Expense variance"],
+    requiredDataSources: ["Forecast model", "CRM", "Billing system", "Finance spreadsheet", "Revenue reports"],
+    routine: ["Detect material forecast variance", "Trace drivers by account or cost line", "Draft variance memo", "Assign follow-up owners", "Review impact in management loop"],
+    verification: ["Numbers reconcile to source", "Variance driver is specific", "Recommendation names tradeoff"],
+    escalation: ["Material revenue miss", "Cash runway impact", "Data does not reconcile"]
+  },
+  "operations_finance-vendor_review": {
+    goal: "Review vendor spend, usage, renewals, and ownership before commitments renew.",
+    businessOutcome: "Spend decisions use value evidence and clear ownership instead of auto-renewal drift.",
+    primaryMetric: "Vendor value coverage",
+    secondaryMetrics: ["Spend avoided", "Renewal risk", "License utilization", "Owner clarity"],
+    observes: ["Vendor spend", "Contract renewal", "Usage", "Owner", "Security review"],
+    requiredDataSources: ["Procurement system", "Billing system", "SSO usage", "Contract repository", "Security review"],
+    routine: ["Find upcoming vendor renewals", "Compare spend to usage and owner need", "Draft renewal recommendation", "Route security or legal exceptions", "Record decision and next review date"],
+    verification: ["Usage data is current", "Business owner confirms need", "Contract risk is checked"],
+    escalation: ["High spend renewal", "No business owner", "Security or legal issue"]
+  },
+  "operations_finance-close_readiness": {
+    goal: "Track month-end close blockers and evidence before close review.",
+    businessOutcome: "Finance closes faster with fewer surprises and clearer accountability.",
+    primaryMetric: "Close readiness score",
+    secondaryMetrics: ["Close time", "Open reconciliations", "Exception count", "Controller review minutes"],
+    observes: ["Reconciliation status", "Journal entries", "Approvals", "Exception list", "Close calendar"],
+    requiredDataSources: ["ERP", "Close checklist", "Bank feeds", "Billing system", "Approval system"],
+    routine: ["Scan close checklist for blockers", "Match exceptions to owners", "Draft close readiness summary", "Escalate unresolved material items", "Track close completion and rework"],
+    verification: ["Numbers reconcile", "Material exceptions are named", "Owner and due date are clear"],
+    escalation: ["Material unreconciled item", "Late approval", "Control failure"]
+  },
+  "operations_finance-cash_collection": {
+    goal: "Detect invoice risk and prepare owner follow-up before cash collection slips.",
+    businessOutcome: "Cash collection improves through timely, accurate, relationship-aware follow-up.",
+    primaryMetric: "At-risk cash recovered",
+    secondaryMetrics: ["Days sales outstanding", "Past-due amount", "Follow-up latency", "Dispute resolution time"],
+    observes: ["Invoice age", "Payment history", "Customer notes", "Disputes", "Account owner"],
+    requiredDataSources: ["Billing system", "CRM", "Email", "Support tickets", "Collections sheet"],
+    routine: ["Rank invoices by risk and amount", "Identify reason for nonpayment", "Draft owner follow-up plan", "Route sensitive customer communication to approval", "Track payment or dispute outcome"],
+    verification: ["Invoice status is current", "Customer context is checked", "Communication owner approves"],
+    escalation: ["Large past-due balance", "Customer dispute", "Legal or relationship risk"]
+  },
+  "hr-candidate_pipeline": {
+    goal: "Track candidate stage, missing feedback, and next action across the hiring pipeline.",
+    businessOutcome: "Hiring teams reduce candidate drop-off and make decisions with better evidence.",
+    primaryMetric: "Candidate stage latency",
+    secondaryMetrics: ["Feedback completion", "Candidate experience", "Offer conversion", "Time to hire"],
+    observes: ["Candidate stage", "Interview feedback", "Role priority", "Scheduling status", "Offer status"],
+    requiredDataSources: ["ATS", "Calendar", "Interview notes", "Email", "Hiring plan"],
+    routine: ["Find candidates stuck by stage", "Identify missing feedback or owner action", "Draft recruiter and interviewer nudges", "Escalate late hiring decisions", "Track stage movement"],
+    verification: ["Candidate data is current", "Feedback request is role-specific", "Sensitive notes are minimized"],
+    escalation: ["Offer-stage delay", "Potential bias signal", "Hiring manager decision overdue"]
+  },
+  "hr-onboarding_progress": {
+    goal: "Detect onboarding gaps and route manager actions for new hires.",
+    businessOutcome: "New hires reach productivity faster with fewer missed setup or manager touchpoints.",
+    primaryMetric: "Onboarding completion",
+    secondaryMetrics: ["Time to first contribution", "Manager check-in completion", "Access readiness", "New hire sentiment"],
+    observes: ["Onboarding checklist", "Access setup", "Manager meetings", "Training progress", "New hire feedback"],
+    requiredDataSources: ["HRIS", "Calendar", "IT tickets", "Learning system", "Manager notes"],
+    routine: ["Check onboarding milestones by hire date", "Identify missing access or meetings", "Draft manager action list", "Escalate blocked setup", "Record completion and feedback"],
+    verification: ["Checklist matches role", "No private feedback is overexposed", "Manager owns next action"],
+    escalation: ["Access blocker", "Manager check-in missed", "Sensitive new hire concern"]
+  },
+  "hr-manager_coaching": {
+    goal: "Summarize recurring team signals into responsible manager coaching prompts.",
+    businessOutcome: "Managers get timely support while sensitive people data stays human-owned.",
+    primaryMetric: "Coaching action completion",
+    secondaryMetrics: ["Team sentiment trend", "Manager follow-through", "Retention risk", "Coaching hours"],
+    observes: ["Engagement survey", "One-on-one themes", "Team delivery signals", "Feedback patterns", "Manager actions"],
+    requiredDataSources: ["Survey tool", "Calendar", "Manager notes", "HRIS", "Project system"],
+    routine: ["Detect recurring team or manager signals", "Summarize coaching theme with safeguards", "Draft private coaching prompt", "Route to people partner review", "Track follow-up action"],
+    verification: ["Sensitive details are minimized", "Prompt is supportive not punitive", "Evidence is not overgeneralized"],
+    escalation: ["Potential discrimination or harassment", "High retention risk", "Manager conflict"]
+  },
+  "hr-retention_signal": {
+    goal: "Surface retention risks with privacy, fairness, and human judgment controls.",
+    businessOutcome: "People teams intervene thoughtfully before preventable attrition occurs.",
+    primaryMetric: "Retention risk action rate",
+    secondaryMetrics: ["Regrettable attrition", "Engagement trend", "Manager follow-up", "Fairness review"],
+    observes: ["Engagement signals", "Role changes", "Manager check-ins", "Workload indicators", "Career growth notes"],
+    requiredDataSources: ["HRIS", "Survey tool", "Calendar", "Manager notes", "Project system"],
+    routine: ["Identify retention risk patterns", "Filter out unsupported or sensitive inferences", "Draft human review brief", "Assign people partner follow-up", "Measure action completion"],
+    verification: ["No protected-class inference is used", "Evidence is appropriate", "Human owner approves any action"],
+    escalation: ["High attrition risk", "Potential fairness issue", "Sensitive employee concern"]
+  },
+  "hr-performance_review_prep": {
+    goal: "Prepare fair, evidence-backed review packets for managers.",
+    businessOutcome: "Performance conversations become more balanced, specific, and less administratively heavy.",
+    primaryMetric: "Review evidence completeness",
+    secondaryMetrics: ["Manager prep time saved", "Calibration edits", "Fairness flags", "Feedback specificity"],
+    observes: ["Goals", "Peer feedback", "Manager notes", "Project outcomes", "Calibration guidance"],
+    requiredDataSources: ["HRIS", "Performance system", "Project system", "Manager notes", "Feedback forms"],
+    routine: ["Collect evidence tied to goals", "Balance accomplishments and growth areas", "Flag missing or biased evidence", "Draft manager packet", "Route to manager and people partner review"],
+    verification: ["Evidence is recent and specific", "Sensitive data is excluded", "Fairness checks pass"],
+    escalation: ["Adverse employment decision", "Bias risk", "Insufficient evidence"]
+  },
+  "legal_security-contract_triage": {
+    goal: "Extract contract clauses, compare them to playbook, and route exceptions.",
+    businessOutcome: "Contract review cycles speed up while legal judgment stays focused on material risk.",
+    primaryMetric: "Contract triage cycle time",
+    secondaryMetrics: ["Exception accuracy", "Legal review minutes", "Risk exposure", "Sales cycle impact"],
+    observes: ["Contract text", "Clause playbook", "Deal context", "Customer redlines", "Risk tier"],
+    requiredDataSources: ["Contract repository", "Clause playbook", "CRM", "Email", "Legal ticketing"],
+    routine: ["Extract clauses and requested changes", "Compare to approved playbook", "Classify exceptions and risk", "Draft legal review summary", "Track approval or fallback language"],
+    verification: ["Clause citation is exact", "Playbook match is current", "Risk tier is justified"],
+    escalation: ["Nonstandard liability or data terms", "Large deal exposure", "Legal interpretation required"]
+  },
+  "legal_security-policy_drift": {
+    goal: "Detect product, process, or control changes that require policy review.",
+    businessOutcome: "Security and legal controls stay current as the company changes.",
+    primaryMetric: "Policy drift detection time",
+    secondaryMetrics: ["Control coverage", "Exception age", "Audit readiness", "Reviewer effort"],
+    observes: ["Code changes", "Access changes", "Process updates", "Policy documents", "Audit findings"],
+    requiredDataSources: ["GitHub", "Policy repository", "Access logs", "Audit findings", "Change tickets"],
+    routine: ["Detect changes touching regulated or controlled areas", "Compare against current policy", "Draft drift summary and owner action", "Route exceptions for review", "Track policy update or control fix"],
+    verification: ["Change is mapped to specific policy", "Owner is accountable", "Audit trail is preserved"],
+    escalation: ["Policy exception", "Customer contractual impact", "Critical control drift"]
+  },
+  "legal_security-access_review": {
+    goal: "Track access exceptions and owner approvals across sensitive systems.",
+    businessOutcome: "Access risk decreases without turning quarterly reviews into manual spreadsheet work.",
+    primaryMetric: "Access exception closure",
+    secondaryMetrics: ["Overdue access reviews", "Privilege reduction", "Owner approval rate", "Audit readiness"],
+    observes: ["User access", "Role changes", "Manager approvals", "System criticality", "Exceptions"],
+    requiredDataSources: ["Identity provider", "Access logs", "HRIS", "Ticketing", "System inventory"],
+    routine: ["Identify access that needs review", "Match users to owners and roles", "Draft approval or removal queue", "Escalate overdue exceptions", "Record decision evidence"],
+    verification: ["Owner mapping is current", "Least privilege policy is applied", "Decision is auditable"],
+    escalation: ["Privileged access", "Terminated user access", "Owner does not respond"]
+  },
+  "legal_security-incident_evidence": {
+    goal: "Collect incident evidence and prepare review summaries for legal and security owners.",
+    businessOutcome: "Incident response uses complete evidence without exposing unnecessary sensitive detail.",
+    primaryMetric: "Evidence packet completeness",
+    secondaryMetrics: ["Incident response time", "Chain-of-custody coverage", "Reviewer edits", "Remediation closure"],
+    observes: ["Incident timeline", "Logs", "Alerts", "Customer impact", "Remediation actions"],
+    requiredDataSources: ["SIEM", "Incident tracker", "Cloud logs", "GitHub", "Status page"],
+    routine: ["Collect time-bounded incident evidence", "Build source-cited timeline", "Draft impact and remediation summary", "Route legal or security review", "Track evidence gaps and follow-up"],
+    verification: ["Evidence source and time window are clear", "Sensitive data is minimized", "Chain of custody is preserved"],
+    escalation: ["Possible breach", "Customer notification risk", "Evidence gap blocks decision"]
+  },
+  "legal_security-security_questionnaire": {
+    goal: "Draft evidence-backed security questionnaire responses for human review.",
+    businessOutcome: "Sales and security respond faster while customer-facing claims stay accurate.",
+    primaryMetric: "Questionnaire turnaround time",
+    secondaryMetrics: ["Citation coverage", "Reviewer rework", "Deal unblock rate", "Unsupported claim count"],
+    observes: ["Questionnaire questions", "Security docs", "Control evidence", "Customer requirements", "Past approved answers"],
+    requiredDataSources: ["Security knowledge base", "Policy repository", "SOC 2 evidence", "CRM", "Past questionnaires"],
+    routine: ["Map questions to approved evidence", "Draft concise answers with citations", "Flag unsupported or changed controls", "Route security review", "Store approved reusable answer"],
+    verification: ["Every claim has evidence", "Answer matches current control state", "Customer-specific commitments are reviewed"],
+    escalation: ["Unsupported control claim", "Contractual commitment requested", "Sensitive architecture detail"]
+  },
+  "management-weekly_anomaly_review": {
+    goal: "Detect important company metric drift and prepare leadership decisions.",
+    businessOutcome: "Management attention moves quickly to anomalies that need ownership or tradeoffs.",
+    primaryMetric: "Anomaly decision latency",
+    secondaryMetrics: ["Metric drift magnitude", "Owner assignment rate", "False alarm rate", "Decision follow-through"],
+    observes: ["Company metrics", "Department rollups", "Loop health", "Escalations", "Recent decisions"],
+    requiredDataSources: ["Metrics warehouse", "Loopgraph traces", "CRM", "Finance reports", "Project system"],
+    routine: ["Scan key metrics for meaningful drift", "Separate noise from actionable anomaly", "Draft owner-specific decision options", "Route leadership review", "Track follow-through"],
+    verification: ["Baseline and comparison window are valid", "Anomaly has likely driver", "Decision owner is explicit"],
+    escalation: ["Revenue or churn anomaly", "Cross-functional owner conflict", "Capital allocation decision"]
+  },
+  "management-department_loop_review": {
+    goal: "Roll up department loop health, bottlenecks, reviews, and improvement work.",
+    businessOutcome: "Leaders see which operating loops are creating value and which ones need intervention.",
+    primaryMetric: "Loop health recovery",
+    secondaryMetrics: ["Open review age", "Improvement throughput", "Hidden labor ratio", "Department bottleneck age"],
+    observes: ["Loop health", "Human reviews", "Improvement items", "Hidden labor", "Department metrics"],
+    requiredDataSources: ["Loopgraph traces", "Review queue", "Improvement backlog", "Metrics warehouse", "Project system"],
+    routine: ["Read health and hidden labor by department", "Identify bottlenecks and repeated failure modes", "Draft department review summary", "Assign improvement owners", "Track whether health recovers"],
+    verification: ["Health score ties to trace evidence", "Bottleneck has owner", "Recommendation names tradeoffs"],
+    escalation: ["Repeated loop failure", "Unowned bottleneck", "Department goal at risk"]
+  },
+  "management-decision_memo": {
+    goal: "Turn ambiguous signals into decision options with evidence, tradeoffs, and owners.",
+    businessOutcome: "Leadership decisions become faster, clearer, and easier to audit later.",
+    primaryMetric: "Decision memo acceptance rate",
+    secondaryMetrics: ["Decision latency", "Evidence coverage", "Tradeoff clarity", "Owner follow-through"],
+    observes: ["Metric changes", "Customer evidence", "Financial impact", "Capacity constraints", "Risk notes"],
+    requiredDataSources: ["Metrics warehouse", "CRM", "Finance reports", "Project system", "Loopgraph traces"],
+    routine: ["Collect signals around the decision", "Frame options and tradeoffs", "Estimate impact and risk", "Draft memo with recommendation", "Record decision and owner"],
+    verification: ["Options are mutually clear", "Evidence supports recommendation", "Risks and reversibility are named"],
+    escalation: ["Strategic tradeoff", "High financial impact", "Insufficient evidence for decision"]
+  },
+  "management-resource_allocation": {
+    goal: "Match goals, bottlenecks, capacity, and constraints before resource decisions.",
+    businessOutcome: "People, budget, and attention move to the highest-leverage constraints.",
+    primaryMetric: "Constraint resolution speed",
+    secondaryMetrics: ["Capacity confidence", "Bottleneck age", "Goal impact", "Reallocation follow-through"],
+    observes: ["Team capacity", "Goal progress", "Bottlenecks", "Budget", "Loop health"],
+    requiredDataSources: ["Project system", "Finance reports", "People plan", "Loopgraph traces", "Metrics warehouse"],
+    routine: ["Compare goals to current bottlenecks", "Estimate capacity and cost tradeoffs", "Draft allocation options", "Route leadership decision", "Track whether constraint improves"],
+    verification: ["Capacity source is current", "Tradeoff is explicit", "Owner and success metric are clear"],
+    escalation: ["Capital allocation required", "Hiring or budget change", "Cross-functional priority conflict"]
+  },
+  "management-improvement": {
+    goal: "Convert loop failures, reviewer corrections, and trace evidence into owned system changes.",
+    businessOutcome: "The operating system gets better each week instead of repeating the same human corrections.",
+    primaryMetric: "Improvement closure rate",
+    secondaryMetrics: ["Repeated failure reduction", "Reviewer correction rate", "Autonomy readiness", "Hidden labor saved"],
+    observes: ["Improvement items", "Reviewer corrections", "Failure modes", "Loop health", "Trace evidence"],
+    requiredDataSources: ["Improvement backlog", "Review queue", "Loopgraph traces", "Project system", "Metrics warehouse"],
+    routine: ["Cluster repeated failure modes", "Prioritize improvements by value and risk", "Assign owners and due dates", "Verify changes against new traces", "Recommend autonomy changes when evidence supports it"],
+    verification: ["Improvement links to trace evidence", "Owner and acceptance criteria are clear", "Closure reduced repeated failure"],
+    escalation: ["Repeated high-risk failure", "No owner accepts work", "Autonomy increase requested"]
+  },
+  "management-operating_rhythm": {
+    goal: "Keep recurring leadership cadences connected to trace-backed decisions and follow-up.",
+    businessOutcome: "Meetings become shorter and more useful because each cadence has evidence, decisions, and owners.",
+    primaryMetric: "Operating cadence follow-through",
+    secondaryMetrics: ["Decision carryover", "Meeting time saved", "Owner completion", "Unresolved risk age"],
+    observes: ["Meeting agendas", "Decision log", "Loop health", "Action items", "Metric rollups"],
+    requiredDataSources: ["Calendar", "Decision log", "Loopgraph traces", "Project system", "Metrics warehouse"],
+    routine: ["Prepare cadence agenda from traces and decisions", "Highlight unresolved owners and risks", "Draft decision and follow-up list", "Route pre-read to leaders", "Close the loop after meeting"],
+    verification: ["Agenda items tie to evidence", "Follow-ups have owners", "Old decisions are not lost"],
+    escalation: ["Decision keeps carrying over", "Unowned cross-functional risk", "Leadership attention conflict"]
+  },
+  "custom-custom_company_loop": {
+    goal: "Define one recurring workflow with observable signals, accountable owners, verification, and improvement.",
+    businessOutcome: "A custom operating loop becomes explicit enough to run, review, and improve.",
+    primaryMetric: "Workflow cycle time",
+    secondaryMetrics: ["Output quality", "Review time", "Rework rate", "Business outcome"],
+    observes: ["Workflow input", "Current status", "Owner notes", "Output evidence", "Review decision"],
+    requiredDataSources: ["Manual input", "Workspace documents", "System of record", "Metrics source"],
+    routine: ["Capture the recurring work item", "Draft next action from source evidence", "Verify output against rubric", "Route human review when needed", "Record trace and improvement item"],
+    verification: ["Goal is measurable", "Output cites evidence", "Owner and escalation path are clear"],
+    escalation: ["Data is missing", "Confidence is low", "Human judgment or approval is required"]
+  }
+};
+
 const departments: DepartmentTemplate[] = [
   {
     key: "marketing",
@@ -516,23 +1025,27 @@ export function getTemplatesForDepartment(department: DepartmentKey) {
 }
 
 function enrichTemplate(department: DepartmentTemplate, template: LoopTemplate): LoopTemplate {
-  const metrics = template.defaultMetrics ?? [
-    template.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
-    ...(template.secondaryMetrics ?? department.commonMetrics.slice(1, 3))
+  const detailedTemplate = {
+    ...(templateDetailsById[template.id] ?? {}),
+    ...template
+  };
+  const metrics = detailedTemplate.defaultMetrics ?? [
+    detailedTemplate.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
+    ...(detailedTemplate.secondaryMetrics ?? department.commonMetrics.slice(1, 3))
   ];
-  const owners = template.defaultOwners ?? departmentOwners[department.key];
-  const dataSources = template.requiredDataSources ?? department.commonDataSources;
+  const owners = detailedTemplate.defaultOwners ?? departmentOwners[department.key];
+  const dataSources = detailedTemplate.requiredDataSources ?? department.commonDataSources;
 
   return {
-    ...template,
-    primaryMetric: template.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
+    ...detailedTemplate,
+    primaryMetric: detailedTemplate.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
     defaultMetrics: Array.from(new Set(metrics)).slice(0, 5),
     defaultOwners: owners,
     defaultHiddenLabor: {
       ...hiddenLaborDefaults[department.key],
-      ...template.defaultHiddenLabor
+      ...detailedTemplate.defaultHiddenLabor
     },
-    connections: template.connections ?? [
+    connections: detailedTemplate.connections ?? [
       ...dataSources.slice(0, 4).map((source) => ({
         kind: "data_source" as const,
         target: titleCase(source),
