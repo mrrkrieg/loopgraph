@@ -14,14 +14,28 @@ import {
   generateLoopSpec
 } from "./spec-generator";
 import { generateImplementationArtifacts } from "./implementation-generator";
-import { createLocalDesignStudioSpec, getRegisteredLoopSpecs } from "./local-workspace";
+import {
+  createLocalDesignStudioSpec,
+  getRegisteredLoopSpecs,
+  getStudioAnswers,
+  getStudioGeneratedSpec,
+  unregisterLoopSpec,
+  updateLocalLoopLogic
+} from "./local-workspace";
+import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
 import { v1alpha1ToFlat } from "../loopgraph-core/studio-adapter";
 import { getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
-import { filterRunsForLoop } from "../loopgraph-runtime/run-filters";
-import { hiddenLaborFromTrace } from "../loopgraph-runtime/trace-labor";
 import { loadImprovementsFromStorage } from "../loopgraph-runtime/improvement-loader";
 import { loadLatestManagementRollup } from "../loopgraph-runtime/management-rollup";
+import {
+  buildSemanticTopology,
+  type SemanticTopology,
+  type TopologyImprovementItem,
+  type TopologyMetricInput
+} from "../loopgraph-core/graph";
+import type { LoopSpec as CoreLoopSpec } from "../loopgraph-core/loop-spec";
+import type { LoopRunTrace } from "../loopgraph-core/trace";
 import type {
   DepartmentKey,
   GeneratedArtifact,
@@ -73,7 +87,7 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     .order("created_at", { ascending: true });
 
   if (!loopRows || loopRows.length === 0) {
-    return createEmptyWorkspace(selectedLoopId);
+    return selectLocalWorkspace(selectedLoopId);
   }
 
   const loops = await Promise.all(loopRows.map((row) => mapLoopRecord(supabase, row as LoopRow)));
@@ -88,18 +102,18 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
   const spec = await getLoopSpec(supabase, selectedLoop, answersWithDefaults);
   const artifacts = await getArtifacts(supabase, selectedLoop.id, spec);
   const runBundle = await getLatestRunBundle(supabase, selectedLoop);
-  const improvements = await getImprovements(supabase, selectedLoop.id);
-  const traceImprovements = await loadImprovementsFromStorage(getStorageAdapter(), selectedLoop.id);
-  const mergedImprovements = mergeImprovements(improvements, traceImprovements);
+  const improvements = mergeImprovements(
+    await getImprovements(supabase, selectedLoop.id),
+    await loadImprovementsFromStorage(getStorageAdapter(), selectedLoop.id)
+  );
   const reviews = runBundle.review ? [runBundle.review] : [];
   const graph = buildLoopGraph({
     organization,
     loops,
     reviews,
-    improvements: mergedImprovements,
+    improvements,
     selectedNodeId: `loop:${selectedLoop.id}`,
-    sourceLabel: "Supabase",
-    hiddenLaborByLoopId: await loadHiddenLaborByLoopId(loops.map((loop) => loop.id))
+    sourceLabel: "Supabase"
   });
 
   return {
@@ -119,7 +133,7 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     spec,
     artifacts,
     runBundle,
-    improvements: mergedImprovements,
+    improvements,
     managementReview: summarizeManagement(loops, graph),
     metrics: summarizeMetrics(graph, selectedLoop.id),
     graph
@@ -139,12 +153,16 @@ export async function createLoop(input: {
   goal: string;
 }) {
   const supabase = createSupabaseAdminClient();
+  const questions = generateQuestions(input.department, input.templateId, input.goal);
+  const answers = createDefaultAnswers(input.department, input.templateId, input.goal);
 
   if (!supabase) {
     const created = await createLocalDesignStudioSpec({
       templateId: input.templateId,
       name: input.name,
-      goal: input.goal
+      goal: input.goal,
+      answers,
+      questionGroups: questions
     });
     return created.id;
   }
@@ -165,18 +183,10 @@ export async function createLoop(input: {
     throw new Error("Unable to resolve organization for new loop");
   }
 
-  const { data: templateRow } = await supabase
-    .from("loop_templates")
-    .select("id")
-    .eq("department", input.department)
-    .eq("loop_type", template?.loopType ?? input.templateId.split("-").slice(1).join("-"))
-    .maybeSingle();
-
   const { data: loop, error: loopError } = await supabase
     .from("loops")
     .insert({
       organization_id: organization.id,
-      template_id: templateRow?.id ?? null,
       name: input.name || template?.name || "New Loop",
       department: input.department,
       loop_type:
@@ -198,13 +208,19 @@ export async function createLoop(input: {
     throw loopError;
   }
 
-  return loop.id as string;
+  const loopId = loop.id as string;
+  await saveLoopAnswers(loopId, answers);
+
+  return loopId;
 }
 
 export async function saveLoopAnswers(loopId: string, answers: AnswerMap) {
   const supabase = createSupabaseAdminClient();
 
   if (!supabase) {
+    const loop = await getLoop(loopId);
+    const questions = generateQuestions(loop.department, loop.templateId, loop.goal);
+    await updateLocalLoopLogic({ loopId, answers, questionGroups: questions });
     return;
   }
 
@@ -276,29 +292,82 @@ export async function generateAndPersistLoopSpec(loopId: string) {
     }
   }
 
+  if (!supabase) {
+    await updateLocalLoopLogic({
+      loopId,
+      answers: workspace.answers,
+      questionGroups: workspace.questions,
+      generatedSpec: spec
+    });
+  }
+
   return {
     spec,
     artifacts
   };
 }
 
+export async function deleteLoop(loopId: string) {
+  const supabase = createSupabaseAdminClient();
+
+  if (!supabase) {
+    return unregisterLoopSpec(loopId);
+  }
+
+  const { error } = await supabase
+    .from("loops")
+    .delete()
+    .eq("id", loopId);
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
+}
+
 export async function getLoopGraph(loopId?: string): Promise<LoopGraph> {
   const workspace = await getWorkspace(loopId);
-  const { getStorageAdapter } = await import("../loopgraph-runtime/storage-resolver");
-  const storage = getStorageAdapter();
-  const [runs, cases] = await Promise.all([storage.listRuns(), storage.listCases()]);
-  const hiddenLaborByLoopId = await loadHiddenLaborByLoopId(workspace.loops.map((loop) => loop.id));
+  return workspace.graph;
+}
 
-  return buildLoopGraph({
-    organization: workspace.organization,
-    loops: workspace.loops,
-    reviews: workspace.runBundle.review ? [workspace.runBundle.review] : [],
-    improvements: workspace.improvements,
-    selectedNodeId: workspace.graph.view.selectedNodeId,
-    sourceLabel: workspace.graph.sourceLabel,
-    hiddenLaborByLoopId,
-    runs,
-    cases
+export async function getSemanticTopology(loopId?: string): Promise<SemanticTopology> {
+  if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY !== "true") {
+    const registeredSpecs = await getRegisteredLoopSpecs();
+    if (registeredSpecs.length > 0) {
+      const selectedSpec =
+        registeredSpecs.find((item) => item.spec.metadata.id === loopId) ?? registeredSpecs[0];
+      return buildSemanticTopology({
+        loopSpecs: registeredSpecs.map((item) => withSourcePathLabel(item.spec, item.sourcePath)),
+        options: {
+          companyName: "Local Loopgraph workspace",
+          sourceLabel: "Registered LoopSpecs",
+          selectedLoopId: selectedSpec.spec.metadata.id,
+          generatedAt: new Date(0).toISOString()
+        }
+      });
+    }
+  }
+
+  const workspace = await getWorkspace(loopId);
+  const liveLoops = workspace.loops.filter((loop) => loop.source !== "demo_catalog");
+  const loopsForTopology = liveLoops.length > 0 ? liveLoops : [workspace.loop];
+  const loopSpecs = loopsForTopology.flatMap((loop) => coreSpecFromLoopRecord(loop));
+  const selectedLoopId = loopSpecs.some((spec) => spec.metadata.id === workspace.loop.id)
+    ? workspace.loop.id
+    : loopSpecs[0]?.metadata.id;
+
+  return buildSemanticTopology({
+    loopSpecs,
+    traces: selectedLoopId ? [traceFromWorkspaceRun(workspace, selectedLoopId)] : [],
+    metrics: selectedLoopId ? metricInputsFromWorkspace(workspace, selectedLoopId) : [],
+    improvements: improvementInputsFromWorkspace(workspace.improvements),
+    options: {
+      companyName: workspace.organization.name,
+      sourceLabel: workspace.graph.sourceLabel ?? "Workspace",
+      selectedLoopId,
+      generatedAt: new Date(0).toISOString()
+    }
   });
 }
 
@@ -628,22 +697,14 @@ async function ensureQuestion(
   return data.id as string;
 }
 
-function mergeImprovements(databaseItems: ImprovementItem[], traceItems: ImprovementItem[]) {
-  const byId = new Map<string, ImprovementItem>();
-  for (const item of [...traceItems, ...databaseItems]) {
-    byId.set(item.id, item);
-  }
-  return [...byId.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-}
-
 async function selectLocalWorkspace(selectedLoopId?: string) {
   if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY === "true") {
-    return selectDemoWorkspace(selectedLoopId);
+    return await selectDemoWorkspace(selectedLoopId);
   }
 
   const registeredSpecs = await getRegisteredLoopSpecs();
   if (registeredSpecs.length === 0) {
-    return selectDemoWorkspace(selectedLoopId);
+    return await selectDemoWorkspace(selectedLoopId);
   }
 
   const organization = {
@@ -653,39 +714,23 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   const loops = registeredSpecs.map((item) => loopRecordFromRegisteredSpec(item, organization.id));
   const selectedLoop = loops.find((item) => item.id === selectedLoopId) ?? loops[0];
   const selectedSpec = registeredSpecs.find((item) => item.spec.metadata.id === selectedLoop.id) ?? registeredSpecs[0];
-  const answers = createDefaultAnswers(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
+  const storedAnswers = getStudioAnswers(selectedSpec.spec);
+  const answers = {
+    ...createDefaultAnswers(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal),
+    ...storedAnswers
+  };
   const questions = generateQuestions(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
   const progress = questionProgress(questions, answers);
-  const spec = v1alpha1ToFlat(selectedSpec.spec);
-  const hiddenLaborByLoopId = await loadHiddenLaborByLoopId(loops.map((loop) => loop.id));
+  const spec = getStudioGeneratedSpec(selectedSpec.spec) ??
+    (Object.keys(storedAnswers).length > 0 ? generateLoopSpec(selectedLoop, answers) : v1alpha1ToFlat(selectedSpec.spec));
+  const graph = buildGraphFromRegisteredSpecs({
+    organization,
+    specs: registeredSpecs,
+    selectedNodeId: `loop:${selectedLoop.id}`
+  });
   const storage = getStorageAdapter();
   const improvements = await loadImprovementsFromStorage(storage, selectedLoop.id);
-  const managementRollup = await loadLatestManagementRollup();
-  const managementReview = managementRollup
-    ? {
-        period: managementRollup.weekKey,
-        summary: `Persisted management rollup with ${managementRollup.openCases} open case(s).`,
-        risks: managementRollup.decisionsNeeded,
-        decisions: managementRollup.decisionsNeeded,
-        bottlenecks: managementRollup.plans.map((plan) => plan.summary),
-        recommendations: managementRollup.plans.flatMap((plan) => plan.plan.monitoringPlan.successCriteria)
-      }
-    : summarizeManagement(loops, buildLoopGraph({
-        organization,
-        loops,
-        reviews: [],
-        improvements,
-        hiddenLaborByLoopId
-      }));
-  const graph = buildLoopGraph({
-    organization,
-    loops,
-    reviews: [],
-    improvements,
-    selectedNodeId: `loop:${selectedLoop.id}`,
-    sourceLabel: "Local LoopSpecs",
-    hiddenLaborByLoopId
-  });
+  const managementReview = await managementReviewForWorkspace(loops, graph, improvements);
 
   return {
     organization,
@@ -711,115 +756,21 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   };
 }
 
-function createEmptyWorkspace(selectedLoopId?: string): WorkspaceData {
-  const organization = { id: "empty_workspace", name: "Empty workspace" };
-  const loop: LoopRecord = {
-    id: "loop_unconfigured",
-    organizationId: organization.id,
-    templateId: "custom-unconfigured",
-    name: "Create your first loop",
-    department: "custom",
-    loopType: "unconfigured",
-    status: "draft",
-    autonomyLevel: "draft_for_review",
-    owner: "Workspace owner",
-    goal: "Create your first loop from Templates or New Loop.",
-    targetMetric: "—",
-    businessOutcome: "—",
-    cadence: "—",
-    specGenerated: false,
-    implementationGenerated: false,
-    openReviews: 0,
-    improvementItems: 0
-  };
-  const selectedLoop = loop;
-  const answers = createDefaultAnswers(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
-  const questions = generateQuestions(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
-  const progress = questionProgress(questions, answers);
-  const spec = generateLoopSpec(selectedLoop, answers);
-  const graph = buildLoopGraph({
-    organization,
-    loops: [],
-    reviews: [],
-    improvements: [],
-    selectedNodeId: selectedLoopId ? `loop:${selectedLoopId}` : undefined,
-    sourceLabel: "Empty workspace"
-  });
-
-  return {
-    organization,
-    profile: {
-      id: "profile_empty",
-      email: "operator@example.com",
-      fullName: "Loop Operator",
-      role: "owner"
-    },
-    templates: getDepartmentTemplates(),
-    loops: [],
-    loop: selectedLoop,
-    answers,
-    questions,
-    progress,
-    spec,
-    artifacts: generateImplementationArtifacts(spec),
-    runBundle: simulateLoopRun(selectedLoop),
-    improvements: [],
-    managementReview: {
-      period: "This week",
-      summary: "No loops in Supabase yet. Create a loop or run `npm run seed:design-studio`.",
-      risks: [],
-      decisions: ["Create your first loop", "Run the Acme seed script for a demo workspace"],
-      bottlenecks: ["Empty workspace"],
-      recommendations: ["Use CLI simulate for code-first traces in .loopgraph/"]
-    },
-    metrics: summarizeMetrics(graph, selectedLoop.id),
-    graph
-  };
-}
-
-async function loadHiddenLaborByLoopId(loopIds: string[]) {
-  const storage = getStorageAdapter();
-  const allRuns = await storage.listRuns();
-  const laborByLoop: Record<string, Partial<import("./types").HiddenLaborMetrics>> = {};
-
-  for (const loopId of loopIds) {
-    const runs = filterRunsForLoop(allRuns, loopId);
-    for (const run of runs) {
-      const trace = await storage.getRun(run.id);
-      if (!trace) continue;
-      const labor = hiddenLaborFromTrace(trace);
-      if (labor) {
-        laborByLoop[loopId] = labor;
-        break;
-      }
-    }
-  }
-
-  return laborByLoop;
-}
-
 async function selectDemoWorkspace(selectedLoopId?: string) {
   const workspace = getDemoWorkspace();
   const loop = workspace.loops.find((item) => item.id === selectedLoopId) ?? workspace.loop;
   const storage = getStorageAdapter();
   const traceImprovements = await loadImprovementsFromStorage(storage, loop.id);
   const improvements = mergeImprovements(workspace.improvements, traceImprovements);
-  const managementRollup = await loadLatestManagementRollup();
+  const managementReview = await managementReviewForWorkspace(workspace.loops, workspace.graph, improvements);
 
-  if (loop.id === workspace.loop.id && improvements.length === workspace.improvements.length && !managementRollup) {
-    return workspace;
+  if (loop.id === workspace.loop.id && improvements.length === workspace.improvements.length) {
+    return {
+      ...workspace,
+      improvements,
+      managementReview
+    };
   }
-
-  const managementReview = managementRollup
-    ? {
-        period: managementRollup.weekKey,
-        summary: `Persisted management rollup with ${managementRollup.openCases} open case(s).`,
-        risks: managementRollup.decisionsNeeded,
-        decisions: managementRollup.decisionsNeeded,
-        bottlenecks: managementRollup.plans.map((plan) => plan.summary),
-        recommendations: managementRollup.plans.flatMap((plan) => plan.plan.monitoringPlan.successCriteria)
-      }
-    : workspace.managementReview;
 
   return {
     ...workspace,
@@ -835,6 +786,138 @@ async function selectDemoWorkspace(selectedLoopId?: string) {
       sourceLabel: workspace.graph.sourceLabel
     })
   };
+}
+
+function mergeImprovements(databaseItems: ImprovementItem[], traceItems: ImprovementItem[]) {
+  const byId = new Map<string, ImprovementItem>();
+  for (const item of [...traceItems, ...databaseItems]) {
+    byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+async function managementReviewForWorkspace(loops: LoopRecord[], graph: LoopGraph, _improvements: ImprovementItem[]) {
+  const rollup = await loadLatestManagementRollup();
+  if (rollup) {
+    return {
+      period: rollup.weekKey,
+      summary: `Persisted management rollup with ${rollup.openCases} open case(s).`,
+      risks: rollup.decisionsNeeded,
+      decisions: rollup.decisionsNeeded,
+      bottlenecks: rollup.plans.map((plan) => plan.summary),
+      recommendations: rollup.plans.flatMap((plan) => plan.plan.monitoringPlan.successCriteria)
+    };
+  }
+
+  return summarizeManagement(loops, graph);
+}
+
+function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSpec {
+  return {
+    ...spec,
+    metadata: {
+      ...spec.metadata,
+      labels: {
+        ...(spec.metadata.labels ?? {}),
+        sourcePath
+      }
+    }
+  };
+}
+
+function coreSpecFromLoopRecord(loop: LoopRecord): CoreLoopSpec[] {
+  try {
+    return [
+      createSpecFromTemplate(loop.templateId, {
+        id: loop.id,
+        name: loop.name,
+        goal: loop.goal,
+        ownerRole: loop.owner
+      })
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function traceFromWorkspaceRun(workspace: WorkspaceData, loopId: string): LoopRunTrace {
+  const run = workspace.runBundle.run;
+  const status = run.status === "completed"
+    ? "COMPLETED"
+    : run.status === "failed"
+      ? "FAILED_VALIDATION"
+      : "SIMULATING";
+
+  return {
+    id: run.id,
+    loopId,
+    loopSpecVersion: "workspace",
+    loopSpecHash: run.id,
+    mode: "simulate",
+    status,
+    trigger: {
+      type: run.triggerType,
+      source: "workspace",
+      event: run.triggerType,
+      eventId: run.id,
+      receivedAt: run.startedAt
+    },
+    idempotencyKey: run.id,
+    contextSnapshot: {
+      id: `${run.id}:context`,
+      loopId,
+      loopSpecVersion: "workspace",
+      createdAt: run.startedAt,
+      contentHash: run.id,
+      tokenEstimate: 0,
+      entries: []
+    },
+    inputs: [],
+    proposedActions: [],
+    preparedActions: [],
+    toolCalls: workspace.runBundle.steps.flatMap((step) =>
+      step.toolCalls.map((toolCall, index) => ({
+        id: `${step.id}:tool:${index + 1}`,
+        toolKey: String(toolCall.tool ?? step.stepName),
+        input: (toolCall.input as Record<string, unknown>) ?? {},
+        output: toolCall.output,
+        status: step.status === "failed" ? "failed" : "completed",
+        startedAt: step.startedAt,
+        completedAt: step.completedAt
+      }))
+    ),
+    policyDecisions: [],
+    verificationResults: [],
+    escalationCases: [],
+    humanReviews: [],
+    outputs: [],
+    metrics: [],
+    errors: run.error
+      ? [{ code: "workspace_run_error", message: run.error, at: run.completedAt ?? run.startedAt }]
+      : [],
+    startedAt: run.startedAt,
+    completedAt: run.completedAt
+  };
+}
+
+function metricInputsFromWorkspace(workspace: WorkspaceData, loopId: string): TopologyMetricInput[] {
+  return workspace.metrics.map((metric) => ({
+    id: metric.name,
+    loopId,
+    name: metric.name,
+    value: metric.value,
+    status: "active"
+  }));
+}
+
+function improvementInputsFromWorkspace(items: ImprovementItem[]): TopologyImprovementItem[] {
+  return items.map((item) => ({
+    id: item.id,
+    loopId: item.loopId,
+    title: item.title,
+    status: item.status,
+    failureMode: item.failureMode
+  }));
 }
 
 function mapRun(row: Record<string, unknown>): LoopRun {

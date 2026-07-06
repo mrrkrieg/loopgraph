@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { LoopGraphView } from "@/components/loop-graph-view";
+import { buildTemplateLoopGraph } from "@/lib/loop-engineering-builder/loop-graph-visualization";
 import type { DepartmentTemplate, LoopTemplate } from "@/lib/loop-engineering-builder/types";
 
 type RuntimeFilter = "all" | LoopTemplate["runtimeLevel"];
@@ -10,6 +12,10 @@ export function TemplateLibrary({ departments }: { departments: DepartmentTempla
   const templates = useMemo(
     () => departments.flatMap((department) => department.commonLoops.map((template) => ({ ...template, departmentName: department.name }))),
     [departments]
+  );
+  const graphByTemplateId = useMemo(
+    () => new Map(templates.map((template) => [template.id, buildTemplateLoopGraph(template)])),
+    [templates]
   );
   const [department, setDepartment] = useState("all");
   const [runtime, setRuntime] = useState<RuntimeFilter>("all");
@@ -70,6 +76,7 @@ export function TemplateLibrary({ departments }: { departments: DepartmentTempla
         <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {filteredTemplates.map((template) => {
             const selected = selectedTemplate?.id === template.id;
+            const previewGraph = graphByTemplateId.get(template.id);
             return (
               <button
                 className={`rounded-md border p-4 text-left transition ${
@@ -90,6 +97,16 @@ export function TemplateLibrary({ departments }: { departments: DepartmentTempla
                     {runtimeLabel(template.runtimeLevel)}
                   </span>
                 </div>
+                {previewGraph ? (
+                  <div className="mt-3 h-24 overflow-hidden rounded-md">
+                    <LoopGraphView
+                      appearance={selected ? "onDark" : "light"}
+                      graph={previewGraph}
+                      interactive={false}
+                      variant="mini"
+                    />
+                  </div>
+                ) : null}
                 <p className={`mt-2 line-clamp-3 text-sm leading-6 ${selected ? "text-white/75" : "text-ink/60"}`}>
                   {template.description}
                 </p>
@@ -108,6 +125,15 @@ export function TemplateLibrary({ departments }: { departments: DepartmentTempla
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Template detail</div>
             <h2 className="mt-2 text-xl font-semibold">{selectedTemplate.name}</h2>
             <p className="mt-2 text-sm leading-6 text-ink/65">{selectedTemplate.description}</p>
+            {graphByTemplateId.get(selectedTemplate.id) ? (
+              <div className="mt-4 overflow-hidden rounded-md border border-line bg-paper">
+                <LoopGraphView
+                  graph={graphByTemplateId.get(selectedTemplate.id)!}
+                  showToggles
+                  variant="template"
+                />
+              </div>
+            ) : null}
             <div className="mt-4 grid gap-2 text-sm">
               <Detail label="Maturity" value={runtimeLabel(selectedTemplate.runtimeLevel)} />
               <Detail label="Department" value={selectedTemplate.departmentName} />

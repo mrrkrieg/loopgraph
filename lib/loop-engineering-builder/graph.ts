@@ -210,28 +210,32 @@ export function buildGraphFromRegisteredSpecs(input: {
 }
 
 export function createCatalogLoopRecords(organizationId = "org_demo"): LoopRecord[] {
-  return getTemplateCatalog().map((template, index) => ({
-    id: catalogLoopId(template.id),
-    organizationId,
-    templateId: template.id,
-    name: template.name,
-    department: template.department,
-    loopType: template.loopType,
-    status: index % 9 === 0 ? "needs_attention" : "active",
-    autonomyLevel: template.runtimeLevel === "runnable" ? "execute_with_approval" : "draft_for_review",
-    owner: template.defaultOwners?.[0] ?? "Department owner",
-    goal: template.goal ?? `${template.name} improves ${template.primaryMetric?.toLowerCase() ?? "quality-adjusted output"} with reviewable evidence.`,
-    targetMetric: template.primaryMetric ?? template.defaultMetrics?.[0] ?? "Quality-adjusted output",
-    businessOutcome: template.businessOutcome ?? "A measurable business outcome improves while hidden labor remains visible.",
-    cadence: template.department === "management" ? "Weekly review" : "Weekly",
-    specGenerated: template.runtimeLevel !== "catalog",
-    implementationGenerated: template.runtimeLevel === "runnable",
-    lastRunAt: index % 4 === 0 ? "2026-06-22T17:00:00.000Z" : undefined,
-    openReviews: template.runtimeLevel === "runnable" || index % 7 === 0 ? 1 : 0,
-    improvementItems: index % 5 === 0 ? 1 : 0,
-    source: "demo_catalog",
-    runtimeLevel: template.runtimeLevel
-  }));
+  return getTemplateCatalog().map((template) => {
+    const operationalState = catalogOperationalState(template);
+
+    return {
+      id: catalogLoopId(template.id),
+      organizationId,
+      templateId: template.id,
+      name: template.name,
+      department: template.department,
+      loopType: template.loopType,
+      status: operationalState.status,
+      autonomyLevel: template.runtimeLevel === "runnable" ? "execute_with_approval" : "draft_for_review",
+      owner: template.defaultOwners?.[0] ?? "Department owner",
+      goal: template.goal ?? `${template.name} improves ${template.primaryMetric?.toLowerCase() ?? "quality-adjusted output"} with reviewable evidence.`,
+      targetMetric: template.primaryMetric ?? template.defaultMetrics?.[0] ?? "Quality-adjusted output",
+      businessOutcome: template.businessOutcome ?? "A measurable business outcome improves while hidden labor remains visible.",
+      cadence: template.department === "management" ? "Weekly review" : "Weekly",
+      specGenerated: template.runtimeLevel !== "catalog",
+      implementationGenerated: template.runtimeLevel === "runnable",
+      lastRunAt: operationalState.lastRunAt,
+      openReviews: operationalState.openReviews,
+      improvementItems: operationalState.improvementItems,
+      source: "demo_catalog",
+      runtimeLevel: template.runtimeLevel
+    };
+  });
 }
 
 function departmentNode(department: DepartmentKey, loops: LoopRecord[]): LoopGraphNode {
@@ -643,6 +647,56 @@ export function createCatalogImprovementItems(loops: LoopRecord[]): ImprovementI
       owner: loop.owner,
       createdAt: "2026-06-22T16:00:00.000Z"
     }));
+}
+
+function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>[number]) {
+  const reviewHeavyTemplateIds = new Set([
+    "github-issue-triage",
+    "strategic-account-escalation",
+    "customer_success-renewal_risk",
+    "engineering-release_readiness",
+    "operations_finance-approval_bottleneck",
+    "operations_finance-forecast_variance",
+    "hr-retention_signal",
+    "hr-performance_review_prep",
+    "legal_security-contract_triage",
+    "legal_security-policy_drift",
+    "legal_security-access_review",
+    "legal_security-incident_evidence",
+    "management-review",
+    "management-decision_memo",
+    "management-resource_allocation"
+  ]);
+  const improvementTemplateIds = new Set([
+    "marketing-channel_allocation",
+    "marketing-landing_page_conversion",
+    "product-feedback_to_problem",
+    "product-bug_cluster_to_problem",
+    "customer_success-support_triage",
+    "sales-crm_hygiene",
+    "engineering-qa_checklist",
+    "engineering-incident_learning",
+    "operations_finance-vendor_review",
+    "hr-manager_coaching",
+    "legal_security-security_questionnaire",
+    "management-department_loop_review",
+    "management-improvement"
+  ]);
+  const attentionTemplateIds = new Set([
+    "customer_success-renewal_risk",
+    "engineering-release_readiness",
+    "operations_finance-forecast_variance",
+    "hr-retention_signal",
+    "legal_security-policy_drift",
+    "management-department_loop_review"
+  ]);
+
+  return {
+    status: attentionTemplateIds.has(template.id) ? "needs_attention" : "active",
+    lastRunAt: template.runtimeLevel === "catalog" ? undefined : "2026-06-22T17:00:00.000Z",
+    openReviews: reviewHeavyTemplateIds.has(template.id) ? 1 : 0,
+    improvementItems: improvementTemplateIds.has(template.id) ? 1 : 0
+  };
 }
 
 function catalogLoopId(templateId: string) {

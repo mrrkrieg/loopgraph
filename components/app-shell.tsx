@@ -118,12 +118,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </header>
         <main
-          className={
+          className={`${
             isTopology
               ? "flex max-w-none flex-col gap-3 overflow-hidden px-3 py-3 sm:px-4 lg:h-full lg:min-h-0"
               : "mx-auto max-w-7xl px-5 py-6 sm:px-8"
-          }
+          }`}
         >
+          {!process.env.NEXT_PUBLIC_SUPABASE_URL && (
+            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+              Demo mode — data resets on refresh. Configure Supabase env vars for Design Studio persistence.
+            </div>
+          )}
           {children}
         </main>
       </div>

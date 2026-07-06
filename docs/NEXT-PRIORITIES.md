@@ -2,7 +2,7 @@
 
 Last updated: 2026-06-30 (post launch-plan implementation on `loopgraph/canvas-first`).
 
-**Full sequencing, effort estimates, Raisi/package tracks:** [BUILD-PLAN.md](./BUILD-PLAN.md)
+**Full sequencing, effort estimates, Raisi/package tracks:** [BUILD-PLAN.md](./BUILD-PLAN.md) · **M4 package extraction:** [M4-PACKAGE-PLAN.md](./M4-PACKAGE-PLAN.md)
 
 ## Shipped in v1.1.0-alpha
 

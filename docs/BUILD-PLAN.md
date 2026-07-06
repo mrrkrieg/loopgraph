@@ -17,7 +17,7 @@ Comprehensive plan for what still needs to be built — platform completion, con
 1. ~~**Ship confidence**~~ — M1 shipped (CI matrix + governance tests)
 2. ~~**Close the learning loop in UI**~~ — M2 shipped (improvements + management rollup)
 3. ~~**One new hero example**~~ — M3 shipped (`support-ticket-triage`)
-4. **Package extraction** — private consumable library for Raisi (before public npm)
+4. **Package extraction** — see [M4-PACKAGE-PLAN.md](./M4-PACKAGE-PLAN.md) (next)
 5. **Raisi loop specs + adapters** — three product loops on top of the library
 
 ### Milestones M1–M3 (shipped 2026-06-30)
