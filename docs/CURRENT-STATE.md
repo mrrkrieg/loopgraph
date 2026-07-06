@@ -51,11 +51,14 @@ CLI loads `.env` via `scripts/load-env.ts` (optional keys for execute only).
 
 - **GitHub Issue Triage** — 4 fixtures + expected trace summaries
 - **Strategic Account Escalation** — 5 fixtures + expected trace summaries
+- **Support Ticket Triage** — 5 fixtures + expected trace summaries
+- **Management Review** — weekly open-cases fixture
 - Snapshot tests lock deterministic behavior
 
 ### Tests & CI
 
-- **54+ vitest tests** (includes run-filters, execute-path, graph hidden-labor)
+- **70 vitest tests** (governance path, support-ticket triage, full fixture snapshots)
+- CI runs all 14 hero fixture simulates + validate for 4 examples
 - `npm run typecheck`, `npm run build` pass
 
 ### Web UI (governance path on file storage)
@@ -93,7 +96,9 @@ loopgraph.yaml
 
 ---
 
-## Known gaps (see NEXT-PRIORITIES.md)
+## Known gaps
+
+See [BUILD-PLAN.md](./BUILD-PLAN.md) (comprehensive) and [NEXT-PRIORITIES.md](./NEXT-PRIORITIES.md) (weekly punch list).
 
 - UI / Design Studio parity incomplete
 - Live execute (GitHub context + writes) not end-to-end

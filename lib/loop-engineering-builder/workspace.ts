@@ -20,6 +20,8 @@ import { v1alpha1ToFlat } from "../loopgraph-core/studio-adapter";
 import { getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
 import { filterRunsForLoop } from "../loopgraph-runtime/run-filters";
 import { hiddenLaborFromTrace } from "../loopgraph-runtime/trace-labor";
+import { loadImprovementsFromStorage } from "../loopgraph-runtime/improvement-loader";
+import { loadLatestManagementRollup } from "../loopgraph-runtime/management-rollup";
 import type {
   DepartmentKey,
   GeneratedArtifact,
@@ -87,12 +89,14 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
   const artifacts = await getArtifacts(supabase, selectedLoop.id, spec);
   const runBundle = await getLatestRunBundle(supabase, selectedLoop);
   const improvements = await getImprovements(supabase, selectedLoop.id);
+  const traceImprovements = await loadImprovementsFromStorage(getStorageAdapter(), selectedLoop.id);
+  const mergedImprovements = mergeImprovements(improvements, traceImprovements);
   const reviews = runBundle.review ? [runBundle.review] : [];
   const graph = buildLoopGraph({
     organization,
     loops,
     reviews,
-    improvements,
+    improvements: mergedImprovements,
     selectedNodeId: `loop:${selectedLoop.id}`,
     sourceLabel: "Supabase",
     hiddenLaborByLoopId: await loadHiddenLaborByLoopId(loops.map((loop) => loop.id))
@@ -115,7 +119,7 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     spec,
     artifacts,
     runBundle,
-    improvements,
+    improvements: mergedImprovements,
     managementReview: summarizeManagement(loops, graph),
     metrics: summarizeMetrics(graph, selectedLoop.id),
     graph
@@ -280,7 +284,22 @@ export async function generateAndPersistLoopSpec(loopId: string) {
 
 export async function getLoopGraph(loopId?: string): Promise<LoopGraph> {
   const workspace = await getWorkspace(loopId);
-  return workspace.graph;
+  const { getStorageAdapter } = await import("../loopgraph-runtime/storage-resolver");
+  const storage = getStorageAdapter();
+  const [runs, cases] = await Promise.all([storage.listRuns(), storage.listCases()]);
+  const hiddenLaborByLoopId = await loadHiddenLaborByLoopId(workspace.loops.map((loop) => loop.id));
+
+  return buildLoopGraph({
+    organization: workspace.organization,
+    loops: workspace.loops,
+    reviews: workspace.runBundle.review ? [workspace.runBundle.review] : [],
+    improvements: workspace.improvements,
+    selectedNodeId: workspace.graph.view.selectedNodeId,
+    sourceLabel: workspace.graph.sourceLabel,
+    hiddenLaborByLoopId,
+    runs,
+    cases
+  });
 }
 
 export async function startLoopRun(loopId: string) {
@@ -609,6 +628,14 @@ async function ensureQuestion(
   return data.id as string;
 }
 
+function mergeImprovements(databaseItems: ImprovementItem[], traceItems: ImprovementItem[]) {
+  const byId = new Map<string, ImprovementItem>();
+  for (const item of [...traceItems, ...databaseItems]) {
+    byId.set(item.id, item);
+  }
+  return [...byId.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
 async function selectLocalWorkspace(selectedLoopId?: string) {
   if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY === "true") {
     return selectDemoWorkspace(selectedLoopId);
@@ -630,12 +657,35 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   const questions = generateQuestions(selectedLoop.department, selectedLoop.templateId, selectedLoop.goal);
   const progress = questionProgress(questions, answers);
   const spec = v1alpha1ToFlat(selectedSpec.spec);
-  const graph = buildGraphFromRegisteredSpecs({
-    organization,
-    specs: registeredSpecs,
-    selectedNodeId: `loop:${selectedLoop.id}`
-  });
   const hiddenLaborByLoopId = await loadHiddenLaborByLoopId(loops.map((loop) => loop.id));
+  const storage = getStorageAdapter();
+  const improvements = await loadImprovementsFromStorage(storage, selectedLoop.id);
+  const managementRollup = await loadLatestManagementRollup();
+  const managementReview = managementRollup
+    ? {
+        period: managementRollup.weekKey,
+        summary: `Persisted management rollup with ${managementRollup.openCases} open case(s).`,
+        risks: managementRollup.decisionsNeeded,
+        decisions: managementRollup.decisionsNeeded,
+        bottlenecks: managementRollup.plans.map((plan) => plan.summary),
+        recommendations: managementRollup.plans.flatMap((plan) => plan.plan.monitoringPlan.successCriteria)
+      }
+    : summarizeManagement(loops, buildLoopGraph({
+        organization,
+        loops,
+        reviews: [],
+        improvements,
+        hiddenLaborByLoopId
+      }));
+  const graph = buildLoopGraph({
+    organization,
+    loops,
+    reviews: [],
+    improvements,
+    selectedNodeId: `loop:${selectedLoop.id}`,
+    sourceLabel: "Local LoopSpecs",
+    hiddenLaborByLoopId
+  });
 
   return {
     organization,
@@ -654,30 +704,10 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
     spec,
     artifacts: generateImplementationArtifacts(spec),
     runBundle: simulateLoopRun(selectedLoop),
-    improvements: [],
-    managementReview: summarizeManagement(loops, buildLoopGraph({
-      organization,
-      loops,
-      reviews: [],
-      improvements: [],
-      hiddenLaborByLoopId
-    })),
-    metrics: summarizeMetrics(buildLoopGraph({
-      organization,
-      loops,
-      reviews: [],
-      improvements: [],
-      hiddenLaborByLoopId
-    }), selectedLoop.id),
-    graph: buildLoopGraph({
-      organization,
-      loops,
-      reviews: [],
-      improvements: [],
-      selectedNodeId: `loop:${selectedLoop.id}`,
-      sourceLabel: "Local LoopSpecs",
-      hiddenLaborByLoopId
-    })
+    improvements,
+    managementReview,
+    metrics: summarizeMetrics(graph, selectedLoop.id),
+    graph
   };
 }
 
@@ -768,22 +798,39 @@ async function loadHiddenLaborByLoopId(loopIds: string[]) {
   return laborByLoop;
 }
 
-function selectDemoWorkspace(selectedLoopId?: string) {
+async function selectDemoWorkspace(selectedLoopId?: string) {
   const workspace = getDemoWorkspace();
   const loop = workspace.loops.find((item) => item.id === selectedLoopId) ?? workspace.loop;
+  const storage = getStorageAdapter();
+  const traceImprovements = await loadImprovementsFromStorage(storage, loop.id);
+  const improvements = mergeImprovements(workspace.improvements, traceImprovements);
+  const managementRollup = await loadLatestManagementRollup();
 
-  if (loop.id === workspace.loop.id) {
+  if (loop.id === workspace.loop.id && improvements.length === workspace.improvements.length && !managementRollup) {
     return workspace;
   }
+
+  const managementReview = managementRollup
+    ? {
+        period: managementRollup.weekKey,
+        summary: `Persisted management rollup with ${managementRollup.openCases} open case(s).`,
+        risks: managementRollup.decisionsNeeded,
+        decisions: managementRollup.decisionsNeeded,
+        bottlenecks: managementRollup.plans.map((plan) => plan.summary),
+        recommendations: managementRollup.plans.flatMap((plan) => plan.plan.monitoringPlan.successCriteria)
+      }
+    : workspace.managementReview;
 
   return {
     ...workspace,
     loop,
+    improvements,
+    managementReview,
     graph: buildLoopGraph({
       organization: workspace.organization,
       loops: workspace.loops,
       reviews: workspace.runBundle.review ? [workspace.runBundle.review] : [],
-      improvements: workspace.improvements,
+      improvements,
       selectedNodeId: `loop:${loop.id}`,
       sourceLabel: workspace.graph.sourceLabel
     })

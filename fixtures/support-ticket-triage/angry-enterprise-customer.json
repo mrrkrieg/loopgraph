@@ -1,0 +1,8 @@
+{
+  "eventId": "support_evt_angry_001",
+  "simulatedAt": "2026-06-27T14:15:00.000Z",
+  "ticket": { "current": { "body": "This is the third outage this week. We need an executive callback immediately." } },
+  "account": { "id": "acct_support_enterprise", "name": "Angry Enterprise", "segment": "enterprise", "renewalDaysRemaining": 20 },
+  "incident": { "category": "service_outage", "severity": "P1" },
+  "businessImpact": { "renewalRisk": "high", "summary": "Angry enterprise customer during outage" }
+}

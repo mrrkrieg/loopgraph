@@ -334,8 +334,9 @@ Then open:
 | Strategic account runs | `/loops/strategic-account-escalation/runs` |
 | This run's detail | `/loops/strategic-account-escalation/runs/run_a75f60f5d6d9121e` |
 | Review UI | `/loops/strategic-account-escalation/reviews?runId=run_a75f60f5d6d9121e` |
+| Topology map | `/topology?node=loop:catalog_strategic-account-escalation` |
 
-The UI reads the same `.loopgraph/` files the CLI writes.
+The UI reads the same `.loopgraph/` files the CLI writes. On Topology, use the Inspector **Review pending** and **Open case** actions after selecting the Strategic Account Escalation loop. See [topology-guide.md](./topology-guide.md).
 
 ---
 

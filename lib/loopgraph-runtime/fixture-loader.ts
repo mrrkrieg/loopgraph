@@ -13,6 +13,7 @@ export type SimulationFixture = {
   incidents?: Record<string, unknown>;
   businessImpact?: Record<string, unknown>;
   usage_30d?: Record<string, unknown>;
+  cases?: Array<Record<string, unknown>>;
   expectedAssessment?: Record<string, unknown>;
   contextOverrides?: Record<string, unknown>;
 };

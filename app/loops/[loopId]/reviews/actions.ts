@@ -56,6 +56,8 @@ export async function submitHumanReviewAction(formData: FormData) {
   revalidatePath(`/loops/${loopId}/runs`);
   revalidatePath(`/loops/${loopId}/runs/${runId}`);
   revalidatePath(`/loops/${loopId}/reviews`);
+  revalidatePath(`/loops/${loopId}/improvements`);
+  revalidatePath("/management");
 
   const statusParam = decision === "approved" ? "&success=approved" : "";
   redirect(`/loops/${loopId}/reviews?runId=${runId}${statusParam}`);

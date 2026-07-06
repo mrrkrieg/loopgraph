@@ -77,4 +77,40 @@ describe("Loopgraph topology", () => {
     expect(graph.edges.some((edge) => edge.kind === "escalates_to")).toBe(true);
     expect(graph.edges.some((edge) => edge.kind === "improves")).toBe(true);
   });
+
+  it("overlays runtime cases and traces onto the operating map", () => {
+    const workspace = getDemoWorkspace();
+    const loop = workspace.loops.find((item) => item.templateId === "strategic-account-escalation");
+    expect(loop).toBeTruthy();
+
+    const graph = buildLoopGraph({
+      organization: workspace.organization,
+      loops: workspace.loops,
+      selectedNodeId: loop ? `loop:${loop.id}` : undefined,
+      runs: [
+        {
+          id: "run_test_1",
+          loopId: "strategic-account-escalation",
+          status: "WAITING_FOR_REVIEW"
+        }
+      ],
+      cases: [
+        {
+          id: "case_test_1",
+          sourceLoopId: "strategic-account-escalation",
+          severity: "P1",
+          status: "open",
+          summary: "Enterprise outage near renewal"
+        }
+      ]
+    });
+
+    expect(graph.nodes.some((node) => node.kind === "trace")).toBe(true);
+    expect(graph.nodes.some((node) => node.kind === "escalation_case")).toBe(true);
+    expect(graph.edges.some((edge) => edge.kind === "writes_trace_to")).toBe(true);
+    expect(graph.edges.some((edge) => edge.kind === "reports_to")).toBe(true);
+    if (loop) {
+      expect(graph.edges.some((edge) => edge.source === `loop:${loop.id}` && edge.kind === "escalates_to")).toBe(true);
+    }
+  });
 });

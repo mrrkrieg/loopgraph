@@ -135,7 +135,9 @@ export type LoopGraphNodeKind =
   | "human_owner"
   | "review"
   | "metric"
-  | "improvement";
+  | "improvement"
+  | "escalation_case"
+  | "trace";
 
 export type LoopGraphEdgeKind =
   | "observes"
@@ -144,7 +146,9 @@ export type LoopGraphEdgeKind =
   | "owned_by"
   | "measured_by"
   | "rolls_up_to"
-  | "improves";
+  | "improves"
+  | "writes_trace_to"
+  | "reports_to";
 
 export type LoopGraphNode = {
   id: string;
@@ -300,6 +304,7 @@ export type ImprovementItem = {
   status: "open" | "in_progress" | "done";
   owner: string;
   createdAt: string;
+  sourceRunId?: string;
 };
 
 export type WorkspaceData = {

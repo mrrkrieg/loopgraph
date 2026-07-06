@@ -183,6 +183,36 @@ const githubIssueTriageTemplate: LoopTemplate = {
   ]
 };
 
+const supportTicketTriageTemplate: LoopTemplate = {
+  id: "support-ticket-triage",
+  department: "customer_success",
+  loopType: "support_triage",
+  runtimeLevel: "runnable",
+  name: "Support Ticket Triage",
+  description:
+    "Classify inbound support tickets from Intercom or similar systems, draft responses, and escalate high-risk cases with separate customer-facing approval.",
+  goal: "Route support volume quickly while escalating revenue and outage risk with evidence-backed cases.",
+  businessOutcome: "Customers get accurate responses faster; high-risk tickets reach the right owner without unsafe auto-replies.",
+  primaryMetric: "Time to first response",
+  secondaryMetrics: ["Escalation accuracy", "Customer-facing review minutes", "Duplicate ticket rate"],
+  observes: ["Support ticket", "CRM account", "Incident severity", "Renewal context", "Customer sentiment"],
+  requiredDataSources: ["Intercom or support inbox", "CRM", "Status page", "Account notes"],
+  routine: [
+    "Assemble ticket and account context",
+    "Assess severity, sentiment, and routing",
+    "Prepare internal task and customer draft separately",
+    "Require approval for customer-facing messages",
+    "Escalate renewal and outage risk to cases"
+  ],
+  verification: ["Ticket context is current", "Evidence is cited", "Customer-facing action is separately approved", "Escalation has owner and SLA"],
+  escalation: ["Enterprise outage", "Renewal risk", "Angry strategic customer", "Incomplete context"],
+  examplePath: "examples/support-ticket-triage",
+  fixturePaths: [
+    "fixtures/support-ticket-triage/high-priority-billing.json",
+    "fixtures/support-ticket-triage/angry-enterprise-customer.json"
+  ]
+};
+
 const strategicAccountEscalationTemplate: LoopTemplate = {
   id: "strategic-account-escalation",
   department: "customer_success",
@@ -236,7 +266,7 @@ const managementReviewTemplate: LoopTemplate = {
   verification: ["Evidence links to traces", "Decision owner is clear", "No raw customer data is overexposed", "Recommendations name tradeoffs"],
   escalation: ["Cross-functional ownership conflict", "High-risk loop degradation", "Capital allocation decision"],
   examplePath: "examples/management-review",
-  fixturePaths: []
+  fixturePaths: ["fixtures/management-review/open-cases-weekly.json"]
 };
 
 const departments: DepartmentTemplate[] = [
@@ -301,6 +331,7 @@ const departments: DepartmentTemplate[] = [
       "Loops for health monitoring, support triage, renewal risk, and proactive customer outreach.",
     commonLoops: [
       strategicAccountEscalationTemplate,
+      supportTicketTriageTemplate,
       loop("customer_success", "customer_health_risk", "Customer Health Risk Loop", "Detect risk from usage, sentiment, tickets, and renewal context."),
       loop("customer_success", "support_triage", "Support Triage Loop", "Classify, route, and draft support responses with human escalation."),
       loop("customer_success", "renewal_risk", "Renewal Risk Loop", "Surface renewal risk early and generate account intervention plans."),

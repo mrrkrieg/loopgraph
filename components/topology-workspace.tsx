@@ -15,22 +15,31 @@ import {
   type NodeChange,
   type NodeProps
 } from "@xyflow/react";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { InspectorActions } from "@/components/topology-inspector-actions";
 import type {
   LoopGraph,
   LoopGraphEdge,
   LoopGraphNode,
   LoopGraphNodeKind,
-  LoopHealthSummary
+  LoopHealthSummary,
+  LoopRecord
 } from "@/lib/loop-engineering-builder/types";
+import type { TopologyRuntimeSummary } from "@/lib/loopgraph-runtime/topology-runtime";
+import { runtimeForLoop } from "@/lib/loopgraph-runtime/topology-runtime";
 
 type TopologyWorkspaceProps = {
   graph: LoopGraph;
+  runtime: TopologyRuntimeSummary;
+  loops: LoopRecord[];
+  isEmptyWorkspace?: boolean;
 };
 
 type TopologyNodeData = LoopGraphNode & {
   selected: boolean;
+  latestRunStatus?: string;
 };
 
 const elk = new ELK();
@@ -44,7 +53,9 @@ const nodeWidthByKind: Record<LoopGraphNodeKind, number> = {
   human_owner: 150,
   review: 170,
   metric: 150,
-  improvement: 180
+  improvement: 180,
+  escalation_case: 200,
+  trace: 180
 };
 
 const nodeHeightByKind: Record<LoopGraphNodeKind, number> = {
@@ -56,14 +67,16 @@ const nodeHeightByKind: Record<LoopGraphNodeKind, number> = {
   human_owner: 54,
   review: 64,
   metric: 54,
-  improvement: 66
+  improvement: 66,
+  escalation_case: 72,
+  trace: 58
 };
 
 const nodeTypes = {
   topology: TopologyNode
 };
 
-export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
+export function TopologyWorkspace({ graph, runtime, loops, isEmptyWorkspace }: TopologyWorkspaceProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -78,9 +91,35 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
   const activeFilter = searchParams.get("department") ?? "all";
   const activeSearch = searchParams.get("q") ?? "";
   const attentionOnly = searchParams.get("attention") === "1";
+  const escalationsOnly = searchParams.get("escalations") === "1";
+  const failedOnly = searchParams.get("failed") === "1";
+  const highLaborOnly = searchParams.get("highLabor") === "1";
+  const loopsById = useMemo(
+    () => Object.fromEntries(loops.map((loop) => [loop.id, loop])),
+    [loops]
+  );
   const filteredGraphBase = useMemo(
-    () => filterGraph(graph, activeFilter, attentionOnly, activeSearch, requestedSelectedNodeId),
-    [activeFilter, activeSearch, attentionOnly, graph, requestedSelectedNodeId]
+    () =>
+      filterGraph(
+        graph,
+        activeFilter,
+        attentionOnly,
+        activeSearch,
+        requestedSelectedNodeId,
+        runtime,
+        { escalationsOnly, failedOnly, highLaborOnly }
+      ),
+    [
+      activeFilter,
+      activeSearch,
+      attentionOnly,
+      escalationsOnly,
+      failedOnly,
+      graph,
+      highLaborOnly,
+      requestedSelectedNodeId,
+      runtime
+    ]
   );
   const filteredGraph = useMemo(
     () => hideGraphNodes(filteredGraphBase, hiddenNodeIds),
@@ -114,7 +153,11 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
             position: topologyLayout[node.id] ?? { x: 0, y: 0 },
             data: {
               ...node,
-              selected: node.id === selectedNodeId
+              selected: node.id === selectedNodeId,
+              latestRunStatus:
+                typeof node.metadata?.loopId === "string"
+                  ? runtime.runsByLoopId[node.metadata.loopId]?.status
+                  : undefined
             }
           }))
         );
@@ -158,7 +201,11 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
           },
           data: {
             ...node,
-            selected: node.id === selectedNodeId
+            selected: node.id === selectedNodeId,
+            latestRunStatus:
+              typeof node.metadata?.loopId === "string"
+                ? runtime.runsByLoopId[node.metadata.loopId]?.status
+                : undefined
           }
         };
       });
@@ -172,7 +219,7 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [filteredGraph, selectedNodeId]);
+  }, [filteredGraph, runtime, selectedNodeId]);
 
   function updateParams(next: Record<string, string | undefined>) {
     const params = new URLSearchParams(searchParams.toString());
@@ -200,65 +247,104 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
   }
 
   return (
-    <div className="grid min-h-[calc(100vh-3rem)] gap-4 lg:grid-cols-[230px_minmax(620px,1fr)_290px]">
-      <aside className="order-2 rounded-md border border-line bg-white p-4 lg:order-none lg:min-h-[calc(100vh-3rem)]">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Snapshot</div>
-            <h1 className="mt-1 text-xl font-semibold">Loop Topology</h1>
+    <div className="grid min-h-0 flex-1 gap-3 overflow-hidden lg:grid-cols-[230px_minmax(0,1fr)_290px] lg:grid-rows-1">
+      <aside className="flex min-h-0 flex-col overflow-hidden rounded-md border border-line bg-white lg:max-h-full">
+        <div className="shrink-0 border-b border-line p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Snapshot</div>
+              <h1 className="mt-1 text-xl font-semibold">Loop Topology</h1>
+            </div>
+            <span className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-ink/60">
+              {filteredGraph.nodes.length}/{graph.nodes.length} nodes
+            </span>
           </div>
-          <span className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-ink/60">
-            {filteredGraph.nodes.length}/{graph.nodes.length} nodes
-          </span>
-        </div>
 
-        <div className="mt-5 grid gap-3">
-          <label className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
-            Department
-            <select
-              className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-ink"
-              value={activeFilter}
-              onChange={(event) => updateParams({ department: event.target.value })}
-            >
-              <option value="all">All departments</option>
-              {departmentOptions(graph.nodes).map((department) => (
-                <option key={department.value} value={department.value}>
-                  {department.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
-            Search
-            <input
-              className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-ink"
-              onChange={(event) => updateParams({ q: event.target.value })}
-              placeholder="Find loop, metric, owner"
-              value={activeSearch}
-            />
-          </label>
-          <label className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-sm font-medium">
-            Needs attention
-            <input
-              checked={attentionOnly}
-              className="h-4 w-4 accent-ink"
-              onChange={(event) => updateParams({ attention: event.target.checked ? "1" : undefined })}
-              type="checkbox"
-            />
-          </label>
-          {hiddenNodeIds.size > 0 ? (
-            <button
-              className="rounded-md border border-line px-3 py-2 text-left text-sm font-medium text-ink/70 hover:bg-paper hover:text-ink"
-              data-testid="restore-hidden-nodes"
-              onClick={() => updateParams({ hidden: undefined })}
-              type="button"
-            >
-              Restore removed nodes ({hiddenNodeIds.size})
-            </button>
+          {isEmptyWorkspace ? (
+            <div className="mt-5 rounded-md border border-dashed border-line bg-paper p-3 text-sm leading-6 text-ink/70">
+              <p>This workspace has no loops yet.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white" href="/loops/new">
+                  Create loop
+                </Link>
+                <span className="rounded-md border border-line px-3 py-2 text-xs font-semibold">
+                  Run: npm run loopgraph -- simulate examples/strategic-account-escalation
+                </span>
+              </div>
+            </div>
           ) : null}
+
+          <div className="mt-4 flex flex-wrap gap-2 text-xs">
+            <AttentionChip
+              active={attentionOnly}
+              label={`${runtime.attentionLoopIds.length} need attention`}
+              onClick={() => updateParams({ attention: attentionOnly ? undefined : "1" })}
+            />
+            <AttentionChip
+              active={escalationsOnly}
+              label={`${runtime.openCaseCount} open cases`}
+              onClick={() => updateParams({ escalations: escalationsOnly ? undefined : "1" })}
+            />
+            <AttentionChip
+              active={failedOnly}
+              label={`${runtime.failedRunCount} failed runs`}
+              onClick={() => updateParams({ failed: failedOnly ? undefined : "1" })}
+            />
+            <AttentionChip
+              active={highLaborOnly}
+              label="High hidden labor"
+              onClick={() => updateParams({ highLabor: highLaborOnly ? undefined : "1" })}
+            />
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
+              Department
+              <select
+                className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-ink"
+                value={activeFilter}
+                onChange={(event) => updateParams({ department: event.target.value })}
+              >
+                <option value="all">All departments</option>
+                {departmentOptions(graph.nodes).map((department) => (
+                  <option key={department.value} value={department.value}>
+                    {department.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
+              Search
+              <input
+                className="mt-2 w-full rounded-md border border-line bg-white px-3 py-2 text-sm font-medium normal-case tracking-normal text-ink"
+                onChange={(event) => updateParams({ q: event.target.value })}
+                placeholder="Find loop, metric, owner"
+                value={activeSearch}
+              />
+            </label>
+            <label className="flex items-center justify-between rounded-md border border-line px-3 py-2 text-sm font-medium">
+              Needs attention
+              <input
+                checked={attentionOnly}
+                className="h-4 w-4 accent-ink"
+                onChange={(event) => updateParams({ attention: event.target.checked ? "1" : undefined })}
+                type="checkbox"
+              />
+            </label>
+            {hiddenNodeIds.size > 0 ? (
+              <button
+                className="rounded-md border border-line px-3 py-2 text-left text-sm font-medium text-ink/70 hover:bg-paper hover:text-ink"
+                data-testid="restore-hidden-nodes"
+                onClick={() => updateParams({ hidden: undefined })}
+                type="button"
+              >
+                Restore removed nodes ({hiddenNodeIds.size})
+              </button>
+            ) : null}
+          </div>
         </div>
 
-        <div className="mt-6">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-3">
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Outline</div>
           <div className="mt-3 space-y-1">
             {filteredGraph.nodes
@@ -279,20 +365,20 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
                 </button>
               ))}
           </div>
-        </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
-          {legendItems.map((item) => (
-            <div className="flex items-center gap-2 rounded-md border border-line px-2 py-2" key={item.label}>
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
-              <span>{item.label}</span>
-            </div>
-          ))}
+          <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
+            {legendItems.map((item) => (
+              <div className="flex items-center gap-2 rounded-md border border-line px-2 py-2" key={item.label}>
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: item.color }} />
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </aside>
 
-      <section className="order-1 flex min-h-[680px] flex-col overflow-hidden rounded-md border border-line bg-white lg:order-none lg:min-h-[calc(100vh-3rem)]">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+      <section className="flex min-h-0 flex-col overflow-hidden rounded-md border border-line bg-white">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Canvas</div>
             <div className="text-lg font-semibold">Company Loopgraph</div>
@@ -304,8 +390,9 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
             <span className="rounded-md border border-line px-2 py-1">{isPending ? "Syncing" : "Ready"}</span>
           </div>
         </div>
-        <div className="min-h-0 flex-1">
+        <div className="relative min-h-0 flex-1">
           <ReactFlow
+            className="h-full w-full"
             edges={edges}
             elementsSelectable
             fitView
@@ -324,37 +411,47 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
             <Controls position="bottom-right" />
           </ReactFlow>
         </div>
-        <TraceRail graph={filteredGraph} health={selectedHealth} node={selectedNode} />
+        <TraceRail graph={filteredGraph} health={selectedHealth} node={selectedNode} runtime={runtime} />
       </section>
 
-      <aside className="order-3 rounded-md border border-line bg-white p-4 lg:order-none lg:min-h-[calc(100vh-3rem)]">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Inspector</div>
-            <h2 className="mt-1 text-xl font-semibold">{selectedNode?.label ?? "Loopgraph"}</h2>
-            <p className="mt-1 text-sm text-ink/60">{selectedNode?.subtitle ?? "Select a node to inspect it."}</p>
+      <aside className="flex min-h-0 flex-col overflow-hidden rounded-md border border-line bg-white lg:max-h-full">
+        <div className="shrink-0 border-b border-line p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Inspector</div>
+              <h2 className="mt-1 text-xl font-semibold">{selectedNode?.label ?? "Loopgraph"}</h2>
+              <p className="mt-1 text-sm text-ink/60">{selectedNode?.subtitle ?? "Select a node to inspect it."}</p>
+            </div>
+            <span className="rounded-md border border-line px-2 py-1 text-xs font-semibold">
+              {selectedNode?.kind.replace(/_/g, " ") ?? "node"}
+            </span>
           </div>
-          <span className="rounded-md border border-line px-2 py-1 text-xs font-semibold">
-            {selectedNode?.kind.replace(/_/g, " ") ?? "node"}
-          </span>
+          {selectedNode ? (
+            <div className="mt-4 rounded-md border border-line bg-paper p-3">
+              <button
+                className="w-full rounded-md border border-line bg-white px-3 py-2 text-left text-sm font-semibold text-ink hover:border-ink"
+                data-testid="remove-selected-node"
+                onClick={removeSelectedNode}
+                type="button"
+              >
+                Remove from topology
+              </button>
+              <p className="mt-2 text-xs leading-5 text-ink/55">
+                Hides this node and its connected edges from the current view. The loop data is not deleted.
+              </p>
+            </div>
+          ) : null}
         </div>
-        {selectedNode ? (
-          <div className="mt-4 rounded-md border border-line bg-paper p-3">
-            <button
-              className="w-full rounded-md border border-line bg-white px-3 py-2 text-left text-sm font-semibold text-ink hover:border-ink"
-              data-testid="remove-selected-node"
-              onClick={removeSelectedNode}
-              type="button"
-            >
-              Remove from topology
-            </button>
-            <p className="mt-2 text-xs leading-5 text-ink/55">
-              Hides this node and its connected edges from the current view. The loop data is not deleted.
-            </p>
-          </div>
-        ) : null}
 
-        <InspectorBody health={selectedHealth} node={selectedNode} />
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 pt-3">
+          <InspectorActions
+            graph={graph}
+            loopsById={loopsById}
+            node={selectedNode}
+            runtime={runtime}
+          />
+          <InspectorBody health={selectedHealth} node={selectedNode} />
+        </div>
       </aside>
     </div>
   );
@@ -363,11 +460,15 @@ export function TopologyWorkspace({ graph }: TopologyWorkspaceProps) {
 function TopologyNode({ data }: NodeProps<Node<TopologyNodeData>>) {
   const selected = data.selected;
   const isManagement = data.kind === "management_loop";
+  const isCase = data.kind === "escalation_case";
+  const isTrace = data.kind === "trace";
   return (
     <div
       className={`cursor-grab rounded-md border bg-white px-4 py-3 shadow-sm active:cursor-grabbing ${
         selected ? "border-ink ring-2 ring-ink/10" : "border-line"
-      } ${isManagement ? "min-w-52 text-center" : "min-w-40"}`}
+      } ${isManagement ? "min-w-52 text-center" : "min-w-40"} ${isCase ? "border-blue-300 bg-blue-50/40" : ""} ${
+        isTrace ? "border-dashed border-ink/25 bg-paper/60" : ""
+      }`}
     >
       <Handle className="opacity-0" position={Position.Top} type="target" />
       <div className="flex items-start gap-3">
@@ -387,6 +488,11 @@ function TopologyNode({ data }: NodeProps<Node<TopologyNodeData>>) {
               Health {data.health}
             </div>
           ) : null}
+          {data.latestRunStatus ? (
+            <div className="mt-2 inline-flex rounded-full border border-line bg-white px-2 py-0.5 text-[11px] font-semibold text-ink/70">
+              {data.latestRunStatus}
+            </div>
+          ) : null}
         </div>
       </div>
       <Handle className="opacity-0" position={Position.Bottom} type="source" />
@@ -397,18 +503,22 @@ function TopologyNode({ data }: NodeProps<Node<TopologyNodeData>>) {
 function TraceRail({
   graph,
   health,
-  node
+  node,
+  runtime
 }: {
   graph: LoopGraph;
   health?: LoopHealthSummary;
   node?: LoopGraphNode;
+  runtime: TopologyRuntimeSummary;
 }) {
   const loopId = node?.metadata?.loopId as string | undefined;
+  const { latestRun, openCases } = runtimeForLoop(loopId, runtime);
   const relatedEdges = loopId
     ? graph.edges.filter((edge) => edge.source.includes(loopId) || edge.target.includes(loopId))
     : graph.edges.slice(0, 4);
+
   return (
-    <div className="border-t border-line bg-paper/80 px-4 py-3">
+    <div className="shrink-0 border-t border-line bg-paper/80 px-4 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Trace</div>
@@ -419,7 +529,28 @@ function TraceRail({
         </div>
       </div>
       <div className="mt-3 grid gap-2 md:grid-cols-4">
-        {relatedEdges.slice(0, 4).map((edge) => (
+        {latestRun && loopId ? (
+          <Link
+            className="rounded-md border border-ink bg-white px-3 py-2 text-xs hover:bg-paper"
+            href={`/loops/${loopId}/runs/${latestRun.id}`}
+          >
+            <div className="font-semibold">Latest run</div>
+            <div className="mt-1 text-ink/55">{latestRun.status}</div>
+          </Link>
+        ) : null}
+        {openCases.slice(0, 2).map((caseItem) => (
+          <Link
+            className="rounded-md border border-blue-200 bg-white px-3 py-2 text-xs hover:bg-paper"
+            href={`/cases/${caseItem.id}`}
+            key={caseItem.id}
+          >
+            <div className="font-semibold">Escalation case</div>
+            <div className="mt-1 text-ink/55">
+              {caseItem.severity} · {caseItem.status}
+            </div>
+          </Link>
+        ))}
+        {relatedEdges.slice(0, latestRun ? 2 : 4).map((edge) => (
           <div className="rounded-md border border-line bg-white px-3 py-2 text-xs" key={edge.id}>
             <div className="font-semibold capitalize">{edge.kind.replace(/_/g, " ")}</div>
             <div className="mt-1 text-ink/55">{edge.label ?? "relationship"}</div>
@@ -445,7 +576,7 @@ function InspectorBody({
   const metrics = (node?.metadata?.metrics as string[] | undefined) ?? [];
 
   return (
-    <div className="mt-4 space-y-4">
+    <div className="mt-0 space-y-4">
       {source || runtimeLevel || sourcePath ? (
         <div className="rounded-md border border-line p-3">
           <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Source</div>
@@ -504,28 +635,77 @@ function InspectorMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function AttentionChip({
+  active,
+  label,
+  onClick
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`rounded-md border px-2 py-1 font-semibold ${
+        active ? "border-ink bg-ink text-white" : "border-line bg-white text-ink/70 hover:bg-paper"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
 function filterGraph(
   graph: LoopGraph,
   department: string,
   attentionOnly: boolean,
   search: string,
-  selectedNodeId?: string
+  selectedNodeId: string | undefined,
+  runtime: TopologyRuntimeSummary,
+  filters: {
+    escalationsOnly: boolean;
+    failedOnly: boolean;
+    highLaborOnly: boolean;
+  }
 ): LoopGraph {
   const selectedLoopId = selectedNodeId?.startsWith("loop:")
     ? selectedNodeId.replace("loop:", "")
     : undefined;
-  const attentionLoopIds = new Set(
-    graph.health
+  const attentionLoopIds = new Set([
+    ...graph.health
       .filter((item) => item.healthScore < 78 || item.openReviews > 0 || item.openImprovements > 0)
-      .map((item) => item.loopId)
+      .map((item) => item.loopId),
+    ...runtime.attentionLoopIds
+  ]);
+  const escalationLoopIds = new Set(Object.keys(runtime.openCasesByLoopId));
+  const failedLoopIds = new Set(
+    Object.entries(runtime.runsByLoopId)
+      .filter(([, run]) => ["FAILED", "BLOCKED", "POLICY_BLOCKED", "VERIFICATION_FAILED"].includes(run.status))
+      .map(([loopId]) => loopId)
   );
+  const highLaborLoopIds = new Set(
+    graph.health.filter((item) => item.healthScore < 72 || item.botsittingMinutes >= 30).map((item) => item.loopId)
+  );
+
   const nodes = graph.nodes.filter((node) => {
-    const isCore = ["organization", "management_loop", "department", "loop"].includes(node.kind);
+    const isCore = [
+      "organization",
+      "management_loop",
+      "department",
+      "loop",
+      "escalation_case",
+      "trace"
+    ].includes(node.kind);
     const isAlwaysVisible = ["organization", "management_loop"].includes(node.kind);
     const nodeLoopId = node.metadata?.loopId as string | undefined;
+    const sourceLoopId = node.metadata?.sourceLoopId as string | undefined;
+    const resolvedLoopId = nodeLoopId ?? sourceLoopId;
     const isSelectedContext =
       Boolean(selectedLoopId) &&
-      (nodeLoopId === selectedLoopId ||
+      (resolvedLoopId === selectedLoopId ||
+        node.id === selectedNodeId ||
         graph.edges.some((edge) => {
           const selectedEdgeSource = edge.source === `loop:${selectedLoopId}`;
           const selectedEdgeTarget = edge.target === `loop:${selectedLoopId}`;
@@ -536,14 +716,40 @@ function filterGraph(
         }));
     const matchesDepartment =
       department === "all" || node.department === department || isAlwaysVisible || isSelectedContext;
-    const matchesAttention = !attentionOnly || isAlwaysVisible || (nodeLoopId && attentionLoopIds.has(nodeLoopId));
+    const matchesAttention =
+      !attentionOnly ||
+      isAlwaysVisible ||
+      (resolvedLoopId && attentionLoopIds.has(resolvedLoopId)) ||
+      (node.kind === "escalation_case" && node.status === "open");
+    const matchesEscalations =
+      !filters.escalationsOnly ||
+      isAlwaysVisible ||
+      node.kind === "escalation_case" ||
+      (resolvedLoopId && escalationLoopIds.has(resolvedLoopId));
+    const matchesFailed =
+      !filters.failedOnly ||
+      isAlwaysVisible ||
+      (resolvedLoopId && failedLoopIds.has(resolvedLoopId)) ||
+      node.kind === "trace";
+    const matchesHighLabor =
+      !filters.highLaborOnly ||
+      isAlwaysVisible ||
+      (resolvedLoopId && highLaborLoopIds.has(resolvedLoopId));
     const normalizedSearch = search.trim().toLowerCase();
     const matchesSearch =
       normalizedSearch.length === 0 ||
       isAlwaysVisible ||
       isSelectedContext ||
       `${node.label} ${node.subtitle ?? ""} ${node.department ?? ""}`.toLowerCase().includes(normalizedSearch);
-    return (isCore || isSelectedContext) && matchesDepartment && matchesAttention && matchesSearch;
+    return (
+      (isCore || isSelectedContext) &&
+      matchesDepartment &&
+      matchesAttention &&
+      matchesEscalations &&
+      matchesFailed &&
+      matchesHighLabor &&
+      matchesSearch
+    );
   });
   const nodeIds = new Set(nodes.map((node) => node.id));
   const edges = graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target));
@@ -600,7 +806,9 @@ function positionTopology(nodes: LoopGraphNode[], selectedNodeId?: string) {
   const improvements = contextNodes.filter((node) => node.kind === "improvement");
   const otherContext = contextNodes.filter(
     (node) =>
-      !["data_source", "human_owner", "department", "review", "metric", "improvement"].includes(node.kind)
+      !["data_source", "human_owner", "department", "review", "metric", "improvement", "escalation_case", "trace"].includes(
+        node.kind
+      )
   );
   const loopSlots: Record<string, { x: number; y: number }> = {
     marketing: { x: 110, y: 250 },
@@ -720,24 +928,29 @@ function clamp(value: number, min: number, max: number) {
 }
 
 function toFlowEdges(edges: LoopGraphEdge[]): Edge[] {
-  return edges.map<Edge>((edge) => ({
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    label: edge.label,
-    animated: edge.kind === "improves" || edge.kind === "escalates_to",
-    type: "smoothstep",
-    className: `loopgraph-edge loopgraph-edge-${edge.kind}`,
-    style: {
-      stroke: edgeColor(edge.kind),
-      strokeWidth: edge.kind === "rolls_up_to" ? 2.5 : 1.8
-    },
-    labelStyle: {
-      fill: "#5f5b53",
-      fontSize: 10,
-      fontWeight: 600
-    }
-  }));
+  return edges.map<Edge>((edge) => {
+    const informational =
+      edge.kind === "reports_to" || edge.metadata?.semantic === false;
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.label,
+      animated: edge.kind === "improves" || edge.kind === "escalates_to",
+      type: "smoothstep",
+      className: `loopgraph-edge loopgraph-edge-${edge.kind}${informational ? " loopgraph-edge-informational" : ""}`,
+      style: {
+        stroke: edgeColor(edge.kind),
+        strokeWidth: edge.kind === "rolls_up_to" ? 2.5 : 1.8,
+        strokeDasharray: informational ? "6 4" : undefined
+      },
+      labelStyle: {
+        fill: "#5f5b53",
+        fontSize: 10,
+        fontWeight: 600
+      }
+    };
+  });
 }
 
 function departmentOptions(nodes: LoopGraphNode[]) {
@@ -748,7 +961,20 @@ function departmentOptions(nodes: LoopGraphNode[]) {
   }));
 }
 
+function edgeColor(kind: LoopGraphEdge["kind"]) {
+  if (kind === "escalates_to") return "#2563eb";
+  if (kind === "improves") return "#7c3aed";
+  if (kind === "data_flow") return "#9a948a";
+  if (kind === "owned_by") return "#d97706";
+  if (kind === "measured_by") return "#16a34a";
+  if (kind === "writes_trace_to") return "#0284c7";
+  if (kind === "reports_to") return "#9a948a";
+  return "#111111";
+}
+
 function nodeColor(kind: LoopGraphNodeKind, department?: string) {
+  if (kind === "escalation_case") return "#2563eb";
+  if (kind === "trace") return "#0284c7";
   if (kind === "management_loop") return "#111111";
   if (kind === "review") return "#2563eb";
   if (kind === "improvement") return "#7c3aed";
@@ -765,16 +991,9 @@ function nodeColor(kind: LoopGraphNodeKind, department?: string) {
   return "#111111";
 }
 
-function edgeColor(kind: LoopGraphEdge["kind"]) {
-  if (kind === "escalates_to") return "#2563eb";
-  if (kind === "improves") return "#7c3aed";
-  if (kind === "data_flow") return "#9a948a";
-  if (kind === "owned_by") return "#d97706";
-  if (kind === "measured_by") return "#16a34a";
-  return "#111111";
-}
-
 function nodeIcon(node: LoopGraphNode) {
+  if (node.kind === "escalation_case") return "C";
+  if (node.kind === "trace") return "T";
   if (node.kind === "management_loop") return "M";
   if (node.kind === "review") return "R";
   if (node.kind === "improvement") return "I";

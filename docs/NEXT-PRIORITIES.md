@@ -1,6 +1,8 @@
 # What still needs to be built — priorities
 
-Last updated: 2026-06-29 (post launch-plan implementation on `loopgraph/canvas-first`).
+Last updated: 2026-06-30 (post launch-plan implementation on `loopgraph/canvas-first`).
+
+**Full sequencing, effort estimates, Raisi/package tracks:** [BUILD-PLAN.md](./BUILD-PLAN.md)
 
 ## Shipped in v1.1.0-alpha
 
@@ -16,11 +18,11 @@ Last updated: 2026-06-29 (post launch-plan implementation on `loopgraph/canvas-f
 
 ## Remaining P1
 
-1. **Intercom / support-ticket example** — `examples/support-ticket-triage/`
+1. ~~**Intercom / support-ticket example**~~ — shipped as `examples/support-ticket-triage/`
 2. **Supabase multi-user prod validation**
-3. **Management rollup persistence** to DB
-4. **Improvements page** reads trace `improvement_signal` outputs
-5. **Manual QA sign-off** on clean clone ([manual-qa-v1.1.md](./manual-qa-v1.1.md))
+3. ~~**Management rollup persistence**~~ — `.loopgraph/management/latest.json` + cron persistence
+4. ~~**Improvements page** reads trace `improvement_signal` outputs~~ — `loadImprovementsFromStorage`
+5. **Manual QA sign-off** on clean clone ([manual-qa-v1.1.md](./manual-qa-v1.1.md)) — CLI paths covered by automated governance tests
 
 ## Explicitly deferred (V2)
 

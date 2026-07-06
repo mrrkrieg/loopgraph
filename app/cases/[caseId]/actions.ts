@@ -29,6 +29,7 @@ export async function resolveCaseAction(formData: FormData) {
   if (caseItem.sourceRunId) {
     revalidatePath(`/loops/${caseItem.sourceLoopId}/runs/${caseItem.sourceRunId}`);
     revalidatePath(`/loops/${caseItem.sourceLoopId}/runs`);
+    revalidatePath(`/loops/${caseItem.sourceLoopId}/improvements`);
   }
 
   redirect(`/cases/${caseId}?resolved=1`);

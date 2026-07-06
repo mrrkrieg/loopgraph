@@ -23,7 +23,7 @@ export async function WorkspaceBanner() {
   const banner = workspaceModeBanner(mode);
 
   return (
-    <div className={`mb-4 rounded-md border px-4 py-2 text-sm ${banner.className}`}>
+    <div className={`mb-4 shrink-0 rounded-md border px-4 py-2 text-sm ${banner.className}`}>
       {banner.label}
     </div>
   );
