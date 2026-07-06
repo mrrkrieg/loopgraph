@@ -1,0 +1,170 @@
+apiVersion: loopgraph/v1alpha1
+kind: Loop
+metadata:
+  id: support-ticket-triage
+  name: Support Ticket Triage
+  version: "1.0.0"
+  description: Classify inbound support tickets, draft responses, and escalate high-risk cases with separate customer-facing approval.
+  owner:
+    role: support_queue_owner
+trigger:
+  type: webhook
+  source: intercom
+  event: conversation.created
+input:
+  schema:
+    type: object
+    required: [eventId, ticket]
+    properties:
+      eventId: { type: string }
+      ticket: { type: object }
+  fixtures:
+    - id: high-priority-billing
+      path: ../../fixtures/support-ticket-triage/high-priority-billing.json
+    - id: low-risk-how-to
+      path: ../../fixtures/support-ticket-triage/low-risk-how-to.json
+    - id: duplicate-ticket
+      path: ../../fixtures/support-ticket-triage/duplicate-ticket.json
+    - id: angry-enterprise-customer
+      path: ../../fixtures/support-ticket-triage/angry-enterprise-customer.json
+    - id: incomplete-context
+      path: ../../fixtures/support-ticket-triage/incomplete-context.json
+output:
+  schema:
+    type: object
+    required: [decisionSummary, proposedActions, evidence, policyInputs, verificationRequest]
+    properties:
+      decisionSummary: { type: string }
+      assumptions: { type: array }
+      proposedActions: { type: array }
+      evidence: { type: array }
+      policyInputs: { type: array }
+      verificationRequest: { type: object }
+context:
+  sources:
+    - id: ticket_current
+      type: integration
+      adapterId: mock-support
+      variableKey: support.ticket.current
+      title: Current support ticket
+      sensitivity: internal
+      trusted: false
+      precedence: 0
+    - id: account
+      type: integration
+      adapterId: mock-crm
+      variableKey: crm.account
+      title: CRM account
+      sensitivity: confidential
+      trusted: true
+      precedence: 1
+    - id: incident
+      type: integration
+      adapterId: mock-status
+      variableKey: incident.category
+      title: Incident category
+      sensitivity: internal
+      trusted: true
+      precedence: 2
+  precedence:
+    - { sourceType: integration, rank: 0 }
+  redactionPolicy: restricted_only
+routine:
+  steps:
+    - id: step_1
+      name: Assemble ticket context
+      stepType: observe
+      actor: system
+      description: Load ticket, account, and incident context from support systems
+    - id: step_2
+      name: Assess triage
+      stepType: assess
+      actor: agent
+      description: Produce structured support triage assessment
+    - id: step_3
+      name: Prepare actions
+      stepType: prepare
+      actor: system
+      description: Prepare internal routing and customer-facing draft separately
+tools:
+  - key: create_internal_task
+    adapterId: mock-linear
+    label: Create internal task
+    writeCapable: true
+    riskLevel: medium
+  - key: draft_internal_reply
+    adapterId: mock-support
+    label: Draft internal reply
+    writeCapable: false
+    riskLevel: low
+  - key: customer_message
+    adapterId: mock-support
+    label: Customer message
+    writeCapable: true
+    riskLevel: high
+policy:
+  allowedActions:
+    - { toolKey: create_internal_task, allowed: true, requiresApproval: true, customerFacing: false, riskLevel: medium }
+    - { toolKey: draft_internal_reply, allowed: true, requiresApproval: true, customerFacing: false, riskLevel: low }
+    - { toolKey: customer_message, allowed: true, requiresApproval: true, customerFacing: true, riskLevel: high }
+  forbiddenActions: []
+  escalationRules:
+    - id: enterprise-service-failure
+      when:
+        all:
+          - "account.segment in": [enterprise, strategic]
+          - "incident.category ==": service_outage
+          - "incident.severity in": [P0, P1]
+      createEscalationCase:
+        category: customer_risk
+        severity: P1
+      routeTo:
+        primaryOwner: support_queue_owner
+        reviewers: [engineering_incident_owner, customer_success_owner]
+        responseSla: 15m
+      requiresApproval: [external_customer_message]
+      decisionsRequired: [Approve escalation package]
+    - id: renewal-risk
+      when:
+        all:
+          - "account.renewalDaysRemaining <=": 90
+          - "businessImpact.renewalRisk ==": high
+      createEscalationCase:
+        category: revenue_risk
+        severity: P1
+      routeTo:
+        primaryOwner: support_queue_owner
+        reviewers: [customer_success_owner, account_executive]
+        responseSla: 60m
+      requiresApproval: [discount_offer, customer_message]
+      decisionsRequired: [Approve renewal-risk response]
+    - id: low-risk-support-case
+      when:
+        all:
+          - "incident.severity in": [P2, P3]
+          - "businessImpact.renewalRisk ==": low
+      routeTo:
+        primaryOwner: support_queue_owner
+        reviewers: []
+        responseSla: 240m
+      requiresApproval: [customer_message]
+      decisionsRequired: []
+verification:
+  - { id: schema, type: schema }
+  - { id: policy, type: policy }
+  - { id: evidence, type: evidence }
+  - { id: approval_required, type: approval_required }
+approval:
+  requireFingerprintMatch: true
+  separateCustomerFacingApproval: true
+  allowedRoles: [approver, reviewer, owner, accountability_holder]
+persistence:
+  idempotency:
+    enabled: true
+trace:
+  captureContextSnapshot: true
+  captureToolInputOutput: true
+  evidenceRequired: true
+topology:
+  department: customer_success
+  tags: [support, triage]

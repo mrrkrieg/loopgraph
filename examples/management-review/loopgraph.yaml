@@ -17,6 +17,9 @@ input:
     required: [cases]
     properties:
       cases: { type: array }
+  fixtures:
+    - id: open-cases-weekly
+      path: ../../fixtures/management-review/open-cases-weekly.json
 output:
   schema:
     type: object

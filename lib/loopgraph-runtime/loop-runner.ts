@@ -53,14 +53,15 @@ export async function runLoop(input: RunLoopInput): Promise<RunLoopResult> {
 
   const contextSnapshot = await compileContextSnapshot({
     spec: input.spec,
-    fixture: (fixture ?? payload) as SimulationFixture
+    fixture: (fixture ?? payload) as SimulationFixture,
+    mode: input.mode
   });
 
   const provider = getAssessmentProvider(input.mode);
   const agentOutput = await provider.generate({
     spec: input.spec,
     context: contextSnapshot,
-    fixture,
+    fixture: fixture ?? (input.triggerPayload as SimulationFixture | undefined),
     triggerPayload: input.triggerPayload
   });
 

@@ -21,6 +21,8 @@ npm run dev
 
 Open the web UI for Design Studio and topology. CLI traces are stored under `.loopgraph/`.
 
+After a simulate run, open **Topology** (`/topology`) to see the loop on the company map and click through to runs, reviews, and cases. See [docs/topology-guide.md](docs/topology-guide.md).
+
 ## Simulated vs real
 
 | Mode | Command | What it does |
@@ -48,6 +50,7 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 1. **GitHub Issue Triage** — developer onboarding demo (`examples/github-issue-triage`)
 2. **Strategic Account Escalation** — company operating-system demo (`examples/strategic-account-escalation`)
+3. **Support Ticket Triage** — Intercom/support inbox triage (`examples/support-ticket-triage`)
 
 ## CLI commands
 
@@ -95,6 +98,7 @@ CRON_SECRET=
 
 - [Current build state](docs/CURRENT-STATE.md)
 - [Dan walkthrough (CLI demo)](docs/DAN-WALKTHROUGH.md)
+- [Topology guide](docs/topology-guide.md)
 - [Next priorities](docs/NEXT-PRIORITIES.md)
 - [V1 Launch Context Plan](V1-LAUNCH-CONTEXT-PLAN.md)
 - [V1 Execution Plan](docs/V1-EXECUTION-PLAN.md)

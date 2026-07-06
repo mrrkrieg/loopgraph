@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - run: npm ci
       - run: npm run typecheck
@@ -20,8 +20,23 @@ jobs:
       - run: npm run build
       - run: npm run loopgraph -- validate examples/github-issue-triage
       - run: npm run loopgraph -- validate examples/strategic-account-escalation
+      - run: npm run loopgraph -- validate examples/support-ticket-triage
+      - run: npm run loopgraph -- validate examples/management-review
       - run: npm run loopgraph -- init github-issue-triage /tmp/loopgraph-init-check
+      - run: npm run loopgraph -- init support-ticket-triage /tmp/loopgraph-init-support
       - run: npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/normal-bug.json
       - run: npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/security-issue.json
+      - run: npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/duplicate-feature-request.json
+      - run: npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/unclear-reproduction.json
       - run: npm run loopgraph -- simulate examples/strategic-account-escalation --fixture fixtures/strategic-account-escalation/enterprise-outage-near-renewal.json
+      - run: npm run loopgraph -- simulate examples/strategic-account-escalation --fixture fixtures/strategic-account-escalation/low-risk-product-question.json
+      - run: npm run loopgraph -- simulate examples/strategic-account-escalation --fixture fixtures/strategic-account-escalation/incomplete-account-context.json
+      - run: npm run loopgraph -- simulate examples/strategic-account-escalation --fixture fixtures/strategic-account-escalation/billing-dispute-without-renewal-risk.json
+      - run: npm run loopgraph -- simulate examples/strategic-account-escalation --fixture fixtures/strategic-account-escalation/executive-escalation.json
+      - run: npm run loopgraph -- simulate examples/support-ticket-triage --fixture fixtures/support-ticket-triage/high-priority-billing.json
+      - run: npm run loopgraph -- simulate examples/support-ticket-triage --fixture fixtures/support-ticket-triage/low-risk-how-to.json
+      - run: npm run loopgraph -- simulate examples/support-ticket-triage --fixture fixtures/support-ticket-triage/duplicate-ticket.json
+      - run: npm run loopgraph -- simulate examples/support-ticket-triage --fixture fixtures/support-ticket-triage/angry-enterprise-customer.json
+      - run: npm run loopgraph -- simulate examples/support-ticket-triage --fixture fixtures/support-ticket-triage/incomplete-context.json
+      - run: npm run loopgraph -- simulate examples/management-review --fixture fixtures/management-review/open-cases-weekly.json
       - run: npm run loopgraph -- adapter test

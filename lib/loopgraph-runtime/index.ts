@@ -15,3 +15,5 @@ export * from "./improvement-service";
 export * from "./orchestration";
 export * from "./job-queue";
 export * from "./management-consumer";
+export * from "./improvement-loader";
+export * from "./management-rollup";

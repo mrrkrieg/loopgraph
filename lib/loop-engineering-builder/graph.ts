@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { getDepartmentTemplate, getTemplateById, getTemplateCatalog } from "./templates";
 import type { LoadedRegisteredLoopSpec } from "./local-workspace";
+import { loopIdsMatch } from "../loopgraph-runtime/run-filters";
 
 const defaultView: LoopGraphViewState = {
   mode: "topology",
@@ -92,18 +93,31 @@ export function buildLoopGraph(input: {
   improvements?: ImprovementItem[];
   selectedNodeId?: string;
   sourceLabel?: string;
+  hiddenLaborByLoopId?: Record<string, Partial<HiddenLaborMetrics>>;
+  runs?: Array<{ id: string; loopId: string; status: string }>;
+  cases?: Array<{ id: string; sourceLoopId: string; severity: string; status: string; summary?: string }>;
 }): LoopGraph {
   const reviews = input.reviews ?? [];
   const improvements = input.improvements ?? [];
+  const runs = input.runs ?? [];
+  const cases = input.cases ?? [];
+  const runtimeReviews = reviewsFromRuns(runs, input.loops);
+  const mergedReviews = mergeReviewsById(reviews, runtimeReviews);
   const departments = Array.from(new Set(input.loops.map((loop) => loop.department)));
   const health = input.loops.map((loop) => {
-    const loopReviews = reviews.filter((review) => review.loopId === loop.id && review.status === "pending");
+    const loopReviews = mergedReviews.filter(
+      (review) => loopIdsMatch(review.loopId, loop.id) && review.status === "pending"
+    );
     const loopImprovements = improvements.filter((item) => item.loopId === loop.id && item.status !== "done");
     const template = getTemplateById(loop.templateId);
+    const traceLabor = input.hiddenLaborByLoopId?.[loop.id];
+    const laborSource =
+      traceLabor ??
+      (loopReviews.length > 0 ? mergeHiddenLabor(loopReviews) : template?.defaultHiddenLabor);
     return calculateHiddenLaborSummary(
       loop.id,
       loop.status,
-      loopReviews.length > 0 ? mergeHiddenLabor(loopReviews) : template?.defaultHiddenLabor,
+      laborSource,
       loop.openReviews || loopReviews.length,
       loop.improvementItems || loopImprovements.length
     );
@@ -130,8 +144,10 @@ export function buildLoopGraph(input: {
     ...dataSourceNodes(input.loops),
     ...ownerNodes(input.loops),
     ...metricNodes(input.loops),
-    ...reviewNodes(reviews),
-    ...improvementNodes(improvements)
+    ...reviewNodes(mergedReviews),
+    ...improvementNodes(improvements),
+    ...caseNodes(cases, input.loops),
+    ...traceNodes(runs, input.loops)
   ];
 
   const edges: LoopGraphEdge[] = [
@@ -149,7 +165,9 @@ export function buildLoopGraph(input: {
       kind: "rolls_up_to" as const,
       label: "department rollup"
     })),
-    ...input.loops.flatMap((loop) => loopEdges(loop, reviews, improvements))
+    ...input.loops.flatMap((loop) => loopEdges(loop, mergedReviews, improvements)),
+    ...caseEdges(cases, input.loops),
+    ...traceEdges(runs, input.loops)
   ];
 
   return {
@@ -251,7 +269,7 @@ function loopNode(loop: LoopRecord, health?: LoopHealthSummary): LoopGraphNode {
       templateId: loop.templateId,
       runtimeLevel: loop.runtimeLevel ?? template?.runtimeLevel,
       source: loop.source ?? "supabase",
-      sourcePath: loop.sourcePath,
+      sourcePath: loop.sourcePath ?? template?.examplePath,
       autonomyLevel: loop.autonomyLevel,
       cadence: loop.cadence,
       purpose: template?.description,
@@ -299,6 +317,118 @@ function metricNodes(loops: LoopRecord[]): LoopGraphNode[] {
   }));
 }
 
+function findWorkspaceLoopId(externalLoopId: string, loops: LoopRecord[]): string | undefined {
+  return loops.find((loop) => loopIdsMatch(loop.id, externalLoopId))?.id;
+}
+
+function reviewsFromRuns(
+  runs: Array<{ id: string; loopId: string; status: string }>,
+  loops: LoopRecord[]
+): HumanReview[] {
+  return runs
+    .filter((run) => run.status === "WAITING_FOR_REVIEW")
+    .map((run) => {
+      const workspaceLoopId = findWorkspaceLoopId(run.loopId, loops) ?? run.loopId;
+      return {
+        id: `runtime_review_${run.id}`,
+        loopRunId: run.id,
+        loopId: workspaceLoopId,
+        reviewer: "Pending reviewer",
+        status: "pending" as const,
+        reason: "Run waiting for human review",
+        recommendation: "Open the review packet and approve or reject prepared actions.",
+        createdAt: new Date().toISOString()
+      };
+    });
+}
+
+function mergeReviewsById(reviews: HumanReview[], runtimeReviews: HumanReview[]): HumanReview[] {
+  const merged = new Map<string, HumanReview>();
+  for (const review of [...reviews, ...runtimeReviews]) {
+    merged.set(review.id, review);
+  }
+  return Array.from(merged.values());
+}
+
+function caseNodes(
+  cases: Array<{ id: string; sourceLoopId: string; severity: string; status: string; summary?: string }>,
+  loops: LoopRecord[]
+): LoopGraphNode[] {
+  return cases.map((caseItem) => ({
+    id: `case:${caseItem.id}`,
+    kind: "escalation_case",
+    label: caseItem.summary ?? caseItem.id,
+    subtitle: `${caseItem.severity} · ${caseItem.status}`,
+    status: caseItem.status,
+    metadata: {
+      caseId: caseItem.id,
+      sourceLoopId: findWorkspaceLoopId(caseItem.sourceLoopId, loops) ?? caseItem.sourceLoopId,
+      severity: caseItem.severity
+    }
+  }));
+}
+
+function traceNodes(
+  runs: Array<{ id: string; loopId: string; status: string }>,
+  loops: LoopRecord[]
+): LoopGraphNode[] {
+  return runs.map((run) => ({
+    id: `trace:${run.id}`,
+    kind: "trace",
+    label: run.id,
+    subtitle: run.status,
+    status: run.status,
+    metadata: {
+      runId: run.id,
+      loopId: findWorkspaceLoopId(run.loopId, loops) ?? run.loopId
+    }
+  }));
+}
+
+function caseEdges(
+  cases: Array<{ id: string; sourceLoopId: string; severity: string; status: string }>,
+  loops: LoopRecord[]
+): LoopGraphEdge[] {
+  return cases.flatMap((caseItem) => {
+    const workspaceLoopId = findWorkspaceLoopId(caseItem.sourceLoopId, loops) ?? caseItem.sourceLoopId;
+    return [
+      {
+        id: `edge:loop:${workspaceLoopId}:case:${caseItem.id}`,
+        source: `loop:${workspaceLoopId}`,
+        target: `case:${caseItem.id}`,
+        kind: "escalates_to" as const,
+        label: "escalation case",
+        metadata: { semantic: true }
+      },
+      {
+        id: `edge:case:${caseItem.id}:management`,
+        source: `case:${caseItem.id}`,
+        target: "loop:management",
+        kind: "reports_to" as const,
+        label: "management handoff",
+        metadata: { semantic: false }
+      }
+    ];
+  });
+}
+
+function traceEdges(
+  runs: Array<{ id: string; loopId: string; status: string }>,
+  loops: LoopRecord[]
+): LoopGraphEdge[] {
+  return runs.map((run) => {
+    const workspaceLoopId = findWorkspaceLoopId(run.loopId, loops) ?? run.loopId;
+    return {
+      id: `edge:loop:${workspaceLoopId}:trace:${run.id}`,
+      source: `loop:${workspaceLoopId}`,
+      target: `trace:${run.id}`,
+      kind: "writes_trace_to" as const,
+      label: "run trace",
+      metadata: { semantic: true }
+    };
+  });
+}
+
 function reviewNodes(reviews: HumanReview[]): LoopGraphNode[] {
   return reviews
     .filter((review) => review.status === "pending")
@@ -310,7 +440,8 @@ function reviewNodes(reviews: HumanReview[]): LoopGraphNode[] {
       status: review.status,
       metadata: {
         reviewId: review.id,
-        loopId: review.loopId
+        loopId: review.loopId,
+        runId: review.loopRunId
       }
     }));
 }
@@ -345,7 +476,7 @@ function loopEdges(
   }));
 
   const pendingReviewEdges = reviews
-    .filter((review) => review.loopId === loop.id && review.status === "pending")
+    .filter((review) => loopIdsMatch(review.loopId, loop.id) && review.status === "pending")
     .map((review) => ({
       id: `edge:${loop.id}:review:${review.id}`,
       source: `loop:${loop.id}`,

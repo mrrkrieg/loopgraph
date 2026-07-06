@@ -439,6 +439,8 @@ export function buildSemanticTopologyVisualGraph(
 export function visualKindForTopology(kind: LoopGraphNodeKind): LoopGraphVisualNodeKind {
   if (kind === "management_loop") return "management";
   if (kind === "human_owner") return "owner";
+  if (kind === "trace") return "review";
+  if (kind === "escalation_case") return "improvement";
   return kind;
 }
 

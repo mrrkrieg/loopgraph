@@ -23,6 +23,16 @@ const FIXTURE_MATRIX = [
       "billing-dispute-without-renewal-risk.json",
       "executive-escalation.json"
     ]
+  },
+  {
+    example: "support-ticket-triage",
+    fixtures: [
+      "high-priority-billing.json",
+      "low-risk-how-to.json",
+      "duplicate-ticket.json",
+      "angry-enterprise-customer.json",
+      "incomplete-context.json"
+    ]
   }
 ] as const;
 

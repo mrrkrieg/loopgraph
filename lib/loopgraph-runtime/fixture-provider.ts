@@ -18,6 +18,10 @@ export function generateAssessment(input: {
     return generateGithubAssessment(input.fixture);
   }
 
+  if (template === "management-review") {
+    return generateManagementAssessment(input.fixture);
+  }
+
   return generateAccountAssessment(input.fixture);
 }
 
@@ -50,6 +54,27 @@ function generateGithubAssessment(fixture: SimulationFixture): AgentRunOutput {
     ],
     verificationRequest: { required: security, reason: security ? "Security-sensitive issue" : undefined, checks: ["evidence", "policy"] },
     escalationRequest: security ? { required: true, category: "security", severity: "P1", rationale: "Security keywords detected" } : { required: false }
+  };
+}
+
+function generateManagementAssessment(fixture: SimulationFixture): AgentRunOutput {
+  const cases = Array.isArray(fixture.cases) ? (fixture.cases as Array<Record<string, unknown>>) : [];
+  const leadershipRequired = cases.some((item) => item.severity === "P0" || item.severity === "P1");
+
+  return {
+    decisionSummary: `Weekly management review covering ${cases.length} open escalation case(s).`,
+    assumptions: [{ id: "a1", statement: "Cases are normalized EscalationCase payloads only", confidence: 1 }],
+    proposedActions: [],
+    evidence: cases.map((item, index) => ({
+      id: `ev_case_${index + 1}`,
+      sourceId: "open_cases",
+      sourceType: "policy" as const,
+      excerpt: `${String(item.summary ?? item.id)} (${String(item.severity ?? "unknown")})`,
+      trusted: true
+    })),
+    policyInputs: [{ key: "openCases.count", value: cases.length, source: "case-registry" }],
+    verificationRequest: { required: leadershipRequired, checks: ["evidence"] },
+    escalationRequest: { required: false }
   };
 }
 

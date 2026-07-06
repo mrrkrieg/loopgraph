@@ -4,6 +4,8 @@ import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
 import { titleCase } from "@/lib/loop-engineering-builder/demo-helpers";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { filterRunsForLoop } from "@/lib/loopgraph-runtime/run-filters";
+import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export default async function LoopOverviewPage({
   params
@@ -12,6 +14,9 @@ export default async function LoopOverviewPage({
 }) {
   const { loopId } = await params;
   const workspace = await getWorkspace(loopId);
+  const storage = getStorageAdapter();
+  const runs = filterRunsForLoop(await storage.listRuns(), loopId);
+  const latestRun = runs[0] ? await storage.getRun(runs[0].id) : null;
 
   return (
     <div className="grid gap-5">
@@ -37,20 +42,25 @@ export default async function LoopOverviewPage({
           </div>
         </div>
       </SectionCard>
-      <SectionCard title="Generated outputs">
+      <SectionCard title="Runtime status">
         <div className="flex flex-wrap gap-2 text-sm">
-          <StatusPill>Loop spec validated with Zod</StatusPill>
-          <StatusPill>Implementation artifacts generated</StatusPill>
-          <StatusPill>Manual run traced</StatusPill>
-          <StatusPill>Human review pending</StatusPill>
+          <StatusPill>{latestRun ? `Latest run: ${latestRun.status}` : "No persisted runs"}</StatusPill>
+          {latestRun && <StatusPill>{latestRun.mode === "execute" ? "Live execute" : "Simulate / fixture"}</StatusPill>}
+          {latestRun?.status === "WAITING_FOR_REVIEW" && <StatusPill>Human review required</StatusPill>}
+          {latestRun?.status === "COMPLETED" && <StatusPill>Run completed</StatusPill>}
         </div>
         <div className="mt-4 flex flex-wrap gap-3">
-          <Link href={`/loops/${workspace.loop.id}/spec`} className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white">
+          <Link href={`/loops/${workspace.loop.id}/runs`} className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white">
+            View runs
+          </Link>
+          <Link href={`/loops/${workspace.loop.id}/spec`} className="rounded-md border border-ink px-4 py-2 text-sm font-semibold">
             View spec
           </Link>
-          <Link href={`/loops/${workspace.loop.id}/implementation`} className="rounded-md border border-ink px-4 py-2 text-sm font-semibold">
-            Copy artifacts
-          </Link>
+          {latestRun?.status === "WAITING_FOR_REVIEW" && (
+            <Link href={`/loops/${workspace.loop.id}/reviews?runId=${latestRun.id}`} className="rounded-md border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold">
+              Review run
+            </Link>
+          )}
         </div>
       </SectionCard>
     </div>

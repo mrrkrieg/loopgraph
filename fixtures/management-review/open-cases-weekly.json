@@ -1,0 +1,20 @@
+{
+  "eventId": "mgmt_review_w26_001",
+  "simulatedAt": "2026-06-27T15:00:00.000Z",
+  "cases": [
+    {
+      "id": "case_sample_open",
+      "summary": "Enterprise outage near renewal",
+      "severity": "P1",
+      "status": "open",
+      "category": "customer_risk"
+    },
+    {
+      "id": "case_sample_review",
+      "summary": "Billing dispute under review",
+      "severity": "P2",
+      "status": "under_review",
+      "category": "revenue_risk"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "eventId": "support_evt_incomplete_001",
+  "simulatedAt": "2026-06-27T14:20:00.000Z",
+  "ticket": { "current": { "body": "Something is broken but I cannot share account details in chat." } }
+}
