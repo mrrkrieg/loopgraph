@@ -1,0 +1,132 @@
+id: ops-finance
+departmentType: ops_finance
+name: Ops / Finance
+description: Approvals, invoices, collections, forecast variance, and resource allocation.
+purpose: Reduce approval and variance drag without making unapproved financial commitments.
+commonGoals:
+  - id: reduce_operating_friction
+    label: Reduce operating friction.
+    description: Detect slow approvals, invoice variance, and forecast drift.
+    exampleMetrics: [approval_latency, invoice_processing_time, forecast_accuracy]
+    typicalPainPoints: [approval bottlenecks, invoice variance, audit readiness]
+discoveryQuestions:
+  - id: ops_finance_systems
+    prompt: Which finance, spreadsheet, database, and approval systems are used?
+    type: integration_picker
+    required: true
+    options: [finance, spreadsheet, database, slack]
+    produces: [signal, integration_requirement]
+loopBlueprints:
+  - id: approval_bottleneck
+    name: Approval Bottleneck Loop
+    description: Finds stuck approvals and routes owner reminders.
+    processType: approval_bottleneck
+    defaultTrigger: Daily approval queue review
+    defaultRoutine: [Find stuck approvals, Draft reminder, Route owner]
+    defaultVerifier: [Reminder cites approval record]
+    defaultHumanReview: [Owner approves escalation]
+    defaultMetrics: [approval_latency]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+  - id: invoice_variance
+    name: Invoice Variance Loop
+    description: Detects invoice variance and drafts review packet.
+    processType: invoice_variance
+    defaultTrigger: New invoice or weekly finance review
+    defaultRoutine: [Compare invoice to budget, Draft variance memo, Route exception]
+    defaultVerifier: [Variance has numeric evidence]
+    defaultHumanReview: [Finance owner approves exception]
+    defaultMetrics: [invoice_processing_time, variance_resolution_time]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: cash_collection
+    name: Cash Collection Loop
+    description: Prepares collections follow-up and risk notes.
+    processType: cash_collection
+    defaultTrigger: Aging receivable threshold
+    defaultRoutine: [Collect receivable status, Draft internal follow-up, Route owner]
+    defaultVerifier: [Follow-up cites invoice and account evidence]
+    defaultHumanReview: [Finance owner approves customer-facing message]
+    defaultMetrics: [cost_per_transaction]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: forecast_variance
+    name: Forecast Variance Loop
+    description: Explains forecast changes and recommends accountable follow-up.
+    processType: forecast_variance
+    defaultTrigger: Weekly forecast update
+    defaultRoutine: [Collect forecast changes, Explain variance, Draft recommendation]
+    defaultVerifier: [Variance explanation cites source numbers]
+    defaultHumanReview: [Finance owner reviews recommendation]
+    defaultMetrics: [forecast_accuracy, variance_resolution_time]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: resource_allocation
+    name: Resource Allocation Loop
+    description: Prepares allocation tradeoff packets.
+    processType: resource_allocation
+    defaultTrigger: Resource review
+    defaultRoutine: [Collect spend and capacity, Draft tradeoffs, Route decision]
+    defaultVerifier: [Tradeoffs include source data]
+    defaultHumanReview: [Leadership approves allocation]
+    defaultMetrics: [forecast_accuracy, audit_readiness]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L1
+requiredIntegrations:
+  - integrationType: finance
+    reason: Read invoices, budgets, and forecasts.
+    variables: [finance.invoices, finance.budget, finance.forecast]
+    actions: [finance.read, finance.write.approval_request]
+    requiredForLoopBlueprints: [invoice_variance, cash_collection, forecast_variance, resource_allocation]
+  - integrationType: spreadsheet
+    reason: Manual finance sheets can provide fallback evidence.
+    variables: [spreadsheet.finance_export]
+    actions: [spreadsheet.read]
+    requiredForLoopBlueprints: [approval_bottleneck, forecast_variance]
+defaultMetrics:
+  - key: approval_latency
+    label: Approval latency
+    description: Time spent waiting on approval.
+    source: trace
+    baselineRequired: true
+  - key: invoice_processing_time
+    label: Invoice processing time
+    description: Time from invoice receipt to resolution.
+    source: integration
+    baselineRequired: true
+  - key: forecast_accuracy
+    label: Forecast accuracy
+    description: Difference between forecast and actual.
+    source: integration
+    baselineRequired: true
+  - key: cost_per_transaction
+    label: Cost per transaction
+    description: Human effort cost per finance transaction.
+    source: modeled
+    baselineRequired: true
+  - key: variance_resolution_time
+    label: Variance resolution time
+    description: Time to explain and resolve variance.
+    source: trace
+    baselineRequired: true
+  - key: audit_readiness
+    label: Audit readiness
+    description: Evidence completeness for audit.
+    source: trace
+    baselineRequired: false
+humanReviewRules:
+  - id: finance_approval_review
+    condition: Financial, budget, or payment actions require finance owner approval
+    reviewerRole: Finance owner
+    reason: AI must not make financial commitments.
+riskRules:
+  - id: no_auto_payment
+    condition: AI attempts to approve payment, collection, or budget change
+    requiredAction: block
+    reason: Financial actions require approval.
+dailySummaryFields:
+  - key: approval_latency
+    label: Approval latency
+    source: metric
+    displayType: duration
+

@@ -2,8 +2,13 @@ import type { LoopSpec } from "./loop-spec-schema";
 import type {
   LoopEgoGraph,
   SemanticTopology,
+  TopologyNode,
   TopologyNodeType
 } from "loopgraph/core";
+import {
+  sequenceGroupForVisualNode,
+  sequenceIndexForVisualNode
+} from "./loop-graph-layout";
 import type {
   LoopGraph,
   LoopGraphNode,
@@ -17,6 +22,7 @@ export type LoopGraphVisualNodeKind =
   | "management"
   | "department"
   | "loop"
+  | "trigger"
   | "data_source"
   | "action"
   | "verification"
@@ -53,6 +59,7 @@ export type LoopGraphVisual = {
   title: string;
   valueLabel?: string;
   selectedNodeId?: string;
+  layoutMode?: "brain-map";
   nodes: LoopGraphVisualNode[];
   edges: LoopGraphVisualEdge[];
 };
@@ -387,8 +394,56 @@ export function buildTopologyVisualGraph(graph: LoopGraph): LoopGraphVisual {
 }
 
 export function buildSemanticTopologyVisualGraph(
-  topology: SemanticTopology | LoopEgoGraph
+  topology: SemanticTopology | LoopEgoGraph,
+  options: { includeWorkflowTriggers?: boolean } = {}
 ): LoopGraphVisual {
+  const nodes: LoopGraphVisualNode[] = topology.nodes.map((node) => ({
+    id: node.id,
+    sourceNodeId: node.id,
+    kind: visualKindForSemanticTopology(node.type),
+    label: node.label,
+    subtitle: node.subtitle,
+    department: node.department,
+    weight: node.weight,
+    metadata: {
+      ...node.metadata,
+      semanticType: node.type,
+      semanticLayer: node.layer,
+      status: node.status,
+      refId: node.refId,
+      refType: node.refType,
+      loopId: node.loopId,
+      parentId: node.parentId,
+      visibleByDefault: node.visibleByDefault,
+      isOrphan: node.isOrphan,
+      ...visualLayoutMetadataForTopologyNode(node)
+    }
+  }));
+  const edges: LoopGraphVisualEdge[] = topology.edges.map((edge) => ({
+    id: edge.id,
+    source: edge.source,
+    target: edge.target,
+    kind: edge.kind,
+    label: edge.label,
+    metadata: {
+      semantic: edge.semantic,
+      executable: edge.executable,
+      style: edge.style
+    }
+  }));
+
+  const triggerNodeIds = new Set<string>();
+  if ("centerNodeId" in topology) {
+    const centerNode = topology.nodes.find((node) => node.id === topology.centerNodeId);
+    addTriggerVisualNode(centerNode, nodes, edges, triggerNodeIds);
+  }
+
+  if (options.includeWorkflowTriggers) {
+    for (const node of topology.nodes) {
+      addTriggerVisualNode(node, nodes, edges, triggerNodeIds);
+    }
+  }
+
   return {
     id: topology.id,
     title: topology.id.startsWith("ego:")
@@ -400,39 +455,89 @@ export function buildSemanticTopologyVisualGraph(
       : topology.selectedLoopId
         ? `loop:${topology.selectedLoopId}`
         : topology.managementLoopId,
-    nodes: topology.nodes.map((node) => ({
-      id: node.id,
-      sourceNodeId: node.id,
-      kind: visualKindForSemanticTopology(node.type),
-      label: node.label,
-      subtitle: node.subtitle,
-      department: node.department,
-      weight: node.weight,
-      metadata: {
-        ...node.metadata,
-        semanticType: node.type,
-        semanticLayer: node.layer,
-        status: node.status,
-        refId: node.refId,
-        refType: node.refType,
-        loopId: node.loopId,
-        parentId: node.parentId,
-        visibleByDefault: node.visibleByDefault,
-        isOrphan: node.isOrphan
-      }
-    })),
-    edges: topology.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      kind: edge.kind,
-      label: edge.label,
-      metadata: {
-        semantic: edge.semantic,
-        executable: edge.executable,
-        style: edge.style
-      }
-    }))
+    nodes,
+    edges
+  };
+}
+
+function addTriggerVisualNode(
+  topologyNode: TopologyNode | undefined,
+  nodes: LoopGraphVisualNode[],
+  edges: LoopGraphVisualEdge[],
+  triggerNodeIds: Set<string>
+) {
+  const triggerLabel = triggerLabelForVisualNode(topologyNode);
+  if (
+    !topologyNode ||
+    !triggerLabel ||
+    (topologyNode.type !== "workflow_loop" && topologyNode.type !== "task_loop")
+  ) {
+    return;
+  }
+
+  const triggerId = `trigger:${topologyNode.id}`;
+  if (triggerNodeIds.has(triggerId)) {
+    return;
+  }
+  triggerNodeIds.add(triggerId);
+
+  nodes.push({
+    id: triggerId,
+    kind: "trigger",
+    label: triggerLabel,
+    subtitle: "Trigger event",
+    sourceNodeId: topologyNode.id,
+    department: topologyNode.department,
+    weight: 3,
+    metadata: {
+      triggerFor: topologyNode.id,
+      parentId: topologyNode.id,
+      semanticLayer: "structure",
+      semanticType: "trigger",
+      loopId: topologyNode.loopId,
+      sequenceGroup: "trigger",
+      sequenceIndex: 0,
+      clusterId: topologyNode.id
+    }
+  });
+  edges.push({
+    id: `${triggerId}->${topologyNode.id}`,
+    source: triggerId,
+    target: topologyNode.id,
+    kind: "triggers",
+    label: "triggers",
+    metadata: {
+      semantic: true,
+      executable: true,
+      style: "solid"
+    }
+  });
+}
+
+function triggerLabelForVisualNode(node?: { metadata?: Record<string, unknown> }) {
+  const trigger = node?.metadata?.trigger;
+  if (typeof trigger !== "string" || trigger.trim().length === 0) {
+    return undefined;
+  }
+  return trigger.replace(/[:_]+/g, " ");
+}
+
+function visualLayoutMetadataForTopologyNode(node: TopologyNode) {
+  const kind = visualKindForSemanticTopology(node.type);
+  const layoutNode = {
+    id: node.id,
+    kind,
+    label: node.label,
+    metadata: {
+      semanticLayer: node.layer,
+      semanticType: node.type
+    }
+  };
+
+  return {
+    sequenceGroup: sequenceGroupForVisualNode(layoutNode),
+    sequenceIndex: sequenceIndexForVisualNode(layoutNode),
+    clusterId: node.loopId ? `loop:${node.loopId}` : node.parentId
   };
 }
 

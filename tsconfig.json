@@ -41,6 +41,39 @@
       "@/lib/loopgraph-runtime/storage-resolver": [
         "./lib/loopgraph-runtime/storage-resolver.ts"
       ],
+      "@/lib/loopgraph-runtime/discovery-engine": [
+        "./lib/loopgraph-runtime/discovery-engine.ts"
+      ],
+      "@/lib/loopgraph-runtime/skill-pack-loader": [
+        "./lib/loopgraph-runtime/skill-pack-loader.ts"
+      ],
+      "@/lib/loopgraph-runtime/access-planner": [
+        "./lib/loopgraph-runtime/access-planner.ts"
+      ],
+      "@/lib/loopgraph-runtime/daily-summary-generator": [
+        "./lib/loopgraph-runtime/daily-summary-generator.ts"
+      ],
+      "@/lib/loopgraph-runtime/human-requirement-planner": [
+        "./lib/loopgraph-runtime/human-requirement-planner.ts"
+      ],
+      "@/lib/loopgraph-runtime/loop-readiness": [
+        "./lib/loopgraph-runtime/loop-readiness.ts"
+      ],
+      "@/lib/loopgraph-runtime/loop-materializer": [
+        "./lib/loopgraph-runtime/loop-materializer.ts"
+      ],
+      "@/lib/loopgraph-runtime/loop-recommender": [
+        "./lib/loopgraph-runtime/loop-recommender.ts"
+      ],
+      "@/lib/loopgraph-runtime/metric-planner": [
+        "./lib/loopgraph-runtime/metric-planner.ts"
+      ],
+      "@/lib/loopgraph-runtime/process-classifier": [
+        "./lib/loopgraph-runtime/process-classifier.ts"
+      ],
+      "@/lib/loopgraph-runtime/undefined-metrics": [
+        "./lib/loopgraph-runtime/undefined-metrics.ts"
+      ],
       "@/lib/loopgraph-runtime/*": [
         "./packages/loopgraph/src/runtime/*"
       ],

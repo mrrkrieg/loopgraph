@@ -284,6 +284,7 @@ export type TopologyBuildOptions = {
 export type TopologyVisibilityMode =
   | "company"
   | "selected-loop"
+  | "brain-map"
   | "department-map"
   | "runtime-trace-map";
 
@@ -1406,15 +1407,28 @@ function createFilterCounts(nodes: TopologyNode[]): TopologyFilterCounts {
 }
 
 function defaultLayerVisibility(mode: TopologyVisibilityMode): Record<TopologyLayer, boolean> {
+  if (mode === "brain-map" || mode === "selected-loop") {
+    return {
+      structure: true,
+      data: true,
+      action: true,
+      verification: true,
+      human: true,
+      measurement: true,
+      runtime: false,
+      memory: true
+    };
+  }
+
   return {
     structure: true,
-    data: mode === "selected-loop",
-    action: mode === "selected-loop",
-    verification: mode === "selected-loop",
-    human: mode === "selected-loop",
-    measurement: mode === "selected-loop",
-    runtime: mode === "selected-loop" || mode === "runtime-trace-map",
-    memory: mode === "selected-loop"
+    data: false,
+    action: false,
+    verification: false,
+    human: false,
+    measurement: false,
+    runtime: mode === "runtime-trace-map",
+    memory: false
   };
 }
 
@@ -1450,13 +1464,31 @@ function directSemanticConnections(nodeId: string, edges: TopologyEdge[]) {
 }
 
 function findLoopNode(nodes: TopologyNode[], loopIdOrNodeId: string) {
+  const candidates = loopLookupCandidates(loopIdOrNodeId);
   return nodes.find(
     (node) =>
-      node.id === loopIdOrNodeId ||
-      node.id === loopNodeId(loopIdOrNodeId) ||
-      node.loopId === loopIdOrNodeId ||
-      node.refId === loopIdOrNodeId
+      candidates.has(node.id) ||
+      (node.loopId ? candidates.has(node.loopId) : false) ||
+      (node.refId ? candidates.has(node.refId) : false)
   );
+}
+
+function loopLookupCandidates(loopIdOrNodeId: string) {
+  const candidates = new Set<string>([
+    loopIdOrNodeId,
+    loopNodeId(loopIdOrNodeId)
+  ]);
+  const departmentPrefixes = ["loop:department:", "department:"];
+  for (const prefix of departmentPrefixes) {
+    if (!loopIdOrNodeId.startsWith(prefix)) {
+      continue;
+    }
+    const department = departmentSlug(loopIdOrNodeId.slice(prefix.length));
+    candidates.add(`${prefix}${department}`);
+    candidates.add(`department:${department}`);
+    candidates.add(`loop:department:${department}`);
+  }
+  return candidates;
 }
 
 function nodeMatchesSearch(node: TopologyNode, search: string) {

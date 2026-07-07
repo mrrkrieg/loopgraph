@@ -1,0 +1,166 @@
+id: management
+departmentType: management
+name: Management
+description: Operating cadence, bottleneck detection, decision routing, and loop governance.
+purpose: Coordinate departmental loops, detect bottlenecks, route decisions, and update operating assumptions.
+commonGoals:
+  - id: improve_operating_cadence
+    label: Improve operating cadence.
+    description: Make daily and weekly management decisions trace-supported and accountable.
+    exampleMetrics: [decision_latency, unresolved_dependency_age, trace_supported_decision_rate]
+    typicalPainPoints: [unclear bottlenecks, unresolved dependencies, local optimization]
+discoveryQuestions:
+  - id: management_cadence
+    prompt: Which decisions and bottlenecks should leadership review daily or weekly?
+    type: textarea
+    required: true
+    produces: [goal, process_inventory, human_review_rule]
+loopBlueprints:
+  - id: daily_operating_review
+    name: Daily Operating Review Loop
+    description: Summarizes loop state, blocked access, open reviews, missing metrics, and recommended actions.
+    processType: daily_operating_review
+    defaultTrigger: Daily operating review
+    defaultRoutine: [Collect department loop state, Detect bottlenecks, Draft operating summary, Route decisions to accountable owners]
+    defaultVerifier: [Summary cites trace, review, access, and metric evidence]
+    defaultHumanReview: [Leadership reviews recommended cross-functional decisions]
+    defaultMetrics: [decision_latency, unresolved_dependency_age, trace_supported_decision_rate]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: weekly_management_review
+    name: Weekly Management Review Loop
+    description: Compiles weekly loop performance and improvement themes.
+    processType: weekly_management_review
+    defaultTrigger: Weekly management review
+    defaultRoutine: [Collect weekly loop evidence, Summarize outcomes, Draft decision memo]
+    defaultVerifier: [Decision memo has source evidence]
+    defaultHumanReview: [Leadership approves decisions]
+    defaultMetrics: [okr_drift, experiment_throughput]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: decision_memo
+    name: Decision Memo Loop
+    description: Frames options, tradeoffs, evidence, and accountable decision.
+    processType: decision_memo
+    defaultTrigger: Decision request
+    defaultRoutine: [Collect decision evidence, Frame options, Draft memo with recommendation]
+    defaultVerifier: [Options and risks are explicit]
+    defaultHumanReview: [Accountable leader makes final decision]
+    defaultMetrics: [decision_latency, trace_supported_decision_rate]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: anomaly_detection
+    name: Anomaly Detection Loop
+    description: Detects operating anomalies and routes investigation.
+    processType: anomaly_detection
+    defaultTrigger: Metric anomaly
+    defaultRoutine: [Detect anomaly, Gather related context, Draft investigation packet]
+    defaultVerifier: [Anomaly has numeric and source evidence]
+    defaultHumanReview: [Owner reviews investigation priority]
+    defaultMetrics: [recurring_issue_rate, unresolved_dependency_age]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: resource_allocation
+    name: Resource Allocation Loop
+    description: Prepares resource tradeoff reviews.
+    processType: resource_allocation
+    defaultTrigger: Resource allocation review
+    defaultRoutine: [Collect capacity and impact signals, Draft allocation options, Route to leadership]
+    defaultVerifier: [Options include tradeoffs and reversibility]
+    defaultHumanReview: [Leadership approves allocation changes]
+    defaultMetrics: [resource_allocation_cycle_time]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L1
+  - id: department_loop_review
+    name: Department Loop Review
+    description: Audits department loops for readiness and hidden labor.
+    processType: department_loop_review
+    defaultTrigger: Weekly loop audit
+    defaultRoutine: [Collect readiness scores, Find hidden labor, Recommend rollout changes]
+    defaultVerifier: [Readiness findings cite blockers]
+    defaultHumanReview: [Loop owner approves rollout changes]
+    defaultMetrics: [trace_supported_decision_rate, recurring_issue_rate]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: improvement_loop
+    name: Improvement Loop
+    description: Turns repeated issues into improvement backlog items.
+    processType: improvement_loop
+    defaultTrigger: Recurring issue detected
+    defaultRoutine: [Collect repeated issues, Draft improvement item, Route owner]
+    defaultVerifier: [Improvement item includes evidence and owner]
+    defaultHumanReview: [Owner accepts improvement item]
+    defaultMetrics: [recurring_issue_rate]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+requiredIntegrations:
+  - integrationType: database
+    reason: Read loop state, traces, review records, and metric definitions.
+    variables: [loopgraph.traces, loopgraph.reviews, loopgraph.metrics]
+    actions: [loopgraph.read]
+    requiredForLoopBlueprints: [daily_operating_review, weekly_management_review, department_loop_review, improvement_loop]
+  - integrationType: slack
+    reason: Draft owner notifications and decision reminders.
+    variables: [slack.channel_ids]
+    actions: [slack.draft]
+    requiredForLoopBlueprints: [daily_operating_review, decision_memo, anomaly_detection]
+defaultMetrics:
+  - key: decision_latency
+    label: Decision latency
+    description: Time from decision need to accountable decision.
+    source: trace
+    baselineRequired: true
+  - key: unresolved_dependency_age
+    label: Unresolved dependency age
+    description: Age of cross-functional blockers.
+    source: trace
+    baselineRequired: true
+  - key: forecast_accuracy
+    label: Forecast accuracy
+    description: Difference between forecast and actual.
+    source: integration
+    baselineRequired: true
+  - key: experiment_throughput
+    label: Experiment throughput
+    description: Evidence-backed experiments completed per period.
+    source: trace
+    baselineRequired: true
+  - key: okr_drift
+    label: OKR drift
+    description: Drift between stated goals and operating work.
+    source: modeled
+    baselineRequired: true
+  - key: resource_allocation_cycle_time
+    label: Resource allocation cycle time
+    description: Time to resolve allocation tradeoffs.
+    source: trace
+    baselineRequired: true
+  - key: recurring_issue_rate
+    label: Recurring issue rate
+    description: Issues repeating after prior review.
+    source: trace
+    baselineRequired: true
+  - key: trace_supported_decision_rate
+    label: Trace-supported decision rate
+    description: Leadership decisions linked to source traces.
+    source: trace
+    baselineRequired: false
+humanReviewRules:
+  - id: leadership_decision_review
+    condition: Cross-functional priority, budget, hiring, legal, or customer risk decisions require leadership judgment
+    reviewerRole: Leadership
+    reason: Management loops coordinate accountability; they do not replace accountable judgment.
+riskRules:
+  - id: no_unapproved_resource_change
+    condition: AI attempts to change staffing, budget, or priority without leadership approval
+    requiredAction: block
+    reason: Resource allocation requires leadership accountability.
+dailySummaryFields:
+  - key: decision_latency
+    label: Decision latency
+    source: metric
+    displayType: duration
+  - key: trace_supported_decision_rate
+    label: Trace-supported decisions
+    source: metric
+    displayType: number

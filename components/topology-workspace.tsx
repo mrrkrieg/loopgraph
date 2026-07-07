@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { LoopGraphView } from "@/components/loop-graph-view";
 import { buildSemanticTopologyVisualGraph } from "@/lib/loop-engineering-builder/loop-graph-visualization";
 import {
@@ -20,6 +20,15 @@ type TopologyWorkspaceProps = {
 };
 
 type LayerState = Record<TopologyLayer, boolean>;
+type TopologyUrlState = {
+  nodeId: string;
+  mode: TopologyVisibilityMode;
+  department: string;
+  search: string;
+  attentionOnly: boolean;
+  showDrafts: boolean;
+  hidden: string;
+};
 
 const companyLayerDefaults: LayerState = {
   structure: true,
@@ -39,7 +48,18 @@ const selectedLayerDefaults: LayerState = {
   verification: true,
   human: true,
   measurement: true,
-  runtime: true,
+  runtime: false,
+  memory: true
+};
+
+const brainLayerDefaults: LayerState = {
+  structure: true,
+  data: true,
+  action: true,
+  verification: true,
+  human: true,
+  measurement: true,
+  runtime: false,
   memory: true
 };
 
@@ -54,35 +74,53 @@ const layerOptions: Array<{ layer: TopologyLayer; label: string }> = [
 
 export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
-  const [isPending, startTransition] = useTransition();
-  const initialSelectedNodeId = searchParams.get("node") ??
-    (topology.selectedLoopId ? `loop:${topology.selectedLoopId}` : topology.managementLoopId);
-  const [localSelectedNodeId, setLocalSelectedNodeId] = useState(initialSelectedNodeId);
+  const searchParamString = searchParams.toString();
+  const [urlState, setUrlState] = useState<TopologyUrlState>(() =>
+    createTopologyUrlState(searchParams, topology)
+  );
   const [companyLayers, setCompanyLayers] = useState<LayerState>(companyLayerDefaults);
   const [selectedLayers, setSelectedLayers] = useState<LayerState>(selectedLayerDefaults);
+  const [brainLayers, setBrainLayers] = useState<LayerState>(brainLayerDefaults);
+
+  useEffect(() => {
+    setUrlState(createTopologyUrlState(new URLSearchParams(searchParamString), topology));
+  }, [searchParamString, topology]);
+
   const hiddenNodeIds = useMemo(
-    () => new Set((searchParams.get("hidden") ?? "").split(",").filter(Boolean)),
-    [searchParams]
+    () => new Set(urlState.hidden.split(",").filter(Boolean)),
+    [urlState.hidden]
   );
-  const activeMode = normalizeMode(searchParams.get("view"));
-  const activeFilter = searchParams.get("department") ?? "all";
-  const activeSearch = searchParams.get("q") ?? "";
-  const attentionOnly = searchParams.get("attention") === "1";
-  const showDrafts = searchParams.get("drafts") === "1";
+  const activeMode = urlState.mode;
+  const activeFilter = urlState.department;
+  const activeSearch = urlState.search;
+  const attentionOnly = urlState.attentionOnly;
+  const showDrafts = urlState.showDrafts;
+  const isBrainMode = activeMode === "brain-map";
   const selectedNode =
-    topology.nodes.find((node) => node.id === localSelectedNodeId) ??
-    topology.nodes.find((node) => node.id === initialSelectedNodeId) ??
-    topology.nodes.find((node) => node.id === topology.managementLoopId) ??
+    findTopologyNode(topology.nodes, urlState.nodeId) ??
+    findTopologyNode(topology.nodes, topology.managementLoopId) ??
     topology.nodes[0];
   const selectedLoopId = selectedNode?.loopId ?? topology.selectedLoopId;
-  const activeLayers = activeMode === "selected-loop" ? selectedLayers : companyLayers;
+  const selectedLoopNode = selectedLoopId
+    ? findLoopTopologyNode(topology.nodes, selectedLoopId)
+    : selectedNode && isLoopNode(selectedNode)
+      ? selectedNode
+      : undefined;
+  const selectedFocusIsWorkflow = selectedLoopNode ? isWorkflowLoopNode(selectedLoopNode) : false;
+  const activeLayers = activeMode === "brain-map"
+    ? brainLayers
+    : activeMode === "selected-loop"
+      ? selectedFocusIsWorkflow
+        ? selectedLayers
+        : companyLayerDefaults
+      : companyLayers;
   const semanticGraph = useMemo(() => {
     if (activeMode === "selected-loop" && selectedLoopId) {
       return buildLoopEgoGraph({
         topology,
         loopId: selectedLoopId,
+        depth: selectedFocusIsWorkflow ? 2 : 1,
         enabledLayers: activeLayers
       });
     }
@@ -103,6 +141,7 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
     activeSearch,
     attentionOnly,
     selectedLoopId,
+    selectedFocusIsWorkflow,
     showDrafts,
     topology
   ]);
@@ -115,44 +154,32 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
     [displayGraph.nodes]
   );
   const selectedGraphNode =
-    displayGraph.nodes.find((node) => node.id === localSelectedNodeId) ??
+    displayGraph.nodes.find((node) => node.id === urlState.nodeId) ??
     displayGraph.nodes.find((node) => node.loopId === selectedLoopId) ??
     displayGraph.nodes[0];
   const selectedNodeId = selectedGraphNode?.id;
   const visualGraph = useMemo(
     () => ({
-      ...buildSemanticTopologyVisualGraph(displayGraph),
+      ...buildSemanticTopologyVisualGraph(displayGraph, {
+        includeWorkflowTriggers: activeMode === "brain-map"
+      }),
+      layoutMode: activeMode === "brain-map" ? "brain-map" as const : undefined,
       selectedNodeId
     }),
-    [displayGraph, selectedNodeId]
+    [activeMode, displayGraph, selectedNodeId]
   );
 
-  useEffect(() => {
-    setLocalSelectedNodeId(initialSelectedNodeId);
-  }, [initialSelectedNodeId]);
-
   function updateParams(next: Record<string, string | undefined>) {
-    const params = new URLSearchParams(
-      typeof window === "undefined" ? searchParams.toString() : window.location.search
-    );
-    for (const [key, value] of Object.entries(next)) {
-      if (!value || value === "all" || (key === "view" && value === "company")) {
-        params.delete(key);
-      } else {
-        params.set(key, value);
-      }
-    }
-    const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
-
-    if (Object.prototype.hasOwnProperty.call(next, "node")) {
-      setLocalSelectedNodeId(next.node ?? topology.managementLoopId);
-    }
-
-    startTransition(() => router.replace(nextUrl, { scroll: false }));
+    setUrlState((current) => applyTopologyUrlPatch(current, next, topology));
+    replaceTopologyParams(pathname, next);
   }
 
   function toggleLayer(layer: TopologyLayer) {
-    const setLayers = activeMode === "selected-loop" ? setSelectedLayers : setCompanyLayers;
+    const setLayers = activeMode === "brain-map"
+      ? setBrainLayers
+      : activeMode === "selected-loop"
+        ? setSelectedLayers
+        : setCompanyLayers;
     setLayers((current) => ({
       ...current,
       [layer]: !current[layer]
@@ -163,7 +190,11 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
     const nextNode = topology.nodes.find((node) => node.id === nodeId);
     updateParams({
       node: nodeId,
-      view: nextNode?.isExpandable ? "selected-loop" : activeMode
+      view: activeMode === "brain-map"
+        ? "brain-map"
+        : nextNode?.isExpandable
+          ? "selected-loop"
+          : activeMode
     });
   }
 
@@ -177,7 +208,13 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
   }
 
   return (
-    <div className="grid gap-4 lg:h-[calc(100vh-7rem)] lg:min-h-[720px] lg:grid-cols-[250px_minmax(0,1fr)_310px] lg:overflow-hidden 2xl:grid-cols-[280px_minmax(760px,1fr)_330px]">
+    <div
+      className={`grid gap-4 lg:h-[calc(100vh-7rem)] lg:min-h-[720px] lg:overflow-hidden ${
+        isBrainMode
+          ? "lg:grid-cols-[250px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(900px,1fr)]"
+          : "lg:grid-cols-[250px_minmax(0,1fr)_310px] 2xl:grid-cols-[280px_minmax(760px,1fr)_330px]"
+      }`}
+    >
       <aside className="order-2 flex min-h-0 flex-col rounded-md border border-line bg-white p-4 lg:order-none lg:h-full lg:overflow-hidden">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -235,6 +272,7 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
             {layerOptions.map((option) => (
               <ToggleButton
                 active={activeLayers[option.layer]}
+                disabled={activeMode === "selected-loop" && !selectedFocusIsWorkflow}
                 key={option.layer}
                 label={`${option.label} ${topology.filterCounts.byLayer[option.layer]}`}
                 onClick={() => toggleLayer(option.layer)}
@@ -287,14 +325,18 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">
-              {activeMode === "selected-loop" ? "Selected loop" : "Company topology"}
+              {activeMode === "brain-map"
+                ? "Company brain"
+                : activeMode === "selected-loop"
+                  ? "Selected loop"
+                  : "Company topology"}
             </div>
             <div className="text-lg font-semibold">{selectedGraphNode?.label ?? "Company Loopgraph"}</div>
             <Breadcrumbs graph={displayGraph} />
           </div>
           <div className="flex items-center gap-2 text-xs text-ink/60">
             <span className="rounded-md border border-line px-2 py-1">{topology.metadata.sourceLabel}</span>
-            <span className="rounded-md border border-line px-2 py-1">{isPending ? "Syncing" : "Ready"}</span>
+            <span className="rounded-md border border-line px-2 py-1">Ready</span>
           </div>
         </div>
         <div className="min-h-[420px] flex-1 lg:min-h-0">
@@ -307,9 +349,12 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
             variant="topology"
           />
         </div>
-        <TraceRail edges={displayGraph.edges} node={selectedGraphNode} nodes={displayGraph.nodes} />
+        {isBrainMode ? null : (
+          <TraceRail edges={displayGraph.edges} node={selectedGraphNode} nodes={displayGraph.nodes} />
+        )}
       </section>
 
+      {isBrainMode ? null : (
       <aside className="order-3 rounded-md border border-line bg-white p-4 lg:order-none lg:h-full lg:min-h-0 lg:overflow-y-auto">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -346,8 +391,73 @@ export function TopologyWorkspace({ topology }: TopologyWorkspaceProps) {
           topology={topology}
         />
       </aside>
+      )}
     </div>
   );
+}
+
+function createTopologyUrlState(
+  searchParams: Pick<URLSearchParams, "get">,
+  topology: SemanticTopology
+): TopologyUrlState {
+  return {
+    nodeId: searchParams.get("node") ??
+      (topology.selectedLoopId ? `loop:${topology.selectedLoopId}` : topology.managementLoopId),
+    mode: normalizeMode(searchParams.get("view")),
+    department: searchParams.get("department") ?? "all",
+    search: searchParams.get("q") ?? "",
+    attentionOnly: searchParams.get("attention") === "1",
+    showDrafts: searchParams.get("drafts") === "1",
+    hidden: searchParams.get("hidden") ?? ""
+  };
+}
+
+function applyTopologyUrlPatch(
+  current: TopologyUrlState,
+  next: Record<string, string | undefined>,
+  topology: SemanticTopology
+): TopologyUrlState {
+  return {
+    nodeId: Object.prototype.hasOwnProperty.call(next, "node")
+      ? next.node ?? topology.managementLoopId
+      : current.nodeId,
+    mode: Object.prototype.hasOwnProperty.call(next, "view")
+      ? normalizeMode(next.view ?? null)
+      : current.mode,
+    department: Object.prototype.hasOwnProperty.call(next, "department")
+      ? next.department ?? "all"
+      : current.department,
+    search: Object.prototype.hasOwnProperty.call(next, "q")
+      ? next.q ?? ""
+      : current.search,
+    attentionOnly: Object.prototype.hasOwnProperty.call(next, "attention")
+      ? next.attention === "1"
+      : current.attentionOnly,
+    showDrafts: Object.prototype.hasOwnProperty.call(next, "drafts")
+      ? next.drafts === "1"
+      : current.showDrafts,
+    hidden: Object.prototype.hasOwnProperty.call(next, "hidden")
+      ? next.hidden ?? ""
+      : current.hidden
+  };
+}
+
+function replaceTopologyParams(pathname: string, next: Record<string, string | undefined>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  for (const [key, value] of Object.entries(next)) {
+    if (!value || value === "all" || (key === "view" && value === "company")) {
+      params.delete(key);
+    } else {
+      params.set(key, value);
+    }
+  }
+
+  const nextUrl = params.toString() ? `${pathname}?${params.toString()}` : pathname;
+  window.history.replaceState(window.history.state, "", nextUrl);
 }
 
 function ViewModeControl({
@@ -360,12 +470,13 @@ function ViewModeControl({
   const modes: Array<{ value: TopologyVisibilityMode; label: string }> = [
     { value: "company", label: "Org" },
     { value: "selected-loop", label: "Loop" },
+    { value: "brain-map", label: "Brain" },
     { value: "department-map", label: "Dept" },
     { value: "runtime-trace-map", label: "Trace" }
   ];
 
   return (
-    <div className="grid grid-cols-4 gap-1 rounded-md border border-line bg-paper p-1">
+    <div className="grid grid-cols-5 gap-1 rounded-md border border-line bg-paper p-1">
       {modes.map((item) => (
         <button
           className={`min-w-0 rounded px-1.5 py-1.5 text-center text-xs font-semibold ${
@@ -384,21 +495,26 @@ function ViewModeControl({
 
 function ToggleButton({
   active,
+  disabled,
   label,
   onClick
 }: {
   active: boolean;
+  disabled?: boolean;
   label: string;
   onClick: () => void;
 }) {
   return (
     <button
       aria-pressed={active}
-      className={`rounded-md border px-2 py-2 text-left text-xs font-semibold ${
+      className={`rounded-md border px-2 py-2 text-left text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-45 ${
         active
           ? "border-ink bg-ink text-white"
-          : "border-line bg-white text-ink/60 hover:border-ink hover:text-ink"
+          : disabled
+            ? "border-line bg-white text-ink/45"
+            : "border-line bg-white text-ink/60 hover:border-ink hover:text-ink"
       }`}
+      disabled={disabled}
       onClick={onClick}
       type="button"
     >
@@ -595,6 +711,7 @@ function hideSemanticNodes<T extends SemanticTopology | LoopEgoGraph>(graph: T, 
 function normalizeMode(value: string | null): TopologyVisibilityMode {
   if (
     value === "selected-loop" ||
+    value === "brain-map" ||
     value === "department-map" ||
     value === "runtime-trace-map"
   ) {
@@ -613,6 +730,60 @@ function departmentOptions(nodes: TopologyNode[]) {
 
 function isLoopNode(node: TopologyNode) {
   return ["management_loop", "department_loop", "workflow_loop", "task_loop"].includes(node.type);
+}
+
+function findLoopTopologyNode(nodes: TopologyNode[], id?: string | null) {
+  if (!id) {
+    return undefined;
+  }
+  const candidates = topologyNodeCandidates(id);
+  return nodes.find(
+    (node) =>
+      isLoopNode(node) &&
+      (candidates.has(node.id) ||
+        (node.loopId ? candidates.has(node.loopId) : false) ||
+        (node.refId ? candidates.has(node.refId) : false))
+  );
+}
+
+function findTopologyNode(nodes: TopologyNode[], id?: string | null) {
+  if (!id) {
+    return undefined;
+  }
+  const candidates = topologyNodeCandidates(id);
+  return nodes.find(
+    (node) =>
+      candidates.has(node.id) ||
+      (node.loopId ? candidates.has(node.loopId) : false) ||
+      (node.refId ? candidates.has(node.refId) : false)
+  );
+}
+
+function topologyNodeCandidates(id: string) {
+  const candidates = new Set<string>([id]);
+  const prefixes = ["loop:department:", "department:"];
+  for (const prefix of prefixes) {
+    if (!id.startsWith(prefix)) {
+      continue;
+    }
+    const department = slugDepartment(id.slice(prefix.length));
+    candidates.add(`${prefix}${department}`);
+    candidates.add(`department:${department}`);
+    candidates.add(`loop:department:${department}`);
+  }
+  return candidates;
+}
+
+function slugDepartment(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "department";
+}
+
+function isWorkflowLoopNode(node: TopologyNode) {
+  return node.type === "workflow_loop" || node.type === "task_loop";
 }
 
 function sortLoopNodes(left: TopologyNode, right: TopologyNode) {
