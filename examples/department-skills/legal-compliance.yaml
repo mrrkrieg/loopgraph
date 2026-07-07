@@ -1,0 +1,131 @@
+id: legal-compliance
+departmentType: legal_compliance
+name: Legal / Compliance
+description: Policy drift, security questionnaires, contract risk, compliance evidence, and access review.
+purpose: Prepare evidence and triage risk while keeping legal and security decisions approved.
+commonGoals:
+  - id: reduce_review_burden
+    label: Reduce expert review burden.
+    description: Prepare better evidence packets for expert legal and compliance review.
+    exampleMetrics: [contract_review_cycle_time, audit_readiness, expert_review_burden]
+    typicalPainPoints: [review queues, policy drift, audit evidence gaps]
+discoveryQuestions:
+  - id: legal_review_boundaries
+    prompt: Which legal, compliance, security, and access decisions require expert approval?
+    type: textarea
+    required: true
+    produces: [risk_rule, human_review_rule]
+loopBlueprints:
+  - id: policy_drift
+    name: Policy Drift Loop
+    description: Detects changes that may require policy updates.
+    processType: policy_drift
+    defaultTrigger: Weekly policy review
+    defaultRoutine: [Collect policy and process changes, Detect drift, Draft review packet]
+    defaultVerifier: [Packet cites policy and process evidence]
+    defaultHumanReview: [Legal owner approves policy interpretation]
+    defaultMetrics: [policy_exception_resolution, risk_detection_rate]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L1
+  - id: security_questionnaire
+    name: Security Questionnaire Loop
+    description: Drafts questionnaire responses from approved evidence.
+    processType: security_questionnaire
+    defaultTrigger: Questionnaire received
+    defaultRoutine: [Collect approved evidence, Draft response, Flag unknowns]
+    defaultVerifier: [Every answer cites approved evidence]
+    defaultHumanReview: [Security or legal owner approves response]
+    defaultMetrics: [expert_review_burden, false_positive_rate]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: contract_risk_triage
+    name: Contract Risk Triage Loop
+    description: Triage contract clauses and route risky changes.
+    processType: contract_risk_triage
+    defaultTrigger: Contract draft received
+    defaultRoutine: [Collect contract clauses, Flag risk terms, Draft review packet]
+    defaultVerifier: [Risk flags cite clause text and policy]
+    defaultHumanReview: [Legal owner approves triage outcome]
+    defaultMetrics: [contract_review_cycle_time, risk_detection_rate]
+    defaultRiskLevel: critical
+    defaultAutonomyLevel: L1
+  - id: compliance_evidence
+    name: Compliance Evidence Loop
+    description: Gathers evidence for controls and audits.
+    processType: compliance_evidence
+    defaultTrigger: Control evidence request
+    defaultRoutine: [Collect evidence, Check freshness, Draft evidence packet]
+    defaultVerifier: [Evidence meets freshness and source rules]
+    defaultHumanReview: [Compliance owner approves packet]
+    defaultMetrics: [audit_readiness]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: access_review
+    name: Access Review Loop
+    description: Prepares access review exceptions and evidence.
+    processType: access_review
+    defaultTrigger: Access review cycle
+    defaultRoutine: [Collect access list, Flag exceptions, Draft review packet]
+    defaultVerifier: [Exceptions cite access policy]
+    defaultHumanReview: [System owner approves access change]
+    defaultMetrics: [audit_readiness, policy_exception_resolution]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+requiredIntegrations:
+  - integrationType: database
+    reason: Read control evidence, access logs, and policy metadata.
+    variables: [compliance.evidence, access.logs, policy.records]
+    actions: [database.read]
+    requiredForLoopBlueprints: [policy_drift, compliance_evidence, access_review]
+  - integrationType: custom_api
+    reason: Read contract or questionnaire source systems.
+    variables: [contract.clauses, questionnaire.answers]
+    actions: [custom_api.read]
+    requiredForLoopBlueprints: [security_questionnaire, contract_risk_triage]
+defaultMetrics:
+  - key: contract_review_cycle_time
+    label: Contract review cycle time
+    description: Time from contract intake to reviewed packet.
+    source: trace
+    baselineRequired: true
+  - key: policy_exception_resolution
+    label: Policy exception resolution
+    description: Time to resolve policy exceptions.
+    source: trace
+    baselineRequired: true
+  - key: audit_readiness
+    label: Audit readiness
+    description: Evidence completeness and freshness.
+    source: trace
+    baselineRequired: false
+  - key: risk_detection_rate
+    label: Risk detection rate
+    description: Valid risk flags per review.
+    source: human_review
+    baselineRequired: true
+  - key: expert_review_burden
+    label: Expert review burden
+    description: Legal or compliance review minutes.
+    source: human_review
+    baselineRequired: true
+  - key: false_positive_rate
+    label: False positive rate
+    description: Flags rejected by expert reviewers.
+    source: human_review
+    baselineRequired: true
+humanReviewRules:
+  - id: legal_expert_review
+    condition: Legal, security, compliance, or access decisions require expert approval
+    reviewerRole: Legal or compliance owner
+    reason: The loop prepares evidence; experts remain accountable for judgment.
+riskRules:
+  - id: no_auto_legal_decision
+    condition: AI attempts to accept legal, security, compliance, or access risk without approval
+    requiredAction: block
+    reason: Regulated and legal decisions require expert review.
+dailySummaryFields:
+  - key: audit_readiness
+    label: Audit readiness
+    source: metric
+    displayType: status
+

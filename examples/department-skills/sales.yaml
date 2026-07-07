@@ -1,0 +1,159 @@
+id: sales
+departmentType: sales
+name: Sales
+description: Pipeline creation, qualification, follow-up, and relationship selling.
+purpose: Reduce prep, follow-up, and CRM friction while keeping trust and negotiation human-led.
+commonGoals:
+  - id: improve_pipeline_quality
+    label: Improve qualified pipeline quality.
+    description: Focus human sellers on high-fit buyers and relationship work.
+    exampleMetrics: [qualified_lead_rate, opportunity_conversion, deal_velocity]
+    typicalPainPoints: [slow follow-up, CRM hygiene, inconsistent qualification]
+discoveryQuestions:
+  - id: sales_queues
+    prompt: Which lead queues, CRM stages, and follow-up dashboards does Sales check?
+    type: textarea
+    required: true
+    produces: [process_inventory, signal]
+  - id: sales_relationship_boundary
+    prompt: Which customer-facing sales actions must stay human-owned?
+    type: textarea
+    required: true
+    produces: [risk_rule, human_review_rule]
+loopBlueprints:
+  - id: lead_qualification
+    name: Lead Qualification Loop
+    description: Scores leads using fit signals and drafts qualification notes.
+    processType: lead_qualification
+    defaultTrigger: New lead or daily lead queue review
+    defaultRoutine: [Collect lead and account context, Draft qualification rationale, Recommend next owner]
+    defaultVerifier: [Qualification has evidence from CRM and source system]
+    defaultHumanReview: [Human reviews score before customer-facing follow-up]
+    defaultMetrics: [qualified_lead_rate, opportunity_conversion, crm_completeness]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: pipeline_forecast
+    name: Pipeline Forecast Loop
+    description: Explains forecast changes and missing evidence.
+    processType: pipeline_forecast
+    defaultTrigger: Weekly forecast review
+    defaultRoutine: [Collect opportunity changes, Explain forecast movement, Recommend accountable follow-up]
+    defaultVerifier: [Forecast movement cites opportunity evidence]
+    defaultHumanReview: [Sales leader reviews forecast recommendations]
+    defaultMetrics: [deal_velocity, opportunity_conversion]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: close_readiness
+    name: Close Readiness Loop
+    description: Prepares deal risk and mutual action plan review.
+    processType: close_readiness
+    defaultTrigger: Opportunity reaches late stage
+    defaultRoutine: [Collect close plan evidence, Identify missing stakeholders, Draft readiness memo]
+    defaultVerifier: [Memo names buyer evidence and risks]
+    defaultHumanReview: [Account owner approves customer-facing next step]
+    defaultMetrics: [deal_velocity, relationship_time]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: follow_up_latency
+    name: Follow-Up Latency Loop
+    description: Detects slow follow-up and drafts internal reminders or email drafts.
+    processType: follow_up_latency
+    defaultTrigger: Lead or opportunity has no next activity
+    defaultRoutine: [Detect stale next steps, Draft follow-up reminder, Draft customer-facing message for review]
+    defaultVerifier: [Draft references the latest CRM context]
+    defaultHumanReview: [Seller approves customer-facing message]
+    defaultMetrics: [follow_up_latency, relationship_time]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: objection_learning
+    name: Objection Learning Loop
+    description: Clusters objections and drafts enablement notes.
+    processType: objection_learning
+    defaultTrigger: Weekly call note review
+    defaultRoutine: [Collect objections, Cluster themes, Draft enablement update]
+    defaultVerifier: [Themes include source examples]
+    defaultHumanReview: [Sales enablement reviews before distribution]
+    defaultMetrics: [opportunity_conversion]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L1
+  - id: crm_hygiene
+    name: CRM Hygiene Loop
+    description: Finds incomplete CRM records and drafts cleanup tasks.
+    processType: crm_hygiene
+    defaultTrigger: Daily CRM hygiene scan
+    defaultRoutine: [Find missing CRM fields, Draft cleanup task, Route to owner]
+    defaultVerifier: [Task points to exact missing field]
+    defaultHumanReview: [Owner reviews before field write]
+    defaultMetrics: [crm_completeness]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+requiredIntegrations:
+  - integrationType: crm
+    reason: Read leads, opportunities, account context, and CRM completeness.
+    variables: [crm.leads, crm.opportunities, crm.next_activity, crm.qualified_lead_status]
+    actions: [crm.read, crm.write.lead_score]
+    requiredForLoopBlueprints: [lead_qualification, pipeline_forecast, close_readiness, follow_up_latency, crm_hygiene]
+  - integrationType: email
+    reason: Draft follow-up messages without sending.
+    variables: [email.draft_context]
+    actions: [email.draft.follow_up]
+    requiredForLoopBlueprints: [follow_up_latency, close_readiness]
+  - integrationType: calendar
+    reason: Estimate relationship time and next meeting gaps.
+    variables: [calendar.meeting_events]
+    actions: [calendar.read]
+    requiredForLoopBlueprints: [follow_up_latency, close_readiness]
+defaultMetrics:
+  - key: follow_up_latency
+    label: Follow-up latency
+    description: Time between buyer signal and seller follow-up.
+    source: integration
+    formula: crm.next_activity_at - crm.last_buyer_signal_at
+    baselineRequired: true
+  - key: qualified_lead_rate
+    label: Qualified lead rate
+    description: Share of leads accepted as qualified.
+    source: integration
+    formula: crm.qualified_leads / crm.total_leads
+    baselineRequired: true
+  - key: opportunity_conversion
+    label: Opportunity conversion
+    description: Conversion from qualified lead to opportunity.
+    source: integration
+    formula: crm.opportunities / crm.qualified_leads
+    baselineRequired: true
+  - key: deal_velocity
+    label: Deal velocity
+    description: Average movement through opportunity stages.
+    source: integration
+    baselineRequired: true
+  - key: crm_completeness
+    label: CRM completeness
+    description: Required CRM fields populated on active records.
+    source: integration
+    baselineRequired: true
+  - key: relationship_time
+    label: Relationship time redeployed
+    description: Seller time shifted into buyer relationship work.
+    source: undefined
+    baselineRequired: true
+humanReviewRules:
+  - id: sales_customer_message_review
+    condition: Customer-facing sales messages require seller approval
+    reviewerRole: Account owner
+    reason: Sales value is relationship-heavy; AI assists preparation, not trust or negotiation.
+riskRules:
+  - id: no_unapproved_send
+    condition: AI attempts to send customer-facing email
+    requiredAction: block
+    reason: Customer-facing communication requires human approval.
+dailySummaryFields:
+  - key: follow_up_latency
+    label: Follow-up latency
+    source: metric
+    displayType: duration
+  - key: relationship_time
+    label: Relationship time
+    source: metric
+    displayType: duration
+

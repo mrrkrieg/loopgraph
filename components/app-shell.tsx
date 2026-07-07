@@ -6,12 +6,16 @@ import { useEffect, useState } from "react";
 import { LoopgraphMark } from "./loopgraph-mark";
 
 const navItems = [
+  { href: "/discovery", label: "Discovery" },
+  { href: "/daily", label: "Daily" },
   { href: "/topology", label: "Topology" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/loops", label: "Loops" },
   { href: "/loops/new", label: "New Loop" },
   { href: "/management", label: "Management" },
   { href: "/templates", label: "Templates" },
+  { href: "/skills", label: "Skills" },
+  { href: "/access-plan", label: "Access Plan" },
   { href: "/settings", label: "Settings" }
 ];
 

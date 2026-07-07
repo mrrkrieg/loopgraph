@@ -5,11 +5,23 @@ import {
   buildSemanticTopology,
   createTopologyWarnings,
   getVisibleTopology,
+  type TopologyLayer,
   type TopologyNodeType
 } from "./graph";
 import type { EscalationCase } from "./escalation";
 import type { LoopSpec } from "./loop-spec";
 import type { LoopRunTrace } from "./trace";
+
+const allLoopLayers: Record<TopologyLayer, boolean> = {
+  structure: true,
+  data: true,
+  action: true,
+  verification: true,
+  human: true,
+  measurement: true,
+  runtime: true,
+  memory: true
+};
 
 describe("semantic loop topology", () => {
   it("builds company, management, department, and workflow containment", () => {
@@ -77,7 +89,11 @@ describe("semantic loop topology", () => {
         title: "Add stricter audience check"
       }]
     });
-    const ego = buildLoopEgoGraph({ topology, loopId: "campaign-learning" });
+    const ego = buildLoopEgoGraph({
+      topology,
+      loopId: "campaign-learning",
+      enabledLayers: allLoopLayers
+    });
     const types = new Set<TopologyNodeType>(ego.nodes.map((node) => node.type));
 
     expect(ego.centerNodeId).toBe("loop:campaign-learning");
@@ -103,6 +119,112 @@ describe("semantic loop topology", () => {
       "loop:department:marketing",
       "loop:campaign-learning"
     ]);
+  });
+
+  it("keeps department focus to parent and direct child loops by default", () => {
+    const topology = buildSemanticTopology({
+      loopSpecs: [
+        loopSpec({ id: "customer-health", department: "customer_success" }),
+        loopSpec({ id: "campaign-learning", department: "marketing" })
+      ],
+      traces: [trace("run_1", "customer-health")]
+    });
+    const ego = buildLoopEgoGraph({
+      topology,
+      loopId: "department:customer_success",
+      depth: 1
+    });
+    const nodeIds = new Set(ego.nodes.map((node) => node.id));
+    const nodeTypes = new Set<TopologyNodeType>(ego.nodes.map((node) => node.type));
+
+    expect(nodeIds).toEqual(new Set([
+      "loop:management",
+      "loop:department:customer-success",
+      "loop:customer-health"
+    ]));
+    expect(nodeTypes).toEqual(new Set([
+      "management_loop",
+      "department_loop",
+      "workflow_loop"
+    ]));
+    expect(ego.edges.every((edge) => edge.kind === "contains")).toBe(true);
+  });
+
+  it("expands selected workflow internals by default while leaving runtime opt-in", () => {
+    const topology = buildSemanticTopology({
+      loopSpecs: [loopSpec({ id: "campaign-learning", department: "marketing" })],
+      traces: [trace("run_1", "campaign-learning")]
+    });
+    const selected = buildLoopEgoGraph({ topology, loopId: "campaign-learning" });
+    const withRuntime = buildLoopEgoGraph({
+      topology,
+      loopId: "campaign-learning",
+      enabledLayers: { runtime: true }
+    });
+    const selectedTypes = new Set<TopologyNodeType>(selected.nodes.map((node) => node.type));
+    const runtimeTypes = new Set<TopologyNodeType>(withRuntime.nodes.map((node) => node.type));
+
+    expect(selectedTypes.has("workflow_loop")).toBe(true);
+    expect(selectedTypes.has("signal_source")).toBe(true);
+    expect(selectedTypes.has("integration")).toBe(true);
+    expect(selectedTypes.has("tool_action")).toBe(true);
+    expect(selectedTypes.has("verifier")).toBe(true);
+    expect(selectedTypes.has("human_owner")).toBe(true);
+    expect(selectedTypes.has("metric")).toBe(true);
+    expect(selectedTypes.has("trace")).toBe(false);
+    expect(runtimeTypes.has("trace")).toBe(true);
+  });
+
+  it("expands brain map internals by default while leaving runtime opt-in", () => {
+    const topology = buildSemanticTopology({
+      loopSpecs: [loopSpec({ id: "campaign-learning", department: "marketing" })],
+      traces: [trace("run_1", "campaign-learning")]
+    });
+    const brain = getVisibleTopology(topology, { mode: "brain-map" });
+    const withRuntime = getVisibleTopology(topology, {
+      mode: "brain-map",
+      enabledLayers: { runtime: true }
+    });
+    const brainTypes = new Set<TopologyNodeType>(brain.nodes.map((node) => node.type));
+    const runtimeTypes = new Set<TopologyNodeType>(withRuntime.nodes.map((node) => node.type));
+
+    expect(brainTypes.has("workflow_loop")).toBe(true);
+    expect(brainTypes.has("signal_source")).toBe(true);
+    expect(brainTypes.has("integration")).toBe(true);
+    expect(brainTypes.has("tool_action")).toBe(true);
+    expect(brainTypes.has("verifier")).toBe(true);
+    expect(brainTypes.has("human_owner")).toBe(true);
+    expect(brainTypes.has("metric")).toBe(true);
+    expect(brainTypes.has("trace")).toBe(false);
+    expect(runtimeTypes.has("trace")).toBe(true);
+  });
+
+  it("removes edges when their layer nodes are disabled", () => {
+    const topology = buildSemanticTopology({
+      loopSpecs: [loopSpec({ id: "campaign-learning", department: "marketing" })]
+    });
+    const actionOnly = buildLoopEgoGraph({
+      topology,
+      loopId: "campaign-learning",
+      enabledLayers: {
+        data: false,
+        action: true,
+        verification: false,
+        human: false,
+        measurement: false,
+        runtime: false,
+        memory: false
+      }
+    });
+    const dataNodeIds = new Set(
+      topology.nodes.filter((node) => node.layer === "data").map((node) => node.id)
+    );
+
+    expect(actionOnly.nodes.some((node) => node.layer === "data")).toBe(false);
+    expect(actionOnly.nodes.some((node) => node.layer === "action")).toBe(true);
+    expect(actionOnly.edges.some((edge) =>
+      dataNodeIds.has(edge.source) || dataNodeIds.has(edge.target)
+    )).toBe(false);
   });
 
   it("hides unattached draft loops by default and reports them as orphans", () => {
