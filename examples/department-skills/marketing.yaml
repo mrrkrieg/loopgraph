@@ -1,0 +1,163 @@
+id: marketing
+departmentType: marketing
+name: Marketing
+description: Growth, messaging, campaign learning, and demand generation.
+purpose: Improve qualified demand while keeping claims, spend, and learning loops accountable.
+commonGoals:
+  - id: reduce_cpqc
+    label: Reduce cost per qualified customer.
+    description: Lower paid acquisition waste by learning from qualified customer outcomes.
+    exampleMetrics: [cost_per_qualified_customer, qualified_lead_rate]
+    typicalPainPoints: [high CAC, slow campaign learning, unsupported claims]
+  - id: increase_conversion
+    label: Increase conversion rate.
+    description: Improve page and funnel conversion with evidence-backed experiments.
+    exampleMetrics: [conversion_rate, campaign_cycle_time]
+    typicalPainPoints: [manual_context_gathering, quality_variance]
+discoveryQuestions:
+  - id: marketing_goal
+    prompt: What marketing outcome matters most this quarter?
+    type: textarea
+    required: true
+    produces: [goal]
+  - id: marketing_systems
+    prompt: Which campaign, analytics, CRM, and CMS systems are used?
+    type: integration_picker
+    required: true
+    options: [ads, analytics, crm, website_cms, manual_upload]
+    produces: [integration_requirement, signal]
+  - id: marketing_never
+    prompt: What campaign or brand actions should AI never take without approval?
+    type: textarea
+    required: true
+    produces: [risk_rule, human_review_rule]
+loopBlueprints:
+  - id: campaign_learning
+    name: Campaign Learning Loop
+    description: Reviews spend, conversions, and qualified lead outcomes to draft experiment briefs.
+    processType: campaign_performance_review
+    defaultTrigger: Weekly campaign performance review
+    defaultRoutine: [Collect campaign performance, Compare spend to qualified lead outcomes, Draft experiment brief, Route budget changes for approval]
+    defaultVerifier: [Evidence links to ads, analytics, and CRM records, Budget recommendations obey approval policy]
+    defaultHumanReview: [Approve any budget or customer-facing messaging change]
+    defaultMetrics: [cost_per_qualified_customer, conversion_rate, campaign_cycle_time, learning_velocity]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: landing_page_experiment
+    name: Landing Page Experiment Loop
+    description: Finds conversion bottlenecks and drafts landing page experiment plans.
+    processType: landing_page_experiment_planning
+    defaultTrigger: Weekly funnel review
+    defaultRoutine: [Collect analytics conversion points, Draft experiment plan, Create internal task]
+    defaultVerifier: [Experiment has hypothesis, metric, and owner]
+    defaultHumanReview: [Approve customer-facing copy before publish]
+    defaultMetrics: [conversion_rate, campaign_cycle_time]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: brand_claim_review
+    name: Brand Claim Review Loop
+    description: Checks campaign claims against approved proof.
+    processType: brand_claim_review
+    defaultTrigger: New campaign draft
+    defaultRoutine: [Collect proposed claims, Compare claims to evidence, Flag unsupported claims]
+    defaultVerifier: [Every claim has source evidence]
+    defaultHumanReview: [Review unsupported or high-risk claims]
+    defaultMetrics: [brand_review_rework_minutes]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L1
+  - id: competitor_monitoring
+    name: Competitor Monitoring Loop
+    description: Summarizes competitor positioning changes.
+    processType: competitor_monitoring
+    defaultTrigger: Weekly market scan
+    defaultRoutine: [Collect competitor changes, Summarize themes, Recommend messaging watch items]
+    defaultVerifier: [Sources are cited]
+    defaultHumanReview: [Review strategic positioning recommendations]
+    defaultMetrics: [learning_velocity]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L1
+  - id: seo_refresh
+    name: SEO Refresh Loop
+    description: Detects stale SEO content and drafts refresh briefs.
+    processType: seo_refresh
+    defaultTrigger: Monthly SEO review
+    defaultRoutine: [Collect page performance, Identify stale content, Draft refresh brief]
+    defaultVerifier: [Brief includes target query and success metric]
+    defaultHumanReview: [Approve customer-facing copy before publish]
+    defaultMetrics: [conversion_rate, campaign_cycle_time]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+requiredIntegrations:
+  - integrationType: ads
+    reason: Read spend, campaign names, and performance.
+    variables: [ads.spend, ads.campaign_performance]
+    actions: [ads.read]
+    requiredForLoopBlueprints: [campaign_learning]
+  - integrationType: analytics
+    reason: Read conversion rate and funnel performance.
+    variables: [analytics.conversion_rate, analytics.landing_page_sessions]
+    actions: [analytics.read]
+    requiredForLoopBlueprints: [campaign_learning, landing_page_experiment, seo_refresh]
+  - integrationType: crm
+    reason: Read qualified lead status and downstream customer quality.
+    variables: [crm.qualified_lead_status, crm.customer_source]
+    actions: [crm.read]
+    requiredForLoopBlueprints: [campaign_learning]
+  - integrationType: website_cms
+    reason: Draft website experiment briefs without publishing.
+    variables: [cms.page_id]
+    actions: [docs.write.experiment_brief]
+    requiredForLoopBlueprints: [landing_page_experiment, seo_refresh]
+  - integrationType: manual_upload
+    reason: Manual campaign exports can provide a fallback.
+    variables: [manual.campaign_csv]
+    actions: []
+    requiredForLoopBlueprints: [campaign_learning, brand_claim_review]
+defaultMetrics:
+  - key: cost_per_qualified_customer
+    label: Cost per qualified customer
+    description: Paid spend divided by qualified customer outcomes.
+    source: integration
+    formula: ads.spend / crm.qualified_customers
+    baselineRequired: true
+  - key: conversion_rate
+    label: Conversion rate
+    description: Visitor-to-lead or lead-to-qualified conversion rate.
+    source: integration
+    formula: analytics.conversions / analytics.sessions
+    baselineRequired: true
+  - key: campaign_cycle_time
+    label: Campaign cycle time
+    description: Time from campaign review to next approved experiment.
+    source: trace
+    baselineRequired: true
+  - key: learning_velocity
+    label: Learning velocity
+    description: Number of evidence-backed campaign learnings per week.
+    source: trace
+    baselineRequired: false
+  - key: brand_review_rework_minutes
+    label: Brand review rework minutes
+    description: Human rework caused by unsupported claims.
+    source: human_review
+    baselineRequired: true
+humanReviewRules:
+  - id: marketing_budget_review
+    condition: Budget changes or public claim changes require approval
+    reviewerRole: Marketing lead
+    reason: Spend and claims create financial and brand risk.
+riskRules:
+  - id: no_unapproved_budget_changes
+    condition: Budget change without approver fingerprint
+    requiredAction: block
+    reason: AI must not move campaign budget directly.
+dailySummaryFields:
+  - key: cost_per_qualified_customer
+    label: CPQC
+    source: metric
+    displayType: currency
+  - key: brand_review_rework_minutes
+    label: Brand rework
+    source: human_review
+    displayType: duration
+

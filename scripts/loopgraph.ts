@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import "./load-env";
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import { Command } from "commander";
@@ -15,6 +15,24 @@ import { applyReviewDecision, ReviewServiceError } from "../lib/loopgraph-runtim
 import { formatReviewPacket } from "../lib/loopgraph-runtime/review-packet";
 import { listEscalationCases, resolveCase } from "../lib/loopgraph-runtime/case-service";
 import { getStorageAdapter, getLoopgraphRoot } from "../lib/loopgraph-runtime/storage-resolver";
+import {
+  acceptRecommendation,
+  answerDiscoveryQuestion,
+  buildDemoDiscoverySession,
+  generateDemoDailySummary,
+  listUndefinedMetrics,
+  loadDiscoverySession,
+  materializeAcceptedLoops,
+  runDiscoveryPipeline,
+  saveDailySummary,
+  saveDiscoverySession,
+  startDiscoverySession
+} from "../lib/loopgraph-runtime/discovery-engine";
+import {
+  loadDepartmentSkillPack,
+  loadDepartmentSkillPacks,
+  validateDepartmentSkillPackReferences
+} from "../lib/loopgraph-runtime/skill-pack-loader";
 import { createSpecFromTemplate } from "../lib/loop-engineering-builder/template-spec";
 import { getDepartmentTemplates, getTemplateById, getTemplateCatalog } from "../lib/loop-engineering-builder/templates";
 import { registerLoopSpec } from "../lib/loop-engineering-builder/local-workspace";
@@ -83,6 +101,141 @@ templates
         console.log(`- ${template.id} [${template.runtimeLevel}] ${template.name}`);
       }
     }
+  });
+
+const skills = program.command("skills").description("Department skill pack commands");
+
+skills
+  .command("list")
+  .option("--json", "Print raw JSON")
+  .action(async (options: { json?: boolean }) => {
+    const packs = await loadDepartmentSkillPacks(repoRoot);
+    const errors = packs.flatMap(validateDepartmentSkillPackReferences);
+    if (options.json) {
+      console.log(JSON.stringify({ packs, errors }, null, 2));
+      return;
+    }
+    for (const pack of packs) {
+      console.log(`- ${pack.id} (${pack.departmentType}) ${pack.loopBlueprints.length} loops`);
+    }
+    if (errors.length > 0) {
+      console.error(`\nValidation errors:\n- ${errors.join("\n- ")}`);
+      process.exit(1);
+    }
+  });
+
+skills
+  .command("show")
+  .argument("<skillId>", "Skill pack id or department type")
+  .action(async (skillId) => {
+    const pack = await loadDepartmentSkillPack(skillId, repoRoot);
+    if (!pack) {
+      console.error(`Unknown skill pack: ${skillId}`);
+      process.exit(1);
+    }
+    console.log(JSON.stringify(pack, null, 2));
+  });
+
+const discovery = program.command("discovery").description("Business discovery commands");
+
+discovery
+  .command("start")
+  .option("--fixture <file>", "Discovery fixture JSON path")
+  .option("--recommend", "Run the deterministic recommendation pipeline immediately")
+  .action(async (options: { fixture?: string; recommend?: boolean }) => {
+    const input = options.fixture
+      ? JSON.parse(await readFile(path.resolve(options.fixture), "utf8"))
+      : {};
+    const session = await startDiscoverySession(input, repoRoot);
+    const next = options.recommend ? await runDiscoveryPipeline(session, repoRoot) : session;
+    await saveDiscoverySession(next, repoRoot);
+    console.log(JSON.stringify({
+      sessionId: next.id,
+      status: next.status,
+      companyId: next.companyId,
+      recommendations: next.recommendedLoops.map((item) => item.name)
+    }, null, 2));
+  });
+
+discovery
+  .command("answer")
+  .argument("<sessionId>")
+  .requiredOption("--question <id>", "Question id")
+  .requiredOption("--value <value>", "Answer value")
+  .option("--scope <scope>", "Answer scope", "company")
+  .option("--department <id>", "Department id")
+  .action(async (sessionId, options: { question: string; value: string; scope: string; department?: string }) => {
+    const session = await answerDiscoveryQuestion(sessionId, {
+      questionId: options.question,
+      scope: options.scope as "company",
+      departmentId: options.department,
+      value: options.value
+    }, repoRoot);
+    console.log(`Recorded ${options.question} on ${session.id} (${session.status})`);
+  });
+
+discovery
+  .command("recommend")
+  .argument("<sessionId>")
+  .action(async (sessionId) => {
+    const session = await loadDiscoverySession(sessionId, repoRoot);
+    if (!session) {
+      console.error(`Discovery session not found: ${sessionId}`);
+      process.exit(1);
+    }
+    const next = await runDiscoveryPipeline(session, repoRoot);
+    await saveDiscoverySession(next, repoRoot);
+    console.log(JSON.stringify(next.recommendedLoops.map((item) => ({
+      id: item.id,
+      name: item.name,
+      readiness: item.readiness.level,
+      blockers: item.readiness.blockers
+    })), null, 2));
+  });
+
+discovery
+  .command("materialize")
+  .argument("<sessionId>")
+  .option("--accept-all", "Accept all recommended loops before materializing")
+  .action(async (sessionId, options: { acceptAll?: boolean }) => {
+    const loaded = await loadDiscoverySession(sessionId, repoRoot);
+    if (!loaded) {
+      console.error(`Discovery session not found: ${sessionId}`);
+      process.exit(1);
+    }
+    const session = options.acceptAll
+      ? loaded.recommendedLoops.reduce((next, recommendation) => acceptRecommendation(next, recommendation.id), loaded)
+      : loaded;
+    const result = await materializeAcceptedLoops(session, repoRoot);
+    console.log(JSON.stringify({
+      createdLoopIds: result.session.createdLoopIds,
+      errors: result.errors
+    }, null, 2));
+  });
+
+const metricsCmd = program.command("metrics").description("Metric planning commands");
+
+metricsCmd
+  .command("undefined")
+  .action(async () => {
+    const stored = await listUndefinedMetrics(repoRoot);
+    const metrics = stored.length > 0 ? stored : (await buildDemoDiscoverySession(repoRoot)).undefinedMetrics;
+    console.log(JSON.stringify(metrics, null, 2));
+  });
+
+const dailySummary = program.command("daily-summary").description("Daily summary commands");
+
+dailySummary
+  .command("generate")
+  .action(async () => {
+    const { summary } = await generateDemoDailySummary(repoRoot);
+    await saveDailySummary(summary, repoRoot);
+    console.log(JSON.stringify({
+      id: summary.id,
+      companyHealth: summary.companyHealth,
+      netSavedMinutes: summary.netSavedMinutes,
+      loops: summary.loops.map((loop) => ({ name: loop.loopName, status: loop.status }))
+    }, null, 2));
   });
 
 templates

@@ -1,0 +1,126 @@
+id: hr-talent
+departmentType: hr_talent
+name: HR / Talent
+description: Candidate pipeline, onboarding, performance review prep, manager coaching, and engagement risk.
+purpose: Reduce talent process friction while protecting sensitive employment decisions.
+commonGoals:
+  - id: improve_talent_flow
+    label: Improve talent flow.
+    description: Prepare better candidate, onboarding, and manager review packets.
+    exampleMetrics: [time_to_hire, onboarding_completion, candidate_experience]
+    typicalPainPoints: [candidate delays, onboarding gaps, manager prep burden]
+discoveryQuestions:
+  - id: talent_boundaries
+    prompt: Which employment decisions require human judgment or legal review?
+    type: textarea
+    required: true
+    produces: [risk_rule, human_review_rule]
+loopBlueprints:
+  - id: candidate_pipeline
+    name: Candidate Pipeline Loop
+    description: Detects stalled candidates and drafts recruiter follow-up tasks.
+    processType: candidate_pipeline
+    defaultTrigger: Daily candidate pipeline review
+    defaultRoutine: [Collect candidate stage data, Detect stalled candidates, Draft recruiter task]
+    defaultVerifier: [Task cites candidate stage evidence]
+    defaultHumanReview: [Recruiter approves candidate-facing communication]
+    defaultMetrics: [time_to_hire, candidate_experience]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: onboarding_progress
+    name: Onboarding Progress Loop
+    description: Tracks onboarding tasks and routes blockers.
+    processType: onboarding_progress
+    defaultTrigger: Daily onboarding check
+    defaultRoutine: [Collect onboarding task status, Detect blocker, Draft manager reminder]
+    defaultVerifier: [Reminder cites task evidence]
+    defaultHumanReview: [Manager reviews blocker]
+    defaultMetrics: [onboarding_completion]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: performance_review_prep
+    name: Performance Review Prep Loop
+    description: Drafts evidence packets for performance reviews.
+    processType: performance_review_prep
+    defaultTrigger: Review cycle opens
+    defaultRoutine: [Collect review evidence, Draft packet, Route manager]
+    defaultVerifier: [Packet cites source evidence]
+    defaultHumanReview: [Manager owns review judgment]
+    defaultMetrics: [manager_coaching_hours]
+    defaultRiskLevel: critical
+    defaultAutonomyLevel: L1
+  - id: manager_coaching
+    name: Manager Coaching Loop
+    description: Prepares manager coaching prompts and follow-up.
+    processType: manager_coaching
+    defaultTrigger: Weekly manager review
+    defaultRoutine: [Collect team signals, Draft coaching prompts, Route manager]
+    defaultVerifier: [Prompts cite evidence and avoid protected-class inferences]
+    defaultHumanReview: [HR partner reviews sensitive cases]
+    defaultMetrics: [manager_coaching_hours, employee_sentiment]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L1
+  - id: engagement_risk
+    name: Engagement Risk Loop
+    description: Flags engagement risk signals for human review.
+    processType: engagement_risk
+    defaultTrigger: Engagement signal threshold
+    defaultRoutine: [Collect engagement signals, Draft risk packet, Route HR partner]
+    defaultVerifier: [Packet avoids unsupported sensitive inference]
+    defaultHumanReview: [HR partner reviews every case]
+    defaultMetrics: [retention_risk, employee_sentiment]
+    defaultRiskLevel: critical
+    defaultAutonomyLevel: L1
+requiredIntegrations:
+  - integrationType: custom_api
+    reason: Read ATS or HRIS data through approved API.
+    variables: [hris.employee_status, ats.candidate_stage]
+    actions: [hris.read]
+    requiredForLoopBlueprints: [candidate_pipeline, onboarding_progress, performance_review_prep, manager_coaching, engagement_risk]
+defaultMetrics:
+  - key: time_to_hire
+    label: Time to hire
+    description: Time from open role to accepted candidate.
+    source: integration
+    baselineRequired: true
+  - key: candidate_experience
+    label: Candidate experience
+    description: Candidate satisfaction or response quality.
+    source: manual
+    baselineRequired: true
+  - key: onboarding_completion
+    label: Onboarding completion
+    description: Onboarding tasks completed on time.
+    source: integration
+    baselineRequired: true
+  - key: retention_risk
+    label: Retention risk
+    description: Human-reviewed engagement risk indicator.
+    source: modeled
+    baselineRequired: true
+  - key: manager_coaching_hours
+    label: Manager coaching hours
+    description: Time managers spend on coaching.
+    source: undefined
+    baselineRequired: true
+  - key: employee_sentiment
+    label: Employee sentiment
+    description: Human-reviewed employee sentiment signal.
+    source: manual
+    baselineRequired: true
+humanReviewRules:
+  - id: employment_decision_review
+    condition: Employment, compensation, performance, or candidate decisions require human and policy review
+    reviewerRole: HR partner
+    reason: Sensitive employment decisions must remain human-owned.
+riskRules:
+  - id: no_auto_employment_decision
+    condition: AI attempts to reject, rank, discipline, or compensate a person
+    requiredAction: block
+    reason: Employment decisions require accountable human judgment.
+dailySummaryFields:
+  - key: time_to_hire
+    label: Time to hire
+    source: metric
+    displayType: duration
+

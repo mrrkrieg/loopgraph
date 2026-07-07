@@ -1,0 +1,138 @@
+id: product
+departmentType: product
+name: Product
+description: Discovery, feedback, roadmap evidence, and specification flow.
+purpose: Turn noisy product signals into evidence-backed decisions and clear implementation work.
+commonGoals:
+  - id: reduce_feedback_noise
+    label: Reduce feedback-to-insight time.
+    description: Cluster customer feedback and convert validated themes into decisions or tickets.
+    exampleMetrics: [feedback_to_insight_time, idea_to_spec_time, evidence_backed_decision_rate]
+    typicalPainPoints: [noisy feedback, rework, unclear priority]
+discoveryQuestions:
+  - id: product_feedback_sources
+    prompt: Where does product feedback arrive and where do tickets get created?
+    type: integration_picker
+    required: true
+    options: [support, ticketing, linear, github, analytics]
+    produces: [signal, integration_requirement]
+loopBlueprints:
+  - id: feedback_clustering
+    name: Feedback Clustering Loop
+    description: Clusters noisy feedback into product themes with evidence.
+    processType: feedback_clustering
+    defaultTrigger: Daily feedback queue review
+    defaultRoutine: [Collect feedback items, Cluster themes, Draft insight brief, Route ambiguous items to PM]
+    defaultVerifier: [Each theme cites source feedback]
+    defaultHumanReview: [PM reviews themes before roadmap changes]
+    defaultMetrics: [feedback_to_insight_time, evidence_backed_decision_rate]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+  - id: product_discovery
+    name: Product Discovery Loop
+    description: Prepares discovery questions and evidence packets.
+    processType: product_discovery
+    defaultTrigger: Weekly discovery planning
+    defaultRoutine: [Collect evidence gaps, Draft discovery plan, Route to PM]
+    defaultVerifier: [Plan maps questions to evidence gaps]
+    defaultHumanReview: [PM approves discovery plan]
+    defaultMetrics: [idea_to_spec_time, evidence_backed_decision_rate]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+  - id: spec_to_ticket
+    name: Spec-to-Ticket Loop
+    description: Converts approved specs into draft tickets.
+    processType: spec_to_ticket
+    defaultTrigger: Spec approved
+    defaultRoutine: [Read approved spec, Draft implementation tickets, Route to engineering owner]
+    defaultVerifier: [Tickets trace to spec requirements]
+    defaultHumanReview: [PM or EM approves generated tickets]
+    defaultMetrics: [spec_to_ship_time, rework_rate]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: release_learning
+    name: Release Learning Loop
+    description: Compares release outcomes to expected adoption.
+    processType: release_learning
+    defaultTrigger: Post-release review
+    defaultRoutine: [Collect release metrics, Compare expected and actual outcomes, Draft learning memo]
+    defaultVerifier: [Memo includes metric evidence]
+    defaultHumanReview: [PM reviews learning memo]
+    defaultMetrics: [adoption_rate, rework_rate]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L1
+  - id: roadmap_evidence
+    name: Roadmap Evidence Loop
+    description: Audits roadmap items for supporting evidence.
+    processType: roadmap_evidence
+    defaultTrigger: Roadmap review
+    defaultRoutine: [Collect roadmap items, Attach evidence, Flag weak evidence]
+    defaultVerifier: [Every item has evidence or explicit assumption]
+    defaultHumanReview: [Leadership reviews high-impact roadmap changes]
+    defaultMetrics: [evidence_backed_decision_rate]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L1
+requiredIntegrations:
+  - integrationType: support
+    reason: Read customer feedback and support tickets.
+    variables: [support.tickets, support.customer_feedback]
+    actions: [support.read]
+    requiredForLoopBlueprints: [feedback_clustering]
+  - integrationType: ticketing
+    reason: Draft internal product or engineering tickets.
+    variables: [ticketing.issue_fields]
+    actions: [ticketing.write.draft]
+    requiredForLoopBlueprints: [feedback_clustering, spec_to_ticket]
+  - integrationType: analytics
+    reason: Read adoption and release outcome metrics.
+    variables: [analytics.feature_usage]
+    actions: [analytics.read]
+    requiredForLoopBlueprints: [release_learning, roadmap_evidence]
+defaultMetrics:
+  - key: feedback_to_insight_time
+    label: Feedback-to-insight time
+    description: Time from feedback arrival to reviewed theme.
+    source: trace
+    baselineRequired: true
+  - key: idea_to_spec_time
+    label: Idea-to-spec time
+    description: Time from discovery idea to approved spec.
+    source: trace
+    baselineRequired: true
+  - key: spec_to_ship_time
+    label: Spec-to-ship time
+    description: Time from approved spec to release.
+    source: integration
+    baselineRequired: true
+  - key: adoption_rate
+    label: Adoption rate
+    description: Target user adoption after release.
+    source: integration
+    formula: analytics.active_users_with_feature / analytics.target_users
+    baselineRequired: true
+  - key: rework_rate
+    label: Rework rate
+    description: Work returned because the spec or ticket was unclear.
+    source: human_review
+    baselineRequired: true
+  - key: evidence_backed_decision_rate
+    label: Evidence-backed decision rate
+    description: Product decisions with attached source evidence.
+    source: trace
+    baselineRequired: false
+humanReviewRules:
+  - id: roadmap_human_review
+    condition: Roadmap, scope, or customer commitment changes require product owner approval
+    reviewerRole: Product lead
+    reason: Product direction needs accountable human judgment.
+riskRules:
+  - id: no_auto_roadmap_change
+    condition: AI attempts to change roadmap priority
+    requiredAction: block
+    reason: Roadmap changes require leadership judgment.
+dailySummaryFields:
+  - key: feedback_to_insight_time
+    label: Feedback insight time
+    source: metric
+    displayType: duration
+

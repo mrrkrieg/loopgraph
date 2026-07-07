@@ -1,0 +1,175 @@
+{
+  "id": "acme-saas-discovery",
+  "companyId": "acme-saas",
+  "companyProfile": {
+    "id": "acme-saas",
+    "name": "Acme SaaS",
+    "description": "B2B SaaS platform selling workflow automation to mid-market operations teams.",
+    "customerType": "Mid-market B2B operations and revenue teams",
+    "primaryGoal": "Reduce cost per qualified customer while improving retention and product learning.",
+    "northStarMetric": "Qualified customer activation",
+    "riskTolerance": "medium",
+    "departments": ["management", "marketing", "sales", "product", "customer_success"],
+    "tools": ["ads", "analytics", "crm", "email", "calendar", "support", "usage", "ticketing", "linear", "slack", "database", "manual_upload"],
+    "bottlenecks": [
+      "Marketing has high CAC and slow campaign learning.",
+      "Sales follow-up is slow and CRM hygiene is inconsistent.",
+      "Product feedback is noisy across support tickets and sales notes.",
+      "Customer Success manages churn reactively from usage and support signals.",
+      "Management lacks a daily view of bottlenecks, open reviews, missing access, and missing metrics."
+    ],
+    "recurringWork": [
+      "Marketing weekly campaign performance review",
+      "Sales daily lead qualification and follow-up review",
+      "Product daily feedback clustering from support tickets",
+      "Customer Success daily customer health review",
+      "Management daily operating review"
+    ],
+    "aiNeverActions": [
+      "Change campaign budget without approval",
+      "Send customer-facing sales or success messages without owner approval",
+      "Commit roadmap dates without leadership judgment",
+      "Change pricing, legal, security, employment, or financial commitments"
+    ],
+    "customerFacingOutputs": ["campaign copy", "sales follow-up", "customer success account messages"],
+    "leadershipJudgment": ["budget changes", "roadmap commitments", "strategic account risk", "cross-functional resource allocation"]
+  },
+  "processInventory": [
+    {
+      "id": "acme-saas:marketing:process:campaign-learning",
+      "companyId": "acme-saas",
+      "departmentId": "acme-saas:marketing",
+      "name": "Campaign performance review for high CAC",
+      "description": "Marketing reviews paid campaign spend, analytics conversion, and CRM qualified lead outcomes weekly.",
+      "recurrence": "weekly",
+      "volumeEstimate": 8,
+      "currentTrigger": "Weekly campaign performance review",
+      "currentInputs": ["ads spend", "analytics conversion rate", "crm qualified lead status"],
+      "currentOutputs": ["experiment brief", "budget recommendation"],
+      "systemsTouched": ["ads", "analytics", "crm", "manual_upload"],
+      "currentOwner": "Marketing lead",
+      "currentReviewer": "Marketing lead",
+      "painPoints": ["manual_context_gathering", "missing_measurement", "quality_variance"],
+      "riskLevel": "medium",
+      "customerFacing": false,
+      "requiresHumanJudgment": true,
+      "candidateAutomationMode": "recommend_with_review",
+      "baseline": {
+        "activeMinutesPerItem": 50,
+        "reviewMinutesPerItem": 12,
+        "reworkMinutesPerItem": 10,
+        "cycleTimeHours": 72,
+        "errorRate": 0.12
+      }
+    },
+    {
+      "id": "acme-saas:sales:process:lead-follow-up",
+      "companyId": "acme-saas",
+      "departmentId": "acme-saas:sales",
+      "name": "Lead qualification and slow follow-up",
+      "description": "Sales checks CRM lead queues, qualifies new leads, and follows up slowly when context is scattered.",
+      "recurrence": "daily",
+      "volumeEstimate": 18,
+      "currentTrigger": "New lead or stale next activity",
+      "currentInputs": ["crm leads", "crm next activity", "email context", "calendar meetings"],
+      "currentOutputs": ["qualification note", "follow-up draft", "owner reminder"],
+      "systemsTouched": ["crm", "email", "calendar"],
+      "currentOwner": "Sales manager",
+      "currentReviewer": "Account owner",
+      "painPoints": ["manual_context_gathering", "missed_follow_up", "quality_variance"],
+      "riskLevel": "medium",
+      "customerFacing": true,
+      "requiresHumanJudgment": true,
+      "candidateAutomationMode": "recommend_with_review",
+      "baseline": {
+        "activeMinutesPerItem": 20,
+        "reviewMinutesPerItem": 6,
+        "reworkMinutesPerItem": 4,
+        "cycleTimeHours": 12,
+        "errorRate": 0.18
+      }
+    },
+    {
+      "id": "acme-saas:product:process:feedback-clustering",
+      "companyId": "acme-saas",
+      "departmentId": "acme-saas:product",
+      "name": "Noisy customer feedback clustering",
+      "description": "Product reviews noisy feedback from support tickets, sales notes, and analytics to decide what should become tickets.",
+      "recurrence": "daily",
+      "volumeEstimate": 25,
+      "currentTrigger": "Daily support ticket and feedback queue review",
+      "currentInputs": ["support tickets", "ticketing labels", "linear backlog", "analytics feature usage"],
+      "currentOutputs": ["theme brief", "draft product ticket"],
+      "systemsTouched": ["support", "ticketing", "linear", "analytics"],
+      "currentOwner": "Product lead",
+      "currentReviewer": "Product manager",
+      "painPoints": ["manual_context_gathering", "rework", "unclear_owner"],
+      "riskLevel": "medium",
+      "customerFacing": false,
+      "requiresHumanJudgment": true,
+      "candidateAutomationMode": "recommend_with_review",
+      "baseline": {
+        "activeMinutesPerItem": 15,
+        "reviewMinutesPerItem": 8,
+        "reworkMinutesPerItem": 6,
+        "cycleTimeHours": 48,
+        "errorRate": 0.22
+      }
+    },
+    {
+      "id": "acme-saas:customer_success:process:customer-health",
+      "companyId": "acme-saas",
+      "departmentId": "acme-saas:customer_success",
+      "name": "Reactive churn and customer health review",
+      "description": "Customer Success reacts to churn risk using usage, support, CRM, and calendar signals that are checked manually.",
+      "recurrence": "daily",
+      "volumeEstimate": 12,
+      "currentTrigger": "Daily account health review",
+      "currentInputs": ["usage change", "support severity", "crm renewal date", "calendar meetings"],
+      "currentOutputs": ["health risk packet", "CSM follow-up plan"],
+      "systemsTouched": ["usage", "support", "crm", "calendar"],
+      "currentOwner": "Customer Success lead",
+      "currentReviewer": "CSM",
+      "painPoints": ["manual_context_gathering", "missed_follow_up", "customer_sensitivity"],
+      "riskLevel": "high",
+      "customerFacing": true,
+      "requiresHumanJudgment": true,
+      "candidateAutomationMode": "recommend_with_review",
+      "baseline": {
+        "activeMinutesPerItem": 30,
+        "reviewMinutesPerItem": 10,
+        "reworkMinutesPerItem": 5,
+        "cycleTimeHours": 24,
+        "errorRate": 0.15
+      }
+    },
+    {
+      "id": "acme-saas:management:process:daily-operating-review",
+      "companyId": "acme-saas",
+      "departmentId": "acme-saas:management",
+      "name": "Daily operating review for bottlenecks",
+      "description": "Management wants a daily summary of loop state, missing metrics, blocked access, open reviews, bottlenecks, and next actions.",
+      "recurrence": "daily",
+      "volumeEstimate": 5,
+      "currentTrigger": "Daily leadership operating review",
+      "currentInputs": ["loop traces", "review records", "access blockers", "metric definitions", "department status"],
+      "currentOutputs": ["daily operating summary", "decision list"],
+      "systemsTouched": ["database", "slack", "spreadsheet"],
+      "currentOwner": "Leadership",
+      "currentReviewer": "CEO",
+      "painPoints": ["manual_context_gathering", "unclear_owner", "approval_bottleneck", "missing_measurement"],
+      "riskLevel": "medium",
+      "customerFacing": false,
+      "requiresHumanJudgment": true,
+      "candidateAutomationMode": "recommend_with_review",
+      "baseline": {
+        "activeMinutesPerItem": 40,
+        "reviewMinutesPerItem": 15,
+        "reworkMinutesPerItem": 5,
+        "cycleTimeHours": 8,
+        "errorRate": 0.1
+      }
+    }
+  ]
+}
+

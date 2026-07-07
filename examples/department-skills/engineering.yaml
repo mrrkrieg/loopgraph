@@ -1,0 +1,143 @@
+id: engineering
+departmentType: engineering
+name: Engineering
+description: Issue triage, PR prep, incident learning, release readiness, and QA.
+purpose: Reduce engineering coordination drag while keeping changes reviewed and verified.
+commonGoals:
+  - id: reduce_delivery_drag
+    label: Reduce delivery drag.
+    description: Improve lead time, review flow, and incident learning with traceable work.
+    exampleMetrics: [lead_time_for_changes, pr_cycle_time, escaped_defects]
+    typicalPainPoints: [triage backlog, review burden, repeated incidents]
+discoveryQuestions:
+  - id: engineering_sources
+    prompt: Which code, issue, incident, and QA systems does Engineering use?
+    type: integration_picker
+    required: true
+    options: [github, linear, ticketing, slack]
+    produces: [signal, integration_requirement]
+loopBlueprints:
+  - id: github_issue_triage
+    name: GitHub Issue Triage Loop
+    description: Classifies issues, finds duplicates, and drafts triage notes.
+    processType: issue_triage
+    defaultTrigger: New issue or daily backlog review
+    defaultRoutine: [Collect issue context, Classify issue, Draft triage recommendation]
+    defaultVerifier: [Recommendation cites issue evidence]
+    defaultHumanReview: [Maintainer approves label or assignment changes]
+    defaultMetrics: [lead_time_for_changes, review_burden_minutes]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+  - id: pr_review_prep
+    name: PR Review Prep Loop
+    description: Prepares review context and risk notes for pull requests.
+    processType: pr_review_prep
+    defaultTrigger: Pull request opened
+    defaultRoutine: [Collect diff context, Summarize risk, Draft review checklist]
+    defaultVerifier: [Checklist references changed files]
+    defaultHumanReview: [Reviewer owns approval]
+    defaultMetrics: [pr_cycle_time, review_burden_minutes]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+  - id: incident_learning
+    name: Incident Learning Loop
+    description: Drafts post-incident learning packets.
+    processType: incident_learning
+    defaultTrigger: Incident resolved
+    defaultRoutine: [Collect incident timeline, Extract contributing factors, Draft learning memo]
+    defaultVerifier: [Memo cites timeline evidence]
+    defaultHumanReview: [Incident commander approves findings]
+    defaultMetrics: [incident_recurrence]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: release_readiness
+    name: Release Readiness Loop
+    description: Checks release signals and drafts go/no-go review.
+    processType: release_readiness
+    defaultTrigger: Release candidate created
+    defaultRoutine: [Collect tests and incidents, Draft readiness memo, Route blockers]
+    defaultVerifier: [Readiness cites checks and known risks]
+    defaultHumanReview: [Release owner approves go/no-go]
+    defaultMetrics: [escaped_defects, test_coverage_delta]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: qa_checklist
+    name: QA Checklist Loop
+    description: Drafts QA checklists from change scope.
+    processType: qa_checklist
+    defaultTrigger: Feature ready for QA
+    defaultRoutine: [Collect changed scope, Draft QA checklist, Route to owner]
+    defaultVerifier: [Checklist covers acceptance criteria]
+    defaultHumanReview: [QA owner approves checklist]
+    defaultMetrics: [escaped_defects, test_coverage_delta]
+    defaultRiskLevel: low
+    defaultAutonomyLevel: L2
+  - id: bug_cluster_to_product_problem
+    name: Bug Cluster to Product Problem Loop
+    description: Clusters bugs into product problems for prioritization.
+    processType: bug_cluster
+    defaultTrigger: Weekly bug review
+    defaultRoutine: [Collect bugs, Cluster themes, Draft product problem statement]
+    defaultVerifier: [Problem statement cites bugs]
+    defaultHumanReview: [PM and EM review prioritization]
+    defaultMetrics: [escaped_defects, incident_recurrence]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+requiredIntegrations:
+  - integrationType: github
+    reason: Read issues, PRs, checks, and changed files.
+    variables: [github.issues, github.pull_requests, github.checks]
+    actions: [github.read, github.write.draft_comment]
+    requiredForLoopBlueprints: [github_issue_triage, pr_review_prep, release_readiness]
+  - integrationType: linear
+    reason: Read and draft internal tasks.
+    variables: [linear.issues]
+    actions: [linear.write.draft]
+    requiredForLoopBlueprints: [bug_cluster_to_product_problem, qa_checklist]
+defaultMetrics:
+  - key: lead_time_for_changes
+    label: Lead time for changes
+    description: Time from work start to release.
+    source: integration
+    baselineRequired: true
+  - key: pr_cycle_time
+    label: PR cycle time
+    description: Time from PR open to merge.
+    source: integration
+    baselineRequired: true
+  - key: escaped_defects
+    label: Escaped defects
+    description: Defects found after release.
+    source: integration
+    baselineRequired: true
+  - key: incident_recurrence
+    label: Incident recurrence
+    description: Repeated incident themes after remediation.
+    source: trace
+    baselineRequired: true
+  - key: test_coverage_delta
+    label: Test coverage delta
+    description: Coverage change associated with release.
+    source: integration
+    baselineRequired: true
+  - key: review_burden_minutes
+    label: Review burden minutes
+    description: Human review time spent on repetitive prep.
+    source: human_review
+    baselineRequired: true
+humanReviewRules:
+  - id: code_owner_review
+    condition: Code, release, and incident recommendations require owner review
+    reviewerRole: Engineering owner
+    reason: Engineering changes need accountable human review.
+riskRules:
+  - id: no_auto_merge
+    condition: AI attempts to merge, deploy, or close incident without approval
+    requiredAction: block
+    reason: Releases and incident closure require human ownership.
+dailySummaryFields:
+  - key: pr_cycle_time
+    label: PR cycle time
+    source: metric
+    displayType: duration
+

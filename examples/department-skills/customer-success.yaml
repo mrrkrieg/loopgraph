@@ -1,0 +1,142 @@
+id: customer-success
+departmentType: customer_success
+name: Customer Success
+description: Customer health, renewals, QBRs, ticket escalation, and knowledge maintenance.
+purpose: Detect risk early and prepare humans for relationship-heavy customer work.
+commonGoals:
+  - id: reduce_churn_risk
+    label: Reduce churn risk.
+    description: Detect health changes and prepare account-level follow-up.
+    exampleMetrics: [churn_risk_reduction, resolution_time, csat]
+    typicalPainPoints: [reactive churn management, manual QBR prep]
+discoveryQuestions:
+  - id: cs_health_sources
+    prompt: Which usage, support, CRM, and renewal signals indicate account health?
+    type: integration_picker
+    required: true
+    options: [usage, support, crm, calendar]
+    produces: [signal, metric, integration_requirement]
+loopBlueprints:
+  - id: customer_health
+    name: Customer Health Loop
+    description: Monitors usage, support, and CRM signals to draft health-risk packets.
+    processType: customer_health
+    defaultTrigger: Daily account health review
+    defaultRoutine: [Collect usage and support signals, Identify account health change, Draft review packet, Route risk to CSM]
+    defaultVerifier: [Risk packet cites usage and support evidence]
+    defaultHumanReview: [CSM approves customer-facing follow-up]
+    defaultMetrics: [churn_risk_reduction, strategic_account_relationship_time, resolution_time]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: renewal_risk
+    name: Renewal Risk Loop
+    description: Prepares renewal risk evidence and next actions.
+    processType: renewal_risk
+    defaultTrigger: Renewal window opens
+    defaultRoutine: [Collect renewal signals, Draft risk memo, Route renewal plan for approval]
+    defaultVerifier: [Risk memo cites contract and support evidence]
+    defaultHumanReview: [Account owner approves renewal plan]
+    defaultMetrics: [renewal_risk, strategic_account_relationship_time]
+    defaultRiskLevel: high
+    defaultAutonomyLevel: L2
+  - id: qbr_prep
+    name: QBR Prep Loop
+    description: Drafts QBR packets from usage, support, and outcome data.
+    processType: qbr_prep
+    defaultTrigger: QBR scheduled
+    defaultRoutine: [Collect account outcomes, Draft QBR packet, Route to CSM]
+    defaultVerifier: [Packet includes source evidence]
+    defaultHumanReview: [CSM reviews before customer meeting]
+    defaultMetrics: [strategic_account_relationship_time, csat]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: ticket_escalation
+    name: Ticket Escalation Loop
+    description: Finds support tickets that need escalation.
+    processType: ticket_escalation
+    defaultTrigger: Ticket breaches threshold
+    defaultRoutine: [Detect stale or high-impact tickets, Draft escalation packet, Route owner]
+    defaultVerifier: [Escalation cites customer and ticket evidence]
+    defaultHumanReview: [Support lead reviews escalation]
+    defaultMetrics: [time_to_first_response, resolution_time]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+  - id: knowledge_base_maintenance
+    name: Knowledge Base Maintenance Loop
+    description: Detects repeated ticket themes and drafts knowledge base updates.
+    processType: knowledge_base_maintenance
+    defaultTrigger: Weekly support theme review
+    defaultRoutine: [Cluster repeated tickets, Draft KB update, Route for review]
+    defaultVerifier: [Draft cites source ticket examples]
+    defaultHumanReview: [Support lead approves customer-facing article]
+    defaultMetrics: [resolution_time, csat]
+    defaultRiskLevel: medium
+    defaultAutonomyLevel: L2
+requiredIntegrations:
+  - integrationType: usage
+    reason: Read product usage changes.
+    variables: [usage.active_users, usage.feature_adoption]
+    actions: [usage.read]
+    requiredForLoopBlueprints: [customer_health, renewal_risk, qbr_prep]
+  - integrationType: support
+    reason: Read support ticket volume, severity, and response times.
+    variables: [support.ticket_count, support.severity, support.response_time]
+    actions: [support.read]
+    requiredForLoopBlueprints: [customer_health, ticket_escalation, knowledge_base_maintenance]
+  - integrationType: crm
+    reason: Read account owner, stage, renewal date, and qualified contacts.
+    variables: [crm.account_owner, crm.renewal_date, crm.contacts]
+    actions: [crm.read]
+    requiredForLoopBlueprints: [customer_health, renewal_risk, qbr_prep]
+  - integrationType: calendar
+    reason: Estimate relationship time and upcoming QBR context.
+    variables: [calendar.customer_meetings]
+    actions: [calendar.read]
+    requiredForLoopBlueprints: [qbr_prep, customer_health]
+defaultMetrics:
+  - key: churn_risk_reduction
+    label: Churn risk reduction
+    description: Change in scored renewal or churn risk.
+    source: modeled
+    baselineRequired: true
+  - key: time_to_first_response
+    label: Time to first response
+    description: Support response speed.
+    source: integration
+    baselineRequired: true
+  - key: resolution_time
+    label: Resolution time
+    description: Time to resolve support issues.
+    source: integration
+    baselineRequired: true
+  - key: csat
+    label: CSAT
+    description: Customer satisfaction score.
+    source: integration
+    baselineRequired: true
+  - key: renewal_risk
+    label: Renewal risk
+    description: Account-level renewal risk score.
+    source: modeled
+    baselineRequired: true
+  - key: strategic_account_relationship_time
+    label: Strategic account relationship time
+    description: CSM time redeployed to customer relationship work.
+    source: undefined
+    baselineRequired: true
+humanReviewRules:
+  - id: cs_customer_message_review
+    condition: Customer-facing account messages require CSM approval
+    reviewerRole: Customer success owner
+    reason: Account trust and timing remain human-owned.
+riskRules:
+  - id: no_auto_customer_commitment
+    condition: AI attempts to promise service credits or roadmap dates
+    requiredAction: block
+    reason: Customer commitments require approval.
+dailySummaryFields:
+  - key: churn_risk_reduction
+    label: Churn risk
+    source: metric
+    displayType: trend
+
