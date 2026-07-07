@@ -5,7 +5,7 @@ import {
   getExampleSimulateCommand,
   runtimeForLoop,
   type TopologyRuntimeSummary
-} from "@/lib/loopgraph-runtime/topology-runtime";
+} from "@/lib/loop-engineering-builder/topology-runtime";
 
 type InspectorActionsProps = {
   graph: LoopGraph;

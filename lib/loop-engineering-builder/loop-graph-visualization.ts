@@ -3,7 +3,7 @@ import type {
   LoopEgoGraph,
   SemanticTopology,
   TopologyNodeType
-} from "../loopgraph-core/graph";
+} from "loopgraph/core";
 import type {
   LoopGraph,
   LoopGraphNode,

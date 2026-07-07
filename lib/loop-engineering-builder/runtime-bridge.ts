@@ -1,8 +1,7 @@
 import path from "node:path";
-import { loadLoopSpecFromPath } from "../loopgraph-runtime/loader";
-import { simulateLoop } from "../loopgraph-runtime/simulator";
+import { loadLoopSpecFromPath, simulateLoop } from "loopgraph/runtime";
 import { getLoopgraphRoot, getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
-import type { LoopRunTrace } from "../loopgraph-core/trace";
+import type { LoopRunTrace } from "loopgraph/core";
 import type { HumanReview, LoopRun, LoopRunStep } from "./types";
 
 const HERO_LOOP_CONFIG: Record<string, { examplePath: string; defaultFixture: string }> = {

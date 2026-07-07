@@ -13,7 +13,7 @@ import type {
 } from "./types";
 import { getDepartmentTemplate, getTemplateById, getTemplateCatalog } from "./templates";
 import type { LoadedRegisteredLoopSpec } from "./local-workspace";
-import { loopIdsMatch } from "../loopgraph-runtime/run-filters";
+import { loopIdsMatch } from "@/lib/loopgraph-runtime/run-filters";
 
 const defaultView: LoopGraphViewState = {
   mode: "topology",

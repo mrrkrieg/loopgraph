@@ -1,0 +1,8 @@
+{
+  "eventId": "support_evt_billing_001",
+  "simulatedAt": "2026-06-27T14:00:00.000Z",
+  "ticket": { "current": { "body": "We were overcharged on the enterprise plan and need this fixed before renewal." } },
+  "account": { "id": "acct_support_billing", "name": "Renewal Risk Co", "segment": "enterprise", "renewalDaysRemaining": 45 },
+  "incident": { "category": "billing_dispute", "severity": "P2" },
+  "businessImpact": { "renewalRisk": "high", "summary": "Billing dispute with high renewal risk" }
+}

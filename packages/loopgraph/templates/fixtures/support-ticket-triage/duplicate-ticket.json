@@ -1,0 +1,8 @@
+{
+  "eventId": "support_evt_duplicate_001",
+  "simulatedAt": "2026-06-27T14:10:00.000Z",
+  "ticket": { "current": { "body": "Duplicate ticket: same CSV export question as ticket #4412." } },
+  "account": { "id": "acct_support_dup", "name": "Dup Co", "segment": "smb", "renewalDaysRemaining": 120 },
+  "incident": { "category": "product_question", "severity": "P3" },
+  "businessImpact": { "renewalRisk": "low", "summary": "Duplicate support request" }
+}

@@ -25,6 +25,27 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "loopgraph/core": [
+        "./packages/loopgraph/src/core/index.ts"
+      ],
+      "loopgraph/runtime": [
+        "./packages/loopgraph/src/runtime/index.ts"
+      ],
+      "loopgraph/sdk": [
+        "./packages/loopgraph/src/sdk/index.ts"
+      ],
+      "@/lib/loopgraph-core/*": [
+        "./packages/loopgraph/src/core/*"
+      ],
+      "@/lib/loopgraph-runtime/storage-resolver": [
+        "./lib/loopgraph-runtime/storage-resolver.ts"
+      ],
+      "@/lib/loopgraph-runtime/*": [
+        "./packages/loopgraph/src/runtime/*"
+      ],
+      "@/lib/loopgraph-sdk/*": [
+        "./packages/loopgraph/src/sdk/*"
       ]
     }
   },
@@ -36,6 +57,7 @@
   ],
   "exclude": [
     "node_modules",
-    ".next"
+    ".next",
+    "packages/loopgraph/tsup.config.ts"
   ]
 }

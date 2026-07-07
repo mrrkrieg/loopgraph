@@ -1,11 +1,16 @@
 import path from "node:path";
-import type { StorageAdapter } from "../loopgraph-sdk/adapters";
-import { FileStorageAdapter } from "../loopgraph-sdk/storage";
+import type { StorageAdapter } from "loopgraph/sdk";
+import { FileStorageAdapter } from "loopgraph/sdk";
+import { getLoopgraphRoot as getPackageLoopgraphRoot } from "loopgraph/runtime";
+import {
+  createSupabaseStorageAdapter,
+  isSupabaseStorageEnabled
+} from "@/lib/db/adapters/supabase-storage";
 
 let cachedAdapter: StorageAdapter | null = null;
 
 export function getLoopgraphRoot(cwd = process.cwd()) {
-  return path.join(cwd, ".loopgraph");
+  return getPackageLoopgraphRoot(cwd);
 }
 
 export function getStorageAdapter(options?: { rootDir?: string; forceFile?: boolean }): StorageAdapter {
@@ -13,10 +18,8 @@ export function getStorageAdapter(options?: { rootDir?: string; forceFile?: bool
     return cachedAdapter;
   }
 
-  // SupabaseStorageAdapter is wired in when env is configured (see supabase-storage.ts).
-  const supabaseModule = tryLoadSupabaseAdapter();
-  if (!options?.forceFile && supabaseModule?.isSupabaseStorageEnabled()) {
-    cachedAdapter = supabaseModule.createSupabaseStorageAdapter();
+  if (!options?.forceFile && isSupabaseStorageEnabled()) {
+    cachedAdapter = createSupabaseStorageAdapter();
     return cachedAdapter;
   }
 
@@ -29,21 +32,4 @@ export function getStorageAdapter(options?: { rootDir?: string; forceFile?: bool
 
 export function resetStorageAdapterCache() {
   cachedAdapter = null;
-}
-
-function tryLoadSupabaseAdapter():
-  | {
-      isSupabaseStorageEnabled: () => boolean;
-      createSupabaseStorageAdapter: () => StorageAdapter;
-    }
-  | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require("../loopgraph-sdk/supabase-storage") as {
-      isSupabaseStorageEnabled: () => boolean;
-      createSupabaseStorageAdapter: () => StorageAdapter;
-    };
-  } catch {
-    return null;
-  }
 }

@@ -17,7 +17,7 @@ Comprehensive plan for what still needs to be built — platform completion, con
 1. ~~**Ship confidence**~~ — M1 shipped (CI matrix + governance tests)
 2. ~~**Close the learning loop in UI**~~ — M2 shipped (improvements + management rollup)
 3. ~~**One new hero example**~~ — M3 shipped (`support-ticket-triage`)
-4. **Package extraction** — see [M4-PACKAGE-PLAN.md](./M4-PACKAGE-PLAN.md) (next)
+4. ~~**Package extraction**~~ — M4 shipped (`packages/loopgraph` v0.2.0, tag `packages/v0.2.0`)
 5. **Raisi loop specs + adapters** — three product loops on top of the library
 
 ### Milestones M1–M3 (shipped 2026-06-30)
@@ -380,7 +380,7 @@ A1 manual QA → B1 improvements from traces → F1 boundary cleanup → F2 pack
 | **M1: Release candidate** | A | `v1.1.0` tagged; manual QA green |
 | **M2: Learning loop closed** | B1, B2 | Improvements + management visible from traces |
 | **M3: Third hero** | C1 | Support-ticket example in CI |
-| **M4: Raisi-ready library** | F | Private package; Raisi imports `runLoop` |
+| **M4: Raisi-ready library** | F | **Shipped** — `packages/loopgraph` v0.2.0; git tag `packages/v0.2.0` |
 | **M5: First Raisi loop live** | G | Investor triage in simulate + founder review |
 | **M6: Design Studio parity** | E | YAML export/import round-trip |
 

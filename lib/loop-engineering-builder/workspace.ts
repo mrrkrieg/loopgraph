@@ -24,18 +24,17 @@ import {
 } from "./local-workspace";
 import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
-import { v1alpha1ToFlat } from "../loopgraph-core/studio-adapter";
+import { v1alpha1ToFlat } from "loopgraph/core";
 import { getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
-import { loadImprovementsFromStorage } from "../loopgraph-runtime/improvement-loader";
-import { loadLatestManagementRollup } from "../loopgraph-runtime/management-rollup";
+import { loadImprovementsFromStorage, loadLatestManagementRollup } from "loopgraph/runtime";
 import {
   buildSemanticTopology,
   type SemanticTopology,
   type TopologyImprovementItem,
   type TopologyMetricInput
-} from "../loopgraph-core/graph";
-import type { LoopSpec as CoreLoopSpec } from "../loopgraph-core/loop-spec";
-import type { LoopRunTrace } from "../loopgraph-core/trace";
+} from "loopgraph/core";
+import type { LoopSpec as CoreLoopSpec } from "loopgraph/core";
+import type { LoopRunTrace } from "loopgraph/core";
 import type {
   DepartmentKey,
   GeneratedArtifact,

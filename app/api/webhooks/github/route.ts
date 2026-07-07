@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { loadLoopSpecFromPath } from "@/lib/loopgraph-runtime/loader";
 import { executeLoop } from "@/lib/loopgraph-runtime/executor";
 import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
-import { recordIngestedEvent } from "@/lib/loopgraph-sdk/supabase-storage";
+import { recordIngestedEvent } from "@/lib/db/adapters/supabase-storage";
 import path from "node:path";
 
 function verifyGithubSignature(payload: string, signature: string | null) {
