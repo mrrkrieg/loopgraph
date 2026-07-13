@@ -1,15 +1,47 @@
 {
   "name": "loopgraph",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
+  "description": "Code-first loop runtime: validate, simulate, trace, review, and case resolve from loopgraph.yaml specs.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "files": [
+    "packages/loopgraph/dist",
+    "packages/loopgraph/templates",
+    "packages/loopgraph/README.md"
+  ],
+  "bin": {
+    "loopgraph": "./packages/loopgraph/dist/cli.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./core": {
+      "types": "./packages/loopgraph/dist/core/index.d.ts",
+      "import": "./packages/loopgraph/dist/core/index.js"
+    },
+    "./runtime": {
+      "types": "./packages/loopgraph/dist/runtime/index.d.ts",
+      "import": "./packages/loopgraph/dist/runtime/index.js"
+    },
+    "./sdk": {
+      "types": "./packages/loopgraph/dist/sdk/index.d.ts",
+      "import": "./packages/loopgraph/dist/sdk/index.js"
+    }
+  },
   "scripts": {
+    "prepare": "npm run build:package",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "loopgraph": "tsx scripts/loopgraph.ts"
+    "build:package": "npm run build -w loopgraph",
+    "loopgraph": "tsx packages/loopgraph/src/cli/index.ts",
+    "loopgraph:studio": "tsx scripts/loopgraph-studio.ts",
+    "seed:design-studio": "tsx scripts/seed-design-studio.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.6.1",
@@ -41,6 +73,7 @@
     "tailwindcss": "^3.4.17",
     "tsx": "^4.22.4",
     "typescript": "^5.8.3",
+    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^3.2.6"
   },
   "overrides": {

@@ -4,7 +4,7 @@ import type {
   SemanticTopology,
   TopologyNode,
   TopologyNodeType
-} from "../loopgraph-core/graph";
+} from "loopgraph/core";
 import {
   sequenceGroupForVisualNode,
   sequenceIndexForVisualNode
@@ -544,6 +544,8 @@ function visualLayoutMetadataForTopologyNode(node: TopologyNode) {
 export function visualKindForTopology(kind: LoopGraphNodeKind): LoopGraphVisualNodeKind {
   if (kind === "management_loop") return "management";
   if (kind === "human_owner") return "owner";
+  if (kind === "trace") return "review";
+  if (kind === "escalation_case") return "improvement";
   return kind;
 }
 

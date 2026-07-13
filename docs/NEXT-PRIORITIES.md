@@ -1,63 +1,34 @@
 # What still needs to be built — priorities
 
-Last updated: 2026-06-28 (after code-first core completion on `v1`).
+Last updated: 2026-06-30 (post launch-plan implementation on `loopgraph/canvas-first`).
 
-## Tomorrow (recommended order)
+**Full sequencing, effort estimates, Raisi/package tracks:** [BUILD-PLAN.md](./BUILD-PLAN.md) · **M4 package extraction:** [M4-PACKAGE-PLAN.md](./M4-PACKAGE-PLAN.md)
 
-### P0 — Shippable examples without core coupling
+## Shipped in v1.1.0-alpha
 
-1. **Intercom / support-ticket example (adapter pattern)**
-   - Add `examples/support-ticket-triage/` using existing `mock-support` adapter + fixtures
-   - Optional: `lib/loopgraph-sdk/adapters/intercom.ts` behind env flag
-   - Normalize webhook payload → generic ticket input schema (no Intercom types in core)
+- Browser governance E2E (runs filter, partial approval UX, case resolve in UI)
+- Unified storage resolver on case/management pages
+- Simulated/fixture mode badges on trace surfaces
+- Empty Supabase workspace (no silent demo fallback)
+- Acme seed script + extended `supabase/seed.sql`
+- Hidden labor from trace reviews feeds health graph
+- Context compiler live GitHub adapter when execute env configured
+- Execute fixture provider path documented
+- Issue templates + release notes
 
-2. **UI: finish inspect → approve flow in browser**
-   - Run history + trace viewer already exist; wire labels (“simulated / fixture”)
-   - Reviews page uses shared `review-service` — verify end-to-end with `.loopgraph/` only
-   - Fix P0 Design Studio issues: demo vs Supabase confusion, hidden labor → health
+## Remaining P1
 
-3. **Execute path hardening (V1.1, optional if time)**
-   - `context-compiler` selects live adapter when env configured
-   - `execute --event` works with `LOOPGRAPH_ASSESSMENT_PROVIDER=fixture`
-   - End-to-end: webhook → review → GitHub label write on test repo
+1. ~~**Intercom / support-ticket example**~~ — shipped as `examples/support-ticket-triage/`
+2. **Supabase multi-user prod validation**
+3. ~~**Management rollup persistence**~~ — `.loopgraph/management/latest.json` + cron persistence
+4. ~~**Improvements page** reads trace `improvement_signal` outputs~~ — `loadImprovementsFromStorage`
+5. **Manual QA sign-off** on clean clone ([manual-qa-v1.1.md](./manual-qa-v1.1.md)) — CLI paths covered by automated governance tests
 
-### P1 — Polish for external readers
+## Explicitly deferred (V2)
 
-4. **Acme seed script + topology YAML** (launch doc Epic 6)
-5. **Manual QA checklist** — run `docs/manual-qa-v1.1.md` on clean clone
-6. **Commit hygiene** — ensure `.env.example` never contains real keys
+- Durable external job queue
+- Marketplace / adapter registry
+- Auto-improving loop specs
+- ROI claims from production data
 
-### P2 — V2 foundations (later in the week)
-
-7. Durable job queue (replace in-memory stub)
-8. Trace-linked improvements UI (not workspace stub)
-9. Management rollup persistence
-10. Semantic topology execution (informational vs executable edges)
-
----
-
-## Explicitly not started / incomplete
-
-| Area | Status |
-|------|--------|
-| Design Studio P0 fixes (P0-1–P0-8) | Partial |
-| Supabase multi-user storage | Code exists; untested in prod |
-| Live GitHub context + writes E2E | Adapter + webhook exist; not wired through context compiler |
-| `dry-run` runtime mode | Types only |
-| Intercom integration | Not started |
-| Public alpha tag / release notes | Not done |
-| ROI / live automation claims in UI | Must remain off until execute is proven |
-
----
-
-## Definition of done for “V1 public alpha” (launch doc)
-
-- [x] Code-first validate + simulate + trace CLI
-- [x] Both hero templates + 9 fixture snapshots
-- [x] Fingerprint approval + partial approval + invalidation tests
-- [x] Review decision packet (CLI)
-- [x] EscalationCase resolve → trace outcome writeback
-- [x] 46 automated tests + CI build
-- [ ] Design Studio / demo mode parity
-- [ ] README/quickstart verified on clean clone by a second person (Dan)
-- [ ] Optional: one live integration example (GitHub or Intercom) clearly labeled experimental
+See [RELEASE-v1.1.0-alpha.md](./RELEASE-v1.1.0-alpha.md).

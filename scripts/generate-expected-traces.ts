@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { loadLoopSpecFromPath } from "../lib/loopgraph-runtime/loader";
-import { simulateLoop } from "../lib/loopgraph-runtime/simulator";
-import { FileStorageAdapter } from "../lib/loopgraph-sdk/storage";
-import { summarizeTrace } from "../lib/loopgraph-core/trace-summary";
+import { loadLoopSpecFromPath } from "loopgraph/runtime";
+import { simulateLoop } from "loopgraph/runtime";
+import { FileStorageAdapter } from "loopgraph/sdk";
+import { summarizeTrace } from "loopgraph/core";
 
 async function main() {
   const repoRoot = path.resolve(__dirname, "..");

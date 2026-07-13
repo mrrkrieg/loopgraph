@@ -1,0 +1,18 @@
+{
+  "status": "WAITING_FOR_REVIEW",
+  "loopId": "support-ticket-triage",
+  "idempotencyKey": "11064a7a1e0619ce",
+  "contextHash": "79e2c00feca30a8b",
+  "preparedActionCount": 2,
+  "preparedFingerprints": [
+    "05437111bacf29d0",
+    "3a223868a24b7c4b"
+  ],
+  "escalationCaseIds": [
+    "case_a823dec2dadb"
+  ],
+  "escalationSeverity": "P1",
+  "policyBlocked": false,
+  "verificationFailed": false,
+  "humanReviewRequired": true
+}

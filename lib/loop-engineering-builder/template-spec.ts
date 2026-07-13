@@ -1,5 +1,4 @@
-import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "../loopgraph-core/constants";
-import { validateLoopSpec, type LoopSpec } from "../loopgraph-core/loop-spec";
+import { LOOPGRAPH_API_VERSION, LOOP_KIND, validateLoopSpec, type LoopSpec } from "loopgraph/core";
 import { getDepartmentTemplate, getTemplateById } from "./templates";
 import type { DepartmentKey, LoopTemplate } from "./types";
 

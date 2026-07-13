@@ -1,5 +1,7 @@
 # GitHub production setup
 
+> **EXPERIMENTAL** — Execute mode performs live GitHub reads and writes after human approval. Simulate/fixture mode remains the default demo path.
+
 Loopgraph V1.1 can run GitHub Issue Triage against a live repository when execute mode is enabled.
 
 ## Prerequisites
@@ -12,7 +14,8 @@ Loopgraph V1.1 can run GitHub Issue Triage against a live repository when execut
 
 ```bash
 LOOPGRAPH_EXECUTE_ENABLED=true
-LOOPGRAPH_ASSESSMENT_PROVIDER=openai   # or fixture for testing
+LOOPGRAPH_ASSESSMENT_PROVIDER=fixture   # recommended for local execute testing without OpenAI
+# LOOPGRAPH_ASSESSMENT_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 
 GITHUB_TOKEN=
@@ -46,6 +49,23 @@ npm run loopgraph -- execute examples/github-issue-triage \
 ```bash
 npm run loopgraph -- review approve <runId> --actions <fingerprint1,fingerprint2>
 ```
+
+## E2E verification (test repo)
+
+1. Create a test repository and issue
+2. Set env vars above with `LOOPGRAPH_ASSESSMENT_PROVIDER=fixture`
+3. Run execute locally:
+
+```bash
+LOOPGRAPH_EXECUTE_ENABLED=true LOOPGRAPH_ASSESSMENT_PROVIDER=fixture \
+  npm run loopgraph -- execute examples/github-issue-triage \
+  --event fixtures/github-issue-triage/security-issue.json
+```
+
+4. Approve fingerprints via CLI or `/loops/github-issue-triage/reviews`
+5. Verify labels on the GitHub issue (when using live GitHub token + issue number in payload)
+
+The UI shows **Mode: execute · live writes enabled** on execute traces.
 
 ## Safety
 

@@ -1,9 +1,9 @@
-import type { AccessRequirement } from "../loopgraph-core/access-requirements";
+import type { AccessRequirement } from "loopgraph/core";
 import {
   UndefinedMetricSchema,
   type MetricDefinition,
   type UndefinedMetric
-} from "../loopgraph-core/metric-definition";
+} from "loopgraph/core";
 
 export function detectUndefinedMetrics(
   metricDefinitions: MetricDefinition[],

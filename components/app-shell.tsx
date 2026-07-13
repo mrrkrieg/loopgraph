@@ -15,6 +15,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setIsNavCollapsed(window.localStorage.getItem("loopgraph-nav-collapsed") === "true");
   }, []);
 
+  useEffect(() => {
+    if (!isCanvasPage) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isCanvasPage]);
+
   function toggleNavigation() {
     setIsNavCollapsed((current) => {
       const next = !current;
@@ -26,7 +38,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <PrimarySidebar isCollapsed={isNavCollapsed} onToggle={toggleNavigation} />
-      <div className={`transition-[padding] duration-200 ${isNavCollapsed ? "lg:pl-20" : "lg:pl-64"}`}>
+      <div
+        className={`transition-[padding] duration-200 ${isNavCollapsed ? "lg:pl-20" : "lg:pl-64"} ${
+          isCanvasPage ? "lg:h-[100dvh] lg:overflow-hidden" : ""
+        }`}
+      >
         <header className="sticky top-0 z-10 border-b border-line bg-white/95 px-5 py-3 backdrop-blur lg:hidden">
           <Link href="/brain" className="flex items-center gap-2 font-semibold">
             <LoopgraphMark className="h-7 w-7" />
@@ -36,9 +52,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main
           className={`${
             isCanvasPage
-              ? "max-w-none lg:flex lg:h-screen lg:flex-col lg:overflow-hidden"
-              : "mx-auto max-w-7xl"
-          } px-5 py-6 sm:px-8`}
+              ? "flex max-w-none flex-col gap-3 overflow-hidden px-3 py-3 sm:px-4 lg:h-full lg:min-h-0"
+              : "mx-auto max-w-7xl px-5 py-6 sm:px-8"
+          }`}
         >
           {!process.env.NEXT_PUBLIC_SUPABASE_URL && (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">

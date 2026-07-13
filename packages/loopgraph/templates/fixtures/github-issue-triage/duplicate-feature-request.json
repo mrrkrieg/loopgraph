@@ -1,0 +1,10 @@
+{
+  "eventId": "gh_evt_duplicate_001",
+  "simulatedAt": "2026-06-27T12:05:00.000Z",
+  "issue": {
+    "title": "Please add dark mode",
+    "body": "Duplicate of #42. Closing discussion here is not allowed by policy.",
+    "labels": ["feature-request", "duplicate"]
+  },
+  "repo": { "name": "loopgraph/demo-app", "policy": "Mark duplicates but do not close automatically." }
+}

@@ -2,10 +2,10 @@ import {
   AccessRequirementSchema,
   IntegrationTypeSchema,
   type AccessRequirement
-} from "../loopgraph-core/access-requirements";
-import type { DepartmentSkillPack } from "../loopgraph-core/department-skills";
-import type { LoopRecommendation } from "../loopgraph-core/loop-recommendation";
-import type { ProcessInventoryItem } from "../loopgraph-core/process-inventory";
+} from "loopgraph/core";
+import type { DepartmentSkillPack } from "loopgraph/core";
+import type { LoopRecommendation } from "loopgraph/core";
+import type { ProcessInventoryItem } from "loopgraph/core";
 
 export function generateAccessRequirements(
   recommendation: LoopRecommendation,

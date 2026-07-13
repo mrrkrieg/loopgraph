@@ -2,10 +2,10 @@ import {
   MetricDefinitionSchema,
   type MetricDefinition,
   type UndefinedMetric
-} from "../loopgraph-core/metric-definition";
-import type { AccessRequirement } from "../loopgraph-core/access-requirements";
-import type { DepartmentSkillPack } from "../loopgraph-core/department-skills";
-import type { LoopRecommendation } from "../loopgraph-core/loop-recommendation";
+} from "loopgraph/core";
+import type { AccessRequirement } from "loopgraph/core";
+import type { DepartmentSkillPack } from "loopgraph/core";
+import type { LoopRecommendation } from "loopgraph/core";
 import { detectUndefinedMetrics } from "./undefined-metrics";
 
 export function generateMetricDefinitions(

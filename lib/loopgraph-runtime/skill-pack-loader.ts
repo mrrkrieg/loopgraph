@@ -5,7 +5,7 @@ import {
   DepartmentSkillPackSchema,
   type DepartmentSkillPack,
   type DepartmentType
-} from "../loopgraph-core/department-skills";
+} from "loopgraph/core";
 
 export function getDepartmentSkillPackDir(projectRoot = process.cwd()) {
   return path.join(projectRoot, "examples", "department-skills");

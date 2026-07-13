@@ -1,5 +1,5 @@
-import type { LoopRecommendation } from "../loopgraph-core/loop-recommendation";
-import type { LoopReadiness, ReadinessLevel } from "../loopgraph-core/readiness";
+import type { LoopRecommendation } from "loopgraph/core";
+import type { LoopReadiness, ReadinessLevel } from "loopgraph/core";
 
 const levelScore: Record<ReadinessLevel, number> = {
   L0: 20,

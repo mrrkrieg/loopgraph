@@ -1,7 +1,7 @@
 import type { GeneratedArtifact, LoopRequirement, LoopRecord } from "./types";
 import type { LoopSpec } from "./loop-spec-schema";
 import { validateLoopSpec } from "./loop-spec-schema";
-import { flatSpecToV1alpha1 } from "../loopgraph-core/studio-adapter";
+import { flatSpecToV1alpha1 } from "loopgraph/core";
 import type { AnswerMap } from "./question-engine";
 import { getDepartmentTemplate, getTemplateById } from "./templates";
 

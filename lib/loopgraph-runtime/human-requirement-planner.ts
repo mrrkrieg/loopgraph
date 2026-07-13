@@ -1,8 +1,8 @@
 import {
   HumanInputRequirementSchema,
   type HumanInputRequirement
-} from "../loopgraph-core/access-requirements";
-import type { LoopRecommendation } from "../loopgraph-core/loop-recommendation";
+} from "loopgraph/core";
+import type { LoopRecommendation } from "loopgraph/core";
 
 export function generateHumanRequirements(recommendation: LoopRecommendation): HumanInputRequirement[] {
   const requirements: HumanInputRequirement[] = [

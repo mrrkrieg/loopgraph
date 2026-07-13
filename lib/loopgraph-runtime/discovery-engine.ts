@@ -1,19 +1,19 @@
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import { AccessRequirementSchema, type AccessRequirement } from "../loopgraph-core/access-requirements";
+import { AccessRequirementSchema, type AccessRequirement } from "loopgraph/core";
 import {
   BusinessDiscoverySessionSchema,
   type BusinessDiscoverySession,
   type CompanyDiscoveryProfile,
   type DepartmentProfile,
   type DiscoveryAnswer
-} from "../loopgraph-core/discovery";
-import { LoopRecommendationSchema, type LoopRecommendation } from "../loopgraph-core/loop-recommendation";
-import { MetricDefinitionSchema, UndefinedMetricSchema, type MetricDefinition, type UndefinedMetric } from "../loopgraph-core/metric-definition";
-import type { ProcessInventoryItem } from "../loopgraph-core/process-inventory";
-import type { DailySummary } from "../loopgraph-core/daily-summary";
-import type { LoopSpec } from "../loopgraph-core/loop-spec";
+} from "loopgraph/core";
+import { LoopRecommendationSchema, type LoopRecommendation } from "loopgraph/core";
+import { MetricDefinitionSchema, UndefinedMetricSchema, type MetricDefinition, type UndefinedMetric } from "loopgraph/core";
+import type { ProcessInventoryItem } from "loopgraph/core";
+import type { DailySummary } from "loopgraph/core";
+import type { LoopSpec } from "loopgraph/core";
 import { registerLoopSpec } from "../loop-engineering-builder/local-workspace";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { generateAccessPlan as planAccess } from "./access-planner";

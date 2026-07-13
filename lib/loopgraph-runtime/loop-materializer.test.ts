@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateLoopSpec } from "../loopgraph-core/loop-spec";
+import { validateLoopSpec } from "loopgraph/core";
 import { buildDemoDiscoverySession } from "./discovery-engine";
 import { tryMaterializeLoopRecommendation } from "./loop-materializer";
 

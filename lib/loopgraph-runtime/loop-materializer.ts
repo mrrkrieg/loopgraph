@@ -1,9 +1,9 @@
-import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "../loopgraph-core/constants";
-import { validateLoopSpec, type LoopSpec } from "../loopgraph-core/loop-spec";
-import type { AccessRequirement, HumanInputRequirement } from "../loopgraph-core/access-requirements";
-import type { CompanyDiscoveryProfile, DepartmentProfile } from "../loopgraph-core/discovery";
-import type { LoopRecommendation } from "../loopgraph-core/loop-recommendation";
-import type { MetricDefinition } from "../loopgraph-core/metric-definition";
+import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "loopgraph/core";
+import { validateLoopSpec, type LoopSpec } from "loopgraph/core";
+import type { AccessRequirement, HumanInputRequirement } from "loopgraph/core";
+import type { CompanyDiscoveryProfile, DepartmentProfile } from "loopgraph/core";
+import type { LoopRecommendation } from "loopgraph/core";
+import type { MetricDefinition } from "loopgraph/core";
 
 export type MaterializeLoopRecommendationInput = {
   recommendation: LoopRecommendation;

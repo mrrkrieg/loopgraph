@@ -8,4 +8,5 @@ dist
 coverage
 .loopgraph
 .loopgraph-test
+.loopgraph-test-*/
 tmp

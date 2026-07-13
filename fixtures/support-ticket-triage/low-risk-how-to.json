@@ -1,0 +1,8 @@
+{
+  "eventId": "support_evt_howto_001",
+  "simulatedAt": "2026-06-27T14:05:00.000Z",
+  "ticket": { "current": { "body": "How do I invite teammates to my workspace?" } },
+  "account": { "id": "acct_support_small", "name": "Small Team", "segment": "smb", "renewalDaysRemaining": 200 },
+  "incident": { "category": "product_question", "severity": "P3" },
+  "businessImpact": { "renewalRisk": "low", "summary": "Low-risk how-to question" }
+}

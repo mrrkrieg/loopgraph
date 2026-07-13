@@ -1,0 +1,8 @@
+{
+  "eventId": "acct_evt_billing_001",
+  "simulatedAt": "2026-06-27T13:10:00.000Z",
+  "ticket": { "current": { "body": "Invoice total looks wrong for last month." } },
+  "account": { "id": "acct_billing", "name": "Billing Co", "segment": "mid_market", "renewalDaysRemaining": 180 },
+  "incident": { "category": "billing_dispute", "severity": "P2" },
+  "businessImpact": { "renewalRisk": "low", "summary": "Billing dispute without renewal risk" }
+}

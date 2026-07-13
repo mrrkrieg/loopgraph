@@ -4,9 +4,9 @@ import type {
   DepartmentGoal,
   DepartmentProfile,
   ProcessGoalMapping
-} from "../loopgraph-core/discovery";
-import type { DepartmentSkillPack, DepartmentType } from "../loopgraph-core/department-skills";
-import type { ProcessInventoryItem, ProcessPainPoint } from "../loopgraph-core/process-inventory";
+} from "loopgraph/core";
+import type { DepartmentSkillPack, DepartmentType } from "loopgraph/core";
+import type { ProcessInventoryItem, ProcessPainPoint } from "loopgraph/core";
 
 const defaultDepartments: DepartmentType[] = [
   "management",

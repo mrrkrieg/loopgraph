@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "../loopgraph-core/constants";
-import { buildLoopEgoGraph, buildSemanticTopology } from "../loopgraph-core/graph";
-import type { LoopSpec } from "../loopgraph-core/loop-spec";
+import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "loopgraph/core";
+import { buildLoopEgoGraph, buildSemanticTopology } from "loopgraph/core";
+import type { LoopSpec } from "loopgraph/core";
 import { buildSemanticTopologyVisualGraph, buildTemplateLoopGraph } from "./loop-graph-visualization";
 import { getTemplateCatalog } from "./templates";
 

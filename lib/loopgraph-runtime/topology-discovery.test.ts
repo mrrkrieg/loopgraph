@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSemanticTopology } from "../loopgraph-core/graph";
+import { buildSemanticTopology } from "loopgraph/core";
 import { buildDemoDiscoverySession } from "./discovery-engine";
 import { tryMaterializeLoopRecommendation } from "./loop-materializer";
 

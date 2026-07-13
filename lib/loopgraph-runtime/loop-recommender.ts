@@ -1,7 +1,7 @@
-import type { DepartmentSkillPack, LoopBlueprint } from "../loopgraph-core/department-skills";
-import type { BusinessDiscoverySession, DepartmentProfile } from "../loopgraph-core/discovery";
-import { LoopRecommendationSchema, type LoopRecommendation } from "../loopgraph-core/loop-recommendation";
-import type { ProcessInventoryItem, ProcessPainPoint } from "../loopgraph-core/process-inventory";
+import type { DepartmentSkillPack, LoopBlueprint } from "loopgraph/core";
+import type { BusinessDiscoverySession, DepartmentProfile } from "loopgraph/core";
+import { LoopRecommendationSchema, type LoopRecommendation } from "loopgraph/core";
+import type { ProcessInventoryItem, ProcessPainPoint } from "loopgraph/core";
 import { inferDepartments, buildProcessInventory, inferGoals } from "./process-classifier";
 
 const recurrenceScore: Record<ProcessInventoryItem["recurrence"], number> = {

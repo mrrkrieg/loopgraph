@@ -1,10 +1,10 @@
-import type { AccessRequirement } from "../loopgraph-core/access-requirements";
-import { DailySummarySchema, type DailySummary } from "../loopgraph-core/daily-summary";
-import type { EscalationCase } from "../loopgraph-core/escalation";
-import type { HumanReviewTrace } from "../loopgraph-core/review";
-import type { LoopSpec } from "../loopgraph-core/loop-spec";
-import type { MetricDefinition, UndefinedMetric } from "../loopgraph-core/metric-definition";
-import type { LoopRunTrace } from "../loopgraph-core/trace";
+import type { AccessRequirement } from "loopgraph/core";
+import { DailySummarySchema, type DailySummary } from "loopgraph/core";
+import type { EscalationCase } from "loopgraph/core";
+import type { HumanReviewTrace } from "loopgraph/core";
+import type { LoopSpec } from "loopgraph/core";
+import type { MetricDefinition, UndefinedMetric } from "loopgraph/core";
+import type { LoopRunTrace } from "loopgraph/core";
 
 export type DailySummaryInput = {
   companyId: string;

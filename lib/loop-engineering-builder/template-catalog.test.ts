@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildGraphFromCatalog } from "./graph";
 import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateCatalog } from "./templates";
-import { validateLoopSpec } from "../loopgraph-core/loop-spec";
+import { validateLoopSpec } from "loopgraph/core";
 
 describe("Loopgraph template catalog", () => {
   it("defines a broad department catalog with maturity labels", () => {

@@ -1,5 +1,7 @@
 # Manual QA — V1.1
 
+Automated coverage: `lib/loopgraph-runtime/governance-path.test.ts` (review binding, improvements from reject), `support-ticket-triage.test.ts`, full fixture snapshot matrix in CI.
+
 ## Governance path (file storage)
 
 - [ ] `npm run loopgraph -- simulate examples/github-issue-triage --fixture fixtures/github-issue-triage/security-issue.json`

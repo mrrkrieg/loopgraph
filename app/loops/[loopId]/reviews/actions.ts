@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   applyReviewDecision,
@@ -52,5 +53,12 @@ export async function submitHumanReviewAction(formData: FormData) {
     redirect(`/loops/${loopId}/reviews?runId=${runId}&error=${message}`);
   }
 
-  redirect(`/loops/${loopId}/reviews?runId=${runId}`);
+  revalidatePath(`/loops/${loopId}/runs`);
+  revalidatePath(`/loops/${loopId}/runs/${runId}`);
+  revalidatePath(`/loops/${loopId}/reviews`);
+  revalidatePath(`/loops/${loopId}/improvements`);
+  revalidatePath("/management");
+
+  const statusParam = decision === "approved" ? "&success=approved" : "";
+  redirect(`/loops/${loopId}/reviews?runId=${runId}${statusParam}`);
 }
