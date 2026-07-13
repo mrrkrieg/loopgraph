@@ -13,14 +13,16 @@ type TemplateOption = LoopTemplate & {
 export function TemplatePicker({
   templates,
   defaultDepartment,
-  defaultTemplateId
+  defaultTemplateId,
+  initialDepartment = "all"
 }: {
   templates: TemplateOption[];
   defaultDepartment: string;
   defaultTemplateId: string;
+  initialDepartment?: string;
 }) {
   const departments = useMemo(() => Array.from(new Set(templates.map((t) => t.department))), [templates]);
-  const [department, setDepartment] = useState("all");
+  const [department, setDepartment] = useState(initialDepartment);
   const [selectedTemplateId, setSelectedTemplateId] = useState(defaultTemplateId);
   const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
   const visibleTemplates = department === "all"

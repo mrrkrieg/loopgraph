@@ -4,12 +4,13 @@ import { SectionCard } from "@/components/section-card";
 import { TemplatePicker } from "@/components/template-picker";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { getTemplateById } from "@/lib/loop-engineering-builder/templates";
+import type { DepartmentKey } from "@/lib/loop-engineering-builder/types";
 import { createLoopAction } from "./actions";
 
 export default async function NewLoopPage({
   searchParams
 }: {
-  searchParams?: Promise<{ template?: string }>;
+  searchParams?: Promise<{ template?: string; department?: string }>;
 }) {
   const params = await searchParams;
   const workspace = await getWorkspace();
@@ -21,7 +22,13 @@ export default async function NewLoopPage({
       owners: loop.defaultOwners ?? ["Loop owner"]
     }))
   );
-  const selectedTemplate = getTemplateById(params?.template ?? "") ?? getTemplateById("marketing-campaign_learning");
+  const requestedDepartment = resolveRequestedDepartment(params?.department, workspace.templates.map((department) => department.key));
+  const departmentTemplate = requestedDepartment
+    ? templateOptions.find((template) => template.department === requestedDepartment)
+    : undefined;
+  const selectedTemplate = getTemplateById(params?.template ?? "")
+    ?? (departmentTemplate ? getTemplateById(departmentTemplate.id) : undefined)
+    ?? getTemplateById("marketing-campaign_learning");
   const defaultDepartment = selectedTemplate?.department ?? "marketing";
   const defaultTemplateId = selectedTemplate?.id ?? "marketing-campaign_learning";
 
@@ -47,6 +54,7 @@ export default async function NewLoopPage({
               templates={templateOptions}
               defaultDepartment={defaultDepartment}
               defaultTemplateId={defaultTemplateId}
+              initialDepartment={requestedDepartment ?? "all"}
             />
             <label className="block text-sm font-medium">
               Goal
@@ -89,4 +97,10 @@ export default async function NewLoopPage({
       </div>
     </>
   );
+}
+
+function resolveRequestedDepartment(department: string | undefined, availableDepartments: DepartmentKey[]) {
+  if (!department) return undefined;
+  if (availableDepartments.includes(department as DepartmentKey)) return department as DepartmentKey;
+  return "custom";
 }
