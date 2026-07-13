@@ -1,6 +1,6 @@
 import React from "react";
 
-export function MetricCard({
+export function DailyMetricCard({
   label,
   value,
   note
