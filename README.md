@@ -136,31 +136,29 @@ For the full walkthrough, see the [Hermes Quickstart](docs/HERMES-QUICKSTART.md)
 
 ## Department examples
 
-The same Hermes-brain pattern works across the company. Marketing is shown first; expand any other department to see its stack, proposed graph, routing decisions, and safety boundary.
+The same Hermes-brain pattern works across the company. Product is shown first; expand any other department to see its stack, proposed graph, routing decisions, and safety boundary.
 
-### Marketing — Ads + Content Creation
+### Product — Feedback Clustering + Release Learning
 
-Suppose Marketing uses Google Ads, product analytics, HubSpot, Notion, Webflow, and Slack. The team says campaign review is slow, content preparation is inconsistent, publishing and budget changes require approval, and qualified pipeline matters more than surface-level engagement.
+Suppose Product uses Productboard, Linear, Intercom, PostHog, Notion, and Slack. The team says feedback is fragmented, roadmap discussions start from anecdotes, release outcomes are reviewed late, and product direction must remain with the product lead.
 
 Loopgraph can design two independent loops:
 
 ```text
 Hermes Brain
-└── Marketing
-    ├── Ads
-    └── Content Creation
+└── Product
+    ├── Feedback Clustering
+    └── Release Learning
 ```
-
-The important part is not the diagram—it is the routing contract behind it:
 
 | Incoming problem | Hermes decision | Loopgraph response |
 |---|---|---|
-| Campaign spend or efficiency anomaly with the required campaign evidence | Route to **Ads** | Validate the event contract, open/update the business problem, and start in the configured rollout mode |
-| Approved content brief with trusted source material | Route to **Content Creation** | Validate the content route and prepare the governed content loop |
-| Landing-page conversion drop with no campaign mapping | Request context or human choice | Abstain instead of guessing between Ads and Content Creation |
-| Duplicate provider delivery | Repeats the same route decision | Suppress duplicate work through durable event/problem identity |
+| New feedback crosses a repeated-theme threshold with linked customer evidence | Route to **Feedback Clustering** | Group the evidence, preserve source links, and prepare a product-problem brief |
+| A release reaches its measurement window with adoption and outcome data | Route to **Release Learning** | Compare expected and observed outcomes and prepare a traceable learning review |
+| A single strategic customer asks for an immediate roadmap change | Request product-owner review | Do not treat one request as a validated cluster or change roadmap priority automatically |
+| The same feedback item arrives from a replayed sync | Repeat the same route decision | Attach no duplicate evidence and avoid opening a second problem |
 
-The committed golden flow covers positive Ads and Content events, duplicates, no-match events, and ambiguous events that require human/context review.
+Loopgraph may draft evidence and tickets, but roadmap, scope, and customer-commitment changes require product-owner approval.
 
 <details>
 <summary><strong>Sales — Lead Qualification + Follow-Up Latency</strong></summary>
@@ -188,27 +186,29 @@ Customer-facing sends, pricing exceptions, negotiation, and commitments stay hum
 </details>
 
 <details>
-<summary><strong>Product — Feedback Clustering + Release Learning</strong></summary>
+<summary><strong>Marketing — Ads + Content Creation</strong></summary>
 
-Suppose Product uses Productboard, Linear, Intercom, PostHog, Notion, and Slack. The team says feedback is fragmented, roadmap discussions start from anecdotes, release outcomes are reviewed late, and product direction must remain with the product lead.
+Suppose Marketing uses Google Ads, product analytics, HubSpot, Notion, Webflow, and Slack. The team says campaign review is slow, content preparation is inconsistent, publishing and budget changes require approval, and qualified pipeline matters more than surface-level engagement.
 
 Loopgraph can design two independent loops:
 
 ```text
 Hermes Brain
-└── Product
-    ├── Feedback Clustering
-    └── Release Learning
+└── Marketing
+    ├── Ads
+    └── Content Creation
 ```
+
+The important part is not the diagram—it is the routing contract behind it:
 
 | Incoming problem | Hermes decision | Loopgraph response |
 |---|---|---|
-| New feedback crosses a repeated-theme threshold with linked customer evidence | Route to **Feedback Clustering** | Group the evidence, preserve source links, and prepare a product-problem brief |
-| A release reaches its measurement window with adoption and outcome data | Route to **Release Learning** | Compare expected and observed outcomes and prepare a traceable learning review |
-| A single strategic customer asks for an immediate roadmap change | Request product-owner review | Do not treat one request as a validated cluster or change roadmap priority automatically |
-| The same feedback item arrives from a replayed sync | Repeat the same route decision | Attach no duplicate evidence and avoid opening a second problem |
+| Campaign spend or efficiency anomaly with the required campaign evidence | Route to **Ads** | Validate the event contract, open/update the business problem, and start in the configured rollout mode |
+| Approved content brief with trusted source material | Route to **Content Creation** | Validate the content route and prepare the governed content loop |
+| Landing-page conversion drop with no campaign mapping | Request context or human choice | Abstain instead of guessing between Ads and Content Creation |
+| Duplicate provider delivery | Repeats the same route decision | Suppress duplicate work through durable event/problem identity |
 
-Loopgraph may draft evidence and tickets, but roadmap, scope, and customer-commitment changes require product-owner approval.
+The committed golden flow covers positive Ads and Content events, duplicates, no-match events, and ambiguous events that require human/context review.
 
 </details>
 
@@ -412,9 +412,19 @@ Provider secrets, OAuth tokens, and webhook signing keys stay in Hermes or an ap
 | [Marketing: Ads + Content Creation](docs/HERMES-EXAMPLES.md#marketing-ads--content-creation) | Two loops in one department with distinct Hermes routing contracts |
 | [Legal / Compliance evidence review](docs/HERMES-EXAMPLES.md#sensitive-department-legal--compliance-evidence-review) | Sensitive work capped in shadow mode with expert approval and blocked actions |
 | [Custom field-ops route](docs/HERMES-EXAMPLES.md#custom-department-field-ops-custom-app-route) | A custom department using the same event-brain pattern |
+| [`examples/department-skills/product.yaml`](examples/department-skills/product.yaml) | Product feedback, discovery, spec-to-ticket, release learning, and roadmap evidence loops |
+| [`examples/department-skills/sales.yaml`](examples/department-skills/sales.yaml) | Lead qualification, pipeline forecast, close readiness, follow-up latency, and CRM hygiene |
+| [`examples/department-skills/customer-success.yaml`](examples/department-skills/customer-success.yaml) | Customer health, renewal risk, QBR prep, ticket escalation, and knowledge-base maintenance |
+| [`examples/department-skills/engineering.yaml`](examples/department-skills/engineering.yaml) | GitHub issue triage, PR review prep, incident learning, release readiness, QA, and bug clustering |
+| [`examples/department-skills/ops-finance.yaml`](examples/department-skills/ops-finance.yaml) | Approval bottlenecks, invoice variance, cash collection, forecast variance, and resource allocation |
+| [`examples/department-skills/hr-talent.yaml`](examples/department-skills/hr-talent.yaml) | Candidate pipeline, onboarding progress, performance review prep, manager coaching, and engagement risk |
+| [`examples/department-skills/legal-compliance.yaml`](examples/department-skills/legal-compliance.yaml) | Policy drift, security questionnaires, contract risk, compliance evidence, and access review |
+| [`examples/department-skills/management.yaml`](examples/department-skills/management.yaml) | Daily operating review, decision memos, anomaly detection, resource allocation, and loop governance |
+| [`examples/department-skills/marketing.yaml`](examples/department-skills/marketing.yaml) | Campaign learning, landing-page experiments, brand claim review, competitor monitoring, and SEO refresh |
 | [`examples/github-issue-triage`](examples/github-issue-triage) | Code-first validate/simulate workflow |
 | [`examples/strategic-account-escalation`](examples/strategic-account-escalation) | Management escalation and evidence handoff |
 | [`examples/support-ticket-triage`](examples/support-ticket-triage) | Support prioritization with review-aware routing |
+| [`examples/management-review`](examples/management-review) | Scheduled management review loop for operating cadence, ownership, and follow-up decisions |
 
 ## CLI at a glance
 
