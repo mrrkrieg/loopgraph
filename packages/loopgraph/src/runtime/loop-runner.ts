@@ -1,5 +1,5 @@
 import type { LoopSpec } from "../core/loop-spec";
-import type { LoopRunTrace } from "../core/trace";
+import type { LoopRunTrace, RunProvenance } from "../core/trace";
 import type { EscalationCase } from "../core/escalation";
 import { idempotencyKey, loopSpecHash, runId } from "../core/hash";
 import { prepareActionsFromProposed, evaluatePolicy, buildEscalationCaseFromPolicy, shouldCreateEscalationCase } from "../core/policy";
@@ -18,6 +18,7 @@ export type RunLoopInput = {
   eventId: string;
   startedAt: string;
   storage: StorageAdapter;
+  provenance?: RunProvenance;
 };
 
 export type RunLoopResult = {
@@ -142,6 +143,7 @@ export async function runLoop(input: RunLoopInput): Promise<RunLoopResult> {
     outputs: [{ id: "output_1", type: "assessment", content: agentOutput }],
     metrics: [],
     errors: [],
+    ...(input.provenance ? { provenance: input.provenance } : {}),
     startedAt,
     completedAt: startedAt,
     latencyMs: 0,

@@ -3,10 +3,15 @@ import { DiscoveryStepNav } from "@/components/discovery-step-nav";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDiscoverySessionForView } from "../view-data";
+import {
+  getDiscoverySessionForView,
+  getDiscoverySessionIdFromSearchParams,
+  type DiscoverySearchParams
+} from "../view-data";
 
-export default async function DiscoveryMetricsPage() {
-  const session = await getDiscoverySessionForView();
+export default async function DiscoveryMetricsPage({ searchParams }: { searchParams?: DiscoverySearchParams }) {
+  const sessionId = await getDiscoverySessionIdFromSearchParams(searchParams);
+  const session = await getDiscoverySessionForView(sessionId);
   return (
     <>
       <PageHeader
@@ -15,7 +20,7 @@ export default async function DiscoveryMetricsPage() {
         description="Metrics are planned per recommendation, and undefined metrics stay visible until the source, formula, baseline, or owner is resolved."
         action={<Link className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" href="/daily/undefined-metrics">Undefined metrics</Link>}
       />
-      <DiscoveryStepNav activeHref="/discovery/metrics" />
+      <DiscoveryStepNav activeHref="/discovery/metrics" sessionId={sessionId} />
       <div className="grid gap-4 xl:grid-cols-2">
         {session.metricDefinitions.map((metric) => {
           const undefinedMetric = session.undefinedMetrics.find((item) => item.metricKey === metric.key && item.loopRecommendationId === metric.loopRecommendationId);
@@ -36,4 +41,3 @@ export default async function DiscoveryMetricsPage() {
     </>
   );
 }
-

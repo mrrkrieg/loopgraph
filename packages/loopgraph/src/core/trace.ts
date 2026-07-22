@@ -68,6 +68,39 @@ export const runErrorSchema = z.object({
   at: z.string()
 });
 
+export const runProvenanceSchema = z.object({
+  invocation: z.object({
+    actor: z.string(),
+    source: z.string().optional(),
+    userId: z.string().optional(),
+    sessionId: z.string().optional(),
+    routeAttemptId: z.string().optional(),
+    routeCommitId: z.string().optional()
+  }),
+  liveExecutionGate: z.object({
+    checkedAt: z.string(),
+    allowed: z.boolean(),
+    activationMode: z.string().optional(),
+    reasonCodes: z.array(z.string()).default([]),
+    requiredActions: z.array(z.string()).default([])
+  }).optional(),
+  approvalPolicy: z.object({
+    requireFingerprintMatch: z.boolean(),
+    separateCustomerFacingApproval: z.boolean(),
+    allowedRoles: z.array(z.string()).default([])
+  }).optional(),
+  connectorChecks: z.array(z.object({
+    capability: z.string(),
+    requiredFor: z.string(),
+    status: z.string(),
+    connectedRuntimeInstances: z.array(z.object({
+      instanceId: z.string(),
+      manifestId: z.string(),
+      environment: z.string()
+    })).default([])
+  })).default([])
+});
+
 export const loopRunTraceSchema = z.object({
   id: z.string(),
   loopId: z.string(),
@@ -99,6 +132,7 @@ export const loopRunTraceSchema = z.object({
   outputs: z.array(outputArtifactSchema).default([]),
   metrics: z.array(metricUpdateSchema).default([]),
   errors: z.array(runErrorSchema).default([]),
+  provenance: runProvenanceSchema.optional(),
   startedAt: z.string(),
   completedAt: z.string().optional(),
   latencyMs: z.number().optional(),
@@ -113,4 +147,5 @@ export type VerificationResult = z.infer<typeof verificationResultSchema>;
 export type OutputArtifact = z.infer<typeof outputArtifactSchema>;
 export type MetricUpdate = z.infer<typeof metricUpdateSchema>;
 export type RunError = z.infer<typeof runErrorSchema>;
+export type RunProvenance = z.infer<typeof runProvenanceSchema>;
 export type LoopRunTrace = z.infer<typeof loopRunTraceSchema>;

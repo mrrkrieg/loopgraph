@@ -345,7 +345,7 @@ Implement the full shape from launch doc §6:
 ### 1.4 Hero template YAML files
 
 **`examples/github-issue-triage/loopgraph.yaml`** — per §11:
-- Trigger: `webhook` / `github` / `issues.opened`
+- Trigger: `event` / `hermes` / normalized GitHub issue problem
 - Context sources: repo policy, issue body, labels, related issues (all fixture-backed)
 - Tools: `propose_labels`, `draft_response`, `create_follow_up`, `create_escalation_case`
 - Policy: security escalation rule with `createEscalationCase.category: security`

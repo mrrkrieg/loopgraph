@@ -8,6 +8,7 @@ import { GraphDiagnostics } from "./graph-diagnostics";
 import { NodeInspector } from "./node-inspector";
 import { ObsidianGraphCanvas } from "./obsidian-graph-canvas";
 import type { BrainGraphMode, BrainGraphSettings } from "./graph-types";
+import type { BrainGraphActions } from "./node-inspector";
 
 const defaultSettings: BrainGraphSettings = {
   includeData: false,
@@ -16,7 +17,15 @@ const defaultSettings: BrainGraphSettings = {
   includeImprove: false
 };
 
-export function LoopgraphBrainView({ topology }: { topology: SemanticTopology }) {
+export function LoopgraphBrainView({
+  actions,
+  includeCatalogLoops = false,
+  topology
+}: {
+  actions?: BrainGraphActions;
+  includeCatalogLoops?: boolean;
+  topology: SemanticTopology;
+}) {
   const [settings, setSettings] = useState<BrainGraphSettings>(defaultSettings);
   const [mode, setMode] = useState<BrainGraphMode>("global");
   const [depth, setDepth] = useState(1);
@@ -25,7 +34,7 @@ export function LoopgraphBrainView({ topology }: { topology: SemanticTopology })
   const [localCenterId, setLocalCenterId] = useState<string | undefined>();
   const [fitRequest, setFitRequest] = useState(0);
   const [resetRequest, setResetRequest] = useState(0);
-  const baseGraph = useMemo(() => buildBrainGraph({ topology, ...settings }), [settings, topology]);
+  const baseGraph = useMemo(() => buildBrainGraph({ topology, includeCatalogLoops, ...settings }), [includeCatalogLoops, settings, topology]);
   const selectedNodeExists = selectedId ? baseGraph.nodes.some((node) => node.id === selectedId) : false;
   const effectiveSelectedId = selectedNodeExists ? selectedId : undefined;
   const centerId = localCenterId && baseGraph.nodes.some((node) => node.id === localCenterId)
@@ -46,7 +55,9 @@ export function LoopgraphBrainView({ topology }: { topology: SemanticTopology })
     : graph.nodes.find((node) => node.type === "company_brain");
   const inspectorNode = selectedNode ?? graph.nodes[0];
   const currentFocusId = effectiveSelectedId ?? inspectorNode?.id;
-  const breadcrumb = inspectorNode ? breadcrumbForNode(inspectorNode) : ["Company Brain"];
+  const brainLabel = topology.metadata.brainLabel ?? "Company Brain";
+  const isHermes = topology.metadata.hierarchyMode === "hermes_brain";
+  const breadcrumb = inspectorNode ? breadcrumbForNode(inspectorNode, brainLabel, isHermes) : [brainLabel];
 
   function openLocalGraph(nodeId: string) {
     setSelectedId(nodeId);
@@ -101,21 +112,26 @@ export function LoopgraphBrainView({ topology }: { topology: SemanticTopology })
           showLabels={showLabels}
         />
       </section>
-      <NodeInspector edges={graph.edges} node={inspectorNode} onOpenLocal={openLocalGraph} />
+      <NodeInspector actions={actions} edges={graph.edges} node={inspectorNode} onOpenLocal={openLocalGraph} />
     </div>
   );
 }
 
-function breadcrumbForNode(node: NonNullable<ReturnType<typeof buildBrainGraph>["nodes"][number]>) {
-  if (node.type === "company_brain") return ["Company Brain"];
-  if (node.type === "management_loop") return ["Company Brain", node.label];
-  if (node.type === "department_loop") return ["Company Brain", "Company Management Loop", node.label];
+function breadcrumbForNode(
+  node: NonNullable<ReturnType<typeof buildBrainGraph>["nodes"][number]>,
+  brainLabel: string,
+  isHermes: boolean
+) {
+  if (node.type === "company_brain") return [brainLabel];
+  if (node.type === "management_loop") return [brainLabel, node.label];
+  if (node.type === "department_loop") return [brainLabel, ...(node.parentId === "loop:management" ? ["Company Management Loop"] : []), node.label];
   if (node.type === "workflow_loop") {
-    return ["Company Brain", "Company Management Loop", node.departmentId ? departmentLabel(node.departmentId) : "Department Loop", node.label];
+    return [brainLabel, node.departmentId ? departmentLabel(node.departmentId, isHermes) : "Department", node.label];
   }
-  return ["Company Brain", node.label];
+  return [brainLabel, node.label];
 }
 
-function departmentLabel(department: string) {
-  return `${department.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())} Department Loop`;
+function departmentLabel(department: string, isHermes: boolean) {
+  const label = department.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  return isHermes ? label : `${label} Department Loop`;
 }

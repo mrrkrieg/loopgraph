@@ -18,7 +18,7 @@ Explicit boundaries for Loopgraph releases.
 - Run history + trace viewer (`/loops/[loopId]/runs`, `/runs/[runId]`)
 - `SupabaseStorageAdapter` + runtime migration when env configured
 - `AssessmentProvider` (fixture + OpenAI) with `execute` mode behind `LOOPGRAPH_EXECUTE_ENABLED`
-- Live `GitHubAdapter` + `/api/webhooks/github` with dedupe
+- Live `GitHubAdapter` for approved execute-mode actions; provider webhooks route through Hermes, with `/api/webhooks/github` kept only as a Hermes compatibility forwarder
 - `loopgraph execute`, `case list`, `case resolve`
 - Docs: [github-production-setup.md](./github-production-setup.md), [manual-qa-v1.1.md](./manual-qa-v1.1.md)
 

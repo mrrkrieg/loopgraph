@@ -2,14 +2,19 @@ import { DiscoveryStepNav } from "@/components/discovery-step-nav";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDiscoverySessionForView } from "../view-data";
+import {
+  getDiscoverySessionForView,
+  getDiscoverySessionIdFromSearchParams,
+  type DiscoverySearchParams
+} from "../view-data";
 
-export default async function ProcessDiscoveryPage() {
-  const session = await getDiscoverySessionForView();
+export default async function ProcessDiscoveryPage({ searchParams }: { searchParams?: DiscoverySearchParams }) {
+  const sessionId = await getDiscoverySessionIdFromSearchParams(searchParams);
+  const session = await getDiscoverySessionForView(sessionId);
   return (
     <>
       <PageHeader eyebrow="Discovery" title="Processes" description="Recurring processes are the raw material for loop recommendations." />
-      <DiscoveryStepNav activeHref="/discovery/processes" />
+      <DiscoveryStepNav activeHref="/discovery/processes" sessionId={sessionId} />
       <div className="space-y-4">
         {session.processInventory.map((process) => {
           const department = session.departmentProfiles.find((item) => item.id === process.departmentId);
@@ -32,4 +37,3 @@ export default async function ProcessDiscoveryPage() {
     </>
   );
 }
-

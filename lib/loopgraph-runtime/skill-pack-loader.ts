@@ -6,13 +6,14 @@ import {
   type DepartmentSkillPack,
   type DepartmentType
 } from "loopgraph/core";
+import { getActiveLoopgraphProjectRoot } from "./storage-resolver";
 
-export function getDepartmentSkillPackDir(projectRoot = process.cwd()) {
+export function getDepartmentSkillPackDir(projectRoot = getActiveLoopgraphProjectRoot()) {
   return path.join(projectRoot, "examples", "department-skills");
 }
 
-export async function loadDepartmentSkillPacks(projectRoot = process.cwd()): Promise<DepartmentSkillPack[]> {
-  const dir = getDepartmentSkillPackDir(projectRoot);
+export async function loadDepartmentSkillPacks(projectRoot = getActiveLoopgraphProjectRoot()): Promise<DepartmentSkillPack[]> {
+  const dir = await resolveDepartmentSkillPackDir(projectRoot);
   const files = (await readdir(dir))
     .filter((file) => file.endsWith(".yaml") || file.endsWith(".yml"))
     .sort((left, right) => left.localeCompare(right));
@@ -23,7 +24,7 @@ export async function loadDepartmentSkillPacks(projectRoot = process.cwd()): Pro
 
 export async function loadDepartmentSkillPack(
   idOrDepartmentType: string,
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<DepartmentSkillPack | undefined> {
   const packs = await loadDepartmentSkillPacks(projectRoot);
   return packs.find(
@@ -67,3 +68,12 @@ export function findSkillPackByDepartment(
   return packs.find((pack) => pack.departmentType === departmentType) ?? packs.find((pack) => pack.departmentType === "custom");
 }
 
+async function resolveDepartmentSkillPackDir(projectRoot: string): Promise<string> {
+  const primary = getDepartmentSkillPackDir(projectRoot);
+  try {
+    await readdir(primary);
+    return primary;
+  } catch {
+    return getDepartmentSkillPackDir(process.cwd());
+  }
+}

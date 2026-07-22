@@ -1,14 +1,19 @@
 import { DiscoveryStepNav } from "@/components/discovery-step-nav";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
-import { getDiscoverySessionForView } from "../view-data";
+import {
+  getDiscoverySessionForView,
+  getDiscoverySessionIdFromSearchParams,
+  type DiscoverySearchParams
+} from "../view-data";
 
-export default async function GoalDiscoveryPage() {
-  const session = await getDiscoverySessionForView();
+export default async function GoalDiscoveryPage({ searchParams }: { searchParams?: DiscoverySearchParams }) {
+  const sessionId = await getDiscoverySessionIdFromSearchParams(searchParams);
+  const session = await getDiscoverySessionForView(sessionId);
   return (
     <>
       <PageHeader eyebrow="Discovery" title="Goals" description="Goals keep recommendations tied to measurable business outcomes." />
-      <DiscoveryStepNav activeHref="/discovery/goals" />
+      <DiscoveryStepNav activeHref="/discovery/goals" sessionId={sessionId} />
       <div className="grid gap-4 lg:grid-cols-2">
         {session.departmentGoals.map((goal) => {
           const department = session.departmentProfiles.find((item) => item.id === goal.departmentId);
@@ -28,4 +33,3 @@ export default async function GoalDiscoveryPage() {
     </>
   );
 }
-

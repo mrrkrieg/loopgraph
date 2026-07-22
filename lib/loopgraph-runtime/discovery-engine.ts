@@ -15,7 +15,7 @@ import type { ProcessInventoryItem } from "loopgraph/core";
 import type { DailySummary } from "loopgraph/core";
 import type { LoopSpec } from "loopgraph/core";
 import { registerLoopSpec } from "../loop-engineering-builder/local-workspace";
-import { getLoopgraphRoot } from "./storage-resolver";
+import { getActiveLoopgraphProjectRoot, getLoopgraphRoot } from "./storage-resolver";
 import { generateAccessPlan as planAccess } from "./access-planner";
 import { generateDailySummary } from "./daily-summary-generator";
 import { generateHumanRequirementPlan } from "./human-requirement-planner";
@@ -45,7 +45,7 @@ export type StartDiscoverySessionInput = {
 
 export async function startDiscoverySession(
   input: StartDiscoverySessionInput = {},
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<BusinessDiscoverySession> {
   const now = new Date().toISOString();
   const companyId = input.companyId ?? input.companyProfile?.id ?? `company_${Date.now()}`;
@@ -86,7 +86,7 @@ export async function startDiscoverySession(
 export async function answerDiscoveryQuestion(
   sessionId: string,
   answer: Omit<DiscoveryAnswer, "id" | "answeredAt"> & Partial<Pick<DiscoveryAnswer, "id" | "answeredAt">>,
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ) {
   const session = await loadDiscoverySession(sessionId, projectRoot);
   if (!session) throw new Error(`Discovery session not found: ${sessionId}`);
@@ -109,7 +109,7 @@ export async function answerDiscoveryQuestion(
 
 export async function runDiscoveryPipeline(
   session: BusinessDiscoverySession,
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<BusinessDiscoverySession> {
   const skillPacks = await loadDepartmentSkillPacks(projectRoot);
   const departmentProfiles = inferDepartments(session, skillPacks);
@@ -156,7 +156,7 @@ export async function runDiscoveryPipeline(
 
 export async function recommendLoops(
   session: BusinessDiscoverySession,
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<LoopRecommendation[]> {
   const skillPacks = await loadDepartmentSkillPacks(projectRoot);
   return recommendLoopsForSession(session, skillPacks);
@@ -164,7 +164,7 @@ export async function recommendLoops(
 
 export async function generateAccessPlan(
   recommendations: LoopRecommendation[],
-  projectRoot = process.cwd(),
+  projectRoot = getActiveLoopgraphProjectRoot(),
   processes: ProcessInventoryItem[] = []
 ): Promise<AccessRequirement[]> {
   const skillPacks = await loadDepartmentSkillPacks(projectRoot);
@@ -174,7 +174,7 @@ export async function generateAccessPlan(
 export async function generateMetricPlan(
   recommendations: LoopRecommendation[],
   accessRequirements: AccessRequirement[] = [],
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ) {
   const skillPacks = await loadDepartmentSkillPacks(projectRoot);
   return planMetrics(recommendations, skillPacks, accessRequirements);
@@ -184,7 +184,7 @@ export { generateHumanRequirementPlan };
 
 export async function materializeAcceptedLoops(
   session: BusinessDiscoverySession,
-  projectRoot = process.cwd()
+  projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<{
   loopSpecs: LoopSpec[];
   session: BusinessDiscoverySession;
@@ -282,7 +282,7 @@ export async function buildDemoDiscoverySession(projectRoot = process.cwd()) {
   return runDiscoveryPipeline(session, projectRoot);
 }
 
-export async function saveDiscoverySession(session: BusinessDiscoverySession, projectRoot = process.cwd()) {
+export async function saveDiscoverySession(session: BusinessDiscoverySession, projectRoot = getActiveLoopgraphProjectRoot()) {
   await writeJson(path.join(discoveryRoot(projectRoot), "sessions", `${session.id}.json`), session);
   await Promise.all([
     ...session.recommendedLoops.map((item) => saveLoopRecommendation(item, projectRoot)),
@@ -292,54 +292,54 @@ export async function saveDiscoverySession(session: BusinessDiscoverySession, pr
   ]);
 }
 
-export async function loadDiscoverySession(sessionId: string, projectRoot = process.cwd()) {
+export async function loadDiscoverySession(sessionId: string, projectRoot = getActiveLoopgraphProjectRoot()) {
   return readJson(
     path.join(discoveryRoot(projectRoot), "sessions", `${sessionId}.json`),
     BusinessDiscoverySessionSchema
   );
 }
 
-export async function listDiscoverySessions(projectRoot = process.cwd()) {
+export async function listDiscoverySessions(projectRoot = getActiveLoopgraphProjectRoot()) {
   return listJson(path.join(discoveryRoot(projectRoot), "sessions"), BusinessDiscoverySessionSchema);
 }
 
-export async function saveLoopRecommendation(item: LoopRecommendation, projectRoot = process.cwd()) {
+export async function saveLoopRecommendation(item: LoopRecommendation, projectRoot = getActiveLoopgraphProjectRoot()) {
   await writeJson(path.join(rootDir(projectRoot, "recommendations"), `${safeFileId(item.id)}.json`), item);
 }
 
-export async function listLoopRecommendations(projectRoot = process.cwd()) {
+export async function listLoopRecommendations(projectRoot = getActiveLoopgraphProjectRoot()) {
   return listJson(rootDir(projectRoot, "recommendations"), LoopRecommendationSchema);
 }
 
-export async function saveAccessRequirement(item: AccessRequirement, projectRoot = process.cwd()) {
+export async function saveAccessRequirement(item: AccessRequirement, projectRoot = getActiveLoopgraphProjectRoot()) {
   await writeJson(path.join(rootDir(projectRoot, "access"), `${safeFileId(item.id)}.json`), item);
 }
 
-export async function listAccessRequirements(projectRoot = process.cwd()) {
+export async function listAccessRequirements(projectRoot = getActiveLoopgraphProjectRoot()) {
   return listJson(rootDir(projectRoot, "access"), AccessRequirementSchema);
 }
 
-export async function saveMetricDefinition(item: MetricDefinition, projectRoot = process.cwd()) {
+export async function saveMetricDefinition(item: MetricDefinition, projectRoot = getActiveLoopgraphProjectRoot()) {
   await writeJson(path.join(rootDir(projectRoot, "metrics"), `${safeFileId(item.id)}.json`), item);
 }
 
-export async function listMetricDefinitions(projectRoot = process.cwd()) {
+export async function listMetricDefinitions(projectRoot = getActiveLoopgraphProjectRoot()) {
   return listJson(rootDir(projectRoot, "metrics"), MetricDefinitionSchema);
 }
 
-export async function saveUndefinedMetric(item: UndefinedMetric, projectRoot = process.cwd()) {
+export async function saveUndefinedMetric(item: UndefinedMetric, projectRoot = getActiveLoopgraphProjectRoot()) {
   await writeJson(path.join(rootDir(projectRoot, "undefined-metrics"), `${safeFileId(item.id)}.json`), item);
 }
 
-export async function listUndefinedMetrics(projectRoot = process.cwd()) {
+export async function listUndefinedMetrics(projectRoot = getActiveLoopgraphProjectRoot()) {
   return listJson(rootDir(projectRoot, "undefined-metrics"), UndefinedMetricSchema);
 }
 
-export async function saveDailySummary(summary: DailySummary, projectRoot = process.cwd()) {
+export async function saveDailySummary(summary: DailySummary, projectRoot = getActiveLoopgraphProjectRoot()) {
   await writeJson(path.join(rootDir(projectRoot, "daily-summary"), `${summary.date}.json`), summary);
 }
 
-export async function loadDailySummary(date: string, projectRoot = process.cwd()) {
+export async function loadDailySummary(date: string, projectRoot = getActiveLoopgraphProjectRoot()) {
   return readJson(path.join(rootDir(projectRoot, "daily-summary"), `${date}.json`), undefined);
 }
 

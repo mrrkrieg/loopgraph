@@ -9,7 +9,11 @@ import {
 
 let cachedAdapter: StorageAdapter | null = null;
 
-export function getLoopgraphRoot(cwd = process.cwd()) {
+export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
+  return path.resolve(projectRoot ?? process.env.LOOPGRAPH_PROJECT_ROOT ?? process.cwd());
+}
+
+export function getLoopgraphRoot(cwd = getActiveLoopgraphProjectRoot()) {
   return getPackageLoopgraphRoot(cwd);
 }
 

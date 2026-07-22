@@ -229,6 +229,8 @@ export type TopologyWarning = {
 
 export type TopologyMetadata = {
   companyName: string;
+  brainLabel?: string;
+  hierarchyMode?: "management" | "hermes_brain";
   sourceLabel: string;
   generatedAt: string;
   loopSpecCount: number;
@@ -274,6 +276,8 @@ export type TopologyImprovementItem = {
 
 export type TopologyBuildOptions = {
   companyName?: string;
+  brainLabel?: string;
+  hierarchyMode?: "management" | "hermes_brain";
   sourceLabel?: string;
   selectedLoopId?: string;
   generatedAt?: string;
@@ -358,7 +362,10 @@ export function buildSemanticTopology(input: {
   );
   const options = input.options ?? {};
   const rootNodeId = "company:root";
-  const managementLoopId = "loop:management";
+  const hierarchyMode = options.hierarchyMode ?? "management";
+  const managementLoopId = hierarchyMode === "hermes_brain" ? rootNodeId : "loop:management";
+  const departmentParentNodeId = hierarchyMode === "hermes_brain" ? rootNodeId : managementLoopId;
+  const brainLabel = options.brainLabel ?? (hierarchyMode === "hermes_brain" ? "Hermes Brain" : options.companyName ?? "Company");
   const nodeMap = new Map<string, TopologyNode>();
   const edgeMap = new Map<string, TopologyEdge>();
   const specIds = new Set(loopSpecs.map((spec) => spec.metadata.id));
@@ -367,40 +374,45 @@ export function buildSemanticTopology(input: {
   addNode(nodeMap, {
     id: rootNodeId,
     type: "company",
-    label: options.companyName ?? "Company",
-    subtitle: "Operating system",
+    label: brainLabel,
+    subtitle: hierarchyMode === "hermes_brain" ? "Operational event brain" : "Operating system",
     layer: "structure",
     status: "active",
     weight: 7,
     visibleByDefault: true,
     isExpandable: true,
     metadata: {
-      source: "semantic_topology"
+      source: "semantic_topology",
+      brainLabel,
+      hierarchyMode
     }
   });
-  addNode(nodeMap, {
-    id: managementLoopId,
-    type: "management_loop",
-    label: "Company Management Loop",
-    subtitle: "Reviews departments, metrics, risk, and improvements",
-    loopId: "management",
-    parentId: rootNodeId,
-    layer: "structure",
-    status: "active",
-    weight: 6,
-    visibleByDefault: true,
-    isExpandable: true,
-    metadata: {
-      synthetic: true,
-      role: "rollup"
-    }
-  });
-  addEdge(edgeMap, nodeMap, {
-    source: rootNodeId,
-    target: managementLoopId,
-    kind: "contains",
-    label: "operates"
-  });
+
+  if (hierarchyMode !== "hermes_brain") {
+    addNode(nodeMap, {
+      id: managementLoopId,
+      type: "management_loop",
+      label: "Company Management Loop",
+      subtitle: "Reviews departments, metrics, risk, and improvements",
+      loopId: "management",
+      parentId: rootNodeId,
+      layer: "structure",
+      status: "active",
+      weight: 6,
+      visibleByDefault: true,
+      isExpandable: true,
+      metadata: {
+        synthetic: true,
+        role: "rollup"
+      }
+    });
+    addEdge(edgeMap, nodeMap, {
+      source: rootNodeId,
+      target: managementLoopId,
+      kind: "contains",
+      label: "operates"
+    });
+  }
 
   const departmentNodeIds = new Map<string, string>();
   for (const spec of loopSpecs) {
@@ -413,9 +425,10 @@ export function buildSemanticTopology(input: {
       department,
       departmentNodeIds,
       edgeMap,
-      managementLoopId,
+      managementLoopId: departmentParentNodeId,
       nodeMap,
-      visibleByDefault: true
+      visibleByDefault: true,
+      plainLabel: hierarchyMode === "hermes_brain"
     });
     const nodeId = loopNodeId(spec.metadata.id);
     addNode(nodeMap, loopNodeFromSpec(spec, {
@@ -440,9 +453,10 @@ export function buildSemanticTopology(input: {
         department: "custom",
         departmentNodeIds,
         edgeMap,
-        managementLoopId,
+        managementLoopId: departmentParentNodeId,
         nodeMap,
-        visibleByDefault: true
+        visibleByDefault: true,
+        plainLabel: hierarchyMode === "hermes_brain"
       });
       addNode(nodeMap, loopNodeFromSpec(spec, {
         nodeId,
@@ -536,6 +550,8 @@ export function buildSemanticTopology(input: {
     selectedLoopId: options.selectedLoopId,
     metadata: {
       companyName: options.companyName ?? "Company",
+      brainLabel,
+      hierarchyMode,
       sourceLabel: options.sourceLabel ?? "LoopSpecs",
       generatedAt: options.generatedAt ?? new Date(0).toISOString(),
       loopSpecCount: loopSpecs.length,
@@ -839,6 +855,7 @@ function ensureDepartmentLoop(input: {
   managementLoopId: string;
   nodeMap: Map<string, TopologyNode>;
   visibleByDefault: boolean;
+  plainLabel?: boolean;
 }) {
   const key = departmentSlug(input.department);
   const existing = input.departmentNodeIds.get(key);
@@ -851,7 +868,7 @@ function ensureDepartmentLoop(input: {
   addNode(input.nodeMap, {
     id: nodeId,
     type: "department_loop",
-    label: `${titleize(input.department)} Department Loop`,
+    label: input.plainLabel ? titleize(input.department) : `${titleize(input.department)} Department Loop`,
     subtitle: "Coordinates workflow loops and rollups",
     refId: `department:${key}`,
     loopId: `department:${key}`,
@@ -889,6 +906,8 @@ function loopNodeFromSpec(
   const department = departmentForSpec(spec);
   const owner = ownerLabel(spec);
   const metrics = extractMetricNames(spec);
+  const runtimeLevel = runtimeLevelForSpec(spec);
+  const source = spec.metadata.labels?.source;
   return {
     id: input.nodeId,
     type: spec.topology?.tags?.includes("task") ? "task_loop" : "workflow_loop",
@@ -917,9 +936,48 @@ function loopNodeFromSpec(
       tools: spec.tools.map((tool) => tool.label),
       verification: spec.verification.map((verifier) => verifier.id),
       tags: spec.topology?.tags ?? [],
-      trigger: `${spec.trigger.source}:${spec.trigger.event}`
+      trigger: `${spec.trigger.source}:${spec.trigger.event}`,
+      source,
+      runtimeLevel,
+      templateOnly: source === "demo_catalog" || runtimeLevel === "catalog",
+      runtime: loopRuntimeMetadata(spec)
     }
   };
+}
+
+function runtimeLevelForSpec(spec: LoopSpec): string | undefined {
+  const labelRuntimeLevel = spec.metadata.labels?.runtimeLevel;
+  if (labelRuntimeLevel) return labelRuntimeLevel;
+  const extension = spec.studioExtension as Record<string, unknown> | undefined;
+  return typeof extension?.runtimeLevel === "string" ? extension.runtimeLevel : undefined;
+}
+
+function loopRuntimeMetadata(spec: LoopSpec): Record<string, unknown> {
+  return {
+    sourcePath: spec.metadata.labels?.sourcePath,
+    inputFixtures: (spec.input.fixtures ?? []).map((fixture) => ({
+      id: fixture.id,
+      path: fixture.path,
+      label: humanizeFixtureId(fixture.id)
+    })),
+    routing: spec.routing
+      ? {
+          ready: true,
+          problemTypes: spec.routing.problemTypes,
+          activationMode: spec.routing.activationMode,
+          minimumConfidence: spec.routing.minimumConfidence,
+          requiredConnections: spec.routing.requiredConnections
+        }
+      : {
+          ready: false,
+          problemTypes: [],
+          requiredConnections: []
+        }
+  };
+}
+
+function humanizeFixtureId(value: string): string {
+  return value.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function addLoopInternals(
@@ -1152,6 +1210,7 @@ function addTrace(
   edgeMap: Map<string, TopologyEdge>,
   trace: LoopRunTrace
 ) {
+  updateLoopRuntimeFromTrace(nodeMap, trace);
   const nodeId = `trace:${trace.id}`;
   addNode(nodeMap, {
     id: nodeId,
@@ -1181,6 +1240,41 @@ function addTrace(
     kind: "writes_trace_to",
     label: "writes trace"
   });
+}
+
+function updateLoopRuntimeFromTrace(
+  nodeMap: Map<string, TopologyNode>,
+  trace: LoopRunTrace
+): void {
+  const loopNode = nodeMap.get(loopNodeId(trace.loopId));
+  if (!loopNode) {
+    return;
+  }
+
+  const existingMetadata = loopNode.metadata ?? {};
+  const existingLatestRun = isRecord(existingMetadata.latestRun) ? existingMetadata.latestRun : undefined;
+  const existingLatestAt = typeof existingLatestRun?.startedAt === "string" ? existingLatestRun.startedAt : undefined;
+  const traceStartedAt = trace.startedAt;
+  const shouldReplaceLatest = !existingLatestAt || traceStartedAt.localeCompare(existingLatestAt) >= 0;
+  const openReviewCount = trace.humanReviews.filter((review) => review.status === "open").length;
+  const existingOpenReviews = typeof existingMetadata.openReviews === "number" ? existingMetadata.openReviews : 0;
+
+  loopNode.metadata = {
+    ...existingMetadata,
+    openReviews: existingOpenReviews + openReviewCount,
+    ...(shouldReplaceLatest
+      ? {
+          lastRunAt: trace.completedAt ?? trace.startedAt,
+          latestRun: {
+            id: trace.id,
+            status: trace.status,
+            mode: trace.mode,
+            startedAt: trace.startedAt,
+            completedAt: trace.completedAt
+          }
+        }
+      : {})
+  };
 }
 
 function addEscalationCase(

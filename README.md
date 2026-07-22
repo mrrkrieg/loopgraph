@@ -6,6 +6,49 @@ A Loopgraph loop is more than a prompt or a tool chain. It defines what event st
 
 ## First 10 minutes
 
+### Hermes-first company brain flow
+
+Use this path when you want Hermes Agent to be the company brain that designs loops and receives all production webhooks.
+
+```bash
+git clone <repo>
+cd loopgraph
+npm install
+
+npm run loopgraph -- workspace init --project .
+npm run loopgraph -- hermes install --project .
+npm run loopgraph -- hermes doctor --project .
+npm run loopgraph -- studio --project . --start
+```
+
+Then ask Hermes:
+
+```text
+/loopgraph design automations for a department
+```
+
+The Hermes skill uses Loopgraph MCP tools to show canonical departments, ask the shared five-bundle discovery questions, design loops such as `Marketing -> Ads` and `Marketing -> Content Creation`, explain required connections, and materialize only the proposals you explicitly accept.
+
+After loops are materialized, keep provider webhooks pointed at Hermes and rehearse routing locally:
+
+```bash
+npm run loopgraph -- hermes webhooks plan --project .
+npm run loopgraph -- hermes webhooks sync --project .
+npm run loopgraph -- hermes webhooks doctor --project .
+npm run loopgraph -- events test --project . \
+  --source google_ads* \
+  --fixture .loopgraph/generated/hermes/company_1/marketing/marketing_ads/fixtures/happy-path.json \
+  --expected-action route \
+  --expected-loop marketing_ads \
+  --require-synced-manifest
+```
+
+`events test` uses a synthetic or redacted normalized fixture. It does not send a real provider webhook or store provider secrets in Loopgraph. Provider webhook signing secrets stay in Hermes.
+
+See [Hermes quickstart](docs/HERMES-QUICKSTART.md) and the deeper [Hermes event brain implementation plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md).
+
+### Code-first loop demo
+
 ```bash
 git clone <repo>
 cd loopgraph
@@ -29,7 +72,7 @@ After a simulate run, open **Topology** (`/topology`) to see the loop on the com
 |------|---------|--------------|
 | **Simulate** (default) | `loopgraph simulate --fixture …` | Deterministic fixtures + heuristic assessment. **No API keys. No external writes.** |
 | **Validate** | `loopgraph validate …` | Schema and policy checks only. |
-| **Execute** (experimental) | `LOOPGRAPH_EXECUTE_ENABLED=true loopgraph execute --event …` | Optional OpenAI assessment. Live GitHub writes only after human approval when configured. |
+| **Execute** (experimental) | `LOOPGRAPH_EXECUTE_ENABLED=true loopgraph execute --event …` | Optional OpenAI assessment behind the Hermes live-execution gate: routing contract, live activation mode, connector readiness, fingerprint approval, and customer-facing separation are required. |
 
 For V1, treat **simulate + review + case resolve** as the supported code-first path.
 
@@ -97,6 +140,7 @@ CRON_SECRET=
 ## Docs
 
 - [Current build state](docs/CURRENT-STATE.md)
+- [Hermes quickstart](docs/HERMES-QUICKSTART.md)
 - [Dan walkthrough (CLI demo)](docs/DAN-WALKTHROUGH.md)
 - [Topology guide](docs/topology-guide.md)
 - [Next priorities](docs/NEXT-PRIORITIES.md)

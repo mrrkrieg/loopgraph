@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "golden-marketing-reference-flow/v1alpha1",
+  "description": "Reference Hermes-first Marketing flow: local project confirmation, Marketing department selection, five question bundles, Ads + Content Creation proposals, atomic materialization, design graph, and starter fixtures.",
+  "session": {
+    "sessionId": "session_golden_marketing",
+    "companyId": "company_golden_marketing",
+    "companyName": "Golden Marketing Co",
+    "createdByActor": "hermes"
+  },
+  "project": {
+    "displayName": "Golden Marketing App",
+    "description": "A local growth workspace for designing Hermes-routed marketing loops.",
+    "customerType": "B2B SaaS",
+    "primaryGoal": "Improve qualified acquisition and content throughput without unsafe automation.",
+    "northStarMetric": "Cost per qualified customer",
+    "sourceOfTruth": "HubSpot defines qualified leads/customers; Notion contains approved content briefs.",
+    "additionalTools": ["Google Ads", "HubSpot", "Notion", "Webflow", "Slack"],
+    "files": [
+      {
+        "path": "package.json",
+        "json": {
+          "name": "golden-marketing-app",
+          "dependencies": {
+            "next": "^15.0.0",
+            "react": "^19.0.0",
+            "@supabase/supabase-js": "^2.0.0",
+            "posthog-js": "^1.0.0"
+          },
+          "devDependencies": {
+            "typescript": "^5.0.0"
+          }
+        }
+      }
+    ]
+  },
+  "department": "marketing",
+  "bundles": [
+    {
+      "bundleId": "current_stack_sources",
+      "answers": {
+        "systems": ["Google Ads", "HubSpot", "Notion", "Webflow", "Slack"],
+        "source_of_truth": "HubSpot defines qualified leads and customers; Notion contains approved content briefs.",
+        "event_sources_subjects": "Hermes receives Google Ads campaign anomaly events keyed by campaign ID and Notion content brief approvals keyed by page ID.",
+        "safe_reads": ["campaign performance", "qualified lead status", "approved briefs", "brand guidelines"],
+        "manual_fallbacks": ["weekly ads CSV", "HubSpot qualified-customer export", "approved briefs Markdown folder"],
+        "existing_automations": ["Slack notifications for campaign review reminders"]
+      }
+    },
+    {
+      "bundleId": "biggest_recurring_problem",
+      "answers": {
+        "processes": ["paid ads review", "content draft creation"],
+        "trigger_or_cadence": "Campaign anomalies, weekly review cadence, and approved content briefs.",
+        "problem_signal": "Campaign spend rises while qualified customer conversion drops.",
+        "required_evidence": ["spend delta", "cost per qualified customer delta", "qualified conversion delta", "approved evidence refs", "reviewer"],
+        "weekly_volume": 12,
+        "current_owner": "Growth lead",
+        "current_steps": ["collect campaign metrics", "compare to qualified lead quality", "draft content from approved evidence", "route review packet"],
+        "pain_type_severity": "Manual context gathering and slow draft review are high severity.",
+        "baseline": "6 hours per week of review prep and 3 days average draft cycle time"
+      }
+    },
+    {
+      "bundleId": "automation_boundaries",
+      "answers": {
+        "desired_automation_mode": "monitor, recommend, and draft",
+        "candidate_outputs_actions": ["campaign recommendation", "experiment brief", "content draft", "review packet"],
+        "read_write_boundary": "Read data and write drafts only; no publishing or spend changes without approval.",
+        "customer_facing_status": true,
+        "forbidden_actions": ["no unapproved budget changes", "no unapproved publishing", "no unsupported claims", "no customer sends"],
+        "ignore_conditions": ["test campaigns", "already-resolved anomalies", "drafts without approved evidence"],
+        "ambiguity_policy": "request_human",
+        "fanout_policy": "independent_only"
+      }
+    },
+    {
+      "bundleId": "ideal_outcome_proof",
+      "answers": {
+        "primary_outcome_metric": "cost per qualified customer",
+        "leading_indicator": "qualified lead rate",
+        "guardrail_metric": "lead quality and brand safety must not decline",
+        "baseline_target": "Reduce review prep from 6 hours to 2 hours per week and draft cycle time from 3 days to 1 day.",
+        "verification_rules": ["recommendations cite source metrics", "draft claims cite approved evidence", "review packets include owner and approval threshold"],
+        "completion_signal": ["approved recommendation recorded", "draft accepted by reviewer"],
+        "failure_signal": ["review rejected", "required evidence missing after timeout", "unsupported claim detected"]
+      }
+    },
+    {
+      "bundleId": "ownership_rollout",
+      "answers": {
+        "loop_owner_role": "Growth lead",
+        "reviewer_roles": ["Marketing lead", "Finance reviewer", "Content lead"],
+        "escalation_conditions": ["spend change above threshold", "unsupported content claim", "low confidence", "missing required evidence"],
+        "initial_autonomy_level": "shadow",
+        "repeat_policy": "append_evidence",
+        "urgency_priority": "Campaign spend anomalies above threshold win over routine content work; independent approved content work can proceed separately.",
+        "pilot_scope": "two campaigns and one content channel",
+        "management_summary": "weekly learning summary"
+      }
+    }
+  ],
+  "expected": {
+    "proposalIds": ["proposal_marketing_ads", "proposal_marketing_content_creation"],
+    "loopSpecIds": ["marketing_ads", "marketing_content_creation"],
+    "graphEdges": [
+      ["company_brain", "department:marketing"],
+      ["department:marketing", "loop:marketing_ads"],
+      ["department:marketing", "loop:marketing_content_creation"]
+    ],
+    "starterFixtures": ["happy-path", "missing-context", "risk-escalation"]
+  }
+}

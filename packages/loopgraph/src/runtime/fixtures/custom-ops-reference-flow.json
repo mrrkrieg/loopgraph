@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "hermes-published-example-flow/v1alpha1",
+  "description": "Custom Hermes-first example: a recurring field-ops work item from a custom application webhook, routed through Hermes into a local operating loop.",
+  "session": {
+    "sessionId": "session_custom_ops",
+    "companyId": "company_custom_ops",
+    "companyName": "Custom Ops Co",
+    "createdByActor": "hermes"
+  },
+  "project": {
+    "displayName": "Custom Field Ops Workspace",
+    "description": "A local custom department workspace for rehearsing Hermes-routed field-maintenance coordination.",
+    "customerType": "Internal operations",
+    "primaryGoal": "Reduce recurring field-maintenance coordination delays without dispatching vendors automatically.",
+    "northStarMetric": "Blocked maintenance resolution time",
+    "sourceOfTruth": "The custom operations app is authoritative for maintenance request status.",
+    "additionalTools": ["Custom operations app", "Airtable asset registry", "Slack"],
+    "files": [
+      {
+        "path": "package.json",
+        "json": {
+          "name": "custom-field-ops-workspace",
+          "dependencies": {
+            "typescript": "^5.0.0"
+          }
+        }
+      }
+    ]
+  },
+  "department": "custom",
+  "bundles": [
+    {
+      "bundleId": "current_stack_sources",
+      "answers": {
+        "systems": ["Custom operations app", "Airtable asset registry", "Slack"],
+        "source_of_truth": "The custom operations app owns maintenance request status; Airtable owns asset metadata.",
+        "event_sources_subjects": "Hermes receives custom_app custom_work_item.blocked events keyed by maintenance request ID.",
+        "safe_reads": ["maintenance request summary", "asset ID", "owner", "priority"],
+        "manual_fallbacks": ["redacted maintenance request JSON export", "Airtable asset CSV"],
+        "existing_automations": ["Slack reminder when a request waits more than 48 hours"]
+      }
+    },
+    {
+      "bundleId": "biggest_recurring_problem",
+      "answers": {
+        "processes": ["blocked maintenance request coordination"],
+        "trigger_or_cadence": "A custom app event says a maintenance request is blocked or overdue.",
+        "problem_signal": "A maintenance request is blocked and missing owner, next action, or required evidence.",
+        "required_evidence": ["summary", "assetId", "priority", "owner"],
+        "weekly_volume": 10,
+        "current_owner": "Field operations lead",
+        "current_steps": ["read request", "find asset owner", "draft next action", "ask lead to approve vendor or schedule changes"],
+        "pain_type_severity": "Coordination delay is medium severity and creates hidden follow-up work.",
+        "baseline": "Five days average blocked request age"
+      }
+    },
+    {
+      "bundleId": "automation_boundaries",
+      "answers": {
+        "desired_automation_mode": "monitor, recommend, and draft",
+        "candidate_outputs_actions": ["next-action draft", "owner reminder", "review packet"],
+        "read_write_boundary": "Read custom app and asset exports; draft reminders only; no vendor dispatch, spend, cancellation, or schedule change without approval.",
+        "customer_facing_status": false,
+        "forbidden_actions": ["no vendor dispatch", "no spend approval", "no cancellation", "no schedule change without approval"],
+        "ignore_conditions": ["test requests", "already assigned requests", "requests with no asset ID"],
+        "ambiguity_policy": "request_human",
+        "fanout_policy": "none"
+      }
+    },
+    {
+      "bundleId": "ideal_outcome_proof",
+      "answers": {
+        "primary_outcome_metric": "blocked maintenance resolution time",
+        "leading_indicator": "owner assignment latency",
+        "guardrail_metric": "no unapproved vendor or spend action",
+        "baseline_target": "Reduce blocked request age from five days to two days.",
+        "verification_rules": ["draft cites request ID and asset ID", "owner is assigned", "next action is approval-safe"],
+        "completion_signal": ["owner confirms next action"],
+        "failure_signal": ["owner missing", "asset ID missing", "request still blocked after SLA"]
+      }
+    },
+    {
+      "bundleId": "ownership_rollout",
+      "answers": {
+        "loop_owner_role": "Field operations lead",
+        "reviewer_roles": ["Operations manager"],
+        "escalation_conditions": ["priority critical", "owner missing", "spend requested", "blocked after SLA"],
+        "initial_autonomy_level": "recommend",
+        "repeat_policy": "append_evidence",
+        "urgency_priority": "Critical maintenance beats routine reminders; otherwise keep one route per request.",
+        "pilot_scope": "one region and one maintenance request type",
+        "management_summary": "weekly blocked request age and owner-latency summary"
+      }
+    }
+  ],
+  "expected": {
+    "proposalIds": ["proposal_custom_operating_loop"],
+    "loopSpecIds": ["custom_operating_loop"],
+    "department": "custom",
+    "activationMode": "recommend",
+    "problemTypes": ["custom_recurring_work"],
+    "sourcePattern": "custom_app*",
+    "eventTypePattern": "custom_work_item.*"
+  }
+}

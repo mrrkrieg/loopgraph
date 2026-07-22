@@ -4,11 +4,19 @@ import React from "react";
 import Link from "next/link";
 import type { BrainGraphEdge, BrainGraphNode } from "./graph-types";
 
+export type BrainGraphActions = {
+  validateLoop?: (formData: FormData) => void | Promise<void>;
+  simulateFixture?: (formData: FormData) => void | Promise<void>;
+  simulateManualEvent?: (formData: FormData) => void | Promise<void>;
+};
+
 export function NodeInspector({
+  actions,
   node,
   edges,
   onOpenLocal
 }: {
+  actions?: BrainGraphActions;
   node?: BrainGraphNode;
   edges: BrainGraphEdge[];
   onOpenLocal: (nodeId: string) => void;
@@ -69,6 +77,8 @@ export function NodeInspector({
         </div>
       ) : null}
 
+      <LoopRunControls actions={actions} node={node} />
+
       <div className="mt-5 flex flex-wrap gap-2">
         {isLoopNode(node) ? (
           <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" onClick={() => onOpenLocal(node.id)} type="button">
@@ -85,12 +95,133 @@ export function NodeInspector({
   );
 }
 
+function LoopRunControls({
+  actions,
+  node
+}: {
+  actions?: BrainGraphActions;
+  node: BrainGraphNode;
+}) {
+  if (node.type !== "workflow_loop" || !node.loopId) {
+    return null;
+  }
+
+  const runtime = runtimeMetadata(node);
+  const problemTypes = stringList(runtime.routing?.problemTypes);
+  const requiredConnections = stringList(runtime.routing?.requiredConnections);
+  const activationMode = stringValue(runtime.routing?.activationMode) ?? "not set";
+  const routingReady = Boolean(runtime.routing?.ready);
+  const latestRun = latestRunMetadata(node);
+
+  return (
+    <div className="mt-5 rounded-md border border-line bg-white p-4">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Hermes local run controls</div>
+      <p className="mt-2 text-sm leading-6 text-ink/60">
+        Validate this registered loop, then run a generated synthetic Hermes event locally. Live provider webhooks should still terminate at Hermes first.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <StatusToken tone={routingReady ? "ready" : "blocked"}>
+          {routingReady ? "Routing ready" : "Routing missing"}
+        </StatusToken>
+        <StatusToken>{activationMode.replace(/_/g, " ")}</StatusToken>
+        {problemTypes.values.slice(0, 2).map((type) => <StatusToken key={type}>{type.replace(/_/g, " ")}</StatusToken>)}
+      </div>
+      {latestRun ? (
+        <Link
+          className="mt-3 block rounded-md border border-line bg-paper px-3 py-2 text-sm text-ink/70 hover:border-ink hover:text-ink"
+          href={`/loops/${node.loopId}/runs/${latestRun.id}`}
+        >
+          Latest run: <span className="font-semibold">{latestRun.status.replace(/_/g, " ")}</span>
+          <span className="ml-2 font-mono text-xs text-ink/45">{latestRun.id}</span>
+        </Link>
+      ) : null}
+      {requiredConnections.values.length > 0 ? (
+        <CompactList
+          title="Required connections"
+          items={requiredConnections.values.slice(0, 4)}
+          empty="No connections listed"
+        />
+      ) : null}
+      <div className="mt-4 space-y-2">
+        {actions?.validateLoop ? (
+          <form action={actions.validateLoop}>
+            <input name="loopId" type="hidden" value={node.loopId} />
+            <button className="w-full rounded-md border border-ink px-3 py-2 text-sm font-semibold text-ink" type="submit">
+              Validate loop
+            </button>
+          </form>
+        ) : null}
+        {runtime.inputFixtures.length > 0 && actions?.simulateFixture ? (
+          <div className="grid gap-2">
+            {runtime.inputFixtures.map((fixture) => (
+              <form action={actions.simulateFixture} key={fixture.id}>
+                <input name="loopId" type="hidden" value={node.loopId} />
+                <input name="fixtureId" type="hidden" value={fixture.id} />
+                <button className="w-full rounded-md bg-ink px-3 py-2 text-left text-sm font-semibold text-white" type="submit">
+                  Simulate {fixture.label}
+                </button>
+              </form>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-md border border-dashed border-line bg-paper px-3 py-2 text-sm text-ink/55">
+            No generated synthetic fixtures are available for this loop yet.
+          </div>
+        )}
+        {actions?.simulateManualEvent ? (
+          <details className="rounded-md border border-line bg-paper p-3">
+            <summary className="cursor-pointer text-sm font-semibold text-ink">
+              Simulate custom event JSON
+            </summary>
+            <form action={actions.simulateManualEvent} className="mt-3 space-y-3">
+              <input name="loopId" type="hidden" value={node.loopId} />
+              <label className="block">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Manual synthetic fixture</span>
+                <textarea
+                  className="mt-2 min-h-44 w-full rounded-md border border-line bg-white px-3 py-2 font-mono text-xs text-ink outline-none focus:border-ink"
+                  name="fixtureJson"
+                  defaultValue={manualFixtureTemplate(node)}
+                />
+              </label>
+              <p className="text-xs leading-5 text-ink/55">
+                Use redacted synthetic data only. The JSON must include eventId and simulatedAt; no live provider write will run from this control.
+              </p>
+              <button className="w-full rounded-md border border-ink px-3 py-2 text-sm font-semibold text-ink" type="submit">
+                Simulate custom event
+              </button>
+            </form>
+          </details>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function InspectorFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-line bg-white px-3 py-2">
       <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink/40">{label}</div>
       <div className="mt-1 text-sm font-medium text-ink">{value}</div>
     </div>
+  );
+}
+
+function StatusToken({
+  children,
+  tone = "neutral"
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "ready" | "blocked";
+}) {
+  const className = tone === "ready"
+    ? "border-green-200 bg-green-50 text-green-800"
+    : tone === "blocked"
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : "border-line bg-paper text-ink/65";
+  return (
+    <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${className}`}>
+      {children}
+    </span>
   );
 }
 
@@ -169,4 +300,112 @@ function stringList(value: unknown) {
     values,
     missing: values.length === 0 ? 1 : 0
   };
+}
+
+type InspectorRuntimeMetadata = {
+  inputFixtures: Array<{
+    id: string;
+    label: string;
+  }>;
+  routing?: {
+    ready?: boolean;
+    problemTypes?: unknown;
+    activationMode?: unknown;
+    requiredConnections?: unknown;
+  };
+};
+
+type InspectorLatestRunMetadata = {
+  id: string;
+  status: string;
+};
+
+function runtimeMetadata(node: BrainGraphNode): InspectorRuntimeMetadata {
+  const value = node.metadata?.runtime;
+  if (!isRecord(value)) {
+    return { inputFixtures: [] };
+  }
+  return {
+    inputFixtures: Array.isArray(value.inputFixtures)
+      ? value.inputFixtures.flatMap((fixture) => {
+          if (!isRecord(fixture) || typeof fixture.id !== "string") {
+            return [];
+          }
+          return [{
+            id: fixture.id,
+            label: typeof fixture.label === "string" && fixture.label.trim()
+              ? fixture.label
+              : fixture.id.replace(/[-_]/g, " ")
+          }];
+        })
+      : [],
+    routing: isRecord(value.routing)
+      ? {
+          ready: typeof value.routing.ready === "boolean" ? value.routing.ready : undefined,
+          problemTypes: value.routing.problemTypes,
+          activationMode: value.routing.activationMode,
+          requiredConnections: value.routing.requiredConnections
+        }
+      : undefined
+  };
+}
+
+function latestRunMetadata(node: BrainGraphNode): InspectorLatestRunMetadata | undefined {
+  const value = node.metadata?.latestRun;
+  if (!isRecord(value) || typeof value.id !== "string" || typeof value.status !== "string") {
+    return undefined;
+  }
+  return {
+    id: value.id,
+    status: value.status
+  };
+}
+
+function manualFixtureTemplate(node: BrainGraphNode): string {
+  const problemType = firstString(runtimeMetadata(node).routing?.problemTypes) ?? "custom_business_problem";
+  return JSON.stringify({
+    eventId: `manual_${safeId(node.loopId ?? node.id)}_001`,
+    simulatedAt: "2026-07-21T12:00:00.000Z",
+    synthetic: true,
+    scenario: "manual-custom-event",
+    trigger: {
+      sourceRoute: "hermes.manual",
+      eventType: `${problemType}.manual_test`,
+      subject: {
+        type: "work_item",
+        id: "manual_test_1"
+      }
+    },
+    expectedAssessment: {
+      decisionSummary: `Manual synthetic event for ${node.label}. Replace this with redacted local evidence.`,
+      assumptions: [{
+        id: "assumption_manual_fixture",
+        statement: "This is a synthetic local simulation fixture, not a live provider webhook.",
+        confidence: 1
+      }],
+      proposedActions: [],
+      evidence: [{
+        id: "evidence_manual_fixture",
+        sourceId: "manual.fixture",
+        sourceType: "fixture",
+        excerpt: "Synthetic redacted event payload.",
+        trusted: false
+      }],
+      policyInputs: [{ key: "confidence", value: 0.75, source: "manual-fixture" }],
+      verificationRequest: { required: false, checks: ["evidence"] },
+      escalationRequest: { required: false }
+    }
+  }, null, 2);
+}
+
+function firstString(value: unknown): string | undefined {
+  return Array.isArray(value) ? value.find((item): item is string => typeof item === "string" && item.length > 0) : undefined;
+}
+
+function safeId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

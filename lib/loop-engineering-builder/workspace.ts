@@ -1,6 +1,11 @@
 import { createSupabaseAdminClient } from "../db/supabase";
 import { createDefaultAnswers, generateQuestions, type AnswerMap } from "./question-engine";
-import { buildGraphFromRegisteredSpecs, buildLoopGraph, loopRecordFromRegisteredSpec } from "./graph";
+import {
+  buildGraphFromRegisteredSpecs,
+  buildLoopGraph,
+  createCatalogLoopRecords,
+  loopRecordFromRegisteredSpec
+} from "./graph";
 import { getDemoWorkspace } from "./demo-data";
 import { questionProgress } from "./demo-helpers";
 import {
@@ -48,6 +53,12 @@ import type {
 } from "./types";
 
 type SupabaseClient = NonNullable<ReturnType<typeof createSupabaseAdminClient>>;
+
+type SemanticTopologyWorkspaceOptions = {
+  includeCatalogLoops?: boolean;
+  brainLabel?: string;
+  hierarchyMode?: "management" | "hermes_brain";
+};
 
 type LoopRow = {
   id: string;
@@ -330,18 +341,36 @@ export async function getLoopGraph(loopId?: string): Promise<LoopGraph> {
   return workspace.graph;
 }
 
-export async function getSemanticTopology(loopId?: string): Promise<SemanticTopology> {
+export async function getSemanticTopology(
+  loopId?: string,
+  options: SemanticTopologyWorkspaceOptions = {}
+): Promise<SemanticTopology> {
   if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY !== "true") {
     const registeredSpecs = await getRegisteredLoopSpecs();
     if (registeredSpecs.length > 0) {
-      const selectedSpec =
-        registeredSpecs.find((item) => item.spec.metadata.id === loopId) ?? registeredSpecs[0];
+      const registeredLoopSpecs = registeredSpecs.map((item) => withSourcePathLabel(item.spec, item.sourcePath));
+      const catalogLoopSpecs = options.includeCatalogLoops
+        ? createCatalogLoopRecords("local_workspace").flatMap((loop) => coreSpecFromLoopRecord(loop))
+        : [];
+      const loopSpecs = mergeCoreLoopSpecs([...registeredLoopSpecs, ...catalogLoopSpecs]);
+      const selectedLoopId = selectTopologyLoopId(
+        loopSpecs,
+        loopId,
+        registeredSpecs[0]?.spec.metadata.id
+      );
+      const traces = await loadPersistedTopologyTraces();
+
       return buildSemanticTopology({
-        loopSpecs: registeredSpecs.map((item) => withSourcePathLabel(item.spec, item.sourcePath)),
+        loopSpecs,
+        traces,
         options: {
           companyName: "Local Loopgraph workspace",
-          sourceLabel: "Registered LoopSpecs",
-          selectedLoopId: selectedSpec.spec.metadata.id,
+          brainLabel: options.brainLabel,
+          hierarchyMode: options.hierarchyMode,
+          sourceLabel: options.includeCatalogLoops
+            ? "Registered LoopSpecs + demo catalog"
+            : "Registered LoopSpecs",
+          selectedLoopId,
           generatedAt: new Date(0).toISOString()
         }
       });
@@ -350,11 +379,16 @@ export async function getSemanticTopology(loopId?: string): Promise<SemanticTopo
 
   const workspace = await getWorkspace(loopId);
   const liveLoops = workspace.loops.filter((loop) => loop.source !== "demo_catalog");
-  const loopsForTopology = liveLoops.length > 0 ? liveLoops : [workspace.loop];
+  const loopsForTopology = options.includeCatalogLoops
+    ? mergeLoopRecordsById([
+        ...workspace.loops,
+        ...createCatalogLoopRecords(workspace.organization.id)
+      ])
+    : liveLoops.length > 0
+      ? liveLoops
+      : [workspace.loop];
   const loopSpecs = loopsForTopology.flatMap((loop) => coreSpecFromLoopRecord(loop));
-  const selectedLoopId = loopSpecs.some((spec) => spec.metadata.id === workspace.loop.id)
-    ? workspace.loop.id
-    : loopSpecs[0]?.metadata.id;
+  const selectedLoopId = selectTopologyLoopId(loopSpecs, loopId, workspace.loop.id);
 
   return buildSemanticTopology({
     loopSpecs,
@@ -363,6 +397,8 @@ export async function getSemanticTopology(loopId?: string): Promise<SemanticTopo
     improvements: improvementInputsFromWorkspace(workspace.improvements),
     options: {
       companyName: workspace.organization.name,
+      brainLabel: options.brainLabel,
+      hierarchyMode: options.hierarchyMode,
       sourceLabel: workspace.graph.sourceLabel ?? "Workspace",
       selectedLoopId,
       generatedAt: new Date(0).toISOString()
@@ -795,6 +831,41 @@ function mergeImprovements(databaseItems: ImprovementItem[], traceItems: Improve
   return [...byId.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function mergeLoopRecordsById(loops: LoopRecord[]) {
+  const byId = new Map<string, LoopRecord>();
+  for (const loop of loops) {
+    if (!byId.has(loop.id) || byId.get(loop.id)?.source === "demo_catalog") {
+      byId.set(loop.id, loop);
+    }
+  }
+  return [...byId.values()];
+}
+
+function mergeCoreLoopSpecs(specs: CoreLoopSpec[]) {
+  const byId = new Map<string, CoreLoopSpec>();
+  for (const spec of specs) {
+    if (!byId.has(spec.metadata.id)) {
+      byId.set(spec.metadata.id, spec);
+    }
+  }
+  return [...byId.values()];
+}
+
+function selectTopologyLoopId(
+  specs: CoreLoopSpec[],
+  requestedLoopId?: string,
+  fallbackLoopId?: string
+) {
+  const ids = new Set(specs.map((spec) => spec.metadata.id));
+  if (requestedLoopId && ids.has(requestedLoopId)) {
+    return requestedLoopId;
+  }
+  if (fallbackLoopId && ids.has(fallbackLoopId)) {
+    return fallbackLoopId;
+  }
+  return specs[0]?.metadata.id;
+}
+
 async function managementReviewForWorkspace(loops: LoopRecord[], graph: LoopGraph, _improvements: ImprovementItem[]) {
   const rollup = await loadLatestManagementRollup();
   if (rollup) {
@@ -811,6 +882,13 @@ async function managementReviewForWorkspace(loops: LoopRecord[], graph: LoopGrap
   return summarizeManagement(loops, graph);
 }
 
+async function loadPersistedTopologyTraces(limit = 50): Promise<LoopRunTrace[]> {
+  const storage = getStorageAdapter();
+  const runSummaries = await storage.listRuns();
+  const traces = await Promise.all(runSummaries.slice(0, limit).map((run) => storage.getRun(run.id)));
+  return traces.filter((trace): trace is LoopRunTrace => trace !== null);
+}
+
 function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSpec {
   return {
     ...spec,
@@ -818,6 +896,7 @@ function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSp
       ...spec.metadata,
       labels: {
         ...(spec.metadata.labels ?? {}),
+        source: "local_spec",
         sourcePath
       }
     }
@@ -826,14 +905,23 @@ function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSp
 
 function coreSpecFromLoopRecord(loop: LoopRecord): CoreLoopSpec[] {
   try {
-    return [
-      createSpecFromTemplate(loop.templateId, {
-        id: loop.id,
-        name: loop.name,
-        goal: loop.goal,
-        ownerRole: loop.owner
-      })
-    ];
+    const spec = createSpecFromTemplate(loop.templateId, {
+      id: loop.id,
+      name: loop.name,
+      goal: loop.goal,
+      ownerRole: loop.owner
+    });
+    return [{
+      ...spec,
+      metadata: {
+        ...spec.metadata,
+        labels: {
+          ...(spec.metadata.labels ?? {}),
+          source: loop.source ?? "workspace",
+          runtimeLevel: loop.runtimeLevel ?? spec.metadata.labels?.runtimeLevel ?? "spec_stub"
+        }
+      }
+    }];
   } catch {
     return [];
   }

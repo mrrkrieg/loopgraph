@@ -176,6 +176,18 @@ function matchesClause(clause: Record<string, unknown>, output: AgentRunOutput):
       if (days > max) return false;
       continue;
     }
+    if (key.endsWith(" ==")) {
+      const policyInputKey = key.slice(0, -" ==".length).trim();
+      if (String(output.policyInputs.find((p) => p.key === policyInputKey)?.value ?? "") !== String(value)) return false;
+      continue;
+    }
+    if (key.endsWith(" in")) {
+      const policyInputKey = key.slice(0, -" in".length).trim();
+      const allowedValues = Array.isArray(value) ? value.map(String) : [String(value)];
+      const actualValue = String(output.policyInputs.find((p) => p.key === policyInputKey)?.value ?? "");
+      if (!allowedValues.includes(actualValue)) return false;
+      continue;
+    }
   }
   if (output.escalationRequest?.required && Object.keys(clause).length === 0) return true;
   return Object.keys(clause).length > 0;

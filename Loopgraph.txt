@@ -611,7 +611,7 @@ The runtime should be provider-agnostic.
 }
 Support:
 OpenAI-compatible APIs
-Anthropic-compatible APIs
+Hermes-mediated model routing
 local models
 custom HTTP model endpoint
 dry-run/test model
