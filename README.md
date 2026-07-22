@@ -136,31 +136,29 @@ For the full walkthrough, see the [Hermes Quickstart](docs/HERMES-QUICKSTART.md)
 
 ## Department examples
 
-The same Hermes-brain pattern works across the company. Marketing is shown first; expand any other department to see its stack, proposed graph, routing decisions, and safety boundary.
+The same Hermes-brain pattern works across the company. Product is shown first; expand any other department to see its stack, proposed graph, routing decisions, and safety boundary.
 
-### Marketing — Ads + Content Creation
+### Product — Feedback Clustering + Release Learning
 
-Suppose Marketing uses Google Ads, product analytics, HubSpot, Notion, Webflow, and Slack. The team says campaign review is slow, content preparation is inconsistent, publishing and budget changes require approval, and qualified pipeline matters more than surface-level engagement.
+Suppose Product uses Productboard, Linear, Intercom, PostHog, Notion, and Slack. The team says feedback is fragmented, roadmap discussions start from anecdotes, release outcomes are reviewed late, and product direction must remain with the product lead.
 
 Loopgraph can design two independent loops:
 
 ```text
 Hermes Brain
-└── Marketing
-    ├── Ads
-    └── Content Creation
+└── Product
+    ├── Feedback Clustering
+    └── Release Learning
 ```
-
-The important part is not the diagram—it is the routing contract behind it:
 
 | Incoming problem | Hermes decision | Loopgraph response |
 |---|---|---|
-| Campaign spend or efficiency anomaly with the required campaign evidence | Route to **Ads** | Validate the event contract, open/update the business problem, and start in the configured rollout mode |
-| Approved content brief with trusted source material | Route to **Content Creation** | Validate the content route and prepare the governed content loop |
-| Landing-page conversion drop with no campaign mapping | Request context or human choice | Abstain instead of guessing between Ads and Content Creation |
-| Duplicate provider delivery | Repeats the same route decision | Suppress duplicate work through durable event/problem identity |
+| New feedback crosses a repeated-theme threshold with linked customer evidence | Route to **Feedback Clustering** | Group the evidence, preserve source links, and prepare a product-problem brief |
+| A release reaches its measurement window with adoption and outcome data | Route to **Release Learning** | Compare expected and observed outcomes and prepare a traceable learning review |
+| A single strategic customer asks for an immediate roadmap change | Request product-owner review | Do not treat one request as a validated cluster or change roadmap priority automatically |
+| The same feedback item arrives from a replayed sync | Repeat the same route decision | Attach no duplicate evidence and avoid opening a second problem |
 
-The committed golden flow covers positive Ads and Content events, duplicates, no-match events, and ambiguous events that require human/context review.
+Loopgraph may draft evidence and tickets, but roadmap, scope, and customer-commitment changes require product-owner approval.
 
 <details>
 <summary><strong>Sales — Lead Qualification + Follow-Up Latency</strong></summary>
@@ -188,27 +186,29 @@ Customer-facing sends, pricing exceptions, negotiation, and commitments stay hum
 </details>
 
 <details>
-<summary><strong>Product — Feedback Clustering + Release Learning</strong></summary>
+<summary><strong>Marketing — Ads + Content Creation</strong></summary>
 
-Suppose Product uses Productboard, Linear, Intercom, PostHog, Notion, and Slack. The team says feedback is fragmented, roadmap discussions start from anecdotes, release outcomes are reviewed late, and product direction must remain with the product lead.
+Suppose Marketing uses Google Ads, product analytics, HubSpot, Notion, Webflow, and Slack. The team says campaign review is slow, content preparation is inconsistent, publishing and budget changes require approval, and qualified pipeline matters more than surface-level engagement.
 
 Loopgraph can design two independent loops:
 
 ```text
 Hermes Brain
-└── Product
-    ├── Feedback Clustering
-    └── Release Learning
+└── Marketing
+    ├── Ads
+    └── Content Creation
 ```
+
+The important part is not the diagram—it is the routing contract behind it:
 
 | Incoming problem | Hermes decision | Loopgraph response |
 |---|---|---|
-| New feedback crosses a repeated-theme threshold with linked customer evidence | Route to **Feedback Clustering** | Group the evidence, preserve source links, and prepare a product-problem brief |
-| A release reaches its measurement window with adoption and outcome data | Route to **Release Learning** | Compare expected and observed outcomes and prepare a traceable learning review |
-| A single strategic customer asks for an immediate roadmap change | Request product-owner review | Do not treat one request as a validated cluster or change roadmap priority automatically |
-| The same feedback item arrives from a replayed sync | Repeat the same route decision | Attach no duplicate evidence and avoid opening a second problem |
+| Campaign spend or efficiency anomaly with the required campaign evidence | Route to **Ads** | Validate the event contract, open/update the business problem, and start in the configured rollout mode |
+| Approved content brief with trusted source material | Route to **Content Creation** | Validate the content route and prepare the governed content loop |
+| Landing-page conversion drop with no campaign mapping | Request context or human choice | Abstain instead of guessing between Ads and Content Creation |
+| Duplicate provider delivery | Repeats the same route decision | Suppress duplicate work through durable event/problem identity |
 
-Loopgraph may draft evidence and tickets, but roadmap, scope, and customer-commitment changes require product-owner approval.
+The committed golden flow covers positive Ads and Content events, duplicates, no-match events, and ambiguous events that require human/context review.
 
 </details>
 
