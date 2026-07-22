@@ -15,6 +15,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run audit:prod
       - run: npm run build:package
       - run: npm run test -w loopgraph
       - run: node --input-type=module -e "import { validateLoopSpec } from './packages/loopgraph/dist/core/index.js'; import { runLoop } from './packages/loopgraph/dist/runtime/index.js'; console.log('package-smoke', typeof validateLoopSpec, typeof runLoop)"

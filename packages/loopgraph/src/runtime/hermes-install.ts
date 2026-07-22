@@ -145,6 +145,48 @@ export type HermesDoctorOptions = {
   hermesVersionCheck?: () => Promise<string | null>;
 };
 
+export type HermesSetupOptions = HermesInstallOptions & {
+  hermesVersionCheck?: () => Promise<string | null>;
+};
+
+export type HermesSetupResult = {
+  ok: boolean;
+  localReady: boolean;
+  hermesReady: boolean;
+  projectRoot: string;
+  install: HermesInstallResult;
+  doctor: HermesDoctorResult;
+  hermesConfig: {
+    generatedSnippetPath: string;
+    targetConfigPath: "~/.hermes/config.yaml";
+    skillsDir: string;
+  };
+  commandUsage: {
+    fromClone: {
+      setup: string;
+      doctor: string;
+      studio: string;
+      webhooksPlan: string;
+      webhooksSync: string;
+      webhooksDoctor: string;
+      eventTest: string;
+    };
+    fromInstalledPackage: {
+      setup: string;
+      doctor: string;
+      studio: string;
+      webhooksPlan: string;
+      webhooksSync: string;
+      webhooksDoctor: string;
+      eventTest: string;
+    };
+    firstHermesPrompt: string;
+  };
+  nextSteps: string[];
+  safety: string[];
+  warnings: string[];
+};
+
 type HermesInstallMetadata = {
   schemaVersion: typeof HERMES_LOOPGRAPH_INTEGRATION_VERSION;
   scope: HermesInstallScope;
@@ -365,7 +407,7 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
   const warnings: string[] = [];
 
   if (!hermesVersion) warnings.push("Hermes CLI was not found on PATH; install Hermes before using the generated config.");
-  if (!installed) warnings.push("Project-local Hermes integration artifacts are incomplete; run `loopgraph hermes install --project <root>`.");
+  if (!installed) warnings.push("Project-local Hermes integration artifacts are incomplete; run `loopgraph hermes setup --project <root>`.");
   if (installStateExists && !compatibility.ok) {
     warnings.push(`Hermes integration metadata is incompatible; run \`${compatibility.upgradeCommand}\` to refresh the project-local skills and MCP contract.`);
   }
@@ -401,6 +443,82 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
   return result;
 }
 
+export async function setupHermesIntegration(options: HermesSetupOptions = {}): Promise<HermesSetupResult> {
+  const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
+  const install = await installHermesIntegration({
+    projectRoot,
+    scope: options.scope,
+    cliEntryPath: options.cliEntryPath,
+    nodeCommand: options.nodeCommand,
+    now: options.now
+  });
+  const doctor = await doctorHermesIntegration({
+    projectRoot,
+    hermesVersionCheck: options.hermesVersionCheck
+  });
+  const localReady = doctor.ok;
+  const hermesReady = localReady && doctor.hermesAvailable;
+  const commandUsage = {
+    fromClone: {
+      setup: "npm run loopgraph -- hermes setup --project .",
+      doctor: "npm run loopgraph -- hermes doctor --project .",
+      studio: "npm run loopgraph -- studio --project . --start",
+      webhooksPlan: "npm run loopgraph -- hermes webhooks plan --project .",
+      webhooksSync: "npm run loopgraph -- hermes webhooks sync --project .",
+      webhooksDoctor: "npm run loopgraph -- hermes webhooks doctor --project .",
+      eventTest: "npm run loopgraph -- events test --project . --fixture <event.json> --require-synced-manifest"
+    },
+    fromInstalledPackage: {
+      setup: "loopgraph hermes setup --project .",
+      doctor: "loopgraph hermes doctor --project .",
+      studio: "loopgraph studio --project . --start",
+      webhooksPlan: "loopgraph hermes webhooks plan --project .",
+      webhooksSync: "loopgraph hermes webhooks sync --project .",
+      webhooksDoctor: "loopgraph hermes webhooks doctor --project .",
+      eventTest: "loopgraph events test --project . --fixture <event.json> --require-synced-manifest"
+    },
+    firstHermesPrompt: install.firstPrompt
+  };
+  const nextSteps = [
+    "Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.",
+    "Make sure Hermes can load the generated Loopgraph skills directory.",
+    `Open Hermes and run: ${install.firstPrompt}`,
+    "After accepting loops, plan and sync Hermes webhook route metadata from Loopgraph.",
+    "Before connecting live provider webhooks, test with generated synthetic or redacted EventEnvelope fixtures."
+  ];
+
+  if (!doctor.hermesAvailable) {
+    nextSteps.unshift("Install Hermes Agent, then confirm `hermes --version` works before starting the first Loopgraph prompt.");
+  }
+  if (!localReady) {
+    nextSteps.unshift("Fix the doctor warnings below, then rerun the setup command.");
+  }
+
+  return {
+    ok: localReady,
+    localReady,
+    hermesReady,
+    projectRoot,
+    install,
+    doctor,
+    hermesConfig: {
+      generatedSnippetPath: install.mcpConfigPath,
+      targetConfigPath: "~/.hermes/config.yaml",
+      skillsDir: install.skillsDir
+    },
+    commandUsage,
+    nextSteps,
+    safety: [
+      "The setup command writes only project-local files under .loopgraph/.",
+      "The generated Hermes MCP config contains command paths, tool names, and skill directories only; it must not contain provider credentials.",
+      "Provider webhooks should terminate at Hermes. Loopgraph receives normalized events through the Hermes event-router skill.",
+      "Webhook signing secrets, OAuth tokens, API keys, and provider payloads stay in Hermes or an approved credential store.",
+      "Newly materialized loops stay in shadow/simulation mode until a human explicitly promotes them and required connection checks pass."
+    ],
+    warnings: doctor.warnings
+  };
+}
+
 function buildHermesMcpConfig(input: {
   command: string;
   args: string[];
@@ -413,11 +531,11 @@ function buildHermesMcpConfig(input: {
         args: input.args,
         enabled: true,
         supports_parallel_tool_calls: false,
-          tools: {
-            include: [...HERMES_LOOPGRAPH_MCP_TOOL_NAMES],
-            prompts: false,
-            resources: true
-          }
+        tools: {
+          include: [...HERMES_LOOPGRAPH_MCP_TOOL_NAMES],
+          prompts: false,
+          resources: true
+        }
       }
     },
     skills: {
@@ -573,7 +691,7 @@ function checkHermesCompatibility(
 
   return {
     ok: installSchema.ok && protocols.every((item) => item.ok) && skills.every((item) => item.ok),
-    upgradeCommand: `loopgraph hermes install --project ${JSON.stringify(projectRoot)}`,
+    upgradeCommand: `loopgraph hermes setup --project ${JSON.stringify(projectRoot)}`,
     installSchema,
     protocols,
     skills

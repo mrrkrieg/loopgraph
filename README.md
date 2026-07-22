@@ -79,21 +79,28 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 ### Requirements
 
 - Node.js 22+ and npm
-- A local [Hermes Agent](https://hermes-agent.nousresearch.com/) installation for the company-brain flow
+- A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) installation for the company-brain flow
 
-### 1. Install Loopgraph and bind the local project
+### 1. Clone Loopgraph and run the guided Hermes setup
 
 ```bash
 git clone https://github.com/mrrkrieg/loopgraph.git
 cd loopgraph
-npm install
-
-npm run loopgraph -- workspace init --project .
-npm run loopgraph -- hermes install --project .
-npm run loopgraph -- hermes doctor --project .
+npm ci
+npm run loopgraph -- hermes setup --project .
 ```
 
-The Hermes installer creates project-local skills and MCP configuration under `.loopgraph/hermes/`. It does **not** copy provider credentials into Loopgraph.
+Use `npm run loopgraph --` from a repository clone. The same commands work as `loopgraph ...` once you are using a published package that includes the Hermes commands.
+
+The setup command initializes the local workspace, writes the project-local Hermes skill/MCP files, runs doctor checks, and prints the exact next actions.
+
+```text
+.loopgraph/hermes/mcp.loopgraph.yaml
+.loopgraph/hermes/skills/
+~/.hermes/config.yaml
+```
+
+Merge the generated MCP snippet into your Hermes config and make sure Hermes can load the generated skills directory. The setup output shows both paths. Loopgraph does **not** copy provider credentials, webhook secrets, or OAuth tokens into `.loopgraph/`.
 
 ### 2. Ask Hermes to design the first department
 
@@ -133,6 +140,16 @@ npm run loopgraph -- events test --project . \
 ```
 
 For the full walkthrough, see the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
+
+### 5. Check before live credentials
+
+Before connecting live provider credentials or production webhook routes, run:
+
+```bash
+npm run audit:prod
+```
+
+Treat production audit findings as blockers for live credentials. You can still use local discovery, generated designs, redacted fixtures, and simulation while remediation is in progress because those flows do not store provider secrets or perform live external writes.
 
 ## Department examples
 
