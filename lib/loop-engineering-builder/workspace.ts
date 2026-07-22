@@ -56,6 +56,8 @@ type SupabaseClient = NonNullable<ReturnType<typeof createSupabaseAdminClient>>;
 
 type SemanticTopologyWorkspaceOptions = {
   includeCatalogLoops?: boolean;
+  brainLabel?: string;
+  hierarchyMode?: "management" | "hermes_brain";
 };
 
 type LoopRow = {
@@ -356,11 +358,15 @@ export async function getSemanticTopology(
         loopId,
         registeredSpecs[0]?.spec.metadata.id
       );
+      const traces = await loadPersistedTopologyTraces();
 
       return buildSemanticTopology({
         loopSpecs,
+        traces,
         options: {
           companyName: "Local Loopgraph workspace",
+          brainLabel: options.brainLabel,
+          hierarchyMode: options.hierarchyMode,
           sourceLabel: options.includeCatalogLoops
             ? "Registered LoopSpecs + demo catalog"
             : "Registered LoopSpecs",
@@ -391,6 +397,8 @@ export async function getSemanticTopology(
     improvements: improvementInputsFromWorkspace(workspace.improvements),
     options: {
       companyName: workspace.organization.name,
+      brainLabel: options.brainLabel,
+      hierarchyMode: options.hierarchyMode,
       sourceLabel: workspace.graph.sourceLabel ?? "Workspace",
       selectedLoopId,
       generatedAt: new Date(0).toISOString()
@@ -874,6 +882,13 @@ async function managementReviewForWorkspace(loops: LoopRecord[], graph: LoopGrap
   return summarizeManagement(loops, graph);
 }
 
+async function loadPersistedTopologyTraces(limit = 50): Promise<LoopRunTrace[]> {
+  const storage = getStorageAdapter();
+  const runSummaries = await storage.listRuns();
+  const traces = await Promise.all(runSummaries.slice(0, limit).map((run) => storage.getRun(run.id)));
+  return traces.filter((trace): trace is LoopRunTrace => trace !== null);
+}
+
 function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSpec {
   return {
     ...spec,
@@ -881,6 +896,7 @@ function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSp
       ...spec.metadata,
       labels: {
         ...(spec.metadata.labels ?? {}),
+        source: "local_spec",
         sourcePath
       }
     }
@@ -889,14 +905,23 @@ function withSourcePathLabel(spec: CoreLoopSpec, sourcePath: string): CoreLoopSp
 
 function coreSpecFromLoopRecord(loop: LoopRecord): CoreLoopSpec[] {
   try {
-    return [
-      createSpecFromTemplate(loop.templateId, {
-        id: loop.id,
-        name: loop.name,
-        goal: loop.goal,
-        ownerRole: loop.owner
-      })
-    ];
+    const spec = createSpecFromTemplate(loop.templateId, {
+      id: loop.id,
+      name: loop.name,
+      goal: loop.goal,
+      ownerRole: loop.owner
+    });
+    return [{
+      ...spec,
+      metadata: {
+        ...spec.metadata,
+        labels: {
+          ...(spec.metadata.labels ?? {}),
+          source: loop.source ?? "workspace",
+          runtimeLevel: loop.runtimeLevel ?? spec.metadata.labels?.runtimeLevel ?? "spec_stub"
+        }
+      }
+    }];
   } catch {
     return [];
   }

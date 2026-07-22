@@ -1,14 +1,15 @@
 import Link from "next/link";
+import React from "react";
 import { discoverySteps } from "@/app/discovery/view-data";
 
-export function DiscoveryStepNav({ activeHref }: { activeHref: string }) {
+export function DiscoveryStepNav({ activeHref, sessionId }: { activeHref: string; sessionId?: string }) {
   return (
     <div className="mb-6 overflow-x-auto border-b border-line pb-3">
       <nav className="flex min-w-max gap-2">
         {discoverySteps.map((step, index) => (
           <Link
             key={step.href}
-            href={step.href}
+            href={sessionId ? `${step.href}?sessionId=${encodeURIComponent(sessionId)}` : step.href}
             className={`rounded-md border px-3 py-2 text-xs font-semibold ${
               activeHref === step.href
                 ? "border-ink bg-ink text-white"
@@ -22,4 +23,3 @@ export function DiscoveryStepNav({ activeHref }: { activeHref: string }) {
     </div>
   );
 }
-

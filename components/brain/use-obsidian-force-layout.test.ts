@@ -59,6 +59,36 @@ describe("obsidian force layout", () => {
 
     expect(overlaps).toBe(0);
   });
+
+  it("uses a stable layered hierarchy for direct Hermes Brain design graphs", () => {
+    const nodes = [
+      brainNode({ id: "company:root", type: "company_brain", label: "Hermes Brain", radius: 54 }),
+      brainNode({ id: "loop:department:marketing", type: "department_loop", label: "Marketing", radius: 38, parentId: "company:root" }),
+      brainNode({ id: "loop:marketing_ads", type: "workflow_loop", label: "Ads", radius: 32, parentId: "loop:department:marketing" }),
+      brainNode({ id: "loop:marketing_content_creation", type: "workflow_loop", label: "Content Creation", radius: 32, parentId: "loop:department:marketing" })
+    ];
+    const edges = [
+      brainEdge({ source: "company:root", target: "loop:department:marketing", type: "brain_routes_to" }),
+      brainEdge({ source: "loop:department:marketing", target: "loop:marketing_ads", type: "department_contains_loop" }),
+      brainEdge({ source: "loop:department:marketing", target: "loop:marketing_content_creation", type: "department_contains_loop" })
+    ];
+    const firstLayout = createObsidianLayout({ nodes, edges, mode: "global" });
+    const secondLayout = createObsidianLayout({ nodes, edges, mode: "global" });
+    const byId = new Map(firstLayout.map((node) => [node.id, node]));
+    const brain = byId.get("company:root");
+    const marketing = byId.get("loop:department:marketing");
+    const ads = byId.get("loop:marketing_ads");
+    const content = byId.get("loop:marketing_content_creation");
+
+    expect(secondLayout.map((node) => [node.id, node.x, node.y])).toEqual(
+      firstLayout.map((node) => [node.id, node.x, node.y])
+    );
+    expect(brain?.x).toBeLessThan(marketing?.x ?? 0);
+    expect(marketing?.x).toBeLessThan(ads?.x ?? 0);
+    expect(marketing?.x).toBeLessThan(content?.x ?? 0);
+    expect(ads?.x).toBeCloseTo(content?.x ?? 0, 1);
+    expect(countOverlaps(firstLayout)).toBe(0);
+  });
 });
 
 function countOverlaps(nodes: Array<BrainGraphNode & { x: number; y: number }>) {

@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "hermes-published-example-flow/v1alpha1",
+  "description": "Sensitive Hermes-first Legal / Compliance example: evidence-review loop that stays shadow-only, requires expert approval, and blocks legal decisions, risk acceptance, contract changes, access decisions, and external sends.",
+  "session": {
+    "sessionId": "session_sensitive_legal",
+    "companyId": "company_sensitive_legal",
+    "companyName": "Sensitive Legal Co",
+    "createdByActor": "hermes"
+  },
+  "project": {
+    "displayName": "Sensitive Legal Workspace",
+    "description": "A local compliance workspace for rehearsing Hermes-routed questionnaire and evidence-review loops.",
+    "customerType": "B2B SaaS",
+    "primaryGoal": "Reduce questionnaire and evidence-review cycle time without automating legal judgment.",
+    "northStarMetric": "Expert-reviewed response cycle time",
+    "sourceOfTruth": "The compliance evidence register is authoritative; policy pages and contract summaries are approved inputs only after redaction.",
+    "additionalTools": ["Vanta", "Google Drive policy folder", "Contract repository", "Slack"],
+    "files": [
+      {
+        "path": "package.json",
+        "json": {
+          "name": "sensitive-legal-workspace",
+          "dependencies": {
+            "typescript": "^5.0.0"
+          }
+        }
+      }
+    ]
+  },
+  "department": "legal_compliance",
+  "bundles": [
+    {
+      "bundleId": "current_stack_sources",
+      "answers": {
+        "systems": ["Vanta", "Google Drive policy folder", "Contract repository", "Slack"],
+        "source_of_truth": "The compliance evidence register defines approved control evidence; legal counsel owns interpretations.",
+        "event_sources_subjects": "Hermes receives Vanta questionnaire.requested events keyed by compliance request ID.",
+        "safe_reads": ["approved policy excerpts", "approved control evidence links", "redacted contract summaries"],
+        "manual_fallbacks": ["redacted compliance evidence bundle", "approved policy export"],
+        "existing_automations": ["Slack reminders for questionnaire owners"]
+      }
+    },
+    {
+      "bundleId": "biggest_recurring_problem",
+      "answers": {
+        "processes": ["security questionnaire response", "policy exception evidence review"],
+        "trigger_or_cadence": "A questionnaire request or policy exception review arrives through Hermes.",
+        "problem_signal": "A compliance questionnaire asks for evidence or policy language that must be answered from approved sources.",
+        "required_evidence": ["approvedSourceRefs", "expertReviewer", "redactionConfirmed"],
+        "weekly_volume": 6,
+        "current_owner": "Compliance owner",
+        "current_steps": ["collect approved sources", "redact sensitive context", "draft evidence packet", "send to legal/compliance reviewer"],
+        "pain_type_severity": "Manual evidence gathering is slow, but wrong legal interpretation or external send would be critical risk.",
+        "baseline": "Two business days average response preparation time"
+      }
+    },
+    {
+      "bundleId": "automation_boundaries",
+      "answers": {
+        "desired_automation_mode": "monitor and draft evidence packets only",
+        "candidate_outputs_actions": ["evidence packet", "draft questionnaire answer", "review packet"],
+        "read_write_boundary": "Read approved evidence and draft packets only; no external send, legal interpretation, risk acceptance, exception approval, access approval, or contract change.",
+        "customer_facing_status": true,
+        "forbidden_actions": ["no legal advice", "no risk acceptance", "no contract changes", "no external send", "no access approval"],
+        "ignore_conditions": ["requests without approved source references", "test questionnaires", "already answered requests"],
+        "ambiguity_policy": "request_human",
+        "fanout_policy": "none"
+      }
+    },
+    {
+      "bundleId": "ideal_outcome_proof",
+      "answers": {
+        "primary_outcome_metric": "expert-reviewed response cycle time",
+        "leading_indicator": "approved evidence packet completeness",
+        "guardrail_metric": "zero unapproved external answers or legal interpretations",
+        "baseline_target": "Reduce preparation time from two business days to one day while preserving expert review.",
+        "verification_rules": ["all answers cite approvedSourceRefs", "redactionConfirmed must be true", "expertReviewer must be assigned"],
+        "completion_signal": ["expert reviewer approves packet"],
+        "failure_signal": ["approved source missing", "protected data found", "reviewer missing"]
+      }
+    },
+    {
+      "bundleId": "ownership_rollout",
+      "answers": {
+        "loop_owner_role": "Compliance owner",
+        "reviewer_roles": ["Legal counsel", "Compliance reviewer", "Security owner"],
+        "escalation_conditions": ["missing approved evidence", "external send requested", "risk acceptance implied", "protected data appears"],
+        "initial_autonomy_level": "execute_with_approval",
+        "repeat_policy": "cooldown_ignore",
+        "urgency_priority": "Regulatory or customer deadline requests are urgent but never bypass expert review.",
+        "pilot_scope": "two recurring questionnaire types with redacted evidence bundles",
+        "management_summary": "weekly count of blocked requests, review cycle time, and missing-evidence reasons"
+      }
+    }
+  ],
+  "expected": {
+    "proposalIds": ["proposal_legal_compliance_evidence_review"],
+    "loopSpecIds": ["legal_compliance_evidence_review"],
+    "department": "legal_compliance",
+    "activationMode": "shadow",
+    "problemTypes": ["legal_compliance_review_required"],
+    "sourcePattern": "vanta*",
+    "eventTypePattern": "questionnaire.*",
+    "requiredApprovalActions": ["draft_compliance_evidence_packet", "draft_external_questionnaire_answer"],
+    "blockedActionFragments": ["legal", "risk acceptance", "contract", "external send", "access approval"]
+  }
+}

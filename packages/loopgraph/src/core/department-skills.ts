@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const DepartmentTypeSchema = z.enum([
+export const DEPARTMENT_TYPES = [
   "management",
   "marketing",
   "sales",
@@ -11,7 +11,84 @@ export const DepartmentTypeSchema = z.enum([
   "hr_talent",
   "legal_compliance",
   "custom"
-]);
+] as const;
+
+export const DepartmentTypeSchema = z.enum(DEPARTMENT_TYPES);
+
+export type DepartmentType = z.infer<typeof DepartmentTypeSchema>;
+
+export const DEPARTMENT_TYPE_ALIASES: Record<string, DepartmentType> = {
+  operations_finance: "ops_finance",
+  hr: "hr_talent",
+  legal_security: "legal_compliance"
+};
+
+export const DEPARTMENT_LABELS = {
+  management: "Management",
+  marketing: "Marketing",
+  sales: "Sales",
+  product: "Product",
+  customer_success: "Customer Success",
+  engineering: "Engineering",
+  ops_finance: "Ops / Finance",
+  hr_talent: "HR / Talent",
+  legal_compliance: "Legal / Compliance",
+  custom: "Custom"
+} satisfies Record<DepartmentType, string>;
+
+export const DEPARTMENT_DESCRIPTIONS = {
+  management: "Company operating cadence, executive decisions, cross-functional priorities, and rollups from department loops.",
+  marketing: "Paid acquisition, content creation, lifecycle marketing, SEO, events, partnerships, brand, and market learning.",
+  sales: "Lead qualification, account research, buyer follow-up, pipeline hygiene, forecasting, and deal-risk preparation.",
+  product: "Feedback synthesis, discovery preparation, roadmap evidence, spec drafting, release learning, and product-quality loops.",
+  customer_success: "Customer health, support escalation, renewal risk, QBR preparation, knowledge base maintenance, and proactive outreach.",
+  engineering: "Issue triage, implementation planning, PR review preparation, QA checks, release readiness, and incident learning.",
+  ops_finance: "Approvals, invoice and billing exceptions, variance analysis, close readiness, procurement, forecasting, and audit evidence.",
+  hr_talent: "Candidate pipeline, onboarding, manager follow-up, performance-review preparation, learning, and sensitive people workflows.",
+  legal_compliance: "Contract triage, compliance evidence, policy drift, access reviews, security questionnaires, and expert-reviewed risk workflows.",
+  custom: "A specific recurring workflow that does not fit one built-in department."
+} satisfies Record<DepartmentType, string>;
+
+export type DepartmentCatalogItem = {
+  id: DepartmentType;
+  label: string;
+  description: string;
+  aliases: string[];
+};
+
+export function normalizeDepartmentType(value: string): DepartmentType | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (DepartmentTypeSchema.safeParse(normalized).success) {
+    return normalized as DepartmentType;
+  }
+  return DEPARTMENT_TYPE_ALIASES[normalized];
+}
+
+export function requireDepartmentType(value: string): DepartmentType {
+  const department = normalizeDepartmentType(value);
+  if (!department) {
+    throw new Error(`Unknown department type: ${value}`);
+  }
+  return department;
+}
+
+export function formatDepartmentType(departmentType: DepartmentType): string {
+  return DEPARTMENT_LABELS[departmentType];
+}
+
+export function listDepartmentCatalog(options: { includeCustom?: boolean } = {}): DepartmentCatalogItem[] {
+  const includeCustom = options.includeCustom ?? true;
+  return DEPARTMENT_TYPES
+    .filter((departmentType) => includeCustom || departmentType !== "custom")
+    .map((departmentType) => ({
+      id: departmentType,
+      label: DEPARTMENT_LABELS[departmentType],
+      description: DEPARTMENT_DESCRIPTIONS[departmentType],
+      aliases: Object.entries(DEPARTMENT_TYPE_ALIASES)
+        .filter(([, canonical]) => canonical === departmentType)
+        .map(([alias]) => alias)
+    }));
+}
 
 export const DiscoveryQuestionTypeSchema = z.enum([
   "text",
@@ -114,8 +191,6 @@ export const DepartmentSkillPackSchema = z.object({
   }))
 });
 
-export type DepartmentType = z.infer<typeof DepartmentTypeSchema>;
 export type DiscoveryQuestion = z.infer<typeof DiscoveryQuestionSchema>;
 export type LoopBlueprint = z.infer<typeof LoopBlueprintSchema>;
 export type DepartmentSkillPack = z.infer<typeof DepartmentSkillPackSchema>;
-

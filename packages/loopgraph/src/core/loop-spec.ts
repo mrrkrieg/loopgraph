@@ -2,6 +2,7 @@ import { z } from "zod";
 import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "./constants";
 import { contextPrecedenceRuleSchema, contextSourceSchema } from "./context";
 import { approvalPolicySchema } from "./review";
+import { loopRoutingContractSchema } from "./routing";
 
 const jsonSchema = z.record(z.string(), z.unknown());
 
@@ -127,6 +128,7 @@ export const loopSpecSchema = z.object({
     department: z.string().optional(),
     tags: z.array(z.string()).optional()
   }).optional(),
+  routing: loopRoutingContractSchema.optional(),
   studioExtension: z.record(z.string(), z.unknown()).optional()
 });
 
@@ -169,6 +171,25 @@ export function collectLoopSpecSemanticErrors(spec: LoopSpec): string[] {
     const outputProps = (spec.output.schema.properties ?? {}) as Record<string, unknown>;
     if (!("evidence" in outputProps)) {
       errors.push("trace.evidenceRequired=true but output.schema lacks evidence field");
+    }
+  }
+
+  if (spec.routing) {
+    for (const [index, rule] of spec.routing.accepts.entries()) {
+      if (rule.requiredFields.some((field) => !field.trim())) {
+        errors.push(`routing.accepts[${index}] contains an empty required field`);
+      }
+    }
+
+    if (spec.routing.activationMode === "autonomous_low_risk") {
+      const hasRequiredEvidence = spec.routing.accepts.some((rule) => rule.requiredFields.length > 0);
+      if (!hasRequiredEvidence) {
+        errors.push("routing.activationMode=autonomous_low_risk requires at least one required event field");
+      }
+    }
+
+    if (spec.routing.fanoutPolicy.mode === "none" && spec.routing.fanoutPolicy.maxRoutes > 1) {
+      errors.push("routing.fanoutPolicy.maxRoutes cannot exceed 1 when mode is none");
     }
   }
 

@@ -3,10 +3,15 @@ import { DiscoveryStepNav } from "@/components/discovery-step-nav";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDiscoverySessionForView } from "../view-data";
+import {
+  getDiscoverySessionForView,
+  getDiscoverySessionIdFromSearchParams,
+  type DiscoverySearchParams
+} from "../view-data";
 
-export default async function DiscoveryAccessPage() {
-  const session = await getDiscoverySessionForView();
+export default async function DiscoveryAccessPage({ searchParams }: { searchParams?: DiscoverySearchParams }) {
+  const sessionId = await getDiscoverySessionIdFromSearchParams(searchParams);
+  const session = await getDiscoverySessionForView(sessionId);
   return (
     <>
       <PageHeader
@@ -15,7 +20,7 @@ export default async function DiscoveryAccessPage() {
         description="Access requirements are planned before execution and can be connected, waived, or handled with manual fallback."
         action={<Link className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" href="/access-plan">Open access plan</Link>}
       />
-      <DiscoveryStepNav activeHref="/discovery/access" />
+      <DiscoveryStepNav activeHref="/discovery/access" sessionId={sessionId} />
       <div className="grid gap-4 lg:grid-cols-2">
         {session.accessRequirements.slice(0, 10).map((access) => (
           <SectionCard key={access.id} title={access.integrationType} description={access.reason}>
@@ -31,4 +36,3 @@ export default async function DiscoveryAccessPage() {
     </>
   );
 }
-

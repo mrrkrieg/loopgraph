@@ -4,6 +4,7 @@ import {
   loadDiscoverySession,
   saveDiscoverySession
 } from "@/lib/loopgraph-runtime/discovery-engine";
+import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export async function POST(
   _request: Request,
@@ -12,9 +13,12 @@ export async function POST(
   const { sessionId } = await params;
   const session = await loadDiscoverySession(sessionId);
   if (!session) return NextResponse.json({ error: "Discovery session not found" }, { status: 404 });
-  const accessRequirements = await generateAccessPlan(session.recommendedLoops, process.cwd(), session.processInventory);
+  const accessRequirements = await generateAccessPlan(
+    session.recommendedLoops,
+    getActiveLoopgraphProjectRoot(),
+    session.processInventory
+  );
   const next = { ...session, accessRequirements, status: "access_mapping" as const, updatedAt: new Date().toISOString() };
   await saveDiscoverySession(next);
   return NextResponse.json(next);
 }
-

@@ -115,6 +115,18 @@ function seedGlobalLayout(nodes: PositionedBrainNode[], edges: BrainGraphEdge[])
     }
   }
 
+  if (company && !management && departments.length > 0) {
+    seedDirectHermesHierarchy({
+      company,
+      departments,
+      workflowsByDepartment,
+      internalByLoop,
+      nodes,
+      nodesById
+    });
+    return;
+  }
+
   if (company) {
     company.x = -360;
     company.y = 0;
@@ -166,6 +178,88 @@ function seedGlobalLayout(nodes: PositionedBrainNode[], edges: BrainGraphEdge[])
       node.y = point.y;
     }
   }
+}
+
+function seedDirectHermesHierarchy(input: {
+  company: PositionedBrainNode;
+  departments: PositionedBrainNode[];
+  workflowsByDepartment: Map<string, PositionedBrainNode[]>;
+  internalByLoop: Map<string, PositionedBrainNode[]>;
+  nodes: PositionedBrainNode[];
+  nodesById: Map<string, PositionedBrainNode>;
+}) {
+  input.company.x = -360;
+  input.company.y = 0;
+
+  const departmentGap = Math.max(190, Math.min(280, 640 / Math.max(input.departments.length, 1)));
+  const departmentStartY = -((input.departments.length - 1) * departmentGap) / 2;
+  input.departments.forEach((department, index) => {
+    department.x = -80;
+    department.y = departmentStartY + index * departmentGap;
+
+    const workflows = (input.workflowsByDepartment.get(department.id) ?? []).sort(byLabel);
+    seedWorkflowLayer(workflows, {
+      x: 240,
+      centerY: department.y,
+      rowGap: 112,
+      columnGap: 210,
+      maxRowsPerColumn: 4
+    });
+  });
+
+  const unassigned = (input.workflowsByDepartment.get("unassigned") ?? []).sort(byLabel);
+  seedWorkflowLayer(unassigned, {
+    x: 240,
+    centerY: departmentStartY + input.departments.length * departmentGap,
+    rowGap: 112,
+    columnGap: 210,
+    maxRowsPerColumn: 4
+  });
+
+  for (const [loopId, internals] of input.internalByLoop) {
+    const parent = input.nodesById.get(loopId);
+    if (!parent) {
+      seedRing(internals, { centerX: 0, centerY: 0, radius: ringRadius(internals, 60) });
+      continue;
+    }
+    seedRing(internals.sort(byLayerThenLabel), {
+      centerX: parent.x,
+      centerY: parent.y,
+      radius: ringRadius(internals, 58),
+      startAngle: -Math.PI * 0.72
+    });
+  }
+
+  for (const node of input.nodes) {
+    if (node.x === 0 && node.y === 0 && node.id !== input.company.id) {
+      const point = seededPoint(node.id, 520);
+      node.x = point.x;
+      node.y = point.y;
+    }
+  }
+}
+
+function seedWorkflowLayer(
+  nodes: PositionedBrainNode[],
+  options: {
+    x: number;
+    centerY: number;
+    rowGap: number;
+    columnGap: number;
+    maxRowsPerColumn: number;
+  }
+) {
+  if (nodes.length === 0) return;
+  nodes.forEach((node, index) => {
+    const column = Math.floor(index / options.maxRowsPerColumn);
+    const row = index % options.maxRowsPerColumn;
+    const rowsInColumn = Math.min(
+      options.maxRowsPerColumn,
+      nodes.length - column * options.maxRowsPerColumn
+    );
+    node.x = options.x + column * options.columnGap;
+    node.y = options.centerY + (row - (rowsInColumn - 1) / 2) * options.rowGap;
+  });
 }
 
 function seedLocalLayout(nodes: PositionedBrainNode[], edges: BrainGraphEdge[], centerId: string) {

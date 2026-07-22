@@ -1,20 +1,29 @@
 import React from "react";
 import Link from "next/link";
+import { loadEventRoutingOperations, type EventRoutingOperationsFilters } from "loopgraph/runtime";
 import { MetricCard } from "../metric-card";
 import { PageHeader } from "../page-header";
 import { SectionCard } from "../section-card";
 import { StatusPill } from "../status-pill";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { loadLatestManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
-import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
+import { getActiveLoopgraphProjectRoot, getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 import { DepartmentManagementCard } from "./department-management-card";
 import { EventRoutingTable } from "./event-routing-table";
 
-export async function ManagementBrainPage() {
+type ManagementBrainPageProps = {
+  routingQuery?: EventRoutingOperationsFilters & {
+    limit?: number;
+  };
+};
+
+export async function ManagementBrainPage({ routingQuery = {} }: ManagementBrainPageProps = {}) {
+  const projectRoot = getActiveLoopgraphProjectRoot();
   const workspace = await getWorkspace();
   const storage = getStorageAdapter();
   const cases = await storage.listCases();
   const rollup = await loadLatestManagementRollup();
+  const routingOperations = await loadEventRoutingOperations({ projectRoot, ...routingQuery });
   const departments = Array.from(new Set(workspace.loops.map((loop) => loop.department))).filter(
     (department) => department !== "management"
   );
@@ -26,30 +35,30 @@ export async function ManagementBrainPage() {
     <>
       <PageHeader
         title="Management"
-        description="The company brain receives events, routes work to department management loops, and keeps human owners accountable for approvals, blockers, and metrics."
+        description="Hermes Brain receives business events, chooses the right Loopgraph loop, and keeps human owners accountable for approvals, blockers, and metrics."
       />
 
       <div className="grid gap-4 md:grid-cols-4">
-        <MetricCard label="Events received today" value={workspace.loops.length} note="Demo event stream" />
+        <MetricCard label="Hermes events" value={routingOperations.summary.eventCount} note="Durable routing receipts" />
         <MetricCard label="Open escalations" value={openEscalations} note="Cases and management decisions" />
         <MetricCard label="Waiting approval" value={openReviews} note="Human judgment required" />
-        <MetricCard label="Improvement items" value={workspace.improvements.length} note="From trace improvement signals" />
+        <MetricCard label="Unhandled problems" value={routingOperations.summary.unhandledProblemCount} note="Missing or unmatched loops" />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
         <SectionCard title="Company Brain Overview">
           <p className="text-sm leading-6 text-ink/70">
-            Company Brain listens for events, checks policy and context, calls the right department management loop, and records decisions back into Loopgraph.
+            Hermes Brain listens for events, asks Loopgraph for eligible routing cards, chooses the right loop, and records every decision back into Loopgraph.
           </p>
           <div className="mt-4 grid gap-3 text-sm">
-            <FlowStep title="Event Intake" body="Company events, department rollups, escalations, and failed verifications enter the management layer." />
-            <FlowStep title="Routing Rules" body="Events are routed by type, risk, department, owner, and required autonomy level." />
+            <FlowStep title="Hermes event intake" body="Provider webhooks, lifecycle callbacks, schedules, and manual events terminate at Hermes before any loop can run." />
+            <FlowStep title="Bounded routing" body="Hermes receives a normalized envelope and Loopgraph routing cards, then Loopgraph validates the selected route before queueing work." />
             <FlowStep title="Human Governance" body="Approvals, policy exceptions, and customer-facing actions stay accountable to named owners." />
           </div>
         </SectionCard>
-        <SectionCard title="Routing Rules">
+        <SectionCard title="Hermes Routing Operations">
           <div className="overflow-x-auto">
-            <EventRoutingTable />
+            <EventRoutingTable model={routingOperations} />
           </div>
         </SectionCard>
       </div>

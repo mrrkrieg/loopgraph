@@ -6,14 +6,19 @@ import {
   acceptRecommendationAction,
   rejectRecommendationAction
 } from "../actions";
-import { getDiscoverySessionForView } from "../view-data";
+import {
+  getDiscoverySessionForView,
+  getDiscoverySessionIdFromSearchParams,
+  type DiscoverySearchParams
+} from "../view-data";
 
-export default async function RecommendationsPage() {
-  const session = await getDiscoverySessionForView();
+export default async function RecommendationsPage({ searchParams }: { searchParams?: DiscoverySearchParams }) {
+  const sessionId = await getDiscoverySessionIdFromSearchParams(searchParams);
+  const session = await getDiscoverySessionForView(sessionId);
   return (
     <>
       <PageHeader eyebrow="Discovery" title="Recommendations" description="Recommendations remain drafts until accepted. Rejected recommendations never materialize into topology." />
-      <DiscoveryStepNav activeHref="/discovery/recommendations" />
+      <DiscoveryStepNav activeHref="/discovery/recommendations" sessionId={sessionId} />
       <div className="grid gap-5 xl:grid-cols-2">
         {session.recommendedLoops.map((recommendation) => {
           const department = session.departmentProfiles.find((item) => item.id === recommendation.departmentId);
@@ -79,4 +84,3 @@ function MiniList({ label, values }: { label: string; values: string[] }) {
     </div>
   );
 }
-

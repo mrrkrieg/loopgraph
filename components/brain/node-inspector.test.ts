@@ -19,9 +19,57 @@ describe("NodeInspector", () => {
     expect(html).toContain("Primary metric");
     expect(html).toContain("Open loop detail");
   });
+
+  it("renders Hermes validation and simulation controls for fixture-backed workflow loops", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeInspector, {
+        actions: {
+          simulateManualEvent: async () => undefined,
+          simulateFixture: async () => undefined,
+          validateLoop: async () => undefined
+        },
+        node: workflowNode({
+          metadata: {
+            latestRun: {
+              id: "run_latest",
+              status: "WAITING_FOR_REVIEW"
+            },
+            runtime: {
+              inputFixtures: [
+                { id: "happy-path", label: "Happy Path", path: "fixtures/happy-path.json" },
+                { id: "risk-escalation", label: "Risk Escalation", path: "fixtures/risk-escalation.json" }
+              ],
+              routing: {
+                ready: true,
+                activationMode: "shadow",
+                problemTypes: ["paid_acquisition_efficiency_drop"],
+                requiredConnections: ["ads.read", "crm.read"]
+              }
+            }
+          }
+        }),
+        edges: [],
+        onOpenLocal: () => undefined
+      })
+    );
+
+    expect(html).toContain("Hermes local run controls");
+    expect(html).toContain("Routing ready");
+    expect(html).toContain("paid acquisition efficiency drop");
+    expect(html).toContain("ads.read");
+    expect(html).toContain("Latest run:");
+    expect(html).toContain("WAITING FOR REVIEW");
+    expect(html).toContain("run_latest");
+    expect(html).toContain("Validate loop");
+    expect(html).toContain("Simulate Happy Path");
+    expect(html).toContain("Simulate Risk Escalation");
+    expect(html).toContain("Simulate custom event JSON");
+    expect(html).toContain("manual_lead-qualification_001");
+    expect(html).toContain("Use redacted synthetic data only");
+  });
 });
 
-function workflowNode(): BrainGraphNode {
+function workflowNode(overrides: Partial<BrainGraphNode> = {}): BrainGraphNode {
   return {
     id: "loop:lead-qualification",
     type: "workflow_loop",
@@ -42,6 +90,7 @@ function workflowNode(): BrainGraphNode {
       routine: ["Score lead", "Draft follow-up"],
       verification: ["policy_check"],
       metrics: ["Qualified lead rate"]
-    }
+    },
+    ...overrides
   };
 }

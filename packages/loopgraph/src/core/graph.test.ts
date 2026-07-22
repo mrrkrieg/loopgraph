@@ -56,6 +56,144 @@ describe("semantic loop topology", () => {
     );
   });
 
+  it("builds a direct Hermes Brain -> Department -> Workflow topology when requested", () => {
+    const topology = buildSemanticTopology({
+      loopSpecs: [
+        loopSpec({ id: "marketing-ads", department: "marketing" }),
+        loopSpec({ id: "marketing-content-creation", department: "marketing" })
+      ],
+      options: {
+        brainLabel: "Hermes Brain",
+        hierarchyMode: "hermes_brain"
+      }
+    });
+
+    expect(topology.managementLoopId).toBe("company:root");
+    expect(topology.metadata).toMatchObject({
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain"
+    });
+    expect(topology.nodes.find((node) => node.id === "company:root")).toMatchObject({
+      type: "company",
+      label: "Hermes Brain"
+    });
+    expect(topology.nodes.some((node) => node.type === "management_loop")).toBe(false);
+    expect(topology.nodes.find((node) => node.id === "loop:department:marketing")).toMatchObject({
+      type: "department_loop",
+      label: "Marketing",
+      parentId: "company:root"
+    });
+    expect(topology.edges).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "company:root",
+          target: "loop:department:marketing",
+          kind: "contains"
+        }),
+        expect.objectContaining({
+          source: "loop:department:marketing",
+          target: "loop:marketing-ads",
+          kind: "contains"
+        }),
+        expect.objectContaining({
+          source: "loop:department:marketing",
+          target: "loop:marketing-content-creation",
+          kind: "contains"
+        })
+      ])
+    );
+  });
+
+  it("adds local runtime metadata for Hermes graph run controls", () => {
+    const spec = loopSpec({ id: "marketing-ads", department: "marketing" });
+    spec.metadata.labels = {
+      ...(spec.metadata.labels ?? {}),
+      sourcePath: "/workspace/.loopgraph/generated/hermes/marketing/marketing_ads/loopgraph.yaml"
+    };
+    spec.trigger = { type: "event", source: "hermes", event: "business_event" };
+    spec.input.fixtures = [
+      { id: "happy-path", path: "fixtures/happy-path.json" },
+      { id: "risk-escalation", path: "fixtures/risk-escalation.json" }
+    ];
+    spec.routing = {
+      schemaVersion: "routing-contract/v1alpha1",
+      problemTypes: ["paid_acquisition_efficiency_drop"],
+      accepts: [{
+        sourcePattern: "google_ads*",
+        eventTypePattern: "campaign.*",
+        subjectTypes: ["campaign"],
+        requiredFields: ["signals.spendDeltaPct"],
+        optionalConditions: []
+      }],
+      excludes: [],
+      inputMapping: { campaignId: "subject.id" },
+      priority: 0,
+      minimumConfidence: 0.82,
+      ambiguityPolicy: "request_human",
+      noMatchPolicy: "unhandled",
+      fanoutPolicy: { mode: "none", maxRoutes: 1, requiresIndependentProblems: true },
+      cooldown: { seconds: 0, dedupeWindowSeconds: 3600 },
+      concurrency: { maxActive: 1, strategy: "append_evidence" },
+      activationMode: "shadow",
+      lifecycleEvents: [],
+      requiredConnections: ["ads.read", "crm.read"],
+      examples: { shouldRoute: [], shouldNotRoute: [] }
+    };
+
+    const topology = buildSemanticTopology({
+      loopSpecs: [spec],
+      options: {
+        brainLabel: "Hermes Brain",
+        hierarchyMode: "hermes_brain"
+      }
+    });
+
+    expect(topology.nodes.find((node) => node.id === "loop:marketing-ads")?.metadata?.runtime).toMatchObject({
+      sourcePath: "/workspace/.loopgraph/generated/hermes/marketing/marketing_ads/loopgraph.yaml",
+      inputFixtures: [
+        { id: "happy-path", path: "fixtures/happy-path.json", label: "Happy Path" },
+        { id: "risk-escalation", path: "fixtures/risk-escalation.json", label: "Risk Escalation" }
+      ],
+      routing: {
+        ready: true,
+        problemTypes: ["paid_acquisition_efficiency_drop"],
+        activationMode: "shadow",
+        minimumConfidence: 0.82,
+        requiredConnections: ["ads.read", "crm.read"]
+      }
+    });
+  });
+
+  it("rolls latest persisted trace metadata onto workflow loop nodes", () => {
+    const older = trace("run_old", "campaign-learning");
+    older.startedAt = "2026-07-03T00:00:00.000Z";
+    older.completedAt = "2026-07-03T00:00:01.000Z";
+    const newer = trace("run_new", "campaign-learning");
+    newer.startedAt = "2026-07-03T00:10:00.000Z";
+    newer.completedAt = undefined;
+    newer.status = "WAITING_FOR_REVIEW";
+
+    const topology = buildSemanticTopology({
+      loopSpecs: [loopSpec({ id: "campaign-learning", department: "marketing" })],
+      traces: [older, newer],
+      options: {
+        brainLabel: "Hermes Brain",
+        hierarchyMode: "hermes_brain"
+      }
+    });
+
+    expect(topology.nodes.find((node) => node.id === "loop:campaign-learning")?.metadata).toMatchObject({
+      openReviews: 2,
+      lastRunAt: "2026-07-03T00:10:00.000Z",
+      latestRun: {
+        id: "run_new",
+        status: "WAITING_FOR_REVIEW",
+        mode: "simulate",
+        startedAt: "2026-07-03T00:10:00.000Z"
+      }
+    });
+  });
+
   it("keeps internal logic hidden in the default company graph", () => {
     const topology = buildSemanticTopology({
       loopSpecs: [loopSpec({ id: "campaign-learning", department: "marketing" })],

@@ -14,7 +14,7 @@ Automated coverage: `lib/loopgraph-runtime/governance-path.test.ts` (review bind
 
 - [ ] Set `LOOPGRAPH_EXECUTE_ENABLED=true` and GitHub env vars
 - [ ] `npm run loopgraph -- execute examples/github-issue-triage --event fixtures/github-issue-triage/normal-bug.json`
-- [ ] GitHub webhook creates run for test issue (if deployed)
+- [ ] GitHub provider webhook is configured in Hermes; Loopgraph `/api/webhooks/github` returns 410 unless `HERMES_WEBHOOK_URL` is set as a temporary compatibility forwarder
 
 ## Cases + management
 

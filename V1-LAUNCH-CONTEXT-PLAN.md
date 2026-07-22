@@ -1699,7 +1699,7 @@ At this point, a developer understands why Loopgraph is more than a generic work
 - More granular policy packs.
 - OpenTelemetry/Langfuse export.
 - Docker Compose quickstart.
-- Optional OpenAI/Anthropic provider adapters behind explicit feature flags.
+- Optional Hermes-mediated planner/runtime adapters behind explicit feature flags.
 
 ### V2 platform work
 

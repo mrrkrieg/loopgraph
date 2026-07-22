@@ -55,7 +55,7 @@ export function buildBrainGraph(input: BrainGraphAdapterInput): BrainGraph {
   const selectedNodeId = input.topology.selectedLoopId
     ? `loop:${input.topology.selectedLoopId}`
     : undefined;
-  const structuralNodes = selectStructuralNodes(input.topology, selectedNodeId, diagnostics);
+  const structuralNodes = selectStructuralNodes(input.topology, selectedNodeId, diagnostics, Boolean(input.includeCatalogLoops));
   const structuralNodeIds = new Set(structuralNodes.map((node) => node.id));
   const nodes: BrainGraphNode[] = [];
   const nodeIds = new Set<string>();
@@ -160,7 +160,8 @@ export function filterBrainGraphByDepth(input: {
 function selectStructuralNodes(
   topology: SemanticTopology,
   selectedNodeId: string | undefined,
-  diagnostics: BrainGraphDiagnostics
+  diagnostics: BrainGraphDiagnostics,
+  includeTemplateOnly: boolean
 ) {
   const rootNodes = topology.nodes.filter((node) => node.type === "company");
   const managementNodes = topology.nodes.filter((node) => node.type === "management_loop");
@@ -171,7 +172,7 @@ function selectStructuralNodes(
     .filter((node) =>
       (node.type === "workflow_loop" || node.type === "task_loop") &&
       !node.isOrphan &&
-      !isTemplateOnly(node)
+      (includeTemplateOnly || !isTemplateOnly(node))
     )
     .sort(byWorkflowPriority);
   const selectedWorkflow = selectedNodeId
@@ -187,7 +188,7 @@ function selectStructuralNodes(
     if (!structureTypes.has(node.type)) {
       continue;
     }
-    if (node.isOrphan || isTemplateOnly(node)) {
+    if (node.isOrphan || (!includeTemplateOnly && isTemplateOnly(node))) {
       diagnostics.hiddenNodeIds.push(node.id);
     }
   }
@@ -215,12 +216,15 @@ function mapTopologyNode(node: TopologyNode): BrainGraphNode | null {
   const departmentStroke = type === "workflow_loop" ? nodeColorForDepartment(node.department) : undefined;
   const status = mapStatus(node.status);
   const stroke = statusStroke[status] ?? departmentStroke ?? baseStyle.stroke;
+  const source = typeof node.metadata?.source === "string" ? node.metadata.source : undefined;
+  const runtimeLevel = typeof node.metadata?.runtimeLevel === "string" ? node.metadata.runtimeLevel : undefined;
+  const isDemoCatalog = source === "demo_catalog";
 
   return {
     id: node.id,
     type,
-    label: type === "company_brain" ? "Company Brain" : node.label,
-    subtitle: node.subtitle,
+    label: isDemoCatalog && type === "workflow_loop" ? `Demo: ${node.label}` : node.label,
+    subtitle: isDemoCatalog ? [runtimeLabel(runtimeLevel), node.subtitle].filter(Boolean).join(" · ") : node.subtitle,
     purpose: node.description ?? node.subtitle,
     loopId: node.loopId,
     departmentId: node.department,
@@ -241,6 +245,14 @@ function mapTopologyNode(node: TopologyNode): BrainGraphNode | null {
       fullLabel: node.label
     }
   };
+}
+
+function runtimeLabel(runtimeLevel: string | undefined): string | undefined {
+  if (!runtimeLevel) return undefined;
+  if (runtimeLevel === "runnable") return "Demo catalog · runnable";
+  if (runtimeLevel === "spec_stub") return "Demo catalog · spec stub";
+  if (runtimeLevel === "catalog") return "Demo catalog";
+  return `Demo catalog · ${runtimeLevel}`;
 }
 
 function mapTopologyEdge(

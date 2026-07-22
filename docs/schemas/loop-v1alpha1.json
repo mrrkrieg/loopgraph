@@ -637,6 +637,285 @@
           },
           "additionalProperties": false
         },
+        "routing": {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "type": "string",
+              "const": "routing-contract/v1alpha1",
+              "default": "routing-contract/v1alpha1"
+            },
+            "problemTypes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minItems": 1
+            },
+            "accepts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sourcePattern": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "eventTypePattern": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "subjectTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "default": []
+                  },
+                  "requiredFields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "default": []
+                  },
+                  "optionalConditions": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "default": []
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sourcePattern",
+                  "eventTypePattern"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1
+            },
+            "excludes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "sourcePattern": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "*"
+                  },
+                  "eventTypePattern": {
+                    "type": "string",
+                    "minLength": 1,
+                    "default": "*"
+                  },
+                  "subjectTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "default": []
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "default": []
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "additionalProperties": false
+              },
+              "default": []
+            },
+            "inputMapping": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "propertyNames": {
+                "minLength": 1
+              },
+              "default": {}
+            },
+            "priority": {
+              "type": "integer",
+              "default": 0
+            },
+            "minimumConfidence": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.75
+            },
+            "ambiguityPolicy": {
+              "type": "string",
+              "enum": [
+                "ignore",
+                "defer",
+                "request_human",
+                "route_to_triage"
+              ],
+              "default": "request_human"
+            },
+            "noMatchPolicy": {
+              "type": "string",
+              "enum": [
+                "unhandled",
+                "ignore",
+                "request_human"
+              ],
+              "default": "unhandled"
+            },
+            "fanoutPolicy": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "independent_only",
+                    "declared_ordered"
+                  ],
+                  "default": "none"
+                },
+                "maxRoutes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 1
+                },
+                "requiresIndependentProblems": {
+                  "type": "boolean",
+                  "default": true
+                }
+              },
+              "additionalProperties": false,
+              "default": {
+                "mode": "none",
+                "maxRoutes": 1,
+                "requiresIndependentProblems": true
+              }
+            },
+            "cooldown": {
+              "type": "object",
+              "properties": {
+                "seconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                },
+                "dedupeWindowSeconds": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "default": 0
+                }
+              },
+              "additionalProperties": false,
+              "default": {
+                "seconds": 0,
+                "dedupeWindowSeconds": 0
+              }
+            },
+            "concurrency": {
+              "type": "object",
+              "properties": {
+                "maxActive": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "default": 1
+                },
+                "strategy": {
+                  "type": "string",
+                  "enum": [
+                    "reject",
+                    "append_evidence",
+                    "queue"
+                  ],
+                  "default": "append_evidence"
+                }
+              },
+              "additionalProperties": false,
+              "default": {
+                "maxActive": 1,
+                "strategy": "append_evidence"
+              }
+            },
+            "activationMode": {
+              "type": "string",
+              "enum": [
+                "shadow",
+                "recommend",
+                "simulate",
+                "execute_with_approval",
+                "autonomous_low_risk"
+              ],
+              "default": "shadow"
+            },
+            "lifecycleEvents": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": []
+            },
+            "requiredConnections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "default": []
+            },
+            "examples": {
+              "type": "object",
+              "properties": {
+                "shouldRoute": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                },
+                "shouldNotRoute": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "default": []
+                }
+              },
+              "additionalProperties": false,
+              "default": {
+                "shouldRoute": [],
+                "shouldNotRoute": []
+              }
+            }
+          },
+          "required": [
+            "problemTypes",
+            "accepts"
+          ],
+          "additionalProperties": false
+        },
         "studioExtension": {
           "type": "object",
           "additionalProperties": {}

@@ -2,14 +2,19 @@ import { DiscoveryStepNav } from "@/components/discovery-step-nav";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
-import { getDiscoverySessionForView } from "../view-data";
+import {
+  getDiscoverySessionForView,
+  getDiscoverySessionIdFromSearchParams,
+  type DiscoverySearchParams
+} from "../view-data";
 
-export default async function HumanRequirementsPage() {
-  const session = await getDiscoverySessionForView();
+export default async function HumanRequirementsPage({ searchParams }: { searchParams?: DiscoverySearchParams }) {
+  const sessionId = await getDiscoverySessionIdFromSearchParams(searchParams);
+  const session = await getDiscoverySessionForView(sessionId);
   return (
     <>
       <PageHeader eyebrow="Discovery" title="Human Input" description="Human requirements define owners, approval gates, review budgets, and rollout decisions before execution." />
-      <DiscoveryStepNav activeHref="/discovery/human-requirements" />
+      <DiscoveryStepNav activeHref="/discovery/human-requirements" sessionId={sessionId} />
       <div className="space-y-4">
         {session.humanRequirements.map((requirement) => {
           const recommendation = session.recommendedLoops.find((item) => item.id === requirement.loopRecommendationId);
@@ -29,4 +34,3 @@ export default async function HumanRequirementsPage() {
     </>
   );
 }
-

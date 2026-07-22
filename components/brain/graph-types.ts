@@ -97,5 +97,6 @@ export type BrainGraphSettings = {
 };
 
 export type BrainGraphAdapterInput = BrainGraphSettings & {
+  includeCatalogLoops?: boolean;
   topology: SemanticTopology;
 };

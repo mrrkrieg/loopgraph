@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { resolveCase } from "@/lib/loopgraph-runtime/case-service";
-import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
+import { getActiveLoopgraphProjectRoot, getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export async function resolveCaseAction(formData: FormData) {
   const caseId = String(formData.get("case_id") ?? "");
@@ -22,6 +22,8 @@ export async function resolveCaseAction(formData: FormData) {
   await resolveCase(storage, caseId, {
     resolutionSummary: summary,
     resolvedAt: new Date().toISOString()
+  }, {
+    projectRoot: getActiveLoopgraphProjectRoot()
   });
 
   revalidatePath(`/cases/${caseId}`);

@@ -25,13 +25,17 @@ const defaultRegistry: LoopgraphWorkspaceRegistry = {
   demoCatalogEnabled: true
 };
 
-export function getWorkspaceRegistryPath(projectRoot = process.cwd()) {
-  return path.join(getLoopgraphRoot(projectRoot), "workspace.json");
+export function getLocalProjectRoot(projectRoot?: string) {
+  return path.resolve(projectRoot ?? process.env.LOOPGRAPH_PROJECT_ROOT ?? process.cwd());
 }
 
-export async function readWorkspaceRegistry(projectRoot = process.cwd()): Promise<LoopgraphWorkspaceRegistry> {
+export function getWorkspaceRegistryPath(projectRoot = getLocalProjectRoot()) {
+  return path.join(getLoopgraphRoot(getLocalProjectRoot(projectRoot)), "workspace.json");
+}
+
+export async function readWorkspaceRegistry(projectRoot = getLocalProjectRoot()): Promise<LoopgraphWorkspaceRegistry> {
   try {
-    const raw = await readFile(getWorkspaceRegistryPath(projectRoot), "utf8");
+    const raw = await readFile(getWorkspaceRegistryPath(getLocalProjectRoot(projectRoot)), "utf8");
     const parsed = JSON.parse(raw) as Partial<LoopgraphWorkspaceRegistry>;
     return {
       version: 1,
@@ -45,25 +49,26 @@ export async function readWorkspaceRegistry(projectRoot = process.cwd()): Promis
 
 export async function writeWorkspaceRegistry(
   registry: LoopgraphWorkspaceRegistry,
-  projectRoot = process.cwd()
+  projectRoot = getLocalProjectRoot()
 ) {
-  const registryPath = getWorkspaceRegistryPath(projectRoot);
+  const registryPath = getWorkspaceRegistryPath(getLocalProjectRoot(projectRoot));
   await mkdir(path.dirname(registryPath), { recursive: true });
   await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
 
-export async function registerLoopSpec(specPath: string, projectRoot = process.cwd()) {
-  const absoluteSpecPath = path.resolve(projectRoot, specPath);
+export async function registerLoopSpec(specPath: string, projectRoot = getLocalProjectRoot()) {
+  const resolvedProjectRoot = getLocalProjectRoot(projectRoot);
+  const absoluteSpecPath = path.resolve(resolvedProjectRoot, specPath);
   const loaded = await loadLoopSpecFromPath(absoluteSpecPath);
   if (!loaded.ok) {
     throw new Error(`Cannot register LoopSpec:\n- ${loaded.errors.join("\n- ")}`);
   }
 
-  const registry = await readWorkspaceRegistry(projectRoot);
-  const entry = entryFromSpec(loaded.spec, loaded.sourcePath, projectRoot);
+  const registry = await readWorkspaceRegistry(resolvedProjectRoot);
+  const entry = entryFromSpec(loaded.spec, loaded.sourcePath, resolvedProjectRoot);
   const nextEntries = [
     ...registry.registeredSpecs.filter(
-      (item) => item.id !== entry.id && resolveRegisteredPath(item.path, projectRoot) !== loaded.sourcePath
+      (item) => item.id !== entry.id && resolveRegisteredPath(item.path, resolvedProjectRoot) !== loaded.sourcePath
     ),
     entry
   ].sort((left, right) => left.name.localeCompare(right.name));
@@ -71,17 +76,18 @@ export async function registerLoopSpec(specPath: string, projectRoot = process.c
   await writeWorkspaceRegistry({
     ...registry,
     registeredSpecs: nextEntries
-  }, projectRoot);
+  }, resolvedProjectRoot);
 
   return entry;
 }
 
-export async function getRegisteredLoopSpecs(projectRoot = process.cwd()): Promise<LoadedRegisteredLoopSpec[]> {
-  const registry = await readWorkspaceRegistry(projectRoot);
+export async function getRegisteredLoopSpecs(projectRoot = getLocalProjectRoot()): Promise<LoadedRegisteredLoopSpec[]> {
+  const resolvedProjectRoot = getLocalProjectRoot(projectRoot);
+  const registry = await readWorkspaceRegistry(resolvedProjectRoot);
   const specs: LoadedRegisteredLoopSpec[] = [];
 
   for (const entry of registry.registeredSpecs) {
-    const sourcePath = resolveRegisteredPath(entry.path, projectRoot);
+    const sourcePath = resolveRegisteredPath(entry.path, resolvedProjectRoot);
     const loaded = await loadLoopSpecFromPath(sourcePath);
     if (loaded.ok) {
       specs.push({
@@ -103,7 +109,7 @@ export async function createLocalDesignStudioSpec(input: {
   answers?: AnswerMap;
   questionGroups?: QuestionGroup[];
 }) {
-  const projectRoot = input.projectRoot ?? process.cwd();
+  const projectRoot = getLocalProjectRoot(input.projectRoot);
   const template = getTemplateById(input.templateId);
   if (!template) {
     throw new Error(`Unknown template: ${input.templateId}`);
@@ -132,8 +138,9 @@ export async function createLocalDesignStudioSpec(input: {
   };
 }
 
-export async function unregisterLoopSpec(loopId: string, projectRoot = process.cwd()) {
-  const registry = await readWorkspaceRegistry(projectRoot);
+export async function unregisterLoopSpec(loopId: string, projectRoot = getLocalProjectRoot()) {
+  const resolvedProjectRoot = getLocalProjectRoot(projectRoot);
+  const registry = await readWorkspaceRegistry(resolvedProjectRoot);
   const nextEntries = registry.registeredSpecs.filter((item) => item.id !== loopId);
 
   if (nextEntries.length === registry.registeredSpecs.length) {
@@ -143,7 +150,7 @@ export async function unregisterLoopSpec(loopId: string, projectRoot = process.c
   await writeWorkspaceRegistry({
     ...registry,
     registeredSpecs: nextEntries
-  }, projectRoot);
+  }, resolvedProjectRoot);
 
   return true;
 }
@@ -155,7 +162,7 @@ export async function updateLocalLoopLogic(input: {
   generatedSpec?: FlatLoopSpec;
   projectRoot?: string;
 }) {
-  const projectRoot = input.projectRoot ?? process.cwd();
+  const projectRoot = getLocalProjectRoot(input.projectRoot);
   const registry = await readWorkspaceRegistry(projectRoot);
   const entry = registry.registeredSpecs.find((item) => item.id === input.loopId);
 

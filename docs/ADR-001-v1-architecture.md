@@ -52,7 +52,7 @@ Human approval binds to a **PreparedAction** with a content fingerprint. The run
 
 ### 9. LLM usage
 
-A **fixture provider** is required for deterministic simulation. Live OpenAI/Anthropic providers are experimental and feature-flagged. `OPENAI_API_KEY` is reserved, not required.
+A **fixture provider** is required for deterministic simulation. Live high-reasoning planning should be mediated through the Hermes integration and guarded by explicit feature flags. `OPENAI_API_KEY` is reserved, not required.
 
 ### 10. License
 

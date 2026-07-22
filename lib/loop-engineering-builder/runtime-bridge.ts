@@ -1,6 +1,7 @@
 import path from "node:path";
 import { loadLoopSpecFromPath, simulateLoop } from "loopgraph/runtime";
 import { getLoopgraphRoot, getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
+import { getLocalProjectRoot } from "./local-workspace";
 import type { LoopRunTrace } from "loopgraph/core";
 import type { HumanReview, LoopRun, LoopRunStep } from "./types";
 
@@ -19,7 +20,7 @@ const HERO_LOOP_CONFIG: Record<string, { examplePath: string; defaultFixture: st
   }
 };
 
-export async function simulateHeroLoop(loopId: string, repoRoot = process.cwd()) {
+export async function simulateHeroLoop(loopId: string, repoRoot = getLocalProjectRoot()) {
   const config = HERO_LOOP_CONFIG[loopId];
   if (!config) return null;
 
@@ -100,10 +101,10 @@ export function mapTraceToRunBundle(trace: LoopRunTrace, loopId: string) {
   return { run, steps, review };
 }
 
-export async function listPersistedTraces(repoRoot = process.cwd()) {
+export async function listPersistedTraces(repoRoot = getLocalProjectRoot()) {
   return getStorageAdapter({ rootDir: getLoopgraphRoot(repoRoot) }).listRuns();
 }
 
-export async function getPersistedTrace(runId: string, repoRoot = process.cwd()) {
+export async function getPersistedTrace(runId: string, repoRoot = getLocalProjectRoot()) {
   return getStorageAdapter({ rootDir: getLoopgraphRoot(repoRoot) }).getRun(runId);
 }

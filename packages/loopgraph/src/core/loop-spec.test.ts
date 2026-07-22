@@ -49,6 +49,47 @@ describe("loop-spec", () => {
     expect(() => validateLoopSpec(minimalSpec)).not.toThrow();
   });
 
+  it("validates an optional Hermes routing contract", () => {
+    const spec = validateLoopSpec({
+      ...minimalSpec,
+      routing: {
+        schemaVersion: "routing-contract/v1alpha1",
+        problemTypes: ["paid_acquisition_efficiency_drop"],
+        accepts: [{
+          sourcePattern: "google_ads*",
+          eventTypePattern: "campaign.*",
+          subjectTypes: ["campaign"],
+          requiredFields: ["signals.costPerQualifiedCustomerDeltaPct"]
+        }],
+        inputMapping: {
+          campaignId: "subject.id"
+        },
+        minimumConfidence: 0.8,
+        activationMode: "shadow"
+      }
+    });
+
+    expect(spec.routing?.problemTypes).toEqual(["paid_acquisition_efficiency_drop"]);
+  });
+
+  it("rejects autonomous routing without required event evidence", () => {
+    expect(() => validateLoopSpec({
+      ...minimalSpec,
+      routing: {
+        schemaVersion: "routing-contract/v1alpha1",
+        problemTypes: ["paid_acquisition_efficiency_drop"],
+        accepts: [{
+          sourcePattern: "google_ads*",
+          eventTypePattern: "campaign.*",
+          subjectTypes: ["campaign"],
+          requiredFields: []
+        }],
+        minimumConfidence: 0.9,
+        activationMode: "autonomous_low_risk"
+      }
+    })).toThrow("requires at least one required event field");
+  });
+
   it("fails write-capable tool without policy", () => {
     const errors = collectLoopSpecSemanticErrors({
       ...minimalSpec,

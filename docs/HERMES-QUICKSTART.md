@@ -1,0 +1,140 @@
+# Hermes Quickstart
+
+This is the local-first path for using Loopgraph with Hermes Agent as the company brain.
+
+Hermes owns the conversation and all production webhook ingress. Loopgraph owns the local workspace, discovery state, validated LoopSpecs, routing contracts, durable receipts, route validation, simulation, traces, and approvals.
+
+## 1. Install and bind a project
+
+From a Loopgraph clone:
+
+```bash
+npm install
+npm run loopgraph -- workspace init --project .
+npm run loopgraph -- hermes install --project .
+npm run loopgraph -- hermes doctor --project .
+```
+
+From an installed package, use `loopgraph` instead of `npm run loopgraph --`.
+
+The install command writes project-local, non-secret Hermes artifacts under `.loopgraph/hermes/`, including `.loopgraph/hermes/install.json`. It does not connect Google Ads, HubSpot, Notion, Slack, or any other business system.
+
+Doctor also checks the project-local Hermes skill and MCP protocol versions. If it reports an incompatible contract, rerun the install command to refresh the generated skills before asking Hermes to design or route loops.
+
+## 2. Start discovery from Hermes
+
+In Hermes, start with:
+
+```text
+/loopgraph design automations for a department
+```
+
+Hermes should:
+
+1. Inspect the Loopgraph workspace through MCP.
+2. Show the canonical department list.
+3. Start or resume the shared discovery session.
+4. Ask the Loopgraph-supplied question bundles.
+5. Request high-reasoning design using the bounded `LoopDesignContext`.
+6. Submit structured proposals back to Loopgraph for validation.
+7. Explain proposals, assumptions, risks, metrics, and required user actions.
+8. Materialize only proposals you explicitly accept.
+
+The browser can resume the same session at `/discovery`; it uses the same package runtime and schemas as Hermes.
+
+## 3. Open the local graph
+
+From the clone:
+
+```bash
+npm run loopgraph -- studio --project . --start
+```
+
+Open the printed local URL and use the Hermes Brain view. After accepting the Marketing reference loops, the design graph should show:
+
+```text
+Hermes Brain -> Marketing -> Ads
+Hermes Brain -> Marketing -> Content Creation
+```
+
+Selecting a workflow node shows its goal, routing readiness, required connections, generated fixtures, latest run status, and safe local validation/simulation controls.
+
+## 4. Plan Hermes webhook routes
+
+After materializing loops:
+
+```bash
+npm run loopgraph -- hermes webhooks plan --project .
+```
+
+This derives one Hermes route family per provider source pattern, not one public webhook per loop. It also includes the dedicated `loopgraph-lifecycle-events` route for signed notification-only callbacks from Loopgraph back to Hermes. For the Marketing reference flow, Google Ads and Notion-like content events become Hermes route families that point at the `loopgraph-event-router` skill.
+
+## 5. Sync and check the local route manifest
+
+```bash
+npm run loopgraph -- hermes webhooks sync --project .
+npm run loopgraph -- hermes webhooks doctor --project .
+```
+
+Sync writes `.loopgraph/hermes-routes.json` with non-secret route metadata only, including the lifecycle callback route. It preserves unrelated external route references in sanitized form and removes stale Loopgraph-managed entries.
+
+Doctor checks whether the manifest still matches the current routing catalog. Applying those routes to real provider subscriptions remains a Hermes-owned/configured step.
+
+## 6. Rehearse an event before live webhooks
+
+Use a generated fixture or a redacted normalized event:
+
+```bash
+npm run loopgraph -- events test --project . \
+  --source google_ads* \
+  --fixture .loopgraph/generated/hermes/marketing/marketing_ads/fixtures/happy-path.json \
+  --expected-action route \
+  --expected-loop marketing_ads \
+  --require-synced-manifest
+```
+
+Equivalent Hermes-scoped aliases:
+
+```bash
+npm run loopgraph -- hermes webhooks test --project . --fixture <event.json>
+npm run loopgraph -- hermes events test --project . --fixture <event.json>
+```
+
+The fixture test:
+
+- loads only a normalized `EventEnvelope` or generated synthetic fixture;
+- verifies the source and event family match a planned Hermes route;
+- optionally requires the synced manifest to be current;
+- persists the event through Loopgraph durable ingest;
+- asks the local shadow router for a decision;
+- validates expected action and loop IDs.
+
+It does not send a real provider webhook, apply a live Hermes route, or store provider credentials.
+
+## 7. Simulate the generated loop locally
+
+The same generated fixture can run the accepted LoopSpec in local simulation mode:
+
+```bash
+npm run loopgraph -- simulate \
+  .loopgraph/generated/hermes/marketing/marketing_ads/loopgraph.yaml \
+  --fixture .loopgraph/generated/hermes/marketing/marketing_ads/fixtures/happy-path.json
+```
+
+This creates a local trace/review packet only. It does not prove that Google Ads, HubSpot, Notion, or any write connector is connected.
+
+## 8. Safe defaults
+
+- All new materialized loops start in shadow routing.
+- Local simulation uses synthetic/redacted fixtures by default.
+- No live external write can occur without connected capabilities, policy approval, and fingerprint-bound prepared actions.
+- Provider webhooks should terminate at Hermes, not at Loopgraph workflow routes.
+- Webhook secrets, OAuth tokens, and API keys stay in Hermes or an approved credential store, never in chat or `.loopgraph`.
+
+## 9. Regression coverage
+
+The package runtime includes a clean local walkthrough regression at `packages/loopgraph/src/runtime/hermes-clean-walkthrough.test.ts`. It starts from a temp project with only `package.json`, installs and doctors Hermes, verifies the restricted webhook-router MCP tool surface, completes the Marketing discovery bundles, generates and materializes Ads plus Content Creation, syncs Hermes webhook routes, rehearses the generated Ads event fixture, renders design/event graph projections, and simulates the generated Ads loop locally.
+
+For the published example catalog, see `docs/HERMES-EXAMPLES.md`. It covers the Marketing reference flow, a strict Legal / Compliance sensitive-department example, and a Custom field-ops example.
+
+For the implementation evidence map, see `docs/HERMES-COMPLETION-AUDIT.md`.

@@ -37,6 +37,41 @@ describe("buildBrainGraph", () => {
     ]);
   });
 
+  it("adapts direct Hermes Brain topology without a management layer", () => {
+    const graph = buildBrainGraph({
+      topology: topology([
+        node({ id: "company:root", type: "company", label: "Hermes Brain" }),
+        node({ id: "loop:department:marketing", type: "department_loop", label: "Marketing", loopId: "department:marketing", parentId: "company:root", department: "marketing" }),
+        node({ id: "loop:marketing_ads", type: "workflow_loop", label: "Ads", loopId: "marketing_ads", parentId: "loop:department:marketing", department: "marketing" }),
+        node({ id: "loop:marketing_content_creation", type: "workflow_loop", label: "Content Creation", loopId: "marketing_content_creation", parentId: "loop:department:marketing", department: "marketing" })
+      ], [
+        edge({ source: "company:root", target: "loop:department:marketing" }),
+        edge({ source: "loop:department:marketing", target: "loop:marketing_ads" }),
+        edge({ source: "loop:department:marketing", target: "loop:marketing_content_creation" })
+      ], {
+        brainLabel: "Hermes Brain",
+        hierarchyMode: "hermes_brain",
+        managementLoopId: "company:root"
+      }),
+      includeData: false,
+      includeMetrics: false,
+      includeReviews: false,
+      includeImprove: false
+    });
+
+    expect(graph.nodes.map((item) => item.label)).toEqual([
+      "Hermes Brain",
+      "Marketing",
+      "Ads",
+      "Content Creation"
+    ]);
+    expect(graph.edges.map((item) => item.type)).toEqual([
+      "brain_routes_to",
+      "department_contains_loop",
+      "department_contains_loop"
+    ]);
+  });
+
   it("excludes orphans and template-only workflow nodes", () => {
     const graph = buildBrainGraph({
       topology: topology([
@@ -60,6 +95,51 @@ describe("buildBrainGraph", () => {
     expect(graph.nodes.map((item) => item.id)).toContain("loop:ready");
     expect(graph.nodes.map((item) => item.id)).not.toContain("loop:orphan");
     expect(graph.nodes.map((item) => item.id)).not.toContain("loop:template");
+  });
+
+  it("shows demo catalog loops only when explicitly requested", () => {
+    const sample = topology([
+      node({ id: "company:root", type: "company", label: "Hermes Brain" }),
+      node({ id: "loop:department:marketing", type: "department_loop", label: "Marketing", department: "marketing" }),
+      node({ id: "loop:marketing_ads", type: "workflow_loop", label: "Ads", loopId: "marketing_ads", parentId: "loop:department:marketing", department: "marketing", metadata: { source: "local_spec" } }),
+      node({ id: "loop:catalog_content", type: "workflow_loop", label: "Content Template", loopId: "catalog_content", parentId: "loop:department:marketing", department: "marketing", metadata: { source: "demo_catalog", runtimeLevel: "spec_stub", templateOnly: true } })
+    ], [
+      edge({ source: "company:root", target: "loop:department:marketing" }),
+      edge({ source: "loop:department:marketing", target: "loop:marketing_ads" }),
+      edge({ source: "loop:department:marketing", target: "loop:catalog_content" })
+    ], {
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain",
+      managementLoopId: "company:root"
+    });
+    const hidden = buildBrainGraph({
+      topology: sample,
+      includeData: false,
+      includeMetrics: false,
+      includeReviews: false,
+      includeImprove: false
+    });
+    const visible = buildBrainGraph({
+      topology: sample,
+      includeCatalogLoops: true,
+      includeData: false,
+      includeMetrics: false,
+      includeReviews: false,
+      includeImprove: false
+    });
+
+    expect(hidden.nodes.map((item) => item.id)).toContain("loop:marketing_ads");
+    expect(hidden.nodes.map((item) => item.id)).not.toContain("loop:catalog_content");
+    expect(hidden.diagnostics.hiddenNodeIds).toContain("loop:catalog_content");
+    expect(visible.nodes).toContainEqual(expect.objectContaining({
+      id: "loop:catalog_content",
+      label: "Demo: Content Template",
+      subtitle: expect.stringContaining("Demo catalog")
+    }));
+    expect(visible.edges).toContainEqual(expect.objectContaining({
+      source: "loop:department:marketing",
+      target: "loop:catalog_content"
+    }));
   });
 
   it("keeps default graph smaller than the full semantic topology and adds metrics by toggle", () => {
@@ -147,14 +227,24 @@ describe("buildBrainGraph", () => {
   });
 });
 
-function topology(nodes: TopologyNode[], edges: TopologyEdge[]): SemanticTopology {
+function topology(
+  nodes: TopologyNode[],
+  edges: TopologyEdge[],
+  options: {
+    brainLabel?: string;
+    hierarchyMode?: "management" | "hermes_brain";
+    managementLoopId?: string;
+  } = {}
+): SemanticTopology {
   return {
     id: "test-topology",
     version: 1,
     rootNodeId: "company:root",
-    managementLoopId: "loop:management",
+    managementLoopId: options.managementLoopId ?? "loop:management",
     metadata: {
       companyName: "Test Company",
+      brainLabel: options.brainLabel,
+      hierarchyMode: options.hierarchyMode,
       sourceLabel: "Test",
       generatedAt: new Date(0).toISOString(),
       loopSpecCount: 1,
