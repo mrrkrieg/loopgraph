@@ -11,9 +11,9 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![GitHub stars](https://img.shields.io/github/stars/mrrkrieg/loopgraph?style=social)](https://github.com/mrrkrieg/loopgraph/stargazers)
 
-[Quickstart](#quickstart) · [How it works](#how-it-works) · [Examples](#examples) · [Documentation](#documentation) · [Contributing](#contributing)
+[Quickstart](#quickstart) · [How it works](#how-it-works) · [Department examples](#department-examples) · [Documentation](#documentation) · [Contributing](#contributing)
 
-<img src="docs/images/loopgraph-hermes-hero.jpg" alt="Hermes receives business events, selects a governed loop, passes human approval gates, and learns from the outcome" width="100%" />
+<img src="docs/images/loopgraph-hermes-company-map.png" alt="Loopgraph routes incoming company data through Hermes Brain into department-owned loops, then returns outcomes as evidence" width="100%" />
 
 </div>
 
@@ -134,7 +134,11 @@ npm run loopgraph -- events test --project . \
 
 For the full walkthrough, see the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
 
-## Marketing example
+## Department examples
+
+The same Hermes-brain pattern works across the company. Marketing is shown first; expand any other department to see its stack, proposed graph, routing decisions, and safety boundary.
+
+### Marketing — Ads + Content Creation
 
 Suppose Marketing uses Google Ads, product analytics, HubSpot, Notion, Webflow, and Slack. The team says campaign review is slow, content preparation is inconsistent, publishing and budget changes require approval, and qualified pipeline matters more than surface-level engagement.
 
@@ -157,6 +161,208 @@ The important part is not the diagram—it is the routing contract behind it:
 | Duplicate provider delivery | Repeats the same route decision | Suppress duplicate work through durable event/problem identity |
 
 The committed golden flow covers positive Ads and Content events, duplicates, no-match events, and ambiguous events that require human/context review.
+
+<details>
+<summary><strong>Sales — Lead Qualification + Follow-Up Latency</strong></summary>
+
+Suppose Sales uses Salesforce or HubSpot, Gmail, Calendar, call notes, and Slack. The team says good leads wait too long, sellers spend hours reconstructing account context, CRM records are incomplete, and every customer-facing message must remain seller-approved.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Sales
+    ├── Lead Qualification
+    └── Follow-Up Latency
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| New lead with fit, intent, account, and source evidence | Route to **Lead Qualification** | Validate the CRM event, prepare an evidence-backed score, and assign the appropriate review/queue |
+| Lead or opportunity has no next activity after the allowed follow-up window | Route to **Follow-Up Latency** | Load relationship context and prepare—not send—a personalized follow-up draft |
+| Late-stage deal is blocked by pricing, legal terms, or an executive commitment | Request seller or manager choice | Abstain from the two loops because a Close Readiness or expert-owned decision may be needed |
+| CRM retries the same update | Repeat the same route decision | Suppress duplicate work using the lead/opportunity identity and event ID |
+
+Customer-facing sends, pricing exceptions, negotiation, and commitments stay human-owned.
+
+</details>
+
+<details>
+<summary><strong>Product — Feedback Clustering + Release Learning</strong></summary>
+
+Suppose Product uses Productboard, Linear, Intercom, PostHog, Notion, and Slack. The team says feedback is fragmented, roadmap discussions start from anecdotes, release outcomes are reviewed late, and product direction must remain with the product lead.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Product
+    ├── Feedback Clustering
+    └── Release Learning
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| New feedback crosses a repeated-theme threshold with linked customer evidence | Route to **Feedback Clustering** | Group the evidence, preserve source links, and prepare a product-problem brief |
+| A release reaches its measurement window with adoption and outcome data | Route to **Release Learning** | Compare expected and observed outcomes and prepare a traceable learning review |
+| A single strategic customer asks for an immediate roadmap change | Request product-owner review | Do not treat one request as a validated cluster or change roadmap priority automatically |
+| The same feedback item arrives from a replayed sync | Repeat the same route decision | Attach no duplicate evidence and avoid opening a second problem |
+
+Loopgraph may draft evidence and tickets, but roadmap, scope, and customer-commitment changes require product-owner approval.
+
+</details>
+
+<details>
+<summary><strong>Customer Success — Customer Health + Renewal Risk</strong></summary>
+
+Suppose Customer Success uses Salesforce or HubSpot, Intercom or Zendesk, product usage analytics, billing data, Calendar, and Slack. The team says risk is discovered too late, account context is scattered, renewal preparation is reactive, and service or roadmap commitments require an accountable CSM.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Customer Success
+    ├── Customer Health
+    └── Renewal Risk
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| Usage decline, rising support severity, or sentiment change crosses the health threshold | Route to **Customer Health** | Validate account evidence and prepare a health-risk brief for the account owner |
+| Renewal window opens with commercial context and credible churn signals | Route to **Renewal Risk** | Build an intervention plan using the renewal date, relationship history, and verified risk evidence |
+| Angry support ticket has no stable account or renewal mapping | Request context or human triage | Avoid guessing between health, renewal, and ticket-escalation work |
+| Support and CRM deliver the same normalized event | Repeat the same route decision | Merge evidence into the open account problem rather than creating duplicate work |
+
+Customer messages, service credits, discounts, roadmap promises, and contractual commitments stay human-owned.
+
+</details>
+
+<details>
+<summary><strong>Engineering — GitHub Issue Triage + Release Readiness</strong></summary>
+
+Suppose Engineering uses GitHub, Linear, CI, Sentry, PagerDuty, and Slack. The team says issue triage is noisy, release checks are reconstructed manually, reviewers lack risk context, and no agent may merge, deploy, roll back, or close an incident without approval.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Engineering
+    ├── GitHub Issue Triage
+    └── Release Readiness
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| New GitHub issue includes repository, issue body, and applicable maintainer policy | Route to **GitHub Issue Triage** | Classify the issue, prepare labels or a response draft, and escalate security-sensitive evidence |
+| Release candidate is created with checks, changed files, migration state, owner, and rollback evidence | Route to **Release Readiness** | Verify the release checklist and prepare a go/no-go review packet |
+| Production incident is still active | Request incident-owner handling | Do not misroute active response work into post-incident learning or ordinary issue triage |
+| GitHub redelivers the same webhook | Repeat the same route decision | Suppress the duplicate using delivery and subject identity |
+
+Code changes, merges, deployments, rollbacks, and incident closure require accountable engineering approval.
+
+</details>
+
+<details>
+<summary><strong>Ops / Finance — Invoice Variance + Approval Bottleneck</strong></summary>
+
+Suppose Ops / Finance uses NetSuite or QuickBooks, Stripe, Bill.com, spreadsheets, a procurement system, and Slack. The team says invoice exceptions are slow to reconcile, approval queues stall without an owner, finance data is split across systems, and no automation may approve payments or budget changes.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Ops / Finance
+    ├── Invoice Variance
+    └── Approval Bottleneck
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| New invoice exceeds the configured amount, PO, quantity, tax, or vendor tolerance | Route to **Invoice Variance** | Reconcile authoritative records and prepare a variance explanation for the finance owner |
+| Approval item has exceeded its SLA with a valid owner and policy reference | Route to **Approval Bottleneck** | Prepare the missing-context summary and route an approval reminder or decision packet |
+| Event requests an immediate payment, collection action, or budget transfer | Block and request finance approval | Refuse autonomous financial commitment even when the underlying numbers are available |
+| Finance provider retries the same invoice event | Repeat the same route decision | Update the existing variance problem without creating a second case |
+
+Payments, collections, vendor commitments, budget changes, and resource allocation always require finance or leadership approval.
+
+</details>
+
+<details>
+<summary><strong>HR / Talent — Candidate Pipeline + Onboarding Progress</strong></summary>
+
+Suppose HR / Talent uses Greenhouse or Lever, an HRIS, an onboarding system, Calendar, approved documents, and Slack. The team says interview feedback goes missing, new-hire tasks slip between teams, sensitive data must be minimized, and employment decisions must never be delegated to an agent.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── HR / Talent
+    ├── Candidate Pipeline
+    └── Onboarding Progress
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| Candidate stage has stalled because approved interview feedback or a next action is missing | Route to **Candidate Pipeline** | Prepare a process-status summary and request the missing human input without ranking the person |
+| New-hire onboarding milestone is overdue with an assigned owner | Route to **Onboarding Progress** | Identify the operational gap and prepare an owner follow-up/checklist |
+| Event asks for candidate rejection, compensation, discipline, performance judgment, or inferred engagement risk | Block and route to HR | Exclude the sensitive decision from autonomous routing and require policy-reviewed human judgment |
+| ATS retries the same stage-change event | Repeat the same route decision | Suppress duplicate work against the candidate/process subject identity |
+
+Candidate ranking or rejection, compensation, performance, discipline, and other employment decisions remain fully human-owned.
+
+</details>
+
+<details>
+<summary><strong>Legal / Compliance — Contract Risk Triage + Compliance Evidence</strong></summary>
+
+Suppose Legal / Compliance uses a contract repository, Vanta or Drata, an approved policy library, access logs, a security questionnaire system, and email. The team says experts spend too much time gathering evidence, answers lack provenance, contracts arrive without structured triage, and risk acceptance must remain with qualified reviewers.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Legal / Compliance
+    ├── Contract Risk Triage
+    └── Compliance Evidence
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| Contract draft arrives with counterparty, playbook, version, and approved clause sources | Route to **Contract Risk Triage** | Extract and compare relevant clauses, then prepare an exception packet for expert review |
+| Control owner requests evidence with approved sources, freshness rules, and redaction confirmation | Route to **Compliance Evidence** | Assemble a cited evidence packet without sending an external answer |
+| Event asks Hermes to interpret law, accept risk, approve access, or change contract terms | Block and request expert review | Keep the loop in evidence-preparation mode and require legal/compliance judgment |
+| Questionnaire or contract system retries the same event | Repeat the same route decision | Reuse the existing business problem and suppress duplicate work |
+
+Legal interpretation, risk acceptance, contract changes, access approval, and external submissions require expert approval. Sensitive Legal / Compliance loops begin at stricter autonomy levels.
+
+</details>
+
+<details>
+<summary><strong>Management — Daily Operating Review + Decision Memo</strong></summary>
+
+Suppose leadership uses Loopgraph traces, OKRs, project trackers, finance dashboards, Slack, and weekly operating reviews. The team says decisions wait for context, cross-functional dependencies age silently, the same issues recur, and staffing, budget, or priority changes must remain accountable leadership decisions.
+
+Loopgraph can design two independent loops:
+
+```text
+Hermes Brain
+└── Management
+    ├── Daily Operating Review
+    └── Decision Memo
+```
+
+| Incoming problem | Hermes decision | Loopgraph response |
+|---|---|---|
+| Scheduled operating review finds open cases, stale dependencies, blocked loops, and verified metric anomalies | Route to **Daily Operating Review** | Produce a trace-supported operating summary with owners and next decisions |
+| Explicit decision request includes alternatives, evidence, accountable owner, and deadline | Route to **Decision Memo** | Prepare options, tradeoffs, unresolved assumptions, and a review packet |
+| Signal implies a staffing, budget, legal, or strategic-priority change without an accountable decision owner | Request leadership review | Abstain from changing resources or inventing authority |
+| Several departments report the same dependency | Update the existing management problem | Consolidate evidence instead of opening duplicate executive work |
+
+Management loops coordinate evidence and accountability; they do not autonomously change staffing, budget, commitments, or company priorities.
+
+</details>
+
+These examples use Loopgraph's shipped department blueprints and safety rules. The exact loops, event fields, systems, thresholds, metrics, owners, and rollout modes are generated from each company's discovery answers rather than hard-coded for every installation.
 
 ## What a loop contains
 
@@ -199,7 +405,7 @@ Real webhook secrets and provider credentials remain with Hermes or an approved 
 
 Provider secrets, OAuth tokens, and webhook signing keys stay in Hermes or an approved credential store—never in chat or committed `.loopgraph` state.
 
-## Examples
+## Runnable reference examples
 
 | Example | What it demonstrates |
 |---|---|
