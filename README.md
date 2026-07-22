@@ -412,9 +412,19 @@ Provider secrets, OAuth tokens, and webhook signing keys stay in Hermes or an ap
 | [Marketing: Ads + Content Creation](docs/HERMES-EXAMPLES.md#marketing-ads--content-creation) | Two loops in one department with distinct Hermes routing contracts |
 | [Legal / Compliance evidence review](docs/HERMES-EXAMPLES.md#sensitive-department-legal--compliance-evidence-review) | Sensitive work capped in shadow mode with expert approval and blocked actions |
 | [Custom field-ops route](docs/HERMES-EXAMPLES.md#custom-department-field-ops-custom-app-route) | A custom department using the same event-brain pattern |
+| [`examples/department-skills/product.yaml`](examples/department-skills/product.yaml) | Product feedback, discovery, spec-to-ticket, release learning, and roadmap evidence loops |
+| [`examples/department-skills/sales.yaml`](examples/department-skills/sales.yaml) | Lead qualification, pipeline forecast, close readiness, follow-up latency, and CRM hygiene |
+| [`examples/department-skills/customer-success.yaml`](examples/department-skills/customer-success.yaml) | Customer health, renewal risk, QBR prep, ticket escalation, and knowledge-base maintenance |
+| [`examples/department-skills/engineering.yaml`](examples/department-skills/engineering.yaml) | GitHub issue triage, PR review prep, incident learning, release readiness, QA, and bug clustering |
+| [`examples/department-skills/ops-finance.yaml`](examples/department-skills/ops-finance.yaml) | Approval bottlenecks, invoice variance, cash collection, forecast variance, and resource allocation |
+| [`examples/department-skills/hr-talent.yaml`](examples/department-skills/hr-talent.yaml) | Candidate pipeline, onboarding progress, performance review prep, manager coaching, and engagement risk |
+| [`examples/department-skills/legal-compliance.yaml`](examples/department-skills/legal-compliance.yaml) | Policy drift, security questionnaires, contract risk, compliance evidence, and access review |
+| [`examples/department-skills/management.yaml`](examples/department-skills/management.yaml) | Daily operating review, decision memos, anomaly detection, resource allocation, and loop governance |
+| [`examples/department-skills/marketing.yaml`](examples/department-skills/marketing.yaml) | Campaign learning, landing-page experiments, brand claim review, competitor monitoring, and SEO refresh |
 | [`examples/github-issue-triage`](examples/github-issue-triage) | Code-first validate/simulate workflow |
 | [`examples/strategic-account-escalation`](examples/strategic-account-escalation) | Management escalation and evidence handoff |
 | [`examples/support-ticket-triage`](examples/support-ticket-triage) | Support prioritization with review-aware routing |
+| [`examples/management-review`](examples/management-review) | Scheduled management review loop for operating cadence, ownership, and follow-up decisions |
 
 ## CLI at a glance
 
