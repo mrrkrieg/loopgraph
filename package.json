@@ -38,6 +38,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "audit:prod": "npm audit --omit=dev",
     "build:package": "npm run build -w loopgraph",
     "loopgraph": "tsx packages/loopgraph/src/cli/index.ts",
     "loopgraph:studio": "tsx scripts/loopgraph-studio.ts",
@@ -77,6 +78,11 @@
     "vitest": "^3.2.6"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "esbuild": "^0.28.1",
+    "postcss": "^8.5.10",
+    "sharp": "^0.35.3",
+    "tsup": {
+      "esbuild": "^0.28.1"
+    }
   }
 }

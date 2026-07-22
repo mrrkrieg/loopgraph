@@ -48,10 +48,14 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.32",
+    "esbuild": "^0.28.1",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
     "vitest": "^3.2.6",
     "yaml": "^2.9.0",
     "zod": "^3.25.67"
+  },
+  "overrides": {
+    "esbuild": "^0.28.1"
   }
 }

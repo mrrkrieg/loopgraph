@@ -13,7 +13,8 @@ import {
   HERMES_LOOPGRAPH_MCP_TOOL_NAMES,
   HERMES_LOOPGRAPH_PROTOCOL_VERSIONS,
   HERMES_LOOPGRAPH_SKILL_VERSION,
-  installHermesIntegration
+  installHermesIntegration,
+  setupHermesIntegration
 } from "./hermes-install";
 
 async function temporaryProjectRoot(): Promise<string> {
@@ -278,6 +279,74 @@ describe("Hermes integration installer", () => {
     });
   });
 
+  it("runs guided setup as the smooth Hermes onboarding path", async () => {
+    const projectRoot = await temporaryProjectRoot();
+    const cliEntryPath = path.join(projectRoot, "dist", "cli.js");
+
+    const result = await setupHermesIntegration({
+      projectRoot,
+      cliEntryPath,
+      nodeCommand: process.execPath,
+      hermesVersionCheck: async () => "hermes 1.0.0",
+      now: new Date("2026-07-21T12:00:00.000Z")
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      localReady: true,
+      hermesReady: true,
+      projectRoot,
+      hermesConfig: {
+        generatedSnippetPath: path.join(projectRoot, ".loopgraph", "hermes", "mcp.loopgraph.yaml"),
+        targetConfigPath: "~/.hermes/config.yaml",
+        skillsDir: path.join(projectRoot, ".loopgraph", "hermes", "skills")
+      },
+      commandUsage: {
+        fromClone: {
+          setup: "npm run loopgraph -- hermes setup --project .",
+          doctor: "npm run loopgraph -- hermes doctor --project .",
+          studio: "npm run loopgraph -- studio --project . --start",
+          webhooksPlan: "npm run loopgraph -- hermes webhooks plan --project .",
+          webhooksSync: "npm run loopgraph -- hermes webhooks sync --project .",
+          webhooksDoctor: "npm run loopgraph -- hermes webhooks doctor --project .",
+          eventTest: "npm run loopgraph -- events test --project . --fixture <event.json> --require-synced-manifest"
+        },
+        fromInstalledPackage: {
+          setup: "loopgraph hermes setup --project ."
+        },
+        firstHermesPrompt: "/loopgraph design automations for a department"
+      },
+      warnings: []
+    });
+    expect(result.install.mcpServer).toMatchObject({
+      name: "loopgraph",
+      command: process.execPath,
+      args: [cliEntryPath, "mcp", "serve", "--project", projectRoot]
+    });
+    expect(result.doctor.ok).toBe(true);
+    expect(result.nextSteps).toContain("Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.");
+    expect(result.nextSteps).toContain("After accepting loops, plan and sync Hermes webhook route metadata from Loopgraph.");
+    expect(result.safety).toContain("Provider webhooks should terminate at Hermes. Loopgraph receives normalized events through the Hermes event-router skill.");
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("api_key");
+    expect(JSON.stringify(result).toLowerCase()).not.toContain("secret_value");
+  });
+
+  it("keeps setup local-ready while warning when the Hermes CLI is not installed", async () => {
+    const projectRoot = await temporaryProjectRoot();
+
+    const result = await setupHermesIntegration({
+      projectRoot,
+      cliEntryPath: path.join(projectRoot, "dist", "cli.js"),
+      nodeCommand: process.execPath,
+      hermesVersionCheck: async () => null
+    });
+
+    expect(result.localReady).toBe(true);
+    expect(result.hermesReady).toBe(false);
+    expect(result.warnings).toContain("Hermes CLI was not found on PATH; install Hermes before using the generated config.");
+    expect(result.nextSteps[0]).toBe("Install Hermes Agent, then confirm `hermes --version` works before starting the first Loopgraph prompt.");
+  });
+
   it("reports stale Hermes skill or schema contracts as incompatible", async () => {
     const projectRoot = await temporaryProjectRoot();
     await installHermesIntegration({
@@ -325,7 +394,7 @@ describe("Hermes integration installer", () => {
       ok: false
     }));
     expect(result.warnings).toContain(
-      `Hermes integration metadata is incompatible; run \`loopgraph hermes install --project ${JSON.stringify(projectRoot)}\` to refresh the project-local skills and MCP contract.`
+      `Hermes integration metadata is incompatible; run \`loopgraph hermes setup --project ${JSON.stringify(projectRoot)}\` to refresh the project-local skills and MCP contract.`
     );
 
     const afterDoctor = await readJsonFile(installStatePath);
@@ -351,7 +420,7 @@ describe("Hermes integration installer", () => {
     expect(result.mcp.workspaceOk).toBe(true);
     expect(result.mcp.workspaceExists).toBe(false);
     expect(result.mcp.catalogOk).toBe(true);
-    expect(result.warnings).toContain("Project-local Hermes integration artifacts are incomplete; run `loopgraph hermes install --project <root>`.");
+    expect(result.warnings).toContain("Project-local Hermes integration artifacts are incomplete; run `loopgraph hermes setup --project <root>`.");
     expect(result.artifacts.every((artifact) => artifact.exists)).toBe(false);
   });
 });

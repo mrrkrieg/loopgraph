@@ -21,7 +21,9 @@ import { normalizeLoopgraphMcpExposure, runLoopgraphMcpStdioServer } from "../mc
 import {
   doctorHermesIntegration,
   installHermesIntegration,
-  type HermesInstallScope
+  setupHermesIntegration,
+  type HermesInstallScope,
+  type HermesSetupResult
 } from "../runtime/hermes-install";
 import {
   doctorHermesWebhookRoutes,
@@ -79,6 +81,22 @@ const program = new Command();
 const storage = getStorageAdapter({ rootDir: getLoopgraphRoot(process.cwd()) });
 
 program.name("loopgraph").description("Loopgraph validate/simulate CLI");
+
+async function runHermesSetup(options: { project: string; scope: string; json?: boolean }): Promise<void> {
+  const scope = parseHermesScope(options.scope);
+  const result = await setupHermesIntegration({
+    projectRoot: path.resolve(options.project),
+    scope,
+    cliEntryPath: cliEntryFile,
+    nodeCommand: process.execPath
+  });
+  if (options.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    printHermesSetupResult(result);
+  }
+  if (!result.localReady) process.exit(1);
+}
 
 async function runHermesInstall(options: { project: string; scope: string }): Promise<void> {
   const scope = parseHermesScope(options.scope);
@@ -185,6 +203,16 @@ const hermes = program.command("hermes").description("Hermes integration utiliti
 const hermesWebhooks = hermes.command("webhooks").description("Hermes webhook gateway route planning");
 const hermesEvents = hermes.command("events").description("Hermes durable event utilities");
 const hermesRouting = hermes.command("routing").description("Hermes local routing tests");
+
+hermes
+  .command("setup")
+  .description("Initialize, install, and check the project-local Hermes Brain integration")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--scope <scope>", "Install scope (project)", "project")
+  .option("--json", "Print the setup result as JSON")
+  .action(async (options: { project: string; scope: string; json?: boolean }) => {
+    await runHermesSetup(options);
+  });
 
 hermes
   .command("install")
@@ -753,6 +781,42 @@ async function readRoutingEvaluationFixtures(filePath: string): Promise<RoutingE
     return parsed.fixtures as RoutingEvaluationFixtureInput[];
   }
   throw new Error("Routing evaluation fixtures file must be a JSON array or an object with a fixtures array.");
+}
+
+function printHermesSetupResult(result: HermesSetupResult): void {
+  console.log("Loopgraph Hermes setup complete");
+  console.log(`Project: ${result.projectRoot}`);
+  console.log(`Local Loopgraph contract: ${result.localReady ? "ready" : "needs attention"}`);
+  console.log(`Hermes CLI: ${result.doctor.hermesAvailable ? result.doctor.hermesVersion ?? "available" : "not detected on PATH"}`);
+  console.log("");
+  console.log("Generated local files");
+  console.log(`- Install state: ${result.install.installStatePath}`);
+  console.log(`- Hermes MCP snippet: ${result.hermesConfig.generatedSnippetPath}`);
+  console.log(`- Hermes skills directory: ${result.hermesConfig.skillsDir}`);
+  console.log("");
+  console.log("Connect Hermes");
+  console.log(`1. Merge the snippet into ${result.hermesConfig.targetConfigPath}.`);
+  console.log("2. Confirm Hermes loads the Loopgraph MCP server named `loopgraph`.");
+  console.log(`3. In Hermes, run: ${result.commandUsage.firstHermesPrompt}`);
+  console.log("");
+  console.log("Useful clone commands");
+  console.log(`- Re-check setup: ${result.commandUsage.fromClone.doctor}`);
+  console.log(`- Open local graph: ${result.commandUsage.fromClone.studio}`);
+  console.log(`- Plan webhook routes: ${result.commandUsage.fromClone.webhooksPlan}`);
+  console.log(`- Sync route manifest: ${result.commandUsage.fromClone.webhooksSync}`);
+  console.log(`- Test a normalized fixture: ${result.commandUsage.fromClone.eventTest}`);
+  console.log("");
+  console.log("Safety boundary");
+  for (const item of result.safety) {
+    console.log(`- ${item}`);
+  }
+  if (result.warnings.length > 0) {
+    console.log("");
+    console.log("Warnings");
+    for (const warning of result.warnings) {
+      console.log(`- ${warning}`);
+    }
+  }
 }
 
 function printStudioPlan(plan: LoopgraphStudioPlan): void {
