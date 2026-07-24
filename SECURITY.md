@@ -33,7 +33,9 @@ npm run audit:prod
 
 Treat production dependency audit findings as blockers for live credentials. It is acceptable to use local discovery, generated loop design, redacted fixtures, and simulation while remediating audit findings because those flows do not store provider secrets or perform live external writes.
 
-Avoid `npm audit fix --force` unless you have reviewed the dependency graph and tested the resulting app/runtime. Forced fixes can downgrade major framework versions or change transitive runtime behavior.
+`npm install` and plain `npm audit` include developer-only lint/build tooling. Those findings still matter for contributor machines, but they are separate from the live-credential gate because they are not part of the shipped Loopgraph/Hermes runtime path.
+
+Avoid `npm audit fix --force` unless you have reviewed the dependency graph and tested the resulting app/runtime. Forced fixes can downgrade major framework versions, break the lint toolchain, or change transitive runtime behavior.
 
 ## Generated files and secrets
 

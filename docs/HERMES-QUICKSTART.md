@@ -21,10 +21,13 @@ Clone Loopgraph into a normal local folder:
 ```bash
 git clone https://github.com/mrrkrieg/loopgraph.git
 cd loopgraph
-npm ci
+npm ci --no-audit
+npm run audit:prod
 ```
 
 Use `npm run loopgraph --` from this repository clone. Do not use `npx loopgraph` for this quickstart unless you have confirmed the published package version includes the Hermes commands; older npm-published CLI builds may not expose `hermes setup`, `workspace inspect`, or the event-routing commands.
+
+`npm install` runs npm's full audit, including developer-only lint/build tooling. If you see dev-tooling findings there, do not connect live credentials until `npm run audit:prod` is clean; use the full audit output as a contributor backlog, not as the Hermes live-use gate.
 
 ## 2. Run the guided Hermes setup
 
@@ -203,6 +206,8 @@ npm run audit:prod
 ```
 
 Treat production audit findings as blockers for live credentials. The local setup and fixture simulation path is still useful for design work because it does not store provider secrets and does not perform live external writes.
+
+The full `npm audit` command also includes developer tooling such as ESLint and tsup. Do not run `npm audit fix --force` blindly; npm currently proposes breaking lint-toolchain changes for some dev-only findings.
 
 ## 13. Regression coverage
 
