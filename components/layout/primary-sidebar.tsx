@@ -12,12 +12,20 @@ export const primaryNav = [
   { href: "/daily", label: "Daily", description: "Operating summary" }
 ] as const;
 
+const previewNav = {
+  href: "/paper/loop-graph-engineering",
+  label: "Paper",
+  description: "Loop Graph Engineering"
+} as const;
+
 export function PrimarySidebar({
   isCollapsed,
-  onToggle
+  onToggle,
+  showPreviewFeatures
 }: {
   isCollapsed: boolean;
   onToggle: () => void;
+  showPreviewFeatures: boolean;
 }) {
   const pathname = usePathname();
 
@@ -89,6 +97,30 @@ export function PrimarySidebar({
           );
         })}
       </nav>
+      {showPreviewFeatures ? (
+        <nav
+          aria-label="Preview"
+          className={`mt-5 border-t border-line pt-5 ${isCollapsed ? "" : "px-0"}`}
+        >
+          <Link
+            aria-label={isCollapsed ? previewNav.label : undefined}
+            className={`group block rounded-md text-sm font-medium text-ink/75 hover:bg-ink hover:text-white focus:bg-ink focus:text-white ${
+              isCollapsed ? "px-2 py-2 text-center" : "px-3 py-2"
+            } ${
+              pathname.startsWith(previewNav.href) ? "bg-paper text-ink" : ""
+            }`}
+            href={previewNav.href}
+            title={isCollapsed ? previewNav.label : undefined}
+          >
+            {isCollapsed ? previewNav.label.slice(0, 1) : previewNav.label}
+            {!isCollapsed ? (
+              <span className="mt-0.5 block text-xs font-normal text-ink/45 group-hover:text-white/75 group-focus:text-white/75">
+                {previewNav.description}
+              </span>
+            ) : null}
+          </Link>
+        </nav>
+      ) : null}
     </aside>
   );
 }
