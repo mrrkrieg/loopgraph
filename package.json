@@ -51,7 +51,7 @@
     "commander": "^15.0.0",
     "dotenv": "^17.4.2",
     "elkjs": "^0.11.1",
-    "next": "^15.3.4",
+    "next": "^15.5.21",
     "openai": "^5.8.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -70,7 +70,7 @@
     "eslint-config-next": "^15.3.4",
     "jsdom": "^27.0.1",
     "playwright": "^1.61.1",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.23",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.22.4",
     "typescript": "^5.8.3",
@@ -79,7 +79,7 @@
   },
   "overrides": {
     "esbuild": "^0.28.1",
-    "postcss": "^8.5.10",
+    "postcss": "^8.5.23",
     "sharp": "^0.35.3",
     "tsup": {
       "esbuild": "^0.28.1"

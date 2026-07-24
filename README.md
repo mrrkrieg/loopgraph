@@ -86,11 +86,14 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 ```bash
 git clone https://github.com/mrrkrieg/loopgraph.git
 cd loopgraph
-npm ci
+npm ci --no-audit
+npm run audit:prod
 npm run loopgraph -- hermes setup --project .
 ```
 
 Use `npm run loopgraph --` from a repository clone. The same commands work as `loopgraph ...` once you are using a published package that includes the Hermes commands.
+
+`npm install` runs npm's full audit, including local lint/build tooling. For the live-credential safety gate, use `npm run audit:prod`; it checks the packages that ship into production use.
 
 The setup command initializes the local workspace, writes the project-local Hermes skill/MCP files, runs doctor checks, and prints the exact next actions.
 
