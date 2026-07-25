@@ -65,12 +65,12 @@ body {
 
 .paper-article {
   margin: 1.5rem auto 5rem;
-  max-width: 64rem;
+  max-width: 56rem;
 }
 
 .paper-article__header {
   margin: 0 auto 2.75rem;
-  max-width: 64rem;
+  max-width: 100%;
   text-align: center;
 }
 
@@ -84,7 +84,7 @@ body {
 
 .paper-article__header > p {
   margin: 1.5rem auto 0;
-  max-width: 42rem;
+  max-width: 100%;
   color: rgb(17 17 17 / 65%);
   font-size: clamp(1.05rem, 2vw, 1.3rem);
   line-height: 1.55;
@@ -106,7 +106,7 @@ body {
 
 .paper-article__body {
   margin: 0 auto;
-  max-width: 46rem;
+  max-width: 100%;
 }
 
 .paper-article__body > p,
@@ -128,7 +128,7 @@ body {
 }
 
 .paper-article__body h2 {
-  margin: 5.5rem -4rem 1.5rem;
+  margin: 5.5rem 0 1.5rem;
   color: #173d34;
   font-size: clamp(2rem, 4.25vw, 3.75rem);
   font-weight: 740;
@@ -138,10 +138,10 @@ body {
 }
 
 .paper-article__body strong {
-  color: #111111;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  font-size: 0.95em;
-  font-weight: 720;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
 }
 
 .paper-article__body em {
@@ -182,7 +182,7 @@ body {
 }
 
 .paper-article__body blockquote {
-  margin: 3.25rem -3.5rem;
+  margin: 3.25rem 0;
   border-left: 0.35rem solid #f97316;
   background: #fbe2d2;
   padding: 1.55rem 2rem;
@@ -197,7 +197,7 @@ body {
 }
 
 .paper-article__body pre {
-  margin: 1.6rem -1.5rem;
+  margin: 1.6rem 0;
   overflow-x: auto;
   border: 1px solid #b9ccc4;
   border-radius: 0.45rem;
@@ -234,7 +234,7 @@ body {
 }
 
 .paper-article__figure {
-  margin: 4rem -8rem 4.5rem;
+  margin: 4rem 0 4.5rem;
 }
 
 .paper-article__figure:first-of-type {
@@ -265,7 +265,7 @@ body {
   justify-content: space-between;
   gap: 2rem;
   margin: 5rem auto 0;
-  max-width: 56rem;
+  max-width: 100%;
   border-top: 1px solid #dedbd2;
   padding-top: 2rem;
 }
@@ -296,16 +296,6 @@ body {
 .paper-article__footer a:hover {
   border-color: #f97316;
   color: #c2410c;
-}
-
-@media (max-width: 1024px) {
-  .paper-article__body h2,
-  .paper-article__body blockquote,
-  .paper-article__body pre,
-  .paper-article__figure {
-    margin-left: 0;
-    margin-right: 0;
-  }
 }
 
 @media (max-width: 640px) {
@@ -352,7 +342,7 @@ body {
   }
 
   .paper-article__figure {
-    margin: 2.75rem -1.25rem 3.25rem;
+    margin: 2.75rem 0 3.25rem;
   }
 
   .paper-article__figure figcaption {
