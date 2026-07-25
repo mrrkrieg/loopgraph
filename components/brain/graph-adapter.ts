@@ -23,6 +23,197 @@ import type {
 } from "./graph-types";
 
 const MAX_DEFAULT_WORKFLOW_LOOPS = 30;
+const MAX_WORKFLOW_LOOPS_PER_DEPARTMENT = 3;
+
+const departmentSortOrder = [
+  "product",
+  "marketing",
+  "sales",
+  "customer_success",
+  "engineering",
+  "operations_finance",
+  "legal_security",
+  "hr",
+  "management",
+  "custom"
+] as const;
+
+type PreviewStoryNodeDefinition = {
+  id: string;
+  type: Extract<BrainNodeType, "data" | "metric" | "review" | "improvement" | "trace">;
+  label: string;
+  subtitle: string;
+  purpose: string;
+  order: number;
+  departmentId?: string;
+  sourceWorkflowLabel?: string;
+};
+
+const previewIncomingSignals: PreviewStoryNodeDefinition[] = [
+  {
+    id: "preview:data:product-analytics",
+    type: "data",
+    label: "Product events",
+    subtitle: "usage, activation, retention",
+    purpose: "Product usage events arrive at Hermes so it can decide whether Product, Marketing, CS, or another loop owns the next action.",
+    order: 1
+  },
+  {
+    id: "preview:data:crm",
+    type: "data",
+    label: "CRM signals",
+    subtitle: "pipeline, accounts, ARR",
+    purpose: "CRM state tells Hermes whether a problem belongs to Sales, Customer Success, Finance, or Management.",
+    order: 2
+  },
+  {
+    id: "preview:data:support",
+    type: "data",
+    label: "Support tickets",
+    subtitle: "pain, sentiment, urgency",
+    purpose: "Support volume and customer language become routing evidence for CS, Product, Engineering, or Legal/Security loops.",
+    order: 3
+  },
+  {
+    id: "preview:data:ads",
+    type: "data",
+    label: "Ad platforms",
+    subtitle: "spend, CAC, creative fatigue",
+    purpose: "Campaign anomalies reach Hermes first; Hermes routes only well-supported marketing problems into Ads or Content loops.",
+    order: 4
+  },
+  {
+    id: "preview:data:website",
+    type: "data",
+    label: "Website",
+    subtitle: "forms, conversion, source",
+    purpose: "Website events give Hermes enough context to avoid guessing between Marketing, Sales, and Product work.",
+    order: 5
+  },
+  {
+    id: "preview:data:billing",
+    type: "data",
+    label: "Billing",
+    subtitle: "invoices, spend, renewals",
+    purpose: "Billing and spend events route into Finance/Ops loops when money, approvals, or collections need attention.",
+    order: 6
+  },
+  {
+    id: "preview:data:incidents",
+    type: "data",
+    label: "Incidents",
+    subtitle: "alerts, impact, timeline",
+    purpose: "Incident events route into Engineering or Legal/Security loops with evidence instead of loose Slack escalation.",
+    order: 7
+  },
+  {
+    id: "preview:data:docs",
+    type: "data",
+    label: "Docs + notes",
+    subtitle: "briefs, policies, decisions",
+    purpose: "Documents provide trusted context so Hermes can ground loop decisions in source material.",
+    order: 8
+  },
+  {
+    id: "preview:data:email-calendar",
+    type: "data",
+    label: "Email + calendar",
+    subtitle: "commitments, meetings, owners",
+    purpose: "Email and calendar signals help Hermes find missing follow-up, owner handoffs, and review gates.",
+    order: 9
+  },
+  {
+    id: "preview:data:warehouse",
+    type: "data",
+    label: "Warehouse",
+    subtitle: "metrics, cohorts, forecasts",
+    purpose: "Warehouse metrics let Hermes compare each loop's work against business outcomes, not only activity.",
+    order: 10
+  }
+];
+
+const previewEvidenceReturns: PreviewStoryNodeDefinition[] = [
+  {
+    id: "preview:evidence:product",
+    type: "metric",
+    label: "Product learning",
+    subtitle: "adoption + feedback evidence",
+    purpose: "Product loop outcomes return as learning evidence for future roadmap and release decisions.",
+    order: 1,
+    departmentId: "product",
+    sourceWorkflowLabel: "Release Learning Loop"
+  },
+  {
+    id: "preview:evidence:marketing",
+    type: "metric",
+    label: "Pipeline quality",
+    subtitle: "qualified pipeline, CAC, activation",
+    purpose: "Marketing loop outcomes return as evidence about which channels and messages create qualified customers.",
+    order: 2,
+    departmentId: "marketing",
+    sourceWorkflowLabel: "Campaign Learning Loop"
+  },
+  {
+    id: "preview:evidence:sales",
+    type: "metric",
+    label: "Deal movement",
+    subtitle: "stage age, next step, risk",
+    purpose: "Sales loop outcomes return as evidence about which opportunities moved and which risks still need owners.",
+    order: 3,
+    departmentId: "sales",
+    sourceWorkflowLabel: "Deal Risk Loop"
+  },
+  {
+    id: "preview:evidence:cs",
+    type: "review",
+    label: "Customer health",
+    subtitle: "risk, sentiment, renewal context",
+    purpose: "Customer Success loop outcomes return as reviewed evidence about accounts needing human relationship work.",
+    order: 4,
+    departmentId: "customer_success",
+    sourceWorkflowLabel: "Customer Health Risk Loop"
+  },
+  {
+    id: "preview:evidence:engineering",
+    type: "improvement",
+    label: "Incident learning",
+    subtitle: "root cause + prevention item",
+    purpose: "Engineering loop outcomes return as prevention work instead of repeated incident babysitting.",
+    order: 5,
+    departmentId: "engineering",
+    sourceWorkflowLabel: "Incident Learning Loop"
+  },
+  {
+    id: "preview:evidence:finance",
+    type: "metric",
+    label: "Forecast variance",
+    subtitle: "cash, spend, approvals",
+    purpose: "Finance/Ops loop outcomes return as auditable evidence for forecast and approval decisions.",
+    order: 6,
+    departmentId: "operations_finance",
+    sourceWorkflowLabel: "Forecast Variance Loop"
+  },
+  {
+    id: "preview:evidence:legal",
+    type: "review",
+    label: "Risk packet",
+    subtitle: "citation-backed review",
+    purpose: "Legal/Security loop outcomes return as reviewed evidence for sensitive approvals and audit trails.",
+    order: 7,
+    departmentId: "legal_security",
+    sourceWorkflowLabel: "Incident Evidence Loop"
+  },
+  {
+    id: "preview:evidence:hr",
+    type: "review",
+    label: "People review",
+    subtitle: "privacy-safe human judgment",
+    purpose: "HR loop outcomes return as human-reviewed evidence, never as unchecked automated people decisions.",
+    order: 8,
+    departmentId: "hr",
+    sourceWorkflowLabel: "Retention Signal Loop"
+  }
+];
 
 const structureTypes = new Set<TopologyNodeType>([
   "company",
@@ -59,9 +250,10 @@ export function buildBrainGraph(input: BrainGraphAdapterInput): BrainGraph {
   const structuralNodeIds = new Set(structuralNodes.map((node) => node.id));
   const nodes: BrainGraphNode[] = [];
   const nodeIds = new Set<string>();
+  const mapOptions = { previewStory: Boolean(input.previewStory) };
 
   for (const node of structuralNodes) {
-    const mapped = mapTopologyNode(node);
+    const mapped = mapTopologyNode(node, mapOptions);
     if (!mapped) {
       diagnostics.hiddenNodeIds.push(node.id);
       continue;
@@ -83,7 +275,7 @@ export function buildBrainGraph(input: BrainGraphAdapterInput): BrainGraph {
       diagnostics.hiddenNodeIds.push(node.id);
       continue;
     }
-    const mapped = mapTopologyNode(node);
+    const mapped = mapTopologyNode(node, mapOptions);
     if (!mapped) {
       diagnostics.hiddenNodeIds.push(node.id);
       continue;
@@ -97,8 +289,12 @@ export function buildBrainGraph(input: BrainGraphAdapterInput): BrainGraph {
     return mapped ? [mapped] : [];
   });
 
-  diagnostics.visibleNodeCount = nodes.length;
+  if (input.previewStory) {
+    addPreviewStoryLayer({ input, nodes, edges, nodeIds });
+  }
+
   addRollupMetadata(nodes, edges);
+  diagnostics.visibleNodeCount = nodes.length;
 
   return {
     nodes,
@@ -178,11 +374,7 @@ function selectStructuralNodes(
   const selectedWorkflow = selectedNodeId
     ? workflowNodes.find((node) => node.id === selectedNodeId)
     : undefined;
-  const cappedWorkflowNodes = workflowNodes.slice(0, MAX_DEFAULT_WORKFLOW_LOOPS);
-
-  if (selectedWorkflow && !cappedWorkflowNodes.some((node) => node.id === selectedWorkflow.id)) {
-    cappedWorkflowNodes.splice(Math.max(cappedWorkflowNodes.length - 1, 0), 1, selectedWorkflow);
-  }
+  const cappedWorkflowNodes = capWorkflowNodesByDepartment(workflowNodes, selectedWorkflow);
 
   for (const node of topology.nodes) {
     if (!structureTypes.has(node.type)) {
@@ -193,8 +385,8 @@ function selectStructuralNodes(
     }
   }
 
-  for (const node of workflowNodes.slice(MAX_DEFAULT_WORKFLOW_LOOPS)) {
-    if (node.id !== selectedWorkflow?.id) {
+  for (const node of workflowNodes) {
+    if (!cappedWorkflowNodes.some((visibleNode) => visibleNode.id === node.id) && node.id !== selectedWorkflow?.id) {
       diagnostics.hiddenNodeIds.push(node.id);
     }
   }
@@ -207,7 +399,46 @@ function selectStructuralNodes(
   ];
 }
 
-function mapTopologyNode(node: TopologyNode): BrainGraphNode | null {
+function capWorkflowNodesByDepartment(
+  workflowNodes: TopologyNode[],
+  selectedWorkflow: TopologyNode | undefined
+) {
+  const capped: TopologyNode[] = [];
+  const countsByDepartment = new Map<string, number>();
+
+  for (const node of workflowNodes) {
+    const department = node.department ?? node.parentId ?? "unassigned";
+    const count = countsByDepartment.get(department) ?? 0;
+
+    if (count >= MAX_WORKFLOW_LOOPS_PER_DEPARTMENT || capped.length >= MAX_DEFAULT_WORKFLOW_LOOPS) {
+      continue;
+    }
+
+    capped.push(node);
+    countsByDepartment.set(department, count + 1);
+  }
+
+  if (selectedWorkflow && !capped.some((node) => node.id === selectedWorkflow.id)) {
+    let sameDepartmentIndex = -1;
+    for (let index = capped.length - 1; index >= 0; index -= 1) {
+      if (capped[index].department === selectedWorkflow.department) {
+        sameDepartmentIndex = index;
+        break;
+      }
+    }
+    const replacementIndex = sameDepartmentIndex >= 0
+      ? sameDepartmentIndex
+      : Math.max(capped.length - 1, 0);
+    capped.splice(replacementIndex, capped.length > 0 ? 1 : 0, selectedWorkflow);
+  }
+
+  return capped;
+}
+
+function mapTopologyNode(
+  node: TopologyNode,
+  options: { previewStory?: boolean } = {}
+): BrainGraphNode | null {
   const type = mapNodeType(node.type);
   if (!type) {
     return null;
@@ -223,8 +454,8 @@ function mapTopologyNode(node: TopologyNode): BrainGraphNode | null {
   return {
     id: node.id,
     type,
-    label: isDemoCatalog && type === "workflow_loop" ? `Demo: ${node.label}` : node.label,
-    subtitle: isDemoCatalog ? [runtimeLabel(runtimeLevel), node.subtitle].filter(Boolean).join(" · ") : node.subtitle,
+    label: isDemoCatalog && type === "workflow_loop" && !options.previewStory ? `Demo: ${node.label}` : node.label,
+    subtitle: isDemoCatalog ? [runtimeLabel(runtimeLevel, options.previewStory), node.subtitle].filter(Boolean).join(" · ") : node.subtitle,
     purpose: node.description ?? node.subtitle,
     loopId: node.loopId,
     departmentId: node.department,
@@ -247,12 +478,160 @@ function mapTopologyNode(node: TopologyNode): BrainGraphNode | null {
   };
 }
 
-function runtimeLabel(runtimeLevel: string | undefined): string | undefined {
+function runtimeLabel(runtimeLevel: string | undefined, previewStory = false): string | undefined {
   if (!runtimeLevel) return undefined;
+  if (previewStory) {
+    if (runtimeLevel === "runnable") return "Runnable example";
+    if (runtimeLevel === "spec_stub") return "Spec example";
+    if (runtimeLevel === "catalog") return "Template";
+    return runtimeLevel.replace(/_/g, " ");
+  }
   if (runtimeLevel === "runnable") return "Demo catalog · runnable";
   if (runtimeLevel === "spec_stub") return "Demo catalog · spec stub";
   if (runtimeLevel === "catalog") return "Demo catalog";
   return `Demo catalog · ${runtimeLevel}`;
+}
+
+function addPreviewStoryLayer({
+  input,
+  nodes,
+  edges,
+  nodeIds
+}: {
+  input: BrainGraphAdapterInput;
+  nodes: BrainGraphNode[];
+  edges: BrainGraphEdge[];
+  nodeIds: Set<string>;
+}) {
+  const company = nodes.find((node) => node.type === "company_brain") ?? nodes[0];
+  if (!company) {
+    return;
+  }
+
+  if (input.includeData) {
+    for (const signal of previewIncomingSignals) {
+      addPreviewNode(nodes, nodeIds, signal, "incoming_signal");
+      edges.push(styledEdge({
+        id: `${signal.id}->${company.id}`,
+        source: signal.id,
+        target: company.id,
+        type: "loop_observes_data",
+        label: "business event"
+      }));
+    }
+  }
+
+  if (!input.includeMetrics && !input.includeReviews && !input.includeImprove) {
+    return;
+  }
+
+  const visibleEvidence = previewEvidenceReturns.filter((item) => {
+    if (item.type === "metric") return input.includeMetrics;
+    if (item.type === "review") return input.includeReviews;
+    if (item.type === "improvement" || item.type === "trace") return input.includeImprove;
+    return true;
+  });
+  const workflowNodes = nodes.filter((node) => node.type === "workflow_loop");
+
+  for (const outcome of visibleEvidence) {
+    const sourceWorkflow = findPreviewEvidenceSource(workflowNodes, outcome);
+    addPreviewNode(nodes, nodeIds, outcome, "evidence_outcome");
+
+    if (sourceWorkflow) {
+      edges.push(styledEdge({
+        id: `${sourceWorkflow.id}->${outcome.id}`,
+        source: sourceWorkflow.id,
+        target: outcome.id,
+        type: edgeTypeForPreviewOutcome(outcome.type),
+        label: "outcome"
+      }));
+    }
+
+    edges.push(styledEdge({
+      id: `${outcome.id}->${company.id}`,
+      source: outcome.id,
+      target: company.id,
+      type: "loop_learns_from_trace",
+      label: "evidence returns",
+      dashed: true
+    }));
+  }
+}
+
+function addPreviewNode(
+  nodes: BrainGraphNode[],
+  nodeIds: Set<string>,
+  definition: PreviewStoryNodeDefinition,
+  role: "incoming_signal" | "evidence_outcome"
+) {
+  if (nodeIds.has(definition.id)) {
+    return;
+  }
+
+  const style = nodeTypeStyles[definition.type];
+  nodes.push({
+    id: definition.id,
+    type: definition.type,
+    label: definition.label,
+    subtitle: definition.subtitle,
+    purpose: definition.purpose,
+    departmentId: definition.departmentId,
+    status: "ready",
+    health: 82,
+    radius: definition.type === "data" ? 22 : 24,
+    color: style.color,
+    stroke: definition.departmentId ? nodeColorForDepartment(definition.departmentId) : style.stroke,
+    metadata: {
+      previewStory: true,
+      previewRole: role,
+      previewOrder: definition.order,
+      fullLabel: definition.label
+    }
+  });
+  nodeIds.add(definition.id);
+}
+
+function findPreviewEvidenceSource(
+  workflowNodes: BrainGraphNode[],
+  outcome: PreviewStoryNodeDefinition
+) {
+  const departmentWorkflows = workflowNodes.filter((node) => node.departmentId === outcome.departmentId);
+  return (
+    departmentWorkflows.find((node) => node.label === outcome.sourceWorkflowLabel) ??
+    departmentWorkflows[0] ??
+    workflowNodes[0]
+  );
+}
+
+function edgeTypeForPreviewOutcome(type: PreviewStoryNodeDefinition["type"]): BrainEdgeType {
+  if (type === "metric") return "loop_updates_metric";
+  if (type === "review") return "loop_requires_review";
+  return "loop_learns_from_trace";
+}
+
+function styledEdge(input: {
+  id: string;
+  source: string;
+  target: string;
+  type: BrainEdgeType;
+  label?: string;
+  dashed?: boolean;
+}): BrainGraphEdge {
+  const style = edgeTypeStyles[input.type];
+
+  return {
+    id: input.id,
+    source: input.source,
+    target: input.target,
+    type: input.type,
+    label: input.label,
+    semantic: true,
+    executable: false,
+    width: style.width,
+    color: style.color,
+    opacity: style.opacity,
+    dashed: input.dashed ?? style.dashed
+  };
 }
 
 function mapTopologyEdge(
@@ -438,7 +817,16 @@ function byWorkflowPriority(left: TopologyNode, right: TopologyNode) {
 }
 
 function byDepartmentThenLabel(left: TopologyNode, right: TopologyNode) {
+  const departmentRank = departmentSortRank(left.department) - departmentSortRank(right.department);
+  if (departmentRank !== 0) {
+    return departmentRank;
+  }
   return `${left.department ?? ""}:${left.label}`.localeCompare(`${right.department ?? ""}:${right.label}`);
+}
+
+function departmentSortRank(department: string | undefined) {
+  const index = department ? departmentSortOrder.indexOf(department as (typeof departmentSortOrder)[number]) : -1;
+  return index >= 0 ? index : departmentSortOrder.length;
 }
 
 function statusPriority(status: TopologyNodeStatus) {

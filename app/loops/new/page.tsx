@@ -28,16 +28,17 @@ export default async function NewLoopPage({
     : undefined;
   const selectedTemplate = getTemplateById(params?.template ?? "")
     ?? (departmentTemplate ? getTemplateById(departmentTemplate.id) : undefined)
+    ?? getTemplateById("product-feedback_to_problem")
     ?? getTemplateById("marketing-campaign_learning");
-  const defaultDepartment = selectedTemplate?.department ?? "marketing";
-  const defaultTemplateId = selectedTemplate?.id ?? "marketing-campaign_learning";
+  const defaultDepartment = selectedTemplate?.department ?? "product";
+  const defaultTemplateId = selectedTemplate?.id ?? "product-feedback_to_problem";
 
   return (
     <>
       <PageHeader
         eyebrow="Design Studio"
-        title="Create a loop"
-        description="Optional blueprint builder: department, template, goal, questions, then a generated LoopSpec and implementation plan. Code-first loops live in examples/ and validate via the CLI."
+        title="Start a loop"
+        description="Create your first local loop, or let Hermes guide you by saying `start Loopgraph` and choosing a department."
       />
       <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
         <SectionCard title="Loop setup">
@@ -48,7 +49,12 @@ export default async function NewLoopPage({
             </label>
             <label className="block text-sm font-medium">
               Loop name
-              <input name="loop_name" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue={workspace.loop.name} />
+              <input
+                name="loop_name"
+                className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2"
+                defaultValue={selectedTemplate?.name ?? ""}
+                placeholder="Example: Product feedback triage"
+              />
             </label>
             <TemplatePicker
               templates={templateOptions}
@@ -61,29 +67,28 @@ export default async function NewLoopPage({
               <textarea
                 name="goal"
                 className="mt-1 min-h-28 w-full rounded-md border border-line bg-white px-3 py-2"
-                defaultValue={workspace.loop.goal}
+                defaultValue=""
+                placeholder="What business problem should this loop fix? Include the current stack, biggest pain, and what ideal automation would look like."
               />
             </label>
             <button className="inline-flex rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">
               Create loop and answer questions
             </button>
-            <Link className="ml-3 inline-flex rounded-md border border-ink px-4 py-2 text-sm font-semibold" href={`/loops/${workspace.loop.id}/questions`}>
-              Open demo loop
+            <Link className="ml-3 inline-flex rounded-md border border-ink px-4 py-2 text-sm font-semibold" href="/discovery">
+              Use guided Hermes discovery
             </Link>
           </form>
         </SectionCard>
 
-        <SectionCard title="Generation flow" description="The starter proves the full loop-building journey before external integrations are connected.">
+        <SectionCard title="Generation flow" description="The recommended path keeps users moving: pick a department, answer compact bundles, review the loops, then run locally in shadow mode.">
           <div className="grid gap-3 text-sm">
             {[
-              "Select department",
-              "Select loop template",
-              "Define goal",
-              "Answer requirements questions",
-              "Generate Loop Spec",
-              "Generate implementation artifacts",
-              "Run loop manually",
-              "Review traces, escalations, and improvements"
+              "Pick a department",
+              "Answer five focused bundles",
+              "Review proposed loops",
+              "Accept the loops to create",
+              "Connect only what Hermes needs",
+              "Run the local fixture in shadow mode"
             ].map((step, index) => (
               <div key={step} className="flex items-center gap-3 rounded-md border border-line bg-paper px-3 py-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">

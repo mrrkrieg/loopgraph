@@ -89,6 +89,12 @@ export type BrainGraph = {
 
 export type BrainGraphMode = "global" | "local";
 
+export type BrainGraphStoryPreset =
+  | "company_map"
+  | "routing_signals"
+  | "evidence_return"
+  | "custom";
+
 export type BrainGraphSettings = {
   includeData: boolean;
   includeMetrics: boolean;
@@ -98,5 +104,6 @@ export type BrainGraphSettings = {
 
 export type BrainGraphAdapterInput = BrainGraphSettings & {
   includeCatalogLoops?: boolean;
+  previewStory?: boolean;
   topology: SemanticTopology;
 };

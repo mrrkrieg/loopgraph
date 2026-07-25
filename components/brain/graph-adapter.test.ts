@@ -142,6 +142,113 @@ describe("buildBrainGraph", () => {
     }));
   });
 
+  it("adds a hosted preview story layer without changing local catalog semantics", () => {
+    const sample = topology([
+      node({ id: "company:root", type: "company", label: "Hermes Brain", metadata: { hierarchyMode: "hermes_brain" } }),
+      node({ id: "loop:department:marketing", type: "department_loop", label: "Marketing", department: "marketing" }),
+      node({ id: "loop:catalog_content", type: "workflow_loop", label: "Content Template", loopId: "catalog_content", parentId: "loop:department:marketing", department: "marketing", metadata: { source: "demo_catalog", runtimeLevel: "spec_stub", templateOnly: true } })
+    ], [
+      edge({ source: "company:root", target: "loop:department:marketing" }),
+      edge({ source: "loop:department:marketing", target: "loop:catalog_content" })
+    ], {
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain",
+      managementLoopId: "company:root"
+    });
+    const preview = buildBrainGraph({
+      topology: sample,
+      includeCatalogLoops: true,
+      previewStory: true,
+      includeData: true,
+      includeMetrics: true,
+      includeReviews: true,
+      includeImprove: true
+    });
+
+    expect(preview.nodes).toContainEqual(expect.objectContaining({
+      id: "loop:catalog_content",
+      label: "Content Template",
+      subtitle: expect.stringContaining("Spec example")
+    }));
+    expect(preview.nodes.map((item) => item.label)).not.toContain("Demo: Content Template");
+    expect(preview.nodes).toContainEqual(expect.objectContaining({
+      id: "preview:data:crm",
+      label: "CRM signals",
+      type: "data",
+      metadata: expect.objectContaining({ previewRole: "incoming_signal" })
+    }));
+    expect(preview.edges).toContainEqual(expect.objectContaining({
+      source: "preview:data:crm",
+      target: "company:root",
+      type: "loop_observes_data"
+    }));
+    expect(preview.nodes).toContainEqual(expect.objectContaining({
+      id: "preview:evidence:marketing",
+      label: "Pipeline quality",
+      metadata: expect.objectContaining({ previewRole: "evidence_outcome" })
+    }));
+    expect(preview.edges).toContainEqual(expect.objectContaining({
+      source: "preview:evidence:marketing",
+      target: "company:root",
+      type: "loop_learns_from_trace"
+    }));
+  });
+
+  it("orders Product before Marketing and shows up to three loops per department", () => {
+    const departments = ["marketing", "product", "sales"] as const;
+    const departmentNodes = departments.map((department) =>
+      node({
+        id: `loop:department:${department}`,
+        type: "department_loop",
+        label: `${department} department`,
+        department
+      })
+    );
+    const workflowNodes = departments.flatMap((department) =>
+      Array.from({ length: 4 }, (_, index) =>
+        node({
+          id: `loop:${department}:${index}`,
+          type: "workflow_loop",
+          label: `${department} loop ${index + 1}`,
+          loopId: `${department}:${index}`,
+          parentId: `loop:department:${department}`,
+          department,
+          metadata: { source: "demo_catalog", runtimeLevel: "spec_stub", templateOnly: true }
+        })
+      )
+    );
+    const sample = topology([
+      node({ id: "company:root", type: "company", label: "Hermes Brain" }),
+      ...departmentNodes,
+      ...workflowNodes
+    ], [
+      ...departments.map((department) => edge({ source: "company:root", target: `loop:department:${department}` })),
+      ...workflowNodes.map((workflow) => edge({ source: workflow.parentId, target: workflow.id }))
+    ], {
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain",
+      managementLoopId: "company:root"
+    });
+    const graph = buildBrainGraph({
+      topology: sample,
+      includeCatalogLoops: true,
+      includeData: false,
+      includeMetrics: false,
+      includeReviews: false,
+      includeImprove: false
+    });
+    const visibleDepartments = graph.nodes.filter((item) => item.type === "department_loop");
+
+    expect(visibleDepartments.map((item) => item.departmentId)).toEqual([
+      "product",
+      "marketing",
+      "sales"
+    ]);
+    expect(graph.nodes.filter((item) => item.type === "workflow_loop" && item.departmentId === "product")).toHaveLength(3);
+    expect(graph.nodes.filter((item) => item.type === "workflow_loop" && item.departmentId === "marketing")).toHaveLength(3);
+    expect(graph.nodes.filter((item) => item.type === "workflow_loop" && item.departmentId === "sales")).toHaveLength(3);
+  });
+
   it("keeps default graph smaller than the full semantic topology and adds metrics by toggle", () => {
     const sample = topology([
       node({ id: "company:root", type: "company" }),

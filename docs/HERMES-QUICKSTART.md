@@ -82,15 +82,15 @@ It does not contain provider credentials. Google Ads, HubSpot, Notion, Slack, bi
 In Hermes, start with:
 
 ```text
-/loopgraph design automations for a department
+start Loopgraph
 ```
 
 Hermes should:
 
 1. Inspect the Loopgraph workspace through MCP.
-2. Show the canonical department list.
+2. Show the canonical department list immediately and ask you to pick one or more departments.
 3. Start or resume the shared discovery session.
-4. Ask the Loopgraph-supplied question bundles.
+4. Ask one compact Loopgraph-supplied question bundle at a time.
 5. Request high-reasoning design using the bounded `LoopDesignContext`.
 6. Submit structured proposals back to Loopgraph for validation.
 7. Explain proposals, assumptions, risks, metrics, and required user actions.

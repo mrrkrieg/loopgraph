@@ -4,9 +4,9 @@ import HomePage from "../../app/page";
 import TopologyPage from "../../app/topology/page";
 
 describe("primary navigation", () => {
-  it("contains only Brain, Management, Loops, and Daily", () => {
+  it("contains only Hermes Brain, Management, Loops, and Daily", () => {
     expect(primaryNav.map((item) => item.label)).toEqual([
-      "Brain",
+      "Hermes Brain",
       "Management",
       "Loops",
       "Daily"

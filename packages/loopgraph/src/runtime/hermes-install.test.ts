@@ -40,7 +40,7 @@ describe("Hermes integration installer", () => {
     expect(result).toMatchObject({
       projectRoot,
       scope: "project",
-      firstPrompt: "/loopgraph design automations for a department",
+      firstPrompt: "start Loopgraph",
       protocols: HERMES_LOOPGRAPH_PROTOCOL_VERSIONS,
       mcpServer: {
         name: "loopgraph",
@@ -156,6 +156,9 @@ describe("Hermes integration installer", () => {
     const routingReference = await readFile(result.supportingFilePaths[4]!, "utf8");
     const routingExample = await readFile(result.supportingFilePaths[5]!, "utf8");
     expect(designSkill).toContain("name: loopgraph");
+    expect(designSkill).toContain("start Loopgraph");
+    expect(designSkill).toContain("Do not ask an open-ended question first");
+    expect(designSkill).toContain("ask only for missing required fields");
     expect(designSkill).toContain(`skillProtocol: ${HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION}`);
     expect(designSkill).toContain(`mcpProtocol: ${HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION}`);
     expect(designSkill).toContain("loopDesignProposalSetSchema: loop-design-proposal-set/v1alpha1");
@@ -211,6 +214,7 @@ describe("Hermes integration installer", () => {
     expect(routerSkill).toContain("notification-only Loopgraph lifecycle events");
     expect(routerSkill).toContain("Do not call `loopgraph_route_commit_simulate` from an untrusted webhook turn");
     expect(routerSkill).toContain("Never bypass a rejected decision");
+    expect(discoveryReference).toContain("present the department picker immediately");
     expect(discoveryReference).toContain("Ask exactly the next `QuestionBundle`");
     expect(proposalReference).toContain("routing contract with problem types");
     expect(proposalReference).toContain("Proposal set schema: `loop-design-proposal-set/v1alpha1`");
@@ -314,7 +318,7 @@ describe("Hermes integration installer", () => {
         fromInstalledPackage: {
           setup: "loopgraph hermes setup --project ."
         },
-        firstHermesPrompt: "/loopgraph design automations for a department"
+        firstHermesPrompt: "start Loopgraph"
       },
       warnings: []
     });

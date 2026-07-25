@@ -2,7 +2,7 @@ import { createSupabaseAdminClient } from "@/lib/db/supabase";
 import { getRegisteredLoopSpecs } from "@/lib/loop-engineering-builder/local-workspace";
 import { getWorkspaceMode, workspaceModeBanner } from "@/lib/loop-engineering-builder/workspace-mode";
 
-export async function WorkspaceBanner() {
+export async function WorkspaceBanner({ previewMode = false }: { previewMode?: boolean } = {}) {
   const supabaseConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   let hasPersistedLoops = false;
 
@@ -16,6 +16,7 @@ export async function WorkspaceBanner() {
 
   const registered = await getRegisteredLoopSpecs();
   const mode = getWorkspaceMode({
+    previewMode,
     supabaseConfigured,
     hasPersistedLoops,
     hasLocalRegistry: registered.length > 0

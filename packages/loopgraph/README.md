@@ -30,7 +30,7 @@ npx loopgraph studio --project .
 Then start Hermes with:
 
 ```text
-/loopgraph design automations for a department
+start Loopgraph
 ```
 
 After materializing loops, rehearse webhook routing locally with synthetic or redacted fixtures:

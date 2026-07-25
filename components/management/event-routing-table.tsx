@@ -29,14 +29,20 @@ const exampleRows = [
   }
 ];
 
-export function EventRoutingTable({ model }: { model?: EventRoutingOperationsReadModel }) {
+export function EventRoutingTable({
+  model,
+  showExamples = false
+}: {
+  model?: EventRoutingOperationsReadModel;
+  showExamples?: boolean;
+}) {
   const hasEvents = Boolean(model && model.rows.length > 0);
 
   return (
     <div className="space-y-4">
       {model ? <RoutingSummary model={model} /> : null}
-      {model ? <RoutingFilters model={model} /> : null}
-      {hasEvents && model ? <ActualRoutingTable rows={model.rows} /> : <RoutingEmptyState />}
+      {model ? <RoutingFilters model={model} showExamples={showExamples} /> : null}
+      {hasEvents && model ? <ActualRoutingTable rows={model.rows} /> : <RoutingEmptyState showExamples={showExamples} />}
       {model ? (
         <div className="grid gap-4 xl:grid-cols-3">
           <ProblemInbox model={model} />
@@ -77,14 +83,20 @@ function RoutingSummary({ model }: { model: EventRoutingOperationsReadModel }) {
   );
 }
 
-function RoutingFilters({ model }: { model: EventRoutingOperationsReadModel }) {
+function RoutingFilters({
+  model,
+  showExamples
+}: {
+  model: EventRoutingOperationsReadModel;
+  showExamples: boolean;
+}) {
   return (
     <form action="/management" className="rounded-lg border border-line bg-white p-3" method="get">
       <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
         <FilterText label="Event ID" name="eventId" value={model.filters.eventId} />
-        <FilterText label="Source" name="source" value={model.filters.source} placeholder="google_ads_detector" />
-        <FilterText label="Event type" name="eventType" value={model.filters.eventType} placeholder="campaign.performance_anomaly" />
-        <FilterText label="Loop ID" name="loopId" value={model.filters.loopId} placeholder="marketing_ads" />
+        <FilterText label="Source" name="source" value={model.filters.source} placeholder={showExamples ? "google_ads_detector" : "provider_source"} />
+        <FilterText label="Event type" name="eventType" value={model.filters.eventType} placeholder={showExamples ? "campaign.performance_anomaly" : "provider.event_type"} />
+        <FilterText label="Loop ID" name="loopId" value={model.filters.loopId} placeholder={showExamples ? "marketing_ads" : "loop_id"} />
         <FilterSelect
           label="Action"
           name="action"
@@ -395,15 +407,17 @@ function HumanChoiceForm({ row }: { row: EventRoutingOperationsRow }) {
   );
 }
 
-function RoutingEmptyState() {
+function RoutingEmptyState({ showExamples }: { showExamples: boolean }) {
   return (
     <div className="rounded-lg border border-dashed border-line bg-paper p-4">
       <div className="text-sm font-semibold">No Hermes routing events received yet</div>
       <p className="mt-1 text-sm leading-6 text-ink/60">
-        Once provider webhooks terminate at Hermes and the router skill submits decisions, this table will show the real event receipt,
-        business problem, selected loop, validation state, queue/run status, and correction history. The examples below are illustrative only.
+        Once provider webhooks terminate at Hermes and the router skill submits decisions, this table will show real event receipts,
+        business problems, selected loops, validation state, queue/run status, and correction history.
+        {showExamples ? " The examples below are illustrative only." : " To start, say `start Loopgraph` in Hermes or open guided Discovery."}
       </p>
-      <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
+      {showExamples ? (
+        <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">
         <table className="w-full min-w-[860px] text-left text-sm">
           <thead className="bg-paper text-xs uppercase tracking-[0.14em] text-ink/50">
             <tr>
@@ -426,7 +440,8 @@ function RoutingEmptyState() {
             ))}
           </tbody>
         </table>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }

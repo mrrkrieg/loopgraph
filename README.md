@@ -108,10 +108,10 @@ Merge the generated MCP snippet into your Hermes config and make sure Hermes can
 ### 2. Ask Hermes to design the first department
 
 ```text
-/loopgraph design automations for a department
+start Loopgraph
 ```
 
-Hermes shows the department catalog, resumes the same discovery session as the browser, asks the Loopgraph question bundles, explains the proposed loops, and materializes only the proposals you accept.
+Hermes should immediately show the department catalog, ask you to pick one or more departments, move through compact question bundles, explain the proposed loops, and materialize only the proposals you accept.
 
 ### 3. Open the local company graph
 
