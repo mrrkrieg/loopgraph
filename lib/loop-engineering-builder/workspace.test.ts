@@ -84,6 +84,27 @@ describe("workspace fallback", () => {
     ]));
   });
 
+  it("starts normal local projects empty until Hermes or the browser creates loops", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-empty-local-"));
+    process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY = "false";
+    process.env.LOOPGRAPH_PROJECT_ROOT = projectRoot;
+
+    const workspace = await getWorkspace();
+    const topology = await getSemanticTopology(undefined, {
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain"
+    });
+    const workflowNodes = topology.nodes.filter((node) => node.type === "workflow_loop");
+
+    expect(workspace.organization.name).toBe("Local Loopgraph workspace");
+    expect(workspace.loops).toEqual([]);
+    expect(workspace.managementReview.decisions).toEqual([]);
+    expect(workspace.managementReview.summary).toContain("No local Loopgraph loops");
+    expect(workspace.graph.sourceLabel).toBe("Empty local workspace");
+    expect(topology.metadata.sourceLabel).toBe("Empty local workspace");
+    expect(workflowNodes).toEqual([]);
+  });
+
   it("can start a demo run without Supabase", async () => {
     const runBundle = await startLoopRun("loop_demo_marketing_campaign");
 

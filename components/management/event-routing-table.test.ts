@@ -10,12 +10,27 @@ describe("EventRoutingTable", () => {
       model: {
         ...baseModel(),
         rows: []
-      }
+      },
+      showExamples: true
     }));
 
     expect(html).toContain("No Hermes routing events received yet");
     expect(html).toContain("illustrative only");
     expect(html).toContain("campaign.performance_anomaly");
+  });
+
+  it("keeps a fresh local empty state free of preview examples", () => {
+    const html = renderToStaticMarkup(React.createElement(EventRoutingTable, {
+      model: {
+        ...baseModel(),
+        rows: []
+      }
+    }));
+
+    expect(html).toContain("No Hermes routing events received yet");
+    expect(html).toContain("start Loopgraph");
+    expect(html).not.toContain("illustrative only");
+    expect(html).not.toContain("campaign.performance_anomaly");
   });
 
   it("renders actual Hermes routing rows, problem inbox, catalog, and webhook health", () => {

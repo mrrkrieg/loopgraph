@@ -23,7 +23,7 @@ export default function RootLayout({
       <body>
         <AppShell
           showPreviewFeatures={showPreviewFeatures}
-          workspaceBanner={<WorkspaceBanner />}
+          workspaceBanner={<WorkspaceBanner previewMode={showPreviewFeatures} />}
         >
           {children}
         </AppShell>

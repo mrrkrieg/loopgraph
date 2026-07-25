@@ -1,13 +1,18 @@
 export type WorkspaceMode = "demo" | "local" | "persisted" | "empty";
 
 export function getWorkspaceMode(input: {
+  previewMode?: boolean;
   supabaseConfigured: boolean;
   hasPersistedLoops: boolean;
   hasLocalRegistry: boolean;
 }): WorkspaceMode {
+  if (input.previewMode) {
+    return "demo";
+  }
+
   if (!input.supabaseConfigured) {
     if (input.hasLocalRegistry) return "local";
-    return "demo";
+    return "empty";
   }
 
   if (input.hasPersistedLoops) return "persisted";
@@ -18,7 +23,7 @@ export function workspaceModeBanner(mode: WorkspaceMode): { label: string; class
   switch (mode) {
     case "demo":
       return {
-        label: "Demo mode — Acme sample data. Configure Supabase for persistence or run CLI simulate for .loopgraph/ traces.",
+        label: "Preview mode — rich sample data is shown here so you can see the Hermes Brain flow before connecting your own project.",
         className: "border-amber-200 bg-amber-50 text-amber-900"
       };
     case "local":
@@ -33,7 +38,7 @@ export function workspaceModeBanner(mode: WorkspaceMode): { label: string; class
       };
     case "empty":
       return {
-        label: "Supabase connected — empty workspace. Run seed script or create a loop. Demo data is not shown.",
+        label: "Empty local workspace — say `start Loopgraph` in Hermes or open Discovery to create your first loops. Demo data is not shown.",
         className: "border-slate-200 bg-slate-50 text-slate-800"
       };
   }

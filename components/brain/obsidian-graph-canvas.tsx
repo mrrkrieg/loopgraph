@@ -23,6 +23,7 @@ export function ObsidianGraphCanvas({
   centerId,
   selectedId,
   showLabels,
+  graphLabel = "Hermes Brain graph",
   onSelect,
   onOpenLocal,
   fitRequest,
@@ -34,6 +35,7 @@ export function ObsidianGraphCanvas({
   centerId?: string;
   selectedId?: string;
   showLabels: boolean;
+  graphLabel?: string;
   onSelect: (nodeId: string) => void;
   onOpenLocal: (nodeId: string) => void;
   fitRequest: number;
@@ -111,21 +113,41 @@ export function ObsidianGraphCanvas({
     };
   }
 
-  function handleWheel(event: React.WheelEvent<SVGSVGElement>) {
-    event.preventDefault();
-    const rect = svgRef.current?.getBoundingClientRect();
-    if (!rect) {
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) {
       return;
     }
-    const nextScale = clamp(transform.k * (event.deltaY > 0 ? 0.9 : 1.1), 0.18, 2.3);
-    const graphX = (event.clientX - rect.left - transform.x) / transform.k;
-    const graphY = (event.clientY - rect.top - transform.y) / transform.k;
-    setTransform({
-      k: nextScale,
-      x: event.clientX - rect.left - graphX * nextScale,
-      y: event.clientY - rect.top - graphY * nextScale
-    });
-  }
+    const svgElement = svg;
+
+    function handleNativeWheel(event: WheelEvent) {
+      event.preventDefault();
+      const rect = svgElement.getBoundingClientRect();
+
+      setTransform((current) => {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+          return {
+            ...current,
+            x: current.x - event.deltaX,
+            y: current.y - event.deltaY
+          };
+        }
+
+        const nextScale = clamp(current.k * (event.deltaY > 0 ? 0.9 : 1.1), 0.18, 2.3);
+        const graphX = (event.clientX - rect.left - current.x) / current.k;
+        const graphY = (event.clientY - rect.top - current.y) / current.k;
+        return {
+          k: nextScale,
+          x: event.clientX - rect.left - graphX * nextScale,
+          y: event.clientY - rect.top - graphY * nextScale
+        };
+      });
+    }
+
+    svgElement.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => svgElement.removeEventListener("wheel", handleNativeWheel);
+  }, []);
+
 
   function handleCanvasPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -175,13 +197,12 @@ export function ObsidianGraphCanvas({
   return (
     <svg
       ref={svgRef}
-      aria-label="Company brain graph"
+      aria-label={graphLabel}
       className="h-full min-h-0 w-full cursor-grab touch-none bg-[radial-gradient(circle_at_1px_1px,rgba(17,17,17,0.12)_1px,transparent_0)] [background-size:22px_22px] active:cursor-grabbing"
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      onWheel={handleWheel}
       role="img"
     >
       <defs>

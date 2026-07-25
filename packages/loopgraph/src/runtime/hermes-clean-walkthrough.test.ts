@@ -81,7 +81,7 @@ describe("clean local Hermes walkthrough", () => {
       nodeCommand: process.execPath,
       now: new Date("2026-07-21T12:00:00.000Z")
     });
-    expect(install.firstPrompt).toBe("/loopgraph design automations for a department");
+    expect(install.firstPrompt).toBe("start Loopgraph");
     expect(install.mcpServer.tools).toEqual(HERMES_LOOPGRAPH_MCP_TOOL_NAMES);
 
     const doctor = await doctorHermesIntegration({

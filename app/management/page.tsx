@@ -1,4 +1,5 @@
 import { ManagementBrainPage } from "@/components/management/management-brain-page";
+import { isHostedPreview } from "@/lib/hosted-preview";
 import { routingOperationsQueryFromSearchParams } from "loopgraph/runtime";
 
 type ManagementPageProps = {
@@ -7,5 +8,5 @@ type ManagementPageProps = {
 
 export default async function ManagementPage({ searchParams }: ManagementPageProps) {
   const routingQuery = routingOperationsQueryFromSearchParams(await searchParams);
-  return <ManagementBrainPage routingQuery={routingQuery} />;
+  return <ManagementBrainPage previewMode={isHostedPreview()} routingQuery={routingQuery} />;
 }

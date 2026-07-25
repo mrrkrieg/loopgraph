@@ -25,18 +25,6 @@ export function AppShell({
     setIsNavCollapsed(window.localStorage.getItem("loopgraph-nav-collapsed") === "true");
   }, []);
 
-  useEffect(() => {
-    if (!isCanvasPage) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = previousOverflow;
-    };
-  }, [isCanvasPage]);
-
   function toggleNavigation() {
     setIsNavCollapsed((current) => {
       const next = !current;
@@ -53,9 +41,7 @@ export function AppShell({
         showPreviewFeatures={showPreviewFeatures}
       />
       <div
-        className={`transition-[padding] duration-200 ${isNavCollapsed ? "lg:pl-20" : "lg:pl-64"} ${
-          isCanvasPage ? "lg:h-[100dvh] lg:overflow-hidden" : ""
-        }`}
+        className={`transition-[padding] duration-200 ${isNavCollapsed ? "lg:pl-20" : "lg:pl-64"}`}
       >
         {showPreviewFeatures ? <PreviewGithubBanner /> : null}
         <header
@@ -79,17 +65,16 @@ export function AppShell({
         <main
           className={`${
             isCanvasPage
-              ? `flex max-w-none flex-col gap-3 overflow-hidden px-3 py-3 sm:px-4 lg:min-h-0 ${
-                  showPreviewFeatures ? "lg:h-[calc(100dvh-2.5rem)]" : "lg:h-full"
-                }`
+              ? "flex max-w-none flex-col gap-3 px-3 py-3 sm:px-4"
               : "mx-auto max-w-7xl px-5 py-6 sm:px-8"
           }`}
         >
           {!isPaperPage ? workspaceBanner : null}
           {!isPaperPage && !process.env.NEXT_PUBLIC_SUPABASE_URL ? (
             <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-              Demo mode — data resets on refresh. Configure Supabase env vars for
-              Design Studio persistence.
+              {showPreviewFeatures
+                ? "Preview mode — sample data is illustrative and resets with the hosted build."
+                : "Local mode — Loopgraph stores project artifacts under .loopgraph/. Configure Supabase only if you want shared hosted persistence."}
             </div>
           ) : null}
           {children}

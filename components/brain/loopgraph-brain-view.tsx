@@ -7,26 +7,52 @@ import { GraphControls } from "./graph-controls";
 import { GraphDiagnostics } from "./graph-diagnostics";
 import { NodeInspector } from "./node-inspector";
 import { ObsidianGraphCanvas } from "./obsidian-graph-canvas";
-import type { BrainGraphMode, BrainGraphSettings } from "./graph-types";
+import type { BrainGraphMode, BrainGraphSettings, BrainGraphStoryPreset } from "./graph-types";
 import type { BrainGraphActions } from "./node-inspector";
 
-const defaultSettings: BrainGraphSettings = {
-  includeData: false,
-  includeMetrics: false,
-  includeReviews: false,
-  includeImprove: false
-};
+function settingsForStoryPreset(
+  preset: Exclude<BrainGraphStoryPreset, "custom">,
+  previewMode: boolean
+): BrainGraphSettings {
+  if (preset === "company_map") {
+    return {
+      includeData: previewMode,
+      includeMetrics: false,
+      includeReviews: false,
+      includeImprove: false
+    };
+  }
+  if (preset === "routing_signals") {
+    return {
+      includeData: true,
+      includeMetrics: true,
+      includeReviews: true,
+      includeImprove: false
+    };
+  }
+  return {
+    includeData: true,
+    includeMetrics: true,
+    includeReviews: true,
+    includeImprove: true
+  };
+}
 
 export function LoopgraphBrainView({
   actions,
   includeCatalogLoops = false,
+  previewMode = false,
   topology
 }: {
   actions?: BrainGraphActions;
   includeCatalogLoops?: boolean;
+  previewMode?: boolean;
   topology: SemanticTopology;
 }) {
-  const [settings, setSettings] = useState<BrainGraphSettings>(defaultSettings);
+  const [storyPreset, setStoryPreset] = useState<BrainGraphStoryPreset>("company_map");
+  const [settings, setSettings] = useState<BrainGraphSettings>(() =>
+    settingsForStoryPreset("company_map", previewMode)
+  );
   const [mode, setMode] = useState<BrainGraphMode>("global");
   const [depth, setDepth] = useState(1);
   const [showLabels, setShowLabels] = useState(true);
@@ -34,7 +60,15 @@ export function LoopgraphBrainView({
   const [localCenterId, setLocalCenterId] = useState<string | undefined>();
   const [fitRequest, setFitRequest] = useState(0);
   const [resetRequest, setResetRequest] = useState(0);
-  const baseGraph = useMemo(() => buildBrainGraph({ topology, includeCatalogLoops, ...settings }), [includeCatalogLoops, settings, topology]);
+  const baseGraph = useMemo(
+    () => buildBrainGraph({
+      topology,
+      includeCatalogLoops,
+      previewStory: previewMode,
+      ...settings
+    }),
+    [includeCatalogLoops, previewMode, settings, topology]
+  );
   const selectedNodeExists = selectedId ? baseGraph.nodes.some((node) => node.id === selectedId) : false;
   const effectiveSelectedId = selectedNodeExists ? selectedId : undefined;
   const centerId = localCenterId && baseGraph.nodes.some((node) => node.id === localCenterId)
@@ -66,9 +100,25 @@ export function LoopgraphBrainView({
     setFitRequest((current) => current + 1);
   }
 
+  function applyStoryPreset(preset: Exclude<BrainGraphStoryPreset, "custom">) {
+    setStoryPreset(preset);
+    setSettings(settingsForStoryPreset(preset, previewMode));
+    setMode("global");
+    setFitRequest((current) => current + 1);
+  }
+
+  function applyCustomSettings(nextSettings: BrainGraphSettings) {
+    setStoryPreset("custom");
+    setSettings(nextSettings);
+  }
+
   return (
-    <div className="grid min-h-[760px] grid-rows-[minmax(440px,1fr)_auto] overflow-hidden rounded-lg border border-line bg-white shadow-sm xl:h-[calc(100vh-12rem)] xl:min-h-[560px] xl:grid-cols-[minmax(0,1fr)_320px] xl:grid-rows-none">
-      <section className="relative min-h-[440px] overflow-hidden xl:min-h-0">
+    <div className={`grid grid-rows-[minmax(520px,1fr)_auto] overflow-hidden rounded-lg border border-line bg-white shadow-sm xl:grid-cols-[minmax(0,1fr)_320px] xl:grid-rows-none ${
+      previewMode
+        ? "min-h-[980px] xl:min-h-[980px]"
+        : "min-h-[760px] xl:h-[calc(100vh-12rem)] xl:min-h-[560px]"
+    }`}>
+      <section className={`relative overflow-hidden ${previewMode ? "min-h-[720px]" : "min-h-[440px] xl:min-h-0"}`}>
         <div className="absolute left-4 top-4 z-10">
           <GraphControls
             canUseLocal={Boolean(currentFocusId)}
@@ -89,8 +139,11 @@ export function LoopgraphBrainView({
               setResetRequest((current) => current + 1);
               setFitRequest((current) => current + 1);
             }}
-            onSettingsChange={setSettings}
+            onSettingsChange={applyCustomSettings}
+            onStoryPresetChange={applyStoryPreset}
+            previewMode={previewMode}
             settings={settings}
+            storyPreset={storyPreset}
           />
         </div>
         <div className="absolute bottom-4 left-4 z-10 max-w-xl space-y-2">
@@ -103,6 +156,7 @@ export function LoopgraphBrainView({
           centerId={mode === "local" ? centerId : undefined}
           edges={graph.edges}
           fitRequest={fitRequest}
+          graphLabel={`${brainLabel} graph`}
           mode={mode}
           nodes={graph.nodes}
           onOpenLocal={openLocalGraph}

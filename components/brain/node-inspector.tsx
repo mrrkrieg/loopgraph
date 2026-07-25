@@ -244,6 +244,9 @@ function CompactList({ title, items, empty }: { title: string; items: string[]; 
 
 function summaryForNode(node: BrainGraphNode) {
   if (node.type === "company_brain") {
+    if (node.metadata?.hierarchyMode === "hermes_brain") {
+      return "Receives business events and decides which department loop should handle the problem, abstaining when the evidence is ambiguous.";
+    }
     return "Receives company events and routes work into the management loop.";
   }
   if (node.type === "management_loop") {

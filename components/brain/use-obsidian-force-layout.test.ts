@@ -89,6 +89,47 @@ describe("obsidian force layout", () => {
     expect(ads?.x).toBeCloseTo(content?.x ?? 0, 1);
     expect(countOverlaps(firstLayout)).toBe(0);
   });
+
+  it("places preview data before Hermes and evidence after the loops", () => {
+    const nodes = [
+      brainNode({ id: "company:root", type: "company_brain", label: "Hermes Brain", radius: 54 }),
+      brainNode({
+        id: "preview:data:crm",
+        type: "data",
+        label: "CRM signals",
+        radius: 22,
+        metadata: { previewRole: "incoming_signal", previewOrder: 1 }
+      }),
+      brainNode({ id: "loop:department:product", type: "department_loop", label: "Product", radius: 38, parentId: "company:root" }),
+      brainNode({ id: "loop:product_release", type: "workflow_loop", label: "Release Learning", radius: 32, parentId: "loop:department:product" }),
+      brainNode({
+        id: "preview:evidence:product",
+        type: "metric",
+        label: "Product learning",
+        radius: 24,
+        metadata: { previewRole: "evidence_outcome", previewOrder: 1 }
+      })
+    ];
+    const edges = [
+      brainEdge({ source: "preview:data:crm", target: "company:root", type: "loop_observes_data" }),
+      brainEdge({ source: "company:root", target: "loop:department:product", type: "brain_routes_to" }),
+      brainEdge({ source: "loop:department:product", target: "loop:product_release", type: "department_contains_loop" }),
+      brainEdge({ source: "loop:product_release", target: "preview:evidence:product", type: "loop_updates_metric" }),
+      brainEdge({ source: "preview:evidence:product", target: "company:root", type: "loop_learns_from_trace" })
+    ];
+    const layout = createObsidianLayout({ nodes, edges, mode: "global" });
+    const byId = new Map(layout.map((node) => [node.id, node]));
+    const incoming = byId.get("preview:data:crm");
+    const brain = byId.get("company:root");
+    const department = byId.get("loop:department:product");
+    const workflow = byId.get("loop:product_release");
+    const evidence = byId.get("preview:evidence:product");
+
+    expect(incoming?.x).toBeLessThan(brain?.x ?? 0);
+    expect(brain?.x).toBeLessThan(department?.x ?? 0);
+    expect(department?.x).toBeLessThan(workflow?.x ?? 0);
+    expect(workflow?.x).toBeLessThan(evidence?.x ?? 0);
+  });
 });
 
 function countOverlaps(nodes: Array<BrainGraphNode & { x: number; y: number }>) {
@@ -112,6 +153,7 @@ function brainNode(overrides: Partial<BrainGraphNode>): BrainGraphNode {
     type: overrides.type ?? "workflow_loop",
     label: overrides.label ?? "Node",
     parentId: overrides.parentId,
+    metadata: overrides.metadata,
     status: "ready",
     radius: overrides.radius ?? 28,
     color: "#fff",

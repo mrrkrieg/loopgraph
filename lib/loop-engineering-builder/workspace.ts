@@ -384,11 +384,9 @@ export async function getSemanticTopology(
         ...workspace.loops,
         ...createCatalogLoopRecords(workspace.organization.id)
       ])
-    : liveLoops.length > 0
-      ? liveLoops
-      : [workspace.loop];
+    : liveLoops;
   const loopSpecs = loopsForTopology.flatMap((loop) => coreSpecFromLoopRecord(loop));
-  const selectedLoopId = selectTopologyLoopId(loopSpecs, loopId, workspace.loop.id);
+  const selectedLoopId = selectTopologyLoopId(loopSpecs, loopId, liveLoops[0]?.id);
 
   return buildSemanticTopology({
     loopSpecs,
@@ -399,7 +397,11 @@ export async function getSemanticTopology(
       companyName: workspace.organization.name,
       brainLabel: options.brainLabel,
       hierarchyMode: options.hierarchyMode,
-      sourceLabel: workspace.graph.sourceLabel ?? "Workspace",
+      sourceLabel: options.includeCatalogLoops
+        ? liveLoops.length > 0
+          ? `${workspace.graph.sourceLabel ?? "Workspace"} + demo catalog`
+          : "Demo catalog"
+        : workspace.graph.sourceLabel ?? "Workspace",
       selectedLoopId,
       generatedAt: new Date(0).toISOString()
     }
@@ -739,7 +741,7 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
 
   const registeredSpecs = await getRegisteredLoopSpecs();
   if (registeredSpecs.length === 0) {
-    return await selectDemoWorkspace(selectedLoopId);
+    return selectEmptyLocalWorkspace();
   }
 
   const organization = {
@@ -788,6 +790,92 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
     managementReview,
     metrics: summarizeMetrics(graph, selectedLoop.id),
     graph
+  };
+}
+
+function selectEmptyLocalWorkspace(): WorkspaceData {
+  const organization = {
+    id: "local_workspace",
+    name: "Local Loopgraph workspace"
+  };
+  const placeholderLoop = emptyPlaceholderLoop(organization.id);
+  const spec = v1alpha1ToFlat(createSpecFromTemplate(placeholderLoop.templateId, {
+    id: placeholderLoop.id,
+    name: placeholderLoop.name,
+    goal: placeholderLoop.goal
+  }));
+  const graph = buildLoopGraph({
+    organization,
+    loops: [],
+    selectedNodeId: undefined,
+    sourceLabel: "Empty local workspace"
+  });
+  const emptyRun: LoopRun = {
+    id: "run_empty_workspace",
+    loopId: placeholderLoop.id,
+    status: "completed",
+    triggerType: "manual",
+    startedAt: new Date(0).toISOString(),
+    completedAt: new Date(0).toISOString(),
+    escalationRequired: false,
+    humanReviewRequired: false,
+    inputSnapshot: {},
+    outputSnapshot: {},
+    verificationResult: {}
+  };
+
+  return {
+    organization,
+    profile: {
+      id: "profile_local",
+      email: "operator@example.com",
+      fullName: "Loop Operator",
+      role: "owner"
+    },
+    templates: getDepartmentTemplates(),
+    loops: [],
+    loop: placeholderLoop,
+    answers: {},
+    questions: [],
+    progress: {
+      totalRequired: 0,
+      answered: 0,
+      missing: 0,
+      percent: 0
+    },
+    spec,
+    artifacts: [],
+    runBundle: {
+      run: emptyRun,
+      steps: []
+    },
+    improvements: [],
+    managementReview: emptyManagementReview(),
+    metrics: [],
+    graph
+  };
+}
+
+function emptyPlaceholderLoop(organizationId: string): LoopRecord {
+  return {
+    id: "new_loop",
+    organizationId,
+    templateId: "custom-custom_company_loop",
+    name: "New Loop",
+    department: "custom",
+    loopType: "custom_company_loop",
+    status: "draft",
+    autonomyLevel: "draft_for_review",
+    owner: "Loop owner",
+    goal: "Design the first local Loopgraph loop.",
+    targetMetric: "",
+    businessOutcome: "",
+    cadence: "Manual",
+    specGenerated: false,
+    implementationGenerated: false,
+    openReviews: 0,
+    improvementItems: 0,
+    source: "local_spec"
   };
 }
 
@@ -1056,7 +1144,26 @@ function mapHumanReview(row: Record<string, unknown>): HumanReview {
   };
 }
 
+function emptyManagementReview(): WorkspaceData["managementReview"] {
+  return {
+    period: "This week",
+    summary: "No local Loopgraph loops have been created yet. Start in Hermes, pick a department, and materialize only the loops you accept.",
+    risks: [],
+    decisions: [],
+    bottlenecks: [],
+    recommendations: [
+      "In Hermes, say `start Loopgraph` to begin the guided department discovery.",
+      "Open Discovery in the browser if you want to review the same question bundles visually.",
+      "After loops are accepted, connect provider webhooks to Hermes and keep Loopgraph in shadow mode until routing tests pass."
+    ]
+  };
+}
+
 function summarizeManagement(loops: LoopRecord[], graph: LoopGraph) {
+  if (loops.length === 0) {
+    return emptyManagementReview();
+  }
+
   const unhealthy = graph.health.filter((item) => item.healthScore < 75);
   const openReviews = graph.health.reduce((sum, item) => sum + item.openReviews, 0);
   const openImprovements = graph.health.reduce((sum, item) => sum + item.openImprovements, 0);

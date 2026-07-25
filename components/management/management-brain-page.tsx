@@ -5,6 +5,7 @@ import { MetricCard } from "../metric-card";
 import { PageHeader } from "../page-header";
 import { SectionCard } from "../section-card";
 import { StatusPill } from "../status-pill";
+import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { loadLatestManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
 import { getActiveLoopgraphProjectRoot, getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
@@ -12,14 +13,15 @@ import { DepartmentManagementCard } from "./department-management-card";
 import { EventRoutingTable } from "./event-routing-table";
 
 type ManagementBrainPageProps = {
+  previewMode?: boolean;
   routingQuery?: EventRoutingOperationsFilters & {
     limit?: number;
   };
 };
 
-export async function ManagementBrainPage({ routingQuery = {} }: ManagementBrainPageProps = {}) {
+export async function ManagementBrainPage({ previewMode = false, routingQuery = {} }: ManagementBrainPageProps = {}) {
   const projectRoot = getActiveLoopgraphProjectRoot();
-  const workspace = await getWorkspace();
+  const workspace = previewMode ? getDemoWorkspace() : await getWorkspace();
   const storage = getStorageAdapter();
   const cases = await storage.listCases();
   const rollup = await loadLatestManagementRollup();
@@ -58,22 +60,26 @@ export async function ManagementBrainPage({ routingQuery = {} }: ManagementBrain
         </SectionCard>
         <SectionCard title="Hermes Routing Operations">
           <div className="overflow-x-auto">
-            <EventRoutingTable model={routingOperations} />
+            <EventRoutingTable model={routingOperations} showExamples={previewMode} />
           </div>
         </SectionCard>
       </div>
 
       <div className="mt-6">
         <SectionCard title="Department Management Loops" description="Each department loop manages specific workflow loops and rolls evidence back into the company brain.">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {departments.map((department) => (
-              <DepartmentManagementCard
-                department={department}
-                key={department}
-                loops={workspace.loops.filter((loop) => loop.department === department)}
-              />
-            ))}
-          </div>
+          {departments.length === 0 ? (
+            <EmptyDepartmentManagement />
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {departments.map((department) => (
+                <DepartmentManagementCard
+                  department={department}
+                  key={department}
+                  loops={workspace.loops.filter((loop) => loop.department === department)}
+                />
+              ))}
+            </div>
+          )}
         </SectionCard>
       </div>
 
@@ -87,7 +93,11 @@ export async function ManagementBrainPage({ routingQuery = {} }: ManagementBrain
         </SectionCard>
         <SectionCard title="Decisions needed">
           <div className="space-y-2">
-            {workspace.managementReview.decisions.map((item) => (
+            {workspace.managementReview.decisions.length === 0 ? (
+              <p className="text-sm leading-6 text-ink/60">
+                No management decisions yet. Once Hermes routes real events or you accept generated loops, decisions will appear here with owners and review status.
+              </p>
+            ) : workspace.managementReview.decisions.map((item) => (
               <div key={item} className="rounded-md border border-line bg-white px-3 py-2 text-sm">
                 {item}
               </div>
@@ -104,14 +114,16 @@ export async function ManagementBrainPage({ routingQuery = {} }: ManagementBrain
         <SectionCard title="Management Metrics">
           <div className="grid gap-3 sm:grid-cols-3">
             <MetricCard label="Blocked loops" value={blockedLoops} />
-            <MetricCard label="Decision latency" value="1d" />
+            <MetricCard label="Decision latency" value={workspace.loops.length > 0 ? "1d" : "—"} />
             <MetricCard label="Unresolved deps" value={workspace.managementReview.bottlenecks.length} />
           </div>
         </SectionCard>
         <SectionCard title="Improvement items">
           <div className="space-y-2">
             {workspace.improvements.length === 0 ? (
-              <p className="text-sm text-ink/60">Reject a review or resolve a case via CLI to create improvement signals.</p>
+              <p className="text-sm text-ink/60">
+                No improvement items yet. Hermes will create these from rejected reviews, resolved cases, and loop outcomes after your first loops are materialized.
+              </p>
             ) : (
               workspace.improvements.map((item) => (
                 <div key={item.id} className="flex items-center justify-between gap-3 rounded-md border border-line bg-paper px-3 py-2 text-sm">
@@ -178,6 +190,26 @@ function FlowStep({ title, body }: { title: string; body: string }) {
     <div className="rounded-md border border-line bg-paper p-3">
       <div className="font-semibold">{title}</div>
       <p className="mt-1 text-ink/60">{body}</p>
+    </div>
+  );
+}
+
+function EmptyDepartmentManagement() {
+  return (
+    <div className="rounded-lg border border-dashed border-line bg-paper p-5">
+      <div className="text-sm font-semibold">No department loops created yet</div>
+      <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/65">
+        A fresh local install starts empty on purpose. In Hermes, say <code className="rounded bg-white px-1 py-0.5">start Loopgraph</code>,
+        pick a department, answer the compact discovery bundles, and accept the loops you want to materialize.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-3 text-sm">
+        <Link className="rounded-md bg-ink px-4 py-2 font-semibold text-white" href="/discovery">
+          Open guided discovery
+        </Link>
+        <Link className="rounded-md border border-line bg-white px-4 py-2 font-semibold text-ink/75 hover:text-ink" href="/loops/new">
+          Create manually
+        </Link>
+      </div>
     </div>
   );
 }

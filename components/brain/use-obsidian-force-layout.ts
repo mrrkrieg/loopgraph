@@ -99,8 +99,18 @@ function seedGlobalLayout(nodes: PositionedBrainNode[], edges: BrainGraphEdge[])
   const departments = nodes.filter((node) => node.type === "department_loop").sort(byLabel);
   const workflowsByDepartment = new Map<string, PositionedBrainNode[]>();
   const internalByLoop = new Map<string, PositionedBrainNode[]>();
+  const previewIncomingNodes: PositionedBrainNode[] = [];
+  const previewEvidenceNodes: PositionedBrainNode[] = [];
 
   for (const node of nodes) {
+    if (previewRole(node) === "incoming_signal") {
+      previewIncomingNodes.push(node);
+      continue;
+    }
+    if (previewRole(node) === "evidence_outcome") {
+      previewEvidenceNodes.push(node);
+      continue;
+    }
     if (node.type === "workflow_loop") {
       const parentId = node.parentId ?? parentFromEdges(node.id, edges);
       const bucket = workflowsByDepartment.get(parentId ?? "unassigned") ?? [];
@@ -122,7 +132,9 @@ function seedGlobalLayout(nodes: PositionedBrainNode[], edges: BrainGraphEdge[])
       workflowsByDepartment,
       internalByLoop,
       nodes,
-      nodesById
+      nodesById,
+      previewIncomingNodes,
+      previewEvidenceNodes
     });
     return;
   }
@@ -134,6 +146,13 @@ function seedGlobalLayout(nodes: PositionedBrainNode[], edges: BrainGraphEdge[])
   if (management) {
     management.x = -90;
     management.y = 0;
+  }
+  if (company) {
+    seedPreviewStoryColumns({
+      company,
+      incomingNodes: previewIncomingNodes,
+      evidenceNodes: previewEvidenceNodes
+    });
   }
 
   const departmentRadius = Math.max(260, departments.length * 42);
@@ -187,9 +206,16 @@ function seedDirectHermesHierarchy(input: {
   internalByLoop: Map<string, PositionedBrainNode[]>;
   nodes: PositionedBrainNode[];
   nodesById: Map<string, PositionedBrainNode>;
+  previewIncomingNodes: PositionedBrainNode[];
+  previewEvidenceNodes: PositionedBrainNode[];
 }) {
   input.company.x = -360;
   input.company.y = 0;
+  seedPreviewStoryColumns({
+    company: input.company,
+    incomingNodes: input.previewIncomingNodes,
+    evidenceNodes: input.previewEvidenceNodes
+  });
 
   const departmentGap = Math.max(190, Math.min(280, 640 / Math.max(input.departments.length, 1)));
   const departmentStartY = -((input.departments.length - 1) * departmentGap) / 2;
@@ -334,7 +360,12 @@ function relaxCollisions(nodes: PositionedBrainNode[], edges: BrainGraphEdge[]) 
     }
     for (const targetId of targetIds) {
       const target = nodes.find((node) => node.id === targetId);
-      if (!target || target.type === "department_loop" || target.type === "management_loop") {
+      if (
+        !target ||
+        target.type === "company_brain" ||
+        target.type === "department_loop" ||
+        target.type === "management_loop"
+      ) {
         continue;
       }
       const dx = target.x - source.x;
@@ -360,6 +391,38 @@ function seedRing(
     const angle = (options.startAngle ?? 0) + (Math.PI * 2 * index) / ringCount;
     node.x = options.centerX + Math.cos(angle) * options.radius;
     node.y = options.centerY + Math.sin(angle) * options.radius;
+  });
+}
+
+function seedPreviewStoryColumns(input: {
+  company: PositionedBrainNode;
+  incomingNodes: PositionedBrainNode[];
+  evidenceNodes: PositionedBrainNode[];
+}) {
+  seedVerticalStack(input.incomingNodes.sort(byPreviewOrder), {
+    x: input.company.x - 330,
+    centerY: input.company.y,
+    rowGap: 76
+  });
+  seedVerticalStack(input.evidenceNodes.sort(byPreviewOrder), {
+    x: input.company.x + 1020,
+    centerY: input.company.y,
+    rowGap: 82
+  });
+}
+
+function seedVerticalStack(
+  nodes: PositionedBrainNode[],
+  options: { x: number; centerY: number; rowGap: number }
+) {
+  if (nodes.length === 0) {
+    return;
+  }
+
+  const startY = options.centerY - ((nodes.length - 1) * options.rowGap) / 2;
+  nodes.forEach((node, index) => {
+    node.x = options.x;
+    node.y = startY + index * options.rowGap;
   });
 }
 
@@ -404,6 +467,18 @@ function addNeighbor(map: Map<string, Set<string>>, source: string, target: stri
 
 function parentFromEdges(nodeId: string, edges: BrainGraphEdge[]) {
   return edges.find((edge) => edge.target === nodeId)?.source;
+}
+
+function previewRole(node: BrainGraphNode) {
+  return typeof node.metadata?.previewRole === "string" ? node.metadata.previewRole : undefined;
+}
+
+function byPreviewOrder(left: BrainGraphNode, right: BrainGraphNode) {
+  return previewOrder(left) - previewOrder(right) || left.label.localeCompare(right.label);
+}
+
+function previewOrder(node: BrainGraphNode) {
+  return typeof node.metadata?.previewOrder === "number" ? node.metadata.previewOrder : 999;
 }
 
 function collisionPadding(left: BrainGraphNode, right: BrainGraphNode) {

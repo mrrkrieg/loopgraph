@@ -360,7 +360,7 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
       args,
       tools: [...HERMES_LOOPGRAPH_MCP_TOOL_NAMES]
     },
-    firstPrompt: "/loopgraph design automations for a department",
+    firstPrompt: "start Loopgraph",
     notes: [
       "Project-scope install wrote only local .loopgraph/hermes artifacts.",
       "Add the generated mcp.loopgraph.yaml snippet to ~/.hermes/config.yaml when you are ready to connect Hermes.",
@@ -482,7 +482,7 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
   const nextSteps = [
     "Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.",
     "Make sure Hermes can load the generated Loopgraph skills directory.",
-    `Open Hermes and run: ${install.firstPrompt}`,
+    `Open Hermes and say: ${install.firstPrompt}`,
     "After accepting loops, plan and sync Hermes webhook route metadata from Loopgraph.",
     "Before connecting live provider webhooks, test with generated synthetic or redacted EventEnvelope fixtures."
   ];
@@ -782,19 +782,19 @@ metadata:
 
 ## When to Use
 
-Use this skill when the user wants to design department automations, inspect Loopgraph routing readiness, or prepare a local company brain.
+Use this skill when the user says "start", "start Loopgraph", "/loopgraph start", asks what to do after install, wants to design department automations, inspect Loopgraph routing readiness, or prepare a local company brain.
 
 ## Procedure
 
 1. Confirm the project root: \`${projectRoot}\`.
 2. Use the Loopgraph MCP server named \`loopgraph\`; Hermes may expose its tools with an \`mcp_loopgraph_\` prefix. Prefer Loopgraph MCP resources for canonical schemas and object reads when available.
 3. Call \`loopgraph_workspace_inspect\` to confirm the local workspace is bound and ready.
-4. Call \`loopgraph_departments_list\` and present only those canonical departments.
+4. Call \`loopgraph_departments_list\` and immediately present only those canonical departments. Do not ask an open-ended question first. Ask the user to pick one or more departments.
 5. Call \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\` to start or resume the local session.
 6. Ask permission before project inspection; if granted, call \`loopgraph_project_inspect\` to read only allowlisted manifests and example env key names.
 7. After the user chooses departments, call \`loopgraph_discovery_select_departments\`.
-8. Ask only the bundle returned by \`loopgraph_discovery_next_questions\`; submit answers with \`loopgraph_discovery_submit_answers\`.
-9. Continue through the five compact discovery bundles, using at most the required follow-ups.
+8. Ask only the next bundle returned by \`loopgraph_discovery_next_questions\`; submit answers with \`loopgraph_discovery_submit_answers\`.
+9. Continue through the five compact discovery bundles, using at most the required follow-ups. If the user already supplied enough information in prose, map it into the bundle fields and ask only for missing required fields.
 10. Call \`loopgraph_design_context_get\` and use the returned bounded context for high-reasoning design.
 11. Confirm the returned design context requests proposal schema \`${LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION}\`; if it does not, stop and ask the operator to run \`loopgraph hermes doctor --project ${projectRoot}\`.
 12. If Hermes hosts the reasoning, submit only a structured proposal set with \`schemaVersion: "${LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION}"\` through \`loopgraph_design_submit\`; if no model path is configured, use \`loopgraph_design_generate\` as the deterministic local fallback.
@@ -908,17 +908,19 @@ Use this sequence when Hermes is helping a user design local company loops.
 
 1. Inspect the workspace with \`loopgraph_workspace_inspect\`.
 2. List canonical departments with \`loopgraph_departments_list\`; do not invent department IDs.
-3. Start or resume discovery with \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\`.
-4. Ask permission before project inspection. If granted, call \`loopgraph_project_inspect\`; treat detected stack details as unconfirmed until the user confirms them.
-5. Select departments with \`loopgraph_discovery_select_departments\`.
-6. Ask exactly the next \`QuestionBundle\` returned by \`loopgraph_discovery_next_questions\`.
-7. Submit answers through \`loopgraph_discovery_submit_answers\` with the expected revision.
-8. After required bundles are complete, call \`loopgraph_design_context_get\`.
-9. In Hermes-hosted mode, produce a schema-constrained proposal set from that bounded context and submit it through \`loopgraph_design_submit\`.
-10. Use \`loopgraph_design_generate\` only as the local deterministic fallback.
-11. Explain only validated proposals, visible assumptions, required connections, risks, and next user actions.
-12. Materialize only explicitly accepted proposal IDs with \`loopgraph_loops_materialize\`.
-13. After materialization, call \`loopgraph_graph_get\`, \`loopgraph_connections_plan\`, and \`loopgraph_hermes_webhooks_plan\` before describing readiness.
+3. If the user started with "start Loopgraph" or an equivalent short trigger, present the department picker immediately and ask them to choose one or more departments before any broad discovery question.
+4. Start or resume discovery with \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\`.
+5. Ask permission before project inspection. If granted, call \`loopgraph_project_inspect\`; treat detected stack details as unconfirmed until the user confirms them.
+6. Select departments with \`loopgraph_discovery_select_departments\`.
+7. Ask exactly the next \`QuestionBundle\` returned by \`loopgraph_discovery_next_questions\`.
+8. Submit answers through \`loopgraph_discovery_submit_answers\` with the expected revision.
+9. Keep the conversation proactive: after each answer submission, fetch the next bundle and ask it; if the user answered several fields in prose, prefill them and ask only for missing required details.
+10. After required bundles are complete, call \`loopgraph_design_context_get\`.
+11. In Hermes-hosted mode, produce a schema-constrained proposal set from that bounded context and submit it through \`loopgraph_design_submit\`.
+12. Use \`loopgraph_design_generate\` only as the local deterministic fallback.
+13. Explain only validated proposals, visible assumptions, required connections, risks, and next user actions.
+14. Materialize only explicitly accepted proposal IDs with \`loopgraph_loops_materialize\`.
+15. After materialization, call \`loopgraph_graph_get\`, \`loopgraph_connections_plan\`, and \`loopgraph_hermes_webhooks_plan\` before describing readiness.
 
 Keep design reasoning separate from runtime event routing. A webhook-triggered turn must never start or edit discovery.
 `;
