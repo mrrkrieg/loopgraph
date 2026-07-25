@@ -69,7 +69,7 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 6. **Connect and promote carefully.** New loops begin in shadow mode. Live work stays blocked until routing, capabilities, approvals, and exact prepared-action fingerprints are ready.
 
 <p align="center">
-  <img src="docs/images/hermes-brain-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
+  <img src="docs/images/hermes-brain-ui.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
   <br />
   <sub>The hosted Hermes Brain preview: incoming data points feed Hermes, departments own loops, and outcomes return as evidence.</sub>
 </p>
