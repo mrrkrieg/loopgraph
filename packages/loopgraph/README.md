@@ -54,6 +54,8 @@ Provider webhooks should point at Hermes, not directly at Loopgraph workflow exe
 
 For proactive Loopgraph-initiated design work, configure the dedicated Hermes `loopgraph.design_requested` webhook described in the [Hermes design bridge](../../docs/HERMES-DESIGN-BRIDGE.md). Hermes reads the durable task and submits evidence/proposals through Loopgraph MCP; the webhook only wakes the agent.
 
+To detect missing or weak loops from accumulated local problems, routing corrections, failed verification, and review friction, use the [Loop opportunity engine](../../docs/LOOP-OPPORTUNITY-ENGINE.md). Qualified opportunities can start a draft Hermes design task but cannot materialize or execute a loop.
+
 See [Hermes examples](../../docs/HERMES-EXAMPLES.md) for the Marketing reference flow, strict Legal / Compliance sensitive-work example, and Custom field-ops example.
 
 ### Runtime API

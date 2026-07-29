@@ -201,7 +201,25 @@ npm run loopgraph -- simulate \
 
 This creates a local trace/review packet only. It does not prove that Productboard, Linear, PostHog, Intercom, Notion, Slack, or any write connector is connected.
 
-## 10. Safe defaults
+## 10. Keep detecting missing and weak loops
+
+Run a one-time scan over the durable local routing, run, verification, and review evidence:
+
+```bash
+npm run loopgraph -- opportunities scan --project .
+```
+
+Keep a trusted local monitor running every 15 minutes:
+
+```bash
+npm run loopgraph -- opportunities scan --project . --watch
+```
+
+Qualified evidence may start a draft Hermes design task. It cannot materialize a loop or perform a business action. Use `--no-auto-start-design` when you want scoring and graph visualization only.
+
+See the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md) for scoring, dismissal, versioned graph-change, and safety contracts.
+
+## 11. Safe defaults
 
 - All new materialized loops start in shadow routing.
 - Local simulation uses synthetic/redacted fixtures by default.
@@ -209,7 +227,7 @@ This creates a local trace/review packet only. It does not prove that Productboa
 - Provider webhooks should terminate at Hermes, not at Loopgraph workflow routes.
 - Webhook secrets, OAuth tokens, and API keys stay in Hermes or an approved credential store, never in chat or `.loopgraph`.
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -221,7 +239,7 @@ This creates a local trace/review packet only. It does not prove that Productboa
 | Hermes design webhook returns `401` | The route secret or V2 signature inputs do not match | Confirm the URL/secret pair returned by `hermes webhook subscribe` and verify the machines' clocks |
 | `hermes webhooks doctor` fails | The local route manifest is stale after loop changes | Rerun `npm run loopgraph -- hermes webhooks sync --project .` |
 
-## 12. Dependency and vulnerability checks
+## 13. Dependency and vulnerability checks
 
 Before connecting live provider credentials or webhook routes, run:
 

@@ -17,6 +17,7 @@ import {
   type RoutingCard
 } from "../core";
 import { loadLoopSpecFromPath } from "./loader";
+import { markLoopOpportunityImplemented } from "./loop-opportunity-engine";
 import { readDesignRun, readLoopDesignProposalSet } from "./design-service";
 import { getDiscoverySession, saveDiscoverySession, type DiscoveryActor } from "./discovery-session";
 import { getLoopgraphRoot } from "./storage-resolver";
@@ -46,7 +47,7 @@ export type LoopListInput = {
 export type HermesGraphProjectionNode = {
   id: string;
   label: string;
-  type: "company_brain" | "department" | "loop" | "connector" | "metric" | "event" | "problem" | "route_commit" | "route_job";
+  type: "company_brain" | "department" | "loop" | "connector" | "metric" | "event" | "problem" | "route_commit" | "route_job" | "opportunity" | "graph_change";
 };
 
 export type HermesGraphProjectionEdge = {
@@ -280,6 +281,17 @@ export async function materializeAcceptedLoopDesignProposals(
       });
     }
     await cleanupMaterializationTransaction(transaction);
+    try {
+      await markLoopOpportunityImplemented({
+        projectRoot,
+        designRunId: input.designRunId,
+        now: input.now
+      });
+    } catch {
+      result.nextActions.push(
+        "Run a Loopgraph opportunity scan to reconcile the materialized design with its opportunity record."
+      );
+    }
     return result;
   } catch (error) {
     if (transaction) await rollbackMaterializationTransaction(transaction);

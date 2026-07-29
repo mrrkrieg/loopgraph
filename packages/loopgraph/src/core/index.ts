@@ -19,6 +19,7 @@ export * from "./connections";
 export * from "./design";
 export * from "./evidence-gap";
 export * from "./hermes-design-task";
+export * from "./loop-opportunity";
 export * from "./process-inventory";
 export * from "./loop-recommendation";
 export * from "./access-requirements";

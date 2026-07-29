@@ -17,6 +17,10 @@ import {
   type LoopgraphLifecycleDelivery
 } from "./lifecycle-events";
 import { listLoopgraphLoops, type HermesGraphProjection } from "./loop-materialization";
+import {
+  listGraphChangeSets,
+  listLoopOpportunities
+} from "./loop-opportunity-engine";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
@@ -114,7 +118,8 @@ export const graphGetInputSchema = z.object({
   projection: z.enum(["design", "event_routing"]).default("design"),
   eventId: z.string().optional(),
   problemId: z.string().optional(),
-  includeConnections: z.boolean().default(true)
+  includeConnections: z.boolean().default(true),
+  includeOpportunities: z.boolean().default(true)
 }).default({});
 
 export type EventsGetInput = z.input<typeof eventsGetInputSchema>;
@@ -436,7 +441,11 @@ export async function loopgraph_graph_get(
   const generatedAt = (options.now ?? new Date()).toISOString();
   const graphProjection = parsed.projection === "event_routing"
     ? await eventRoutingGraphProjection({ projectRoot, eventId: parsed.eventId, problemId: parsed.problemId, options })
-    : await designGraphProjection({ projectRoot, includeConnections: parsed.includeConnections });
+    : await designGraphProjection({
+        projectRoot,
+        includeConnections: parsed.includeConnections,
+        includeOpportunities: parsed.includeOpportunities
+      });
 
   return {
     schemaVersion: "graph-projection/v1alpha1",
@@ -461,32 +470,80 @@ export async function loopgraph_graph_get(
 async function designGraphProjection(input: {
   projectRoot: string;
   includeConnections: boolean;
+  includeOpportunities: boolean;
 }): Promise<HermesGraphProjection> {
   const loops = await listLoopgraphLoops({ projectRoot: input.projectRoot });
   const projection = {
     nodes: [...loops.graphProjection.nodes],
     edges: [...loops.graphProjection.edges]
   };
-  if (!input.includeConnections) return dedupeGraphProjection(projection);
-
-  const plan = await buildConnectionPlan({ projectRoot: input.projectRoot });
-  for (const item of plan.items) {
-    projection.nodes.push({
-      id: `connection:${item.capability}`,
-      label: item.capability,
-      type: "connector"
-    });
-    for (const loop of item.loops) {
-      projection.edges.push({
-        source: `connection:${item.capability}`,
-        target: `loop:${loop.loopId}`,
-        label: item.status === "connected"
-          ? "connected signal"
-          : item.status === "manual_fallback"
-            ? "manual fallback"
-            : "missing connection",
-        executable: item.status === "connected"
+  if (input.includeConnections) {
+    const plan = await buildConnectionPlan({ projectRoot: input.projectRoot });
+    for (const item of plan.items) {
+      projection.nodes.push({
+        id: `connection:${item.capability}`,
+        label: item.capability,
+        type: "connector"
       });
+      for (const loop of item.loops) {
+        projection.edges.push({
+          source: `connection:${item.capability}`,
+          target: `loop:${loop.loopId}`,
+          label: item.status === "connected"
+            ? "connected signal"
+            : item.status === "manual_fallback"
+              ? "manual fallback"
+              : "missing connection",
+          executable: item.status === "connected"
+        });
+      }
+    }
+  }
+
+  if (input.includeOpportunities) {
+    const opportunities = await listLoopOpportunities(input.projectRoot);
+    const changeSets = await listGraphChangeSets(input.projectRoot);
+    for (const opportunity of opportunities.filter((item) => item.status !== "dismissed")) {
+      const departmentId = `department:${opportunity.department}`;
+      const opportunityNodeId = `opportunity:${opportunity.id}`;
+      projection.nodes.push(
+        { id: departmentId, label: opportunity.department, type: "department" },
+        { id: opportunityNodeId, label: opportunity.title, type: "opportunity" }
+      );
+      projection.edges.push({
+        source: "company_brain",
+        target: departmentId,
+        label: "routes business problems",
+        executable: false
+      }, {
+        source: departmentId,
+        target: opportunityNodeId,
+        label: `${opportunity.score.total}/100 opportunity`,
+        executable: false
+      });
+      const changeSet = changeSets.find((item) => item.id === opportunity.graphChangeSetId);
+      if (changeSet) {
+        const changeNodeId = `graph-change:${changeSet.id}`;
+        projection.nodes.push({
+          id: changeNodeId,
+          label: changeSet.changes.map((change) => change.operation).join(" + "),
+          type: "graph_change"
+        });
+        projection.edges.push({
+          source: opportunityNodeId,
+          target: changeNodeId,
+          label: changeSet.status,
+          executable: false
+        });
+        for (const loopId of opportunity.targetLoopIds) {
+          projection.edges.push({
+            source: changeNodeId,
+            target: `loop:${loopId}`,
+            label: "proposes change",
+            executable: false
+          });
+        }
+      }
     }
   }
 

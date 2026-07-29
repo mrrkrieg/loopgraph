@@ -255,6 +255,10 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_hermes_design_tasks_get" }),
           expect.objectContaining({ name: "loopgraph_evidence_gaps_get" }),
           expect.objectContaining({ name: "loopgraph_evidence_gap_answer" }),
+          expect.objectContaining({ name: "loopgraph_opportunities_scan" }),
+          expect.objectContaining({ name: "loopgraph_opportunities_get" }),
+          expect.objectContaining({ name: "loopgraph_opportunity_dismiss" }),
+          expect.objectContaining({ name: "loopgraph_graph_changes_get" }),
           expect.objectContaining({ name: "loopgraph_connections_plan" }),
           expect.objectContaining({ name: "loopgraph_connections_set_manual_fallback" }),
           expect.objectContaining({ name: "loopgraph_loops_list" }),
@@ -285,7 +289,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(44);
+    expect(listLoopgraphMcpTools()).toHaveLength(48);
   });
 
   it("supports a restricted webhook-router exposure for untrusted Hermes event turns", async () => {
@@ -320,6 +324,10 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_design_context_get",
       "loopgraph_design_submit",
       "loopgraph_design_edit",
+      "loopgraph_opportunities_scan",
+      "loopgraph_opportunities_get",
+      "loopgraph_opportunity_dismiss",
+      "loopgraph_graph_changes_get",
       "loopgraph_connections_set_manual_fallback",
       "loopgraph_loops_materialize",
       "loopgraph_loops_validate",
@@ -424,6 +432,8 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/routing-decision" }),
           expect.objectContaining({ uri: "loopgraph://schemas/evidence-gap-set" }),
           expect.objectContaining({ uri: "loopgraph://schemas/hermes-design-task" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/loop-opportunity" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/graph-change-set" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),
@@ -458,6 +468,18 @@ describe("Loopgraph MCP server", () => {
       id: "design-task-schema-resource",
       method: "resources/read",
       params: { uri: "loopgraph://schemas/hermes-design-task" }
+    }, { projectRoot }));
+    const opportunitySchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "opportunity-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/loop-opportunity" }
+    }, { projectRoot }));
+    const graphChangeSetSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "graph-change-set-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/graph-change-set" }
     }, { projectRoot }));
     const session = resourceJson(await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
@@ -496,6 +518,16 @@ describe("Loopgraph MCP server", () => {
       id: "hermes-design-task"
     });
     expect(JSON.stringify(designTaskSchema)).toContain("HermesDesignTask");
+    expect(opportunitySchema).toMatchObject({
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id: "loop-opportunity"
+    });
+    expect(JSON.stringify(opportunitySchema)).toContain("LoopOpportunity");
+    expect(graphChangeSetSchema).toMatchObject({
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id: "graph-change-set"
+    });
+    expect(JSON.stringify(graphChangeSetSchema)).toContain("GraphChangeSet");
     expect(session).toMatchObject({
       id: "session_resources",
       activeStage: "workspace"
