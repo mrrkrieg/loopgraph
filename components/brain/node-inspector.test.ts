@@ -54,6 +54,13 @@ describe("NodeInspector", () => {
     );
 
     expect(html).toContain("Hermes local run controls");
+    expect(html).toContain("Connect next");
+    expect(html).toContain("Event source → Hermes");
+    expect(html).toContain("do not point provider webhooks directly at this loop");
+    expect(html).toContain("ads read");
+    expect(html).toContain("crm read");
+    expect(html).toContain("Human owner / approval");
+    expect(html).toContain("Outcome evidence");
     expect(html).toContain("Routing ready");
     expect(html).toContain("paid acquisition efficiency drop");
     expect(html).toContain("ads.read");

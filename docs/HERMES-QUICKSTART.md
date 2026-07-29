@@ -88,7 +88,7 @@ start Loopgraph
 Hermes should:
 
 1. Inspect the Loopgraph workspace through MCP.
-2. Show the canonical department list immediately and ask you to pick one or more departments.
+2. Show the canonical department list immediately, recommend Product as the easiest first example, and ask you to pick one or more departments.
 3. Start or resume the shared discovery session.
 4. Ask one compact Loopgraph-supplied question bundle at a time.
 5. Request high-reasoning design using the bounded `LoopDesignContext`.
@@ -106,14 +106,14 @@ From the clone:
 npm run loopgraph -- studio --project . --start
 ```
 
-Open the printed local URL and use the Hermes Brain view. After accepting the Marketing reference loops, the design graph should show:
+Open the printed local URL and use the Hermes Brain view. A fresh local install stays empty until you accept real loops. If you choose Product first and accept a feedback loop plus a release-learning loop, the design graph should show:
 
 ```text
-Hermes Brain -> Marketing -> Ads
-Hermes Brain -> Marketing -> Content Creation
+Hermes Brain -> Product -> Feedback Clustering
+Hermes Brain -> Product -> Release Learning
 ```
 
-Selecting a workflow node shows its goal, routing readiness, required connections, generated fixtures, latest run status, and safe local validation/simulation controls.
+Selecting a workflow node shows its goal, routing readiness, the concrete "connect next" checklist, generated fixtures, latest run status, and safe local validation/simulation controls.
 
 ## 6. Plan Hermes webhook routes
 
@@ -123,7 +123,7 @@ After materializing loops:
 npm run loopgraph -- hermes webhooks plan --project .
 ```
 
-This derives one Hermes route family per provider source pattern, not one public webhook per loop. It also includes the dedicated `loopgraph-lifecycle-events` route for signed notification-only callbacks from Loopgraph back to Hermes. For the Marketing reference flow, Google Ads and Notion-like content events become Hermes route families that point at the `loopgraph-event-router` skill.
+This derives one Hermes route family per provider source pattern, not one public webhook per loop. It also includes the dedicated `loopgraph-lifecycle-events` route for signed notification-only callbacks from Loopgraph back to Hermes. For a Product flow, product analytics, support, CRM, roadmap, or release events become Hermes route families that point at the `loopgraph-event-router` skill.
 
 ## 7. Sync and check the local route manifest
 
@@ -142,10 +142,10 @@ Use a generated fixture or a redacted normalized event:
 
 ```bash
 npm run loopgraph -- events test --project . \
-  --source google_ads* \
-  --fixture .loopgraph/generated/hermes/marketing/marketing_ads/fixtures/happy-path.json \
+  --source product_analytics* \
+  --fixture .loopgraph/generated/hermes/product/<accepted-loop-id>/fixtures/happy-path.json \
   --expected-action route \
-  --expected-loop marketing_ads \
+  --expected-loop <accepted-loop-id> \
   --require-synced-manifest
 ```
 
@@ -173,11 +173,11 @@ The same generated fixture can run the accepted LoopSpec in local simulation mod
 
 ```bash
 npm run loopgraph -- simulate \
-  .loopgraph/generated/hermes/marketing/marketing_ads/loopgraph.yaml \
-  --fixture .loopgraph/generated/hermes/marketing/marketing_ads/fixtures/happy-path.json
+  .loopgraph/generated/hermes/product/<accepted-loop-id>/loopgraph.yaml \
+  --fixture .loopgraph/generated/hermes/product/<accepted-loop-id>/fixtures/happy-path.json
 ```
 
-This creates a local trace/review packet only. It does not prove that Google Ads, HubSpot, Notion, or any write connector is connected.
+This creates a local trace/review packet only. It does not prove that Productboard, Linear, PostHog, Intercom, Notion, Slack, or any write connector is connected.
 
 ## 10. Safe defaults
 
@@ -211,7 +211,7 @@ The full `npm audit` command also includes developer tooling such as ESLint and 
 
 ## 13. Regression coverage
 
-The package runtime includes a clean local walkthrough regression at `packages/loopgraph/src/runtime/hermes-clean-walkthrough.test.ts`. It starts from a temp project with only `package.json`, installs and doctors Hermes, verifies the restricted webhook-router MCP tool surface, completes the Marketing discovery bundles, generates and materializes Ads plus Content Creation, syncs Hermes webhook routes, rehearses the generated Ads event fixture, renders design/event graph projections, and simulates the generated Ads loop locally.
+The package runtime includes a clean local walkthrough regression at `packages/loopgraph/src/runtime/hermes-clean-walkthrough.test.ts`. It starts from a temp project with only `package.json`, installs and doctors Hermes, verifies the restricted webhook-router MCP tool surface, completes the Marketing discovery bundles, generates and materializes Ads plus Content Creation, syncs Hermes webhook routes, rehearses the generated Ads event fixture, renders design/event graph projections, and simulates the generated Ads loop locally. Marketing remains the golden regression fixture; Product is the recommended first product story in the README and hosted preview.
 
 For the published example catalog, see `docs/HERMES-EXAMPLES.md`. It covers the Marketing reference flow, a strict Legal / Compliance sensitive-department example, and a Custom field-ops example.
 

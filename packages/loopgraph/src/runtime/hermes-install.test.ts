@@ -53,8 +53,10 @@ describe("Hermes integration installer", () => {
       path.join("loopgraph", "references", "discovery-flow.md"),
       path.join("loopgraph", "references", "proposal-schema.md"),
       path.join("loopgraph", "references", "safety-and-approvals.md"),
+      path.join("loopgraph", "examples", "product-feedback-release.md"),
       path.join("loopgraph", "examples", "marketing-ads-content.md"),
       path.join("loopgraph-event-router", "references", "routing-protocol.md"),
+      path.join("loopgraph-event-router", "examples", "product-routing-events.md"),
       path.join("loopgraph-event-router", "examples", "marketing-routing-events.md")
     ]);
 
@@ -99,14 +101,14 @@ describe("Hermes integration installer", () => {
           version: HERMES_LOOPGRAPH_SKILL_VERSION,
           protocol: HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
           path: result.skillPaths[0],
-          assets: result.supportingFilePaths.slice(0, 4)
+          assets: result.supportingFilePaths.slice(0, 5)
         },
         {
           name: "loopgraph-event-router",
           version: HERMES_LOOPGRAPH_SKILL_VERSION,
           protocol: HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION,
           path: result.skillPaths[1],
-          assets: result.supportingFilePaths.slice(4)
+          assets: result.supportingFilePaths.slice(5)
         }
       ],
       capabilities: {
@@ -152,12 +154,15 @@ describe("Hermes integration installer", () => {
     const discoveryReference = await readFile(result.supportingFilePaths[0]!, "utf8");
     const proposalReference = await readFile(result.supportingFilePaths[1]!, "utf8");
     const safetyReference = await readFile(result.supportingFilePaths[2]!, "utf8");
-    const marketingExample = await readFile(result.supportingFilePaths[3]!, "utf8");
-    const routingReference = await readFile(result.supportingFilePaths[4]!, "utf8");
-    const routingExample = await readFile(result.supportingFilePaths[5]!, "utf8");
+    const productExample = await readFile(result.supportingFilePaths[3]!, "utf8");
+    const marketingExample = await readFile(result.supportingFilePaths[4]!, "utf8");
+    const routingReference = await readFile(result.supportingFilePaths[5]!, "utf8");
+    const productRoutingExample = await readFile(result.supportingFilePaths[6]!, "utf8");
+    const routingExample = await readFile(result.supportingFilePaths[7]!, "utf8");
     expect(designSkill).toContain("name: loopgraph");
     expect(designSkill).toContain("start Loopgraph");
     expect(designSkill).toContain("Do not ask an open-ended question first");
+    expect(designSkill).toContain("Recommend Product as the easiest first example");
     expect(designSkill).toContain("ask only for missing required fields");
     expect(designSkill).toContain(`skillProtocol: ${HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION}`);
     expect(designSkill).toContain(`mcpProtocol: ${HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION}`);
@@ -166,6 +171,7 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph://schemas/loop-design-context");
     expect(designSkill).toContain("loopgraph://graph/company");
     expect(designSkill).toContain("references/discovery-flow.md");
+    expect(designSkill).toContain("examples/product-feedback-release.md");
     expect(designSkill).toContain("examples/marketing-ads-content.md");
     expect(designSkill).toContain("loopgraph_workspace_inspect");
     expect(designSkill).toContain("loopgraph_departments_list");
@@ -203,6 +209,7 @@ describe("Hermes integration installer", () => {
     expect(routerSkill).toContain("--exposure webhook_router");
     expect(routerSkill).not.toContain("loopgraph://loops/{loopId}");
     expect(routerSkill).toContain("references/routing-protocol.md");
+    expect(routerSkill).toContain("examples/product-routing-events.md");
     expect(routerSkill).toContain("examples/marketing-routing-events.md");
     expect(routerSkill).toContain("loopgraph_events_ingest");
     expect(routerSkill).toContain("loopgraph_routing_decision_submit");
@@ -219,10 +226,14 @@ describe("Hermes integration installer", () => {
     expect(proposalReference).toContain("routing contract with problem types");
     expect(proposalReference).toContain("Proposal set schema: `loop-design-proposal-set/v1alpha1`");
     expect(safetyReference).toContain("Provider webhooks terminate at Hermes");
+    expect(productExample).toContain("Hermes Brain -> Product -> Feedback Clustering");
+    expect(productExample).toContain("Release Learning");
     expect(marketingExample).toContain("Hermes Brain -> Marketing -> Ads");
     expect(routingReference).toContain("Call `loopgraph_events_ingest` first");
     expect(routingReference).toContain("Routing decision schema: `routing-decision/v1alpha1`");
     expect(routingReference).toContain("Submit exactly one schema-constrained decision");
+    expect(productRoutingExample).toContain("feedback.repeated_theme_detected");
+    expect(productRoutingExample).toContain("request product-owner review");
     expect(routingExample).toContain("Ambiguous landing-page event");
     expect(routingExample).toContain("Do not submit a second route decision");
   });
@@ -420,7 +431,7 @@ describe("Hermes integration installer", () => {
       expected: HERMES_LOOPGRAPH_INTEGRATION_VERSION,
       ok: false
     });
-    expect(result.artifacts.length).toBe(10);
+    expect(result.artifacts.length).toBe(12);
     expect(result.mcp.workspaceOk).toBe(true);
     expect(result.mcp.workspaceExists).toBe(false);
     expect(result.mcp.catalogOk).toBe(true);

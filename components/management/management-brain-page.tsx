@@ -200,7 +200,7 @@ function EmptyDepartmentManagement() {
       <div className="text-sm font-semibold">No department loops created yet</div>
       <p className="mt-2 max-w-3xl text-sm leading-6 text-ink/65">
         A fresh local install starts empty on purpose. In Hermes, say <code className="rounded bg-white px-1 py-0.5">start Loopgraph</code>,
-        pick a department, answer the compact discovery bundles, and accept the loops you want to materialize.
+        pick Product as the easiest first example or choose another department, answer the compact discovery bundles, and accept the loops you want to materialize.
       </p>
       <div className="mt-4 flex flex-wrap gap-3 text-sm">
         <Link className="rounded-md bg-ink px-4 py-2 font-semibold text-white" href="/discovery">

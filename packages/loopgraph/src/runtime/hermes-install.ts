@@ -253,12 +253,20 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
       content: loopgraphSafetyReference()
     },
     {
+      path: path.join(designSkillDir, "examples", "product-feedback-release.md"),
+      content: loopgraphProductDesignExample()
+    },
+    {
       path: path.join(designSkillDir, "examples", "marketing-ads-content.md"),
       content: loopgraphMarketingDesignExample()
     },
     {
       path: path.join(routerSkillDir, "references", "routing-protocol.md"),
       content: loopgraphRoutingProtocolReference(projectRoot)
+    },
+    {
+      path: path.join(routerSkillDir, "examples", "product-routing-events.md"),
+      content: loopgraphProductRoutingExample()
     },
     {
       path: path.join(routerSkillDir, "examples", "marketing-routing-events.md"),
@@ -382,8 +390,10 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
     path.join(skillsDir, "loopgraph", "references", "discovery-flow.md"),
     path.join(skillsDir, "loopgraph", "references", "proposal-schema.md"),
     path.join(skillsDir, "loopgraph", "references", "safety-and-approvals.md"),
+    path.join(skillsDir, "loopgraph", "examples", "product-feedback-release.md"),
     path.join(skillsDir, "loopgraph", "examples", "marketing-ads-content.md"),
     path.join(skillsDir, "loopgraph-event-router", "references", "routing-protocol.md"),
+    path.join(skillsDir, "loopgraph-event-router", "examples", "product-routing-events.md"),
     path.join(skillsDir, "loopgraph-event-router", "examples", "marketing-routing-events.md")
   ];
   const hermesVersion = options.hermesVersionCheck
@@ -789,7 +799,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 1. Confirm the project root: \`${projectRoot}\`.
 2. Use the Loopgraph MCP server named \`loopgraph\`; Hermes may expose its tools with an \`mcp_loopgraph_\` prefix. Prefer Loopgraph MCP resources for canonical schemas and object reads when available.
 3. Call \`loopgraph_workspace_inspect\` to confirm the local workspace is bound and ready.
-4. Call \`loopgraph_departments_list\` and immediately present only those canonical departments. Do not ask an open-ended question first. Ask the user to pick one or more departments.
+4. Call \`loopgraph_departments_list\` and immediately present only those canonical departments. Do not ask an open-ended question first. Recommend Product as the easiest first example, but let the user pick one or more departments.
 5. Call \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\` to start or resume the local session.
 6. Ask permission before project inspection; if granted, call \`loopgraph_project_inspect\` to read only allowlisted manifests and example env key names.
 7. After the user chooses departments, call \`loopgraph_discovery_select_departments\`.
@@ -830,6 +840,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 - \`references/discovery-flow.md\`: exact discovery/design/materialization sequence.
 - \`references/proposal-schema.md\`: structured proposal expectations.
 - \`references/safety-and-approvals.md\`: trust boundaries and approval rules.
+- \`examples/product-feedback-release.md\`: recommended Product Feedback Clustering + Release Learning example.
 - \`examples/marketing-ads-content.md\`: golden Marketing Ads + Content Creation example.
 
 ## Safety
@@ -885,6 +896,7 @@ Use this skill only for isolated webhook, schedule, manual, or Loopgraph lifecyc
 - MCP exposure: use a dedicated server/profile equivalent to \`loopgraph mcp serve --project ${projectRoot} --exposure webhook_router\` for webhook-triggered turns.
 - MCP resources: \`loopgraph://schemas/event-envelope\`, \`loopgraph://schemas/routing-card\`, \`loopgraph://schemas/routing-decision\`, and \`loopgraph://graph/company\`. Do not read full loop resources from an untrusted webhook turn.
 - \`references/routing-protocol.md\`: event-ingest, decision, validation, and durable-state sequence.
+- \`examples/product-routing-events.md\`: Product feedback, release-learning, duplicate, and human-review examples.
 - \`examples/marketing-routing-events.md\`: Ads, Content Creation, ambiguous, duplicate, and fan-out examples.
 
 ## Hard Rules
@@ -984,6 +996,43 @@ Do not call unrestricted terminal, browser, file-write, connector, or implementa
 `;
 }
 
+function loopgraphProductDesignExample(): string {
+  return `# Product Example: Feedback Clustering and Release Learning
+
+Reference answers:
+
+- Department: Product.
+- Stack: Productboard or roadmap docs, Linear, Intercom or support inbox, PostHog or product analytics, Notion, Slack.
+- Biggest problems: customer feedback is fragmented; roadmap conversations start from anecdotes; release outcomes are reviewed late.
+- Automation mode: monitor, recommend, draft product evidence, and prepare review packets.
+- Boundaries: no automatic roadmap priority changes, customer commitments, scope changes, or external sends.
+- Owners: Product lead for roadmap judgment, design/engineering partner for feasibility, customer owner for sensitive account context.
+
+Expected proposals:
+
+1. Feedback Clustering
+   - Problem type: \`repeated_customer_problem_signal\`.
+   - Should route: feedback threshold crossed with linked source evidence, affected segment, and recent supporting signals.
+   - Should not route: a single loud customer request, a pure support triage issue, or an active incident.
+   - Required connections: support/feedback read, CRM/account context, product analytics read, roadmap/docs read, or manual exports.
+   - Initial action: draft a product-problem brief with evidence clusters and assumptions for product-owner review.
+
+2. Release Learning
+   - Problem type: \`release_outcome_review_due\`.
+   - Should route: release measurement window closed with adoption, support, and intended-outcome evidence.
+   - Should not route: a feature request with no shipped release or a rollback decision that requires incident ownership.
+   - Required connections: feature/release source, product analytics, support signals, release notes, or manual exports.
+   - Initial action: draft a release learning review and recommended follow-up for product-owner approval.
+
+Expected graph:
+
+\`\`\`text
+Hermes Brain -> Product -> Feedback Clustering
+Hermes Brain -> Product -> Release Learning
+\`\`\`
+`;
+}
+
 function loopgraphMarketingDesignExample(): string {
   return `# Marketing Example: Ads and Content Creation
 
@@ -1018,6 +1067,48 @@ Expected graph:
 Hermes Brain -> Marketing -> Ads
 Hermes Brain -> Marketing -> Content Creation
 \`\`\`
+`;
+}
+
+function loopgraphProductRoutingExample(): string {
+  return `# Product Routing Examples
+
+Feedback cluster event:
+
+\`\`\`text
+source: product_feedback
+eventType: feedback.repeated_theme_detected
+subject: feedback_cluster/onboarding-friction
+signals: 14 linked feedback items, affected segment, support burden, product usage drop
+\`\`\`
+
+Expected: route to Feedback Clustering when evidence spans trusted sources. Reject Release Learning because no shipped-release measurement window is involved.
+
+Release learning event:
+
+\`\`\`text
+source: product_analytics
+eventType: release.measurement_window_closed
+subject: release/activation-checklist
+signals: adoption metric, support deflection, release note, intended outcome
+\`\`\`
+
+Expected: route to Release Learning. Reject Feedback Clustering because this is a shipped-release review, not a new feedback-cluster problem.
+
+Single strategic-customer request:
+
+\`\`\`text
+source: crm
+eventType: roadmap.customer_request
+subject: account/acme-enterprise
+signals: strategic account asks for an immediate roadmap commitment
+\`\`\`
+
+Expected: request product-owner review or mark unhandled. Do not route directly into roadmap-changing execution.
+
+Duplicate feedback sync:
+
+Expected: stop after \`loopgraph_events_ingest\` reports duplicate or append evidence to the existing durable problem if Loopgraph returns a matching open problem.
 `;
 }
 

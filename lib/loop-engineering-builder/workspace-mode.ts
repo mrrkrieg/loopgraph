@@ -38,7 +38,7 @@ export function workspaceModeBanner(mode: WorkspaceMode): { label: string; class
       };
     case "empty":
       return {
-        label: "Empty local workspace — say `start Loopgraph` in Hermes or open Discovery to create your first loops. Demo data is not shown.",
+        label: "Empty local workspace — say `start Loopgraph` in Hermes, start with Product or your chosen department, and accept loops to create your graph. Demo data is not shown.",
         className: "border-slate-200 bg-slate-50 text-slate-800"
       };
   }

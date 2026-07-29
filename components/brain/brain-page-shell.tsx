@@ -76,21 +76,26 @@ export function BrainPageShell({
 
 function PreviewStoryStrip() {
   return (
-    <div className="grid gap-3 md:grid-cols-3">
+    <div className="grid gap-3 md:grid-cols-4">
+      <StoryCard
+        eyebrow="Preview opens on Product"
+        title="Start with one understandable route"
+        body="The default canvas follows product events, support tickets, CRM context, docs, and warehouse metrics into Hermes before it shows the full company map."
+      />
       <StoryCard
         eyebrow="1. Data points in"
         title="Events land in Hermes first"
-        body="Ads, CRM, support, product analytics, incidents, docs, billing, email, calendar, and warehouse metrics become routing evidence."
+        body="Provider webhooks and lifecycle callbacks terminate at Hermes Brain, not at individual workflow loops."
       />
       <StoryCard
         eyebrow="2. Hermes decides"
-        title="Departments own loops"
-        body="Hermes Brain does not blindly run everything. It chooses Product, Marketing, Sales, CS, Engineering, Finance/Ops, Legal/Security, HR, or Management loops."
+        title="Product owns the loops"
+        body="Hermes routes only when the evidence matches a registered contract, otherwise it asks for context or human choice."
       />
       <StoryCard
         eyebrow="3. Evidence returns"
-        title="Loops improve the company graph"
-        body="Each loop records outcomes, reviews, metrics, and improvement items so the next decision has better context."
+        title="Outcomes train the map"
+        body="Accepted loops record traces, approvals, metrics, and improvement items so future routing decisions get clearer."
       />
     </div>
   );

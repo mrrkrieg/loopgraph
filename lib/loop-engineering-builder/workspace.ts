@@ -767,7 +767,7 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   });
   const storage = getStorageAdapter();
   const improvements = await loadImprovementsFromStorage(storage, selectedLoop.id);
-  const managementReview = await managementReviewForWorkspace(loops, graph, improvements);
+  const managementReview = await managementReviewForWorkspace(loops, graph);
 
   return {
     organization,
@@ -885,7 +885,7 @@ async function selectDemoWorkspace(selectedLoopId?: string) {
   const storage = getStorageAdapter();
   const traceImprovements = await loadImprovementsFromStorage(storage, loop.id);
   const improvements = mergeImprovements(workspace.improvements, traceImprovements);
-  const managementReview = await managementReviewForWorkspace(workspace.loops, workspace.graph, improvements);
+  const managementReview = await managementReviewForWorkspace(workspace.loops, workspace.graph);
 
   if (loop.id === workspace.loop.id && improvements.length === workspace.improvements.length) {
     return {
@@ -954,7 +954,7 @@ function selectTopologyLoopId(
   return specs[0]?.metadata.id;
 }
 
-async function managementReviewForWorkspace(loops: LoopRecord[], graph: LoopGraph, _improvements: ImprovementItem[]) {
+async function managementReviewForWorkspace(loops: LoopRecord[], graph: LoopGraph) {
   const rollup = await loadLatestManagementRollup();
   if (rollup) {
     return {

@@ -2,6 +2,31 @@
 
 These examples all keep Hermes Agent as the company brain. External events terminate at Hermes, Hermes submits a bounded routing decision, and Loopgraph validates/materializes/runs only through the registered local workspace.
 
+## Product: Feedback Clustering + Release Learning
+
+Recommended first product story:
+
+```text
+Hermes Brain -> Product -> Feedback Clustering
+Hermes Brain -> Product -> Release Learning
+```
+
+This is the clearest preview path because most teams understand the pain immediately: feedback is scattered across support, CRM, calls, product analytics, docs, and Slack; release reviews happen late; roadmap decisions need product-owner judgment.
+
+Routing contract:
+
+- Repeated feedback themes with linked customer evidence route to `product_feedback_clustering`.
+- Release measurement windows with adoption, support, and outcome evidence route to `product_release_learning`.
+- Single strategic-customer roadmap asks require product-owner review instead of automatic priority changes.
+- Duplicate sync deliveries attach evidence to the same durable problem instead of opening duplicate work.
+
+Safe rollout:
+
+- Start in shadow routing.
+- Connect product analytics, support/CRM evidence, roadmap docs, and Slack/Notion review channels through Hermes-owned credentials.
+- Allow Loopgraph to draft problem briefs, release learning reviews, and ticket proposals.
+- Keep roadmap, scope, customer commitments, and external communication human-approved.
+
 ## Marketing: Ads + Content Creation
 
 Reference fixture:
@@ -10,7 +35,7 @@ Reference fixture:
 packages/loopgraph/src/runtime/fixtures/golden-marketing-reference-flow.json
 ```
 
-This is the main happy-path example:
+This remains the current golden regression fixture:
 
 ```text
 Hermes Brain -> Marketing -> Ads

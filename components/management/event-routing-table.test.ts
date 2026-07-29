@@ -16,6 +16,7 @@ describe("EventRoutingTable", () => {
 
     expect(html).toContain("No Hermes routing events received yet");
     expect(html).toContain("illustrative only");
+    expect(html).toContain("feedback.repeated_theme_detected");
     expect(html).toContain("campaign.performance_anomaly");
   });
 
@@ -227,7 +228,10 @@ describe("EventRoutingTable", () => {
     expect(html).toContain("/api/management/routing");
     expect(html).toContain("/api/management/routing/human-choice");
     expect(html).toContain("Submit correction");
-    expect(html).toContain("Decision detail");
+    expect(html).toContain("Routing receipt");
+    expect(html).toContain("Full routing receipt");
+    expect(html).toContain("Why Hermes made this call");
+    expect(html).toContain("Needs human/context review");
     expect(html).toContain("Alternatives Hermes considered");
     expect(html).toContain("Correlation timeline");
     expect(html).toContain("Verified outcome");

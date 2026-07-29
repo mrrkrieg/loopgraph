@@ -10,8 +10,8 @@ describe("Loopgraph template catalog", () => {
     const templates = getTemplateCatalog();
 
     expect(departments.map((department) => department.key)).toEqual([
-      "marketing",
       "product",
+      "marketing",
       "customer_success",
       "sales",
       "engineering",

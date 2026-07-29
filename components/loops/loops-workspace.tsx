@@ -9,6 +9,19 @@ import { LoopContractSummary } from "./loop-contract-summary";
 import { LoopDetail } from "./loop-detail";
 import { LoopList } from "./loop-list";
 
+const departmentOrder = [
+  "product",
+  "marketing",
+  "sales",
+  "customer_success",
+  "engineering",
+  "operations_finance",
+  "legal_security",
+  "hr",
+  "management",
+  "custom"
+];
+
 export function LoopsWorkspace({
   workspace,
   department = "all",
@@ -114,7 +127,14 @@ function buildDepartmentOptions(workspace: WorkspaceData): DepartmentFilterOptio
       byKey.set(loop.department, { key: loop.department, label: titleCase(loop.department) });
     }
   }
-  return Array.from(byKey.values()).sort((left, right) => left.label.localeCompare(right.label));
+  return Array.from(byKey.values()).sort((left, right) => {
+    const leftIndex = departmentOrder.indexOf(left.key);
+    const rightIndex = departmentOrder.indexOf(right.key);
+    if (leftIndex !== -1 || rightIndex !== -1) {
+      return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
+    }
+    return left.label.localeCompare(right.label);
+  });
 }
 
 function newLoopHref(department: string) {
