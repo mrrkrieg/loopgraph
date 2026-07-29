@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildBrainGraph,
-  filterBrainGraphByDepth
+  filterBrainGraphByDepth,
+  filterBrainGraphForDepartmentStory
 } from "./graph-adapter";
 import type { SemanticTopology, TopologyEdge, TopologyNode } from "@/lib/loopgraph-core/graph";
 
@@ -191,6 +192,56 @@ describe("buildBrainGraph", () => {
       source: "preview:evidence:marketing",
       target: "company:root",
       type: "loop_learns_from_trace"
+    }));
+  });
+
+  it("filters the hosted preview to a Product-first event path", () => {
+    const sample = topology([
+      node({ id: "company:root", type: "company", label: "Hermes Brain", metadata: { hierarchyMode: "hermes_brain" } }),
+      node({ id: "loop:department:product", type: "department_loop", label: "Product", department: "product" }),
+      node({ id: "loop:product_feedback", type: "workflow_loop", label: "Feedback Clustering", loopId: "product_feedback", parentId: "loop:department:product", department: "product", metadata: { source: "demo_catalog", runtimeLevel: "spec_stub", templateOnly: true } }),
+      node({ id: "loop:department:marketing", type: "department_loop", label: "Marketing", department: "marketing" }),
+      node({ id: "loop:marketing_ads", type: "workflow_loop", label: "Ads", loopId: "marketing_ads", parentId: "loop:department:marketing", department: "marketing", metadata: { source: "demo_catalog", runtimeLevel: "spec_stub", templateOnly: true } })
+    ], [
+      edge({ source: "company:root", target: "loop:department:product" }),
+      edge({ source: "loop:department:product", target: "loop:product_feedback" }),
+      edge({ source: "company:root", target: "loop:department:marketing" }),
+      edge({ source: "loop:department:marketing", target: "loop:marketing_ads" })
+    ], {
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain",
+      managementLoopId: "company:root"
+    });
+    const graph = buildBrainGraph({
+      topology: sample,
+      includeCatalogLoops: true,
+      previewStory: true,
+      includeData: true,
+      includeMetrics: true,
+      includeReviews: true,
+      includeImprove: false
+    });
+    const productPath = filterBrainGraphForDepartmentStory({
+      graph,
+      departmentId: "product"
+    });
+    const labels = productPath.nodes.map((item) => item.label);
+
+    expect(labels).toContain("Hermes Brain");
+    expect(labels).toContain("Product");
+    expect(labels).toContain("Feedback Clustering");
+    expect(labels).toContain("Product events");
+    expect(labels).toContain("Support tickets");
+    expect(labels).toContain("Product learning");
+    expect(labels).not.toContain("Marketing");
+    expect(labels).not.toContain("Ads");
+    expect(productPath.edges).toContainEqual(expect.objectContaining({
+      source: "preview:data:product-analytics",
+      target: "company:root"
+    }));
+    expect(productPath.edges).toContainEqual(expect.objectContaining({
+      source: "preview:evidence:product",
+      target: "company:root"
     }));
   });
 

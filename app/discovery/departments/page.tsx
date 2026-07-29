@@ -17,7 +17,7 @@ export default async function DepartmentDiscoveryPage({ searchParams }: { search
   const session = await getDiscoverySessionForView(sessionId);
   const catalog = listDepartmentCatalog({ includeCustom: true });
   const selected = new Set(session.selectedDepartmentIds);
-  const defaultActiveDepartment = session.activeDepartmentId ?? session.selectedDepartmentIds[0] ?? "marketing";
+  const defaultActiveDepartment = session.activeDepartmentId ?? session.selectedDepartmentIds[0] ?? "product";
   return (
     <>
       <PageHeader
@@ -48,7 +48,7 @@ export default async function DepartmentDiscoveryPage({ searchParams }: { search
                         type="checkbox"
                         name="departments"
                         value={department.id}
-                        defaultChecked={isSelected || (!session.selectedDepartmentIds.length && department.id === "marketing")}
+                        defaultChecked={isSelected || (!session.selectedDepartmentIds.length && department.id === "product")}
                       />
                       <div>
                         <div className="font-semibold text-ink">{department.label}</div>
@@ -96,7 +96,7 @@ export default async function DepartmentDiscoveryPage({ searchParams }: { search
       </div>
       {sessionId && session.departmentProfiles.length === 0 ? (
         <div className="mt-5 rounded-lg border border-dashed border-line bg-paper p-5 text-sm leading-6 text-ink/60">
-          No departments saved yet. Pick Marketing, Sales, Product, or any department above to start the five-bundle discovery flow.
+          No departments saved yet. Pick Product, Marketing, Sales, or any department above to start the five-bundle discovery flow.
         </div>
       ) : null}
     </>

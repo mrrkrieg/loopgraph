@@ -112,6 +112,9 @@ function LoopRunControls({
   const activationMode = stringValue(runtime.routing?.activationMode) ?? "not set";
   const routingReady = Boolean(runtime.routing?.ready);
   const latestRun = latestRunMetadata(node);
+  const dataSources = stringList(node.metadata?.dataSources);
+  const owner = stringValue(node.metadata?.owner) || stringArrayValue(node.metadata?.owners) || "Department owner";
+  const metrics = stringList(node.metadata?.metrics);
 
   return (
     <div className="mt-5 rounded-md border border-line bg-white p-4">
@@ -135,13 +138,14 @@ function LoopRunControls({
           <span className="ml-2 font-mono text-xs text-ink/45">{latestRun.id}</span>
         </Link>
       ) : null}
-      {requiredConnections.values.length > 0 ? (
-        <CompactList
-          title="Required connections"
-          items={requiredConnections.values.slice(0, 4)}
-          empty="No connections listed"
-        />
-      ) : null}
+      <ConnectionChecklist
+        activationMode={activationMode}
+        dataSources={dataSources.values}
+        metrics={metrics.values}
+        owner={owner}
+        problemTypes={problemTypes.values}
+        requiredConnections={requiredConnections.values}
+      />
       <div className="mt-4 space-y-2">
         {actions?.validateLoop ? (
           <form action={actions.validateLoop}>
@@ -194,6 +198,74 @@ function LoopRunControls({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function ConnectionChecklist({
+  activationMode,
+  dataSources,
+  metrics,
+  owner,
+  problemTypes,
+  requiredConnections
+}: {
+  activationMode: string;
+  dataSources: string[];
+  metrics: string[];
+  owner: string;
+  problemTypes: string[];
+  requiredConnections: string[];
+}) {
+  const primaryProblem = problemTypes[0]?.replace(/_/g, " ") ?? "the accepted business problem";
+  const primaryMetric = metrics[0] ?? "a measurable outcome";
+  const capabilityRows = requiredConnections.length > 0
+    ? requiredConnections.slice(0, 5).map((connection) => ({
+        title: connectionLabel(connection),
+        detail: `Required capability: ${connection}`
+      }))
+    : dataSources.slice(0, 4).map((source) => ({
+        title: source,
+        detail: "Source of truth or evidence source inferred from the LoopSpec"
+      }));
+
+  return (
+    <div className="mt-4 rounded-md border border-line bg-paper p-3">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/45">Connect next</div>
+      <p className="mt-2 text-sm leading-6 text-ink/60">
+        Keep this loop in <span className="font-medium text-ink">{activationMode.replace(/_/g, " ")}</span> until Hermes routes a redacted test event,
+        Loopgraph validates the contract, and the human owner approves the rollout boundary.
+      </p>
+      <ol className="mt-3 space-y-2 text-sm">
+        <ChecklistItem
+          title="1. Event source → Hermes"
+          detail={`Send normalized ${primaryProblem} events to Hermes Brain; do not point provider webhooks directly at this loop.`}
+        />
+        {capabilityRows.map((row, index) => (
+          <ChecklistItem
+            detail={row.detail}
+            key={`${row.title}:${index}`}
+            title={`${index + 2}. ${row.title}`}
+          />
+        ))}
+        <ChecklistItem
+          title={`${capabilityRows.length + 2}. Human owner / approval`}
+          detail={`${owner} owns ambiguous routing, risky actions, and promotion beyond shadow mode.`}
+        />
+        <ChecklistItem
+          title={`${capabilityRows.length + 3}. Outcome evidence`}
+          detail={`Return ${primaryMetric} or review results to Loopgraph so future Hermes decisions improve.`}
+        />
+      </ol>
+    </div>
+  );
+}
+
+function ChecklistItem({ title, detail }: { title: string; detail: string }) {
+  return (
+    <li className="rounded border border-line bg-white px-3 py-2">
+      <div className="font-semibold text-ink">{title}</div>
+      <div className="mt-1 text-xs leading-5 text-ink/55">{detail}</div>
+    </li>
   );
 }
 
@@ -271,6 +343,14 @@ function nextActionForNode(node: BrainGraphNode) {
 
 function readableType(type: BrainGraphNode["type"]) {
   return type.replace(/_/g, " ");
+}
+
+function connectionLabel(value: string) {
+  const [system, capability] = value.split(".");
+  if (!capability) {
+    return value.replace(/_/g, " ");
+  }
+  return `${system.replace(/_/g, " ")} ${capability.replace(/_/g, " ")}`;
 }
 
 function isLoopNode(node: BrainGraphNode) {

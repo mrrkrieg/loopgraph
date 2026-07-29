@@ -61,6 +61,13 @@ export default async function DiscoveryPage({ searchParams }: DiscoveryPageProps
       />
       <DiscoveryStepNav activeHref="/discovery" sessionId={selectedRealSession?.id} />
 
+      <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-950">
+        <div className="font-semibold">Fast path after install</div>
+        <p className="mt-1">
+          Open Hermes and say <code className="rounded bg-white px-1.5 py-0.5">start Loopgraph</code>. Hermes will show departments immediately, suggest Product as the easiest first example, ask one compact bundle at a time, then materialize only the loops you accept.
+        </p>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-4">
         <MetricCard label="Shared sessions" value={realSessions.length} note="Project-local Hermes/browser sessions" />
         <MetricCard label="Progress" value={`${Math.round((completedSteps / discoverySteps.length) * 100)}%`} note={`${completedSteps} of ${discoverySteps.length} Hermes steps have data in ${sessionMode} view`} />

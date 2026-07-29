@@ -90,6 +90,7 @@ export type BrainGraph = {
 export type BrainGraphMode = "global" | "local";
 
 export type BrainGraphStoryPreset =
+  | "product_path"
   | "company_map"
   | "routing_signals"
   | "evidence_return"

@@ -780,6 +780,27 @@ const templateDetailsById: Record<string, Partial<LoopTemplate>> = {
 
 const departments: DepartmentTemplate[] = [
   {
+    key: "product",
+    name: "Product",
+    description:
+      "Loops for turning customer evidence into product problems, bets, releases, and learning.",
+    commonLoops: [
+      loop("product", "feedback_to_problem", "Feedback to Problem Loop", "Cluster feedback and convert repeated pain into well-formed product problems."),
+      loop("product", "problem_to_product_bet", "Problem to Product Bet Loop", "Turn a validated problem into a scoped product bet."),
+      loop("product", "release_learning", "Release Learning Loop", "Compare shipped releases against adoption and customer outcome signals."),
+      loop("product", "bug_cluster_to_problem", "Bug Cluster to Product Problem Loop", "Detect repeated bugs that point to deeper product or UX problems."),
+      loop("product", "roadmap_signal", "Roadmap Signal Loop", "Compare customer demand, strategy, and capacity before roadmap review.")
+    ],
+    requiredQuestions: baseQuestions("product"),
+    commonDataSources: ["linear", "github", "posthog", "analytics", "slack", "custom_api"],
+    commonTools: ["problem brief", "PRD draft", "release note", "feedback cluster", "roadmap update"],
+    commonMetrics: ["adoption", "activation", "retention", "support deflection", "cycle time"],
+    verificationDefaults: ["Evidence links to the problem", "The target user is explicit", "Success metric is measurable", "Scope is reversible"],
+    escalationDefaults: ["Strategic roadmap change", "High customer risk", "Security or privacy implication", "Conflicting executive priority"],
+    failureModes: ["solution-first framing", "thin evidence", "roadmap churn", "unclear success metric"],
+    managementReviewQuestions: ["Which problems are recurring?", "Which bets need decisions?", "Where is product learning blocked?"]
+  },
+  {
     key: "marketing",
     name: "Marketing",
     description:
@@ -811,27 +832,6 @@ const departments: DepartmentTemplate[] = [
       "Where is the funnel constraint this week?",
       "Which tests should be killed, continued, or scaled?"
     ]
-  },
-  {
-    key: "product",
-    name: "Product",
-    description:
-      "Loops for turning customer evidence into product problems, bets, releases, and learning.",
-    commonLoops: [
-      loop("product", "feedback_to_problem", "Feedback to Problem Loop", "Cluster feedback and convert repeated pain into well-formed product problems."),
-      loop("product", "problem_to_product_bet", "Problem to Product Bet Loop", "Turn a validated problem into a scoped product bet."),
-      loop("product", "release_learning", "Release Learning Loop", "Compare shipped releases against adoption and customer outcome signals."),
-      loop("product", "bug_cluster_to_problem", "Bug Cluster to Product Problem Loop", "Detect repeated bugs that point to deeper product or UX problems."),
-      loop("product", "roadmap_signal", "Roadmap Signal Loop", "Compare customer demand, strategy, and capacity before roadmap review.")
-    ],
-    requiredQuestions: baseQuestions("product"),
-    commonDataSources: ["linear", "github", "posthog", "analytics", "slack", "custom_api"],
-    commonTools: ["problem brief", "PRD draft", "release note", "feedback cluster", "roadmap update"],
-    commonMetrics: ["adoption", "activation", "retention", "support deflection", "cycle time"],
-    verificationDefaults: ["Evidence links to the problem", "The target user is explicit", "Success metric is measurable", "Scope is reversible"],
-    escalationDefaults: ["Strategic roadmap change", "High customer risk", "Security or privacy implication", "Conflicting executive priority"],
-    failureModes: ["solution-first framing", "thin evidence", "roadmap churn", "unclear success metric"],
-    managementReviewQuestions: ["Which problems are recurring?", "Which bets need decisions?", "Where is product learning blocked?"]
   },
   {
     key: "customer_success",

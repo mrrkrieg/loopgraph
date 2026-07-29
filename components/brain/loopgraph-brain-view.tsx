@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from "react";
 import type { SemanticTopology } from "@/lib/loopgraph-core/graph";
-import { buildBrainGraph, filterBrainGraphByDepth } from "./graph-adapter";
+import {
+  buildBrainGraph,
+  filterBrainGraphByDepth,
+  filterBrainGraphForDepartmentStory
+} from "./graph-adapter";
 import { GraphControls } from "./graph-controls";
 import { GraphDiagnostics } from "./graph-diagnostics";
 import { NodeInspector } from "./node-inspector";
@@ -14,6 +18,14 @@ function settingsForStoryPreset(
   preset: Exclude<BrainGraphStoryPreset, "custom">,
   previewMode: boolean
 ): BrainGraphSettings {
+  if (preset === "product_path") {
+    return {
+      includeData: true,
+      includeMetrics: true,
+      includeReviews: true,
+      includeImprove: false
+    };
+  }
   if (preset === "company_map") {
     return {
       includeData: previewMode,
@@ -49,9 +61,12 @@ export function LoopgraphBrainView({
   previewMode?: boolean;
   topology: SemanticTopology;
 }) {
-  const [storyPreset, setStoryPreset] = useState<BrainGraphStoryPreset>("company_map");
+  const initialStoryPreset: Exclude<BrainGraphStoryPreset, "custom"> = previewMode
+    ? "product_path"
+    : "company_map";
+  const [storyPreset, setStoryPreset] = useState<BrainGraphStoryPreset>(initialStoryPreset);
   const [settings, setSettings] = useState<BrainGraphSettings>(() =>
-    settingsForStoryPreset("company_map", previewMode)
+    settingsForStoryPreset(initialStoryPreset, previewMode)
   );
   const [mode, setMode] = useState<BrainGraphMode>("global");
   const [depth, setDepth] = useState(1);
@@ -69,21 +84,30 @@ export function LoopgraphBrainView({
     }),
     [includeCatalogLoops, previewMode, settings, topology]
   );
-  const selectedNodeExists = selectedId ? baseGraph.nodes.some((node) => node.id === selectedId) : false;
+  const storyBaseGraph = useMemo(() => {
+    if (storyPreset !== "product_path") {
+      return baseGraph;
+    }
+    return filterBrainGraphForDepartmentStory({
+      graph: baseGraph,
+      departmentId: "product"
+    });
+  }, [baseGraph, storyPreset]);
+  const selectedNodeExists = selectedId ? storyBaseGraph.nodes.some((node) => node.id === selectedId) : false;
   const effectiveSelectedId = selectedNodeExists ? selectedId : undefined;
-  const centerId = localCenterId && baseGraph.nodes.some((node) => node.id === localCenterId)
+  const centerId = localCenterId && storyBaseGraph.nodes.some((node) => node.id === localCenterId)
     ? localCenterId
     : effectiveSelectedId ?? topology.managementLoopId;
   const graph = useMemo(() => {
     if (mode !== "local" || !centerId) {
-      return baseGraph;
+      return storyBaseGraph;
     }
     return filterBrainGraphByDepth({
-      graph: baseGraph,
+      graph: storyBaseGraph,
       centerId,
       depth
     });
-  }, [baseGraph, centerId, depth, mode]);
+  }, [centerId, depth, mode, storyBaseGraph]);
   const selectedNode = effectiveSelectedId
     ? graph.nodes.find((node) => node.id === effectiveSelectedId)
     : graph.nodes.find((node) => node.type === "company_brain");
@@ -146,6 +170,7 @@ export function LoopgraphBrainView({
             storyPreset={storyPreset}
           />
         </div>
+        {previewMode ? <PreviewTraceGuide storyPreset={storyPreset} /> : null}
         <div className="absolute bottom-4 left-4 z-10 max-w-xl space-y-2">
           <div className="rounded-md border border-line bg-white/95 px-3 py-2 text-xs font-medium text-ink/65 shadow-sm backdrop-blur">
             {breadcrumb.join(" / ")}
@@ -167,6 +192,22 @@ export function LoopgraphBrainView({
         />
       </section>
       <NodeInspector actions={actions} edges={graph.edges} node={inspectorNode} onOpenLocal={openLocalGraph} />
+    </div>
+  );
+}
+
+function PreviewTraceGuide({ storyPreset }: { storyPreset: BrainGraphStoryPreset }) {
+  const productPath = storyPreset === "product_path";
+  return (
+    <div className="pointer-events-none absolute left-4 top-24 z-10 hidden max-w-lg rounded-md border border-line bg-white/94 p-3 text-xs leading-5 text-ink/65 shadow-sm backdrop-blur md:block">
+      <div className="font-semibold text-ink">
+        {productPath ? "Follow this event" : "How to read the map"}
+      </div>
+      <div className="mt-1">
+        {productPath
+          ? "Product events, support tickets, CRM context, docs, and metrics flow into Hermes Brain. Hermes routes eligible work to Product loops, then outcomes return as evidence."
+          : "Data points flow into Hermes Brain. Hermes chooses a department route, Loopgraph validates the selected loop, and loop outcomes return as evidence."}
+      </div>
     </div>
   );
 }

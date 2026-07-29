@@ -8,6 +8,11 @@ const storyPresets: Array<{
   description: string;
 }> = [
   {
+    id: "product_path",
+    label: "Product path",
+    description: "Follow one product event from source data through Hermes, Product loops, and outcome evidence."
+  },
+  {
     id: "company_map",
     label: "Company map",
     description: "Data enters Hermes; Hermes routes to department loops."

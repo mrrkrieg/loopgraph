@@ -7,6 +7,20 @@ import { StatusPill } from "../status-pill";
 
 const exampleRows = [
   {
+    eventType: "feedback.repeated_theme_detected",
+    example: "Support, CRM, and product usage show the same customer pain",
+    routedTo: "Product / Feedback Clustering",
+    owner: "Product lead",
+    autonomy: "Shadow → problem brief"
+  },
+  {
+    eventType: "release.measurement_window_closed",
+    example: "Feature adoption, support load, and release notes are ready",
+    routedTo: "Product / Release Learning",
+    owner: "Product lead",
+    autonomy: "Draft learning review"
+  },
+  {
     eventType: "campaign.performance_anomaly",
     example: "CAC rises while qualified conversion falls",
     routedTo: "Marketing / Ads",
@@ -246,6 +260,7 @@ function ActualRoutingTable({ rows }: { rows: EventRoutingOperationsRow[] }) {
                   {row.needsHumanChoice ? <div className="font-medium text-amber-700">Needs human route choice</div> : null}
                   {row.needsCorrection ? <div className="font-medium text-red-700">Failed expected route</div> : null}
                 </div>
+                <RoutingReceiptSummary row={row} />
                 <RoutingDecisionDetails row={row} />
                 {row.needsHumanChoice || row.needsCorrection ? <HumanChoiceForm row={row} /> : null}
               </td>
@@ -257,11 +272,46 @@ function ActualRoutingTable({ rows }: { rows: EventRoutingOperationsRow[] }) {
   );
 }
 
+function RoutingReceiptSummary({ row }: { row: EventRoutingOperationsRow }) {
+  const primaryRoute = row.decisionDetail.selectedRoutes[0];
+  const routeLabel = row.selectedLoopLabels.join(", ") || "No loop selected";
+  const reason = primaryRoute?.reasonSummary ?? decisionFallbackReason(row);
+
+  return (
+    <div className="mt-3 rounded-md border border-line bg-white p-2 text-xs leading-5">
+      <div className="font-semibold text-ink">Routing receipt</div>
+      <div className="mt-1 text-ink/60">
+        Hermes action: <span className="font-medium text-ink">{row.action}</span>
+        {" "}→ route: <span className="font-medium text-ink">{routeLabel}</span>
+        {" "}→ Loopgraph validation: <span className="font-medium text-ink">{row.validationState}</span>
+      </div>
+      <p className="mt-1 text-ink/60">{reason}</p>
+      {row.needsHumanChoice ? (
+        <div className="mt-1 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">
+          Needs human/context review before this can be treated as the final route.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RoutingDecisionDetails({ row }: { row: EventRoutingOperationsRow }) {
   return (
     <details className="mt-3 rounded-md border border-line bg-paper p-2 text-xs">
-      <summary className="cursor-pointer font-medium text-ink/70">Decision detail</summary>
+      <summary className="cursor-pointer font-medium text-ink/70">Full routing receipt</summary>
       <div className="mt-2 space-y-3">
+        <div className="rounded border border-line bg-white p-2">
+          <div className="font-medium text-ink/70">Why Hermes made this call</div>
+          <p className="mt-1 leading-5 text-ink/60">
+            {decisionFallbackReason(row)}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1">
+            <span className="rounded border border-line bg-paper px-2 py-1">event {row.eventType}</span>
+            <span className="rounded border border-line bg-paper px-2 py-1">problem {row.problemType ?? "not opened"}</span>
+            <span className="rounded border border-line bg-paper px-2 py-1">confidence {formatConfidence(row.confidence)}</span>
+            <span className="rounded border border-line bg-paper px-2 py-1">policy {row.decisionDetail.policyVersion}</span>
+          </div>
+        </div>
         <div>
           <div className="font-medium text-ink/70">Hermes selected routes</div>
           {row.decisionDetail.selectedRoutes.length === 0 ? (
@@ -354,6 +404,23 @@ function RoutingDecisionDetails({ row }: { row: EventRoutingOperationsRow }) {
   );
 }
 
+function decisionFallbackReason(row: EventRoutingOperationsRow) {
+  const selectedReason = row.decisionDetail.selectedRoutes[0]?.reasonSummary;
+  if (selectedReason) {
+    return selectedReason;
+  }
+  if (row.validationErrors.length > 0) {
+    return `Loopgraph rejected the route because ${row.validationErrors[0]}`;
+  }
+  if (row.needsHumanChoice) {
+    return "Hermes did not have enough bounded evidence to choose a loop without human/context review.";
+  }
+  if (row.action === "unhandled") {
+    return "Hermes abstained because no registered loop safely accepted this event.";
+  }
+  return row.problemSummary ?? "Hermes recorded the event and is waiting for a valid route decision.";
+}
+
 function HumanChoiceForm({ row }: { row: EventRoutingOperationsRow }) {
   const suggestedLoopIds = row.selectedLoopIds.length > 0
     ? row.selectedLoopIds.join(",")
@@ -414,7 +481,7 @@ function RoutingEmptyState({ showExamples }: { showExamples: boolean }) {
       <p className="mt-1 text-sm leading-6 text-ink/60">
         Once provider webhooks terminate at Hermes and the router skill submits decisions, this table will show real event receipts,
         business problems, selected loops, validation state, queue/run status, and correction history.
-        {showExamples ? " The examples below are illustrative only." : " To start, say `start Loopgraph` in Hermes or open guided Discovery."}
+        {showExamples ? " The examples below are illustrative only." : " To start, say `start Loopgraph` in Hermes, pick Product or another department, and accept at least one loop."}
       </p>
       {showExamples ? (
         <div className="mt-4 overflow-hidden rounded-md border border-line bg-white">

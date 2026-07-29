@@ -71,7 +71,7 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 <p align="center">
   <img src="docs/images/hermes-brain-live-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
   <br />
-  <sub>The hosted Hermes Brain preview: incoming data points feed Hermes, departments own loops, and outcomes return as evidence.</sub>
+  <sub>The hosted Hermes Brain preview opens on the Product path: incoming data points feed Hermes, Product owns the selected loops, and outcomes return as evidence. A fresh local install starts empty until you create your own loops.</sub>
 </p>
 
 ## Quickstart
@@ -111,7 +111,7 @@ Merge the generated MCP snippet into your Hermes config and make sure Hermes can
 start Loopgraph
 ```
 
-Hermes should immediately show the department catalog, ask you to pick one or more departments, move through compact question bundles, explain the proposed loops, and materialize only the proposals you accept.
+Hermes should immediately show the department catalog, suggest starting with Product, ask you to pick one or more departments, move through compact question bundles, explain the proposed loops, and materialize only the proposals you accept.
 
 ### 3. Open the local company graph
 
@@ -119,7 +119,7 @@ Hermes should immediately show the department catalog, ask you to pick one or mo
 npm run loopgraph -- studio --project . --start
 ```
 
-Open the printed local URL. You can inspect the design, connection requirements, routing readiness, generated fixtures, recent runs, reviews, and cases from the graph.
+Open the printed local URL. A new local workspace will be intentionally sparse: only loops you create through Hermes or the browser appear. You can inspect each accepted loop's connection checklist, routing receipt, readiness, generated fixtures, recent runs, reviews, and cases from the graph.
 
 ### 4. Plan and rehearse Hermes event routes
 
@@ -129,7 +129,7 @@ npm run loopgraph -- hermes webhooks sync --project .
 npm run loopgraph -- hermes webhooks doctor --project .
 ```
 
-`sync` writes a **non-secret local route manifest**. Hermes still owns the real provider subscriptions and signing secrets.
+`sync` writes a **non-secret local route manifest**. Hermes still owns the real provider subscriptions and signing secrets; Loopgraph only records the route families and capabilities it must validate.
 
 Test a generated, synthetic event before connecting a real webhook:
 
@@ -429,10 +429,10 @@ Provider secrets, OAuth tokens, and webhook signing keys stay in Hermes or an ap
 
 | Example | What it demonstrates |
 |---|---|
+| [Product: Feedback Clustering + Release Learning](docs/HERMES-EXAMPLES.md#product-feedback-clustering--release-learning) | Product-first Hermes path for feedback, release learning, product-owner review, and outcome evidence |
 | [Marketing: Ads + Content Creation](docs/HERMES-EXAMPLES.md#marketing-ads--content-creation) | Two loops in one department with distinct Hermes routing contracts |
 | [Legal / Compliance evidence review](docs/HERMES-EXAMPLES.md#sensitive-department-legal--compliance-evidence-review) | Sensitive work capped in shadow mode with expert approval and blocked actions |
 | [Custom field-ops route](docs/HERMES-EXAMPLES.md#custom-department-field-ops-custom-app-route) | A custom department using the same event-brain pattern |
-| [`examples/department-skills/product.yaml`](examples/department-skills/product.yaml) | Product feedback, discovery, spec-to-ticket, release learning, and roadmap evidence loops |
 | [`examples/department-skills/sales.yaml`](examples/department-skills/sales.yaml) | Lead qualification, pipeline forecast, close readiness, follow-up latency, and CRM hygiene |
 | [`examples/department-skills/customer-success.yaml`](examples/department-skills/customer-success.yaml) | Customer health, renewal risk, QBR prep, ticket escalation, and knowledge-base maintenance |
 | [`examples/department-skills/engineering.yaml`](examples/department-skills/engineering.yaml) | GitHub issue triage, PR review prep, incident learning, release readiness, QA, and bug clustering |

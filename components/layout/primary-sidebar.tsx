@@ -7,7 +7,7 @@ import { LoopgraphMark } from "../loopgraph-mark";
 
 export const primaryNav = [
   { href: "/brain", label: "Hermes Brain", description: "Event router" },
-  { href: "/management", label: "Management", description: "Company brain" },
+  { href: "/management", label: "Management", description: "Operating review" },
   { href: "/loops", label: "Loops", description: "Loop definitions" },
   { href: "/daily", label: "Daily", description: "Operating summary" }
 ] as const;

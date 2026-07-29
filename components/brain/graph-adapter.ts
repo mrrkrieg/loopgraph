@@ -215,6 +215,14 @@ const previewEvidenceReturns: PreviewStoryNodeDefinition[] = [
   }
 ];
 
+const PRODUCT_PREVIEW_SIGNAL_IDS = new Set([
+  "preview:data:product-analytics",
+  "preview:data:support",
+  "preview:data:crm",
+  "preview:data:docs",
+  "preview:data:warehouse"
+]);
+
 const structureTypes = new Set<TopologyNodeType>([
   "company",
   "management_loop",
@@ -349,6 +357,61 @@ export function filterBrainGraphByDepth(input: {
         ...input.graph.diagnostics.hiddenNodeIds,
         ...input.graph.nodes.filter((node) => !nodeIds.has(node.id)).map((node) => node.id)
       ]
+    }
+  };
+}
+
+export function filterBrainGraphForDepartmentStory(input: {
+  graph: BrainGraph;
+  departmentId: string;
+}): BrainGraph {
+  const keepIds = new Set<string>();
+  const { departmentId, graph } = input;
+  const productStory = departmentId === "product";
+
+  for (const node of graph.nodes) {
+    if (node.type === "company_brain") {
+      keepIds.add(node.id);
+      continue;
+    }
+    if (node.type === "department_loop" && node.departmentId === departmentId) {
+      keepIds.add(node.id);
+      continue;
+    }
+    if (node.type === "workflow_loop" && node.departmentId === departmentId) {
+      keepIds.add(node.id);
+      continue;
+    }
+    if (productStory && PRODUCT_PREVIEW_SIGNAL_IDS.has(node.id)) {
+      keepIds.add(node.id);
+      continue;
+    }
+    if (
+      node.metadata?.previewRole === "evidence_outcome" &&
+      node.departmentId === departmentId
+    ) {
+      keepIds.add(node.id);
+    }
+  }
+
+  if (!graph.nodes.some((node) => node.type === "department_loop" && node.departmentId === departmentId)) {
+    return graph;
+  }
+
+  const nodes = graph.nodes.filter((node) => keepIds.has(node.id));
+  const edges = graph.edges.filter((edge) => keepIds.has(edge.source) && keepIds.has(edge.target));
+  const hiddenNodeIds = [
+    ...graph.diagnostics.hiddenNodeIds,
+    ...graph.nodes.filter((node) => !keepIds.has(node.id)).map((node) => node.id)
+  ];
+
+  return {
+    nodes,
+    edges,
+    diagnostics: {
+      ...graph.diagnostics,
+      visibleNodeCount: nodes.length,
+      hiddenNodeIds
     }
   };
 }
