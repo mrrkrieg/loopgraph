@@ -17,6 +17,8 @@ export * from "./question-bundles";
 export * from "./project-inspection";
 export * from "./connections";
 export * from "./design";
+export * from "./evidence-gap";
+export * from "./hermes-design-task";
 export * from "./process-inventory";
 export * from "./loop-recommendation";
 export * from "./access-requirements";

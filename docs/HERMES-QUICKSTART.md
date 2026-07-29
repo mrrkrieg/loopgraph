@@ -77,6 +77,28 @@ The generated snippet registers:
 
 It does not contain provider credentials. Google Ads, HubSpot, Notion, Slack, billing, email, CRM, analytics, and other provider credentials should remain in Hermes or an approved credential store.
 
+### Optional: let Loopgraph wake Hermes for design work
+
+Interactive discovery works immediately after MCP setup. To let Loopgraph proactively wake Hermes when it creates a durable design task, add a dedicated Hermes webhook subscription:
+
+```bash
+hermes gateway setup
+hermes webhook subscribe loopgraph-design \
+  --events "loopgraph.design_requested" \
+  --prompt "Loopgraph design task {task.id} is ready. Load the loopgraph skill, read task {task.id} through Loopgraph MCP, resolve only its evidence gaps, and submit the validated proposal through Loopgraph." \
+  --skills "loopgraph" \
+  --description "Wake Hermes for governed Loopgraph design work"
+```
+
+Put the returned URL and secret in the environment used to run Loopgraph:
+
+```bash
+LOOPGRAPH_HERMES_WEBHOOK_URL=http://127.0.0.1:8644/webhooks/loopgraph-design
+LOOPGRAPH_HERMES_WEBHOOK_SECRET=<route-secret>
+```
+
+Do not commit the secret or store it in `.loopgraph/`. The route uses Hermes webhook V2 signatures, timestamp replay protection, and request-ID deduplication. See the [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md) for the task, evidence-gap, callback, and trust-boundary contracts.
+
 ## 4. Start discovery from Hermes
 
 In Hermes, start with:
@@ -195,6 +217,8 @@ This creates a local trace/review packet only. It does not prove that Productboa
 | `npx loopgraph ...` does not recognize `hermes` or `workspace` | npm resolved an older published CLI | Use the GitHub clone quickstart, or install a package version that explicitly includes Hermes commands |
 | `cd /workspace/loopgraph` fails | `/workspace/loopgraph` was an example path, not your local clone path | `cd` into the folder created by `git clone`, usually `loopgraph` |
 | `Hermes CLI was not found on PATH` | Hermes is not installed or your shell cannot find it | Install Hermes from GitHub, restart the shell if needed, then run `hermes --version` |
+| Durable design task says `not_configured` | No proactive Hermes design webhook is configured | Configure `LOOPGRAPH_HERMES_WEBHOOK_URL` and `LOOPGRAPH_HERMES_WEBHOOK_SECRET`, or let Hermes claim the task through MCP |
+| Hermes design webhook returns `401` | The route secret or V2 signature inputs do not match | Confirm the URL/secret pair returned by `hermes webhook subscribe` and verify the machines' clocks |
 | `hermes webhooks doctor` fails | The local route manifest is stale after loop changes | Rerun `npm run loopgraph -- hermes webhooks sync --project .` |
 
 ## 12. Dependency and vulnerability checks
