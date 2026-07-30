@@ -10,6 +10,9 @@ import {
   hermesDesignTaskSchema,
   listDepartmentCatalog,
   loopPromotionReceiptSchema,
+  metricBindingSchema,
+  measurementJobSchema,
+  connectionReconciliationReportSchema,
   promotionRehearsalReportSchema,
   metricSampleSchema,
   observedOutcomeSchema,
@@ -159,11 +162,28 @@ import {
 } from "../runtime/project-tools";
 import {
   callLoopgraphConnectionTool,
+  connectionsGetInputSchema,
+  connectionsHealthReportInputSchema,
   connectionsPlanInputSchema,
+  connectionsRegisterInputSchema,
   connectionsSetManualFallbackInputSchema,
   loopgraphConnectionToolDefinitions,
   type LoopgraphConnectionToolName
 } from "../runtime/connection-tools";
+import {
+  callLoopgraphMeasurementTool,
+  connectionReconciliationsGetInputSchema,
+  connectionsReconcileInputSchema,
+  loopgraphMeasurementToolDefinitions,
+  measurementJobsClaimInputSchema,
+  measurementJobsCompleteInputSchema,
+  measurementJobsFailInputSchema,
+  measurementJobsGetInputSchema,
+  measurementsScheduleInputSchema,
+  metricBindingsGetInputSchema,
+  metricBindingsSetInputSchema,
+  type LoopgraphMeasurementToolName
+} from "../runtime/measurement-tools";
 import {
   callLoopgraphSemanticGraphTool,
   graphChangeApplyInputSchema,
@@ -241,6 +261,7 @@ type LoopgraphMcpToolName =
   | LoopgraphControllerToolName
   | LoopgraphSemanticGraphToolName
   | LoopgraphConnectionToolName
+  | LoopgraphMeasurementToolName
   | LoopgraphLoopToolName;
 
 const toolInputSchemas = {
@@ -291,6 +312,18 @@ const toolInputSchemas = {
   loopgraph_graph_rollback: graphRollbackInputSchema,
   loopgraph_connections_plan: connectionsPlanInputSchema,
   loopgraph_connections_set_manual_fallback: connectionsSetManualFallbackInputSchema,
+  loopgraph_connections_register: connectionsRegisterInputSchema,
+  loopgraph_connections_health_report: connectionsHealthReportInputSchema,
+  loopgraph_connections_get: connectionsGetInputSchema,
+  loopgraph_metric_bindings_set: metricBindingsSetInputSchema,
+  loopgraph_metric_bindings_get: metricBindingsGetInputSchema,
+  loopgraph_measurements_schedule: measurementsScheduleInputSchema,
+  loopgraph_measurement_jobs_claim: measurementJobsClaimInputSchema,
+  loopgraph_measurement_jobs_complete: measurementJobsCompleteInputSchema,
+  loopgraph_measurement_jobs_fail: measurementJobsFailInputSchema,
+  loopgraph_measurement_jobs_get: measurementJobsGetInputSchema,
+  loopgraph_connections_reconcile: connectionsReconcileInputSchema,
+  loopgraph_connections_reconciliations_get: connectionReconciliationsGetInputSchema,
   loopgraph_loops_list: loopsListInputSchema,
   loopgraph_runs_get: runsGetInputSchema,
   loopgraph_loops_materialize: loopsMaterializeInputSchema,
@@ -330,6 +363,7 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphControllerToolDefinitions,
   ...loopgraphSemanticGraphToolDefinitions,
   ...loopgraphConnectionToolDefinitions,
+  ...loopgraphMeasurementToolDefinitions,
   ...loopgraphLoopToolDefinitions,
   ...loopgraphRoutingToolDefinitions,
   ...loopgraphRoutingOpsToolDefinitions,
@@ -373,6 +407,9 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/graph-transaction",
   "loopgraph://schemas/loop-promotion-receipt",
   "loopgraph://schemas/promotion-rehearsal",
+  "loopgraph://schemas/metric-binding",
+  "loopgraph://schemas/measurement-job",
+  "loopgraph://schemas/connection-reconciliation",
   "loopgraph://graph/company"
 ] as const;
 
@@ -531,10 +568,28 @@ export async function listLoopgraphMcpResources(
       name: "PromotionRehearsal schema",
       description: "Content-bound simulation, routing, ambiguity, regression, and policy gate report required for promotion.",
       mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
+      name: "MetricBinding schema",
+      description: "Exact contract between a LoopSpec metric and one scheduled Hermes connector query.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[20],
+      name: "MeasurementJob schema",
+      description: "Leased, idempotent provider measurement job with a durable evidence result.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[21],
+      name: "ConnectionReconciliation schema",
+      description: "Connector, scope, webhook, health, and overdue-measurement reconciliation report.",
+      mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
@@ -973,6 +1028,13 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphMeasurementToolName(name)) {
+    return callLoopgraphMeasurementTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
   if (isLoopgraphLoopToolName(name)) {
     return callLoopgraphLoopTool(name, boundInput, {
       projectRoot: options.projectRoot,
@@ -1150,6 +1212,27 @@ function schemaResource(id: string) {
       jsonSchema: zodToJsonSchema(promotionRehearsalReportSchema, "PromotionRehearsal")
     };
   }
+  if (id === "metric-binding") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(metricBindingSchema, "MetricBinding")
+    };
+  }
+  if (id === "measurement-job") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(measurementJobSchema, "MeasurementJob")
+    };
+  }
+  if (id === "connection-reconciliation") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(connectionReconciliationReportSchema, "ConnectionReconciliation")
+    };
+  }
   throw new Error(`Schema resource not found: ${id}`);
 }
 
@@ -1243,6 +1326,10 @@ function isLoopgraphConnectionToolName(value: unknown): value is LoopgraphConnec
   return typeof value === "string" && loopgraphConnectionToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphMeasurementToolName(value: unknown): value is LoopgraphMeasurementToolName {
+  return typeof value === "string" && loopgraphMeasurementToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphLoopToolName(value: unknown): value is LoopgraphLoopToolName {
   return typeof value === "string" && loopgraphLoopToolDefinitions.some((tool) => tool.name === value);
 }
@@ -1263,6 +1350,7 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphControllerToolName(value) ||
     isLoopgraphSemanticGraphToolName(value) ||
     isLoopgraphConnectionToolName(value) ||
+    isLoopgraphMeasurementToolName(value) ||
     isLoopgraphLoopToolName(value);
 }
 
@@ -1292,6 +1380,14 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
     return loopgraphSemanticGraphToolDefinitions
       .find((tool) => tool.name === name)?.readOnly ?? false;
   }
+  if (isLoopgraphMeasurementToolName(name)) {
+    return loopgraphMeasurementToolDefinitions
+      .find((tool) => tool.name === name)?.readOnly ?? false;
+  }
+  if (isLoopgraphConnectionToolName(name)) {
+    return loopgraphConnectionToolDefinitions
+      .find((tool) => tool.name === name)?.readOnly ?? false;
+  }
   return name === "loopgraph_workspace_inspect" ||
     name === "loopgraph_departments_list" ||
     name === "loopgraph_discovery_get" ||
@@ -1306,7 +1402,6 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
     name === "loopgraph_value_ledger_get" ||
     name === "loopgraph_controller_runs_get" ||
     name === "loopgraph_controller_policy_get" ||
-    name === "loopgraph_connections_plan" ||
     name === "loopgraph_loops_list" ||
     name === "loopgraph_runs_get" ||
     name === "loopgraph_loops_validate" ||
@@ -1327,6 +1422,14 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
     return loopgraphSemanticGraphToolDefinitions
       .find((tool) => tool.name === name)?.idempotent ?? false;
   }
+  if (isLoopgraphMeasurementToolName(name)) {
+    return loopgraphMeasurementToolDefinitions
+      .find((tool) => tool.name === name)?.idempotent ?? false;
+  }
+  if (isLoopgraphConnectionToolName(name)) {
+    return loopgraphConnectionToolDefinitions
+      .find((tool) => tool.name === name)?.idempotent ?? false;
+  }
   return ![
     "loopgraph_discovery_start",
     "loopgraph_discovery_select_departments",
@@ -1339,7 +1442,6 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
     "loopgraph_route_worker_run",
     "loopgraph_route_job_retry",
     "loopgraph_route_job_cancel",
-    "loopgraph_connections_set_manual_fallback",
     "loopgraph_loops_materialize",
     "loopgraph_loops_simulate",
     "loopgraph_review_submit",

@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/management-review",
       "schedule": "0 15 * * 1"
+    },
+    {
+      "path": "/api/cron/measurements",
+      "schedule": "0 * * * *"
     }
   ]
 }

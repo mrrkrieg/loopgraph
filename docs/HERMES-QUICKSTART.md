@@ -207,7 +207,28 @@ The worker does not trust the model decision by itself. It atomically claims the
 
 See [Durable Hermes Route-Job Worker](./ROUTE-JOB-WORKER.md) for retry, dead-letter, API authentication, and live-execution requirements.
 
-## 9. Simulate the generated loop locally
+## 9. Bind automatic outcome measurements
+
+Provider credentials stay in Hermes. Register only the connector's non-secret contract:
+
+```bash
+npm run loopgraph -- connections register --project . --file connection.json
+npm run loopgraph -- connections health --project . --file connection-health.json
+```
+
+Then bind an accepted LoopSpec metric to an exact provider field, aggregation, window, and cadence:
+
+```bash
+npm run loopgraph -- measurements bindings set --project . --file metric-binding.json
+npm run loopgraph -- measurements schedule --project . --backfill 2
+npm run loopgraph -- connections reconcile --project .
+```
+
+In the trusted Hermes administration profile, the collector uses `loopgraph_measurement_jobs_claim`, executes the exact structured query through the referenced connector, then calls `loopgraph_measurement_jobs_complete` with provider evidence. These tools are absent from webhook and lifecycle profiles.
+
+See [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md) for schemas, CLI/API operations, guardrails, leases, storage, and the Hermes/Loopgraph ownership boundary.
+
+## 10. Simulate the generated loop locally
 
 The same generated fixture can run the accepted LoopSpec in local simulation mode:
 
@@ -219,7 +240,7 @@ npm run loopgraph -- simulate \
 
 This creates a local trace/review packet only. It does not prove that Productboard, Linear, PostHog, Intercom, Notion, Slack, or any write connector is connected.
 
-## 10. Keep detecting missing and weak loops
+## 11. Keep detecting missing and weak loops
 
 Run a one-time scan over the durable local routing, run, verification, and review evidence:
 
@@ -237,7 +258,7 @@ Qualified evidence may start a draft Hermes design task. It cannot materialize a
 
 See the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md) for scoring, dismissal, versioned graph-change, and safety contracts.
 
-## 11. Keep the continuous controller active
+## 12. Keep the continuous controller active
 
 Run one project-local controller cycle:
 
@@ -253,7 +274,7 @@ npm run loopgraph -- controller run --project . --trigger-type schedule --watch 
 
 Hermes can inspect the same durable policy and decision receipts through `loopgraph_controller_policy_get`, `loopgraph_controller_runs_get`, and `loopgraph_controller_run`. Event-router and lifecycle-router turns never receive those tools.
 
-## 12. Safe defaults
+## 13. Safe defaults
 
 - All new materialized loops start in shadow routing.
 - Local simulation uses synthetic/redacted fixtures by default.

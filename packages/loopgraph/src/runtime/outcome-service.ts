@@ -360,7 +360,7 @@ function inferSampleTruthStatus(input: RecordMetricSampleInput): EvidenceTruthSt
 
 function usableSamples(samples: MetricSample[], window: { start: string; end: string }): MetricSample[] {
   return samples
-    .filter((sample) => sample.window.end >= window.start && sample.window.start <= window.end)
+    .filter((sample) => sample.window.end > window.start && sample.window.start < window.end)
     .filter((sample) => !["missing", "rejected"].includes(sample.quality.status));
 }
 

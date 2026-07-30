@@ -13,6 +13,13 @@ export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hma
 export const connectorCapabilityDirectionSchema = z.enum(["read", "event", "draft_write", "approved_write"]);
 export const connectorRiskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
 export const connectionEnvironmentSchema = z.enum(["simulate", "sandbox", "live"]);
+export const credentialReferenceSchema = z.string()
+  .min(1)
+  .max(512)
+  .regex(
+    /^(?:hermes|keychain|vault|env-ref):\/\/[A-Za-z0-9][A-Za-z0-9._~:/-]*$/,
+    "credentialRef must be an opaque hermes://, keychain://, vault://, or env-ref:// reference"
+  );
 export const connectorCategorySchema = z.enum([
   "ads",
   "analytics",
@@ -86,22 +93,22 @@ export const connectionInstanceSchema = z.object({
   manifestId: z.string().min(1),
   accountLabel: z.string().optional(),
   capabilityKeys: z.array(z.string().min(1)).default([]),
-  credentialRef: z.string().optional(),
+  credentialRef: credentialReferenceSchema.optional(),
   grantedScopes: z.array(z.string()).default([]),
   status: connectionCapabilityStatusSchema,
   statusReason: z.string().optional(),
   environment: connectionEnvironmentSchema.default("simulate"),
   readPolicy: z.enum(["not_allowed", "manual_fallback", "read_only"]).default("manual_fallback"),
   writePolicy: z.enum(["not_allowed", "draft_only", "approved_only"]).default("not_allowed"),
-  lastHealthCheckAt: z.string().datetime().optional()
-}).superRefine((value, context) => {
-  if (value.credentialRef && /(token|secret|password|api[_-]?key)/i.test(value.credentialRef)) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["credentialRef"],
-      message: "credentialRef must be an opaque reference, not a raw credential name or secret value"
-    });
-  }
+  lastHealthCheckAt: z.string().datetime().optional(),
+  health: z.object({
+    status: z.enum(["connected", "degraded", "missing"]),
+    checkedAt: z.string().datetime(),
+    checkedBy: z.string().min(1),
+    latencyMs: z.number().int().min(0).optional(),
+    errorCode: z.string().min(1).optional(),
+    evidenceRefs: z.array(z.string().min(1)).default([])
+  }).optional()
 });
 
 export const connectionInstancesFileSchema = z.object({

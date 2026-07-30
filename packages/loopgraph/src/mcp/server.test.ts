@@ -321,6 +321,18 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_controller_policy_set" }),
           expect.objectContaining({ name: "loopgraph_connections_plan" }),
           expect.objectContaining({ name: "loopgraph_connections_set_manual_fallback" }),
+          expect.objectContaining({ name: "loopgraph_connections_register" }),
+          expect.objectContaining({ name: "loopgraph_connections_health_report" }),
+          expect.objectContaining({ name: "loopgraph_connections_get" }),
+          expect.objectContaining({ name: "loopgraph_metric_bindings_set" }),
+          expect.objectContaining({ name: "loopgraph_metric_bindings_get" }),
+          expect.objectContaining({ name: "loopgraph_measurements_schedule" }),
+          expect.objectContaining({ name: "loopgraph_measurement_jobs_claim" }),
+          expect.objectContaining({ name: "loopgraph_measurement_jobs_complete" }),
+          expect.objectContaining({ name: "loopgraph_measurement_jobs_fail" }),
+          expect.objectContaining({ name: "loopgraph_measurement_jobs_get" }),
+          expect.objectContaining({ name: "loopgraph_connections_reconcile" }),
+          expect.objectContaining({ name: "loopgraph_connections_reconciliations_get" }),
           expect.objectContaining({ name: "loopgraph_loops_list" }),
           expect.objectContaining({ name: "loopgraph_runs_get" }),
           expect.objectContaining({ name: "loopgraph_loops_materialize" }),
@@ -351,7 +363,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(72);
+    expect(listLoopgraphMcpTools()).toHaveLength(84);
     const graphApply = listLoopgraphMcpTools()
       .find((tool) => tool.name === "loopgraph_graph_change_apply");
     const graphHistory = listLoopgraphMcpTools()
@@ -430,6 +442,18 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_controller_policy_get",
       "loopgraph_controller_policy_set",
       "loopgraph_connections_set_manual_fallback",
+      "loopgraph_connections_register",
+      "loopgraph_connections_health_report",
+      "loopgraph_connections_get",
+      "loopgraph_metric_bindings_set",
+      "loopgraph_metric_bindings_get",
+      "loopgraph_measurements_schedule",
+      "loopgraph_measurement_jobs_claim",
+      "loopgraph_measurement_jobs_complete",
+      "loopgraph_measurement_jobs_fail",
+      "loopgraph_measurement_jobs_get",
+      "loopgraph_connections_reconcile",
+      "loopgraph_connections_reconciliations_get",
       "loopgraph_loops_materialize",
       "loopgraph_loops_validate",
       "loopgraph_loops_simulate",
@@ -465,7 +489,12 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_graph_rollback_approve",
       "loopgraph_graph_rollback",
       "loopgraph_loops_simulate",
-      "loopgraph_route_commit_simulate"
+      "loopgraph_route_commit_simulate",
+      "loopgraph_connections_register",
+      "loopgraph_metric_bindings_set",
+      "loopgraph_measurement_jobs_claim",
+      "loopgraph_measurement_jobs_complete",
+      "loopgraph_connections_reconcile"
     ]) {
       await expectMcpToolDenied({
         projectRoot,
@@ -584,6 +613,9 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/graph-transaction" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-promotion-receipt" }),
           expect.objectContaining({ uri: "loopgraph://schemas/promotion-rehearsal" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/metric-binding" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/measurement-job" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/connection-reconciliation" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),

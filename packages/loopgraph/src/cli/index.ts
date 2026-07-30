@@ -1,9 +1,8 @@
-import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import YAML from "yaml";
 import { Command } from "commander";
 import { loadLoopSpecFromPath } from "../runtime/loader";
 import { simulateLoop } from "../runtime/simulator";
@@ -61,6 +60,14 @@ import {
   callLoopgraphSemanticGraphTool,
   type LoopgraphSemanticGraphToolName
 } from "../runtime/semantic-graph-tools";
+import {
+  callLoopgraphMeasurementTool,
+  type LoopgraphMeasurementToolName
+} from "../runtime/measurement-tools";
+import {
+  callLoopgraphConnectionTool,
+  type LoopgraphConnectionToolName
+} from "../runtime/connection-tools";
 
 const HERO_TEMPLATES = [
   {
@@ -146,11 +153,214 @@ const events = program.command("events").description("Hermes-normalized event ut
 const opportunities = program.command("opportunities").description("Detect missing or weak loops from durable operating evidence");
 const worker = program.command("worker").description("Run and operate the durable Hermes route-job worker");
 const controller = program.command("controller").description("Run the durable Hermes Brain continuous-improvement controller");
+const measurements = program.command("measurements").description("Bind metrics and operate Hermes evidence collection");
+const measurementBindings = measurements.command("bindings").description("Manage exact provider metric bindings");
+const measurementJobs = measurements.command("jobs").description("Operate durable Hermes measurement jobs");
+const connections = program.command("connections").description("Register and reconcile non-secret Hermes connector metadata");
 const graph = program.command("graph").description("Review and apply semantic company graph transactions");
 const graphChange = graph.command("change").description("Approve and apply add, update, split, merge, or retire change sets");
 const graphPromotion = graph.command("promotion").description("Approve and apply ordered loop activation-mode promotions");
 const graphLifecycle = graph.command("lifecycle").description("Approve and apply loop pause or resume transactions");
 const graphRollback = graph.command("rollback").description("Approve and apply exact graph transaction rollback");
+
+measurementBindings
+  .command("set")
+  .description("Create or revise one exact metric-to-provider binding from a JSON contract")
+  .requiredOption("--file <path>", "Metric binding JSON file")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { file: string; project: string }) => {
+    await printMeasurementTool(
+      "loopgraph_metric_bindings_set",
+      await readJsonRecord(path.resolve(options.file)),
+      options.project
+    );
+  });
+
+measurementBindings
+  .command("list")
+  .description("List metric bindings, optionally for one loop")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--loop <id>", "Filter by loop ID")
+  .option("--binding <id>", "Read one binding")
+  .action(async (options: { project: string; loop?: string; binding?: string }) => {
+    await printMeasurementTool("loopgraph_metric_bindings_get", {
+      loopId: options.loop,
+      bindingId: options.binding
+    }, options.project);
+  });
+
+measurements
+  .command("schedule")
+  .description("Create idempotent due measurement jobs from enabled bindings")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--binding <id>", "Schedule one binding")
+  .option("--backfill <windows>", "Number of aligned windows to consider", "1")
+  .option("--max-attempts <count>", "Maximum collection attempts", "3")
+  .action(async (options: {
+    project: string;
+    binding?: string;
+    backfill: string;
+    maxAttempts: string;
+  }) => {
+    await printMeasurementTool("loopgraph_measurements_schedule", {
+      bindingId: options.binding,
+      backfillWindows: parsePositiveInteger(options.backfill, "Measurement backfill"),
+      maxAttempts: parsePositiveInteger(options.maxAttempts, "Measurement max attempts")
+    }, options.project);
+  });
+
+measurementJobs
+  .command("list")
+  .description("Inspect measurement jobs, results, leases, and failures")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--job <id>", "Read one job")
+  .option("--loop <id>", "Filter by loop")
+  .option("--binding <id>", "Filter by binding")
+  .option("--connection <id>", "Filter by connector instance")
+  .option("--status <status>", "Filter by job status")
+  .action(async (options: {
+    project: string;
+    job?: string;
+    loop?: string;
+    binding?: string;
+    connection?: string;
+    status?: string;
+  }) => {
+    await printMeasurementTool("loopgraph_measurement_jobs_get", {
+      jobId: options.job,
+      loopId: options.loop,
+      bindingId: options.binding,
+      connectionInstanceId: options.connection,
+      status: options.status
+    }, options.project);
+  });
+
+measurementJobs
+  .command("claim")
+  .description("Claim due jobs for a trusted Hermes metric collector")
+  .requiredOption("--by <id>", "Stable collector identity")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--connection <id>", "Only claim jobs for one connector")
+  .option("--limit <count>", "Maximum claims", "20")
+  .option("--lease-seconds <seconds>", "Lease duration", "300")
+  .action(async (options: {
+    project: string;
+    by: string;
+    connection?: string;
+    limit: string;
+    leaseSeconds: string;
+  }) => {
+    await printMeasurementTool("loopgraph_measurement_jobs_claim", {
+      claimedBy: options.by,
+      connectionInstanceId: options.connection,
+      limit: parsePositiveInteger(options.limit, "Measurement claim limit"),
+      leaseSeconds: parsePositiveInteger(options.leaseSeconds, "Measurement lease seconds")
+    }, options.project);
+  });
+
+measurementJobs
+  .command("complete")
+  .description("Complete a claimed job from a JSON result containing jobId, leaseToken, value, observedAt, and evidenceRefs")
+  .requiredOption("--file <path>", "Measurement result JSON file")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { file: string; project: string }) => {
+    await printMeasurementTool(
+      "loopgraph_measurement_jobs_complete",
+      await readJsonRecord(path.resolve(options.file)),
+      options.project
+    );
+  });
+
+measurementJobs
+  .command("fail")
+  .description("Fail or dead-letter a claimed measurement job")
+  .requiredOption("--job <id>", "Measurement job ID")
+  .requiredOption("--lease <token>", "Opaque claim lease token")
+  .requiredOption("--code <code>", "Stable failure code")
+  .requiredOption("--message <text>", "Auditable failure explanation")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--no-retry", "Move directly to dead letter")
+  .action(async (options: {
+    project: string;
+    job: string;
+    lease: string;
+    code: string;
+    message: string;
+    retry: boolean;
+  }) => {
+    await printMeasurementTool("loopgraph_measurement_jobs_fail", {
+      jobId: options.job,
+      leaseToken: options.lease,
+      code: options.code,
+      message: options.message,
+      retryable: options.retry
+    }, options.project);
+  });
+
+connections
+  .command("register")
+  .description("Register non-secret connector metadata from JSON; credentials remain in Hermes")
+  .requiredOption("--file <path>", "Connection instance JSON file")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { file: string; project: string }) => {
+    await printConnectionTool(
+      "loopgraph_connections_register",
+      await readJsonRecord(path.resolve(options.file)),
+      options.project
+    );
+  });
+
+connections
+  .command("health")
+  .description("Record a non-secret Hermes connector health receipt from JSON")
+  .requiredOption("--file <path>", "Connection health receipt JSON file")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { file: string; project: string }) => {
+    await printConnectionTool(
+      "loopgraph_connections_health_report",
+      await readJsonRecord(path.resolve(options.file)),
+      options.project
+    );
+  });
+
+connections
+  .command("list")
+  .description("List registered connection metadata and health receipts")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--connection <id>", "Read one connector instance")
+  .action(async (options: { project: string; connection?: string }) => {
+    await printConnectionTool("loopgraph_connections_get", {
+      instanceId: options.connection
+    }, options.project);
+  });
+
+connections
+  .command("reconcile")
+  .description("Reconcile metric bindings, scopes, health, Hermes routes, and overdue jobs")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--health-stale-hours <hours>", "Health evidence staleness threshold", "24")
+  .option("--overdue-hours <hours>", "Measurement overdue threshold", "24")
+  .action(async (options: {
+    project: string;
+    healthStaleHours: string;
+    overdueHours: string;
+  }) => {
+    await printMeasurementTool("loopgraph_connections_reconcile", {
+      healthStaleAfterHours: parsePositiveInteger(options.healthStaleHours, "Health stale hours"),
+      measurementOverdueAfterHours: parsePositiveInteger(options.overdueHours, "Measurement overdue hours")
+    }, options.project);
+  });
+
+connections
+  .command("reports")
+  .description("Read durable connection reconciliation reports")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--report <id>", "Read one report")
+  .action(async (options: { project: string; report?: string }) => {
+    await printMeasurementTool("loopgraph_connections_reconciliations_get", {
+      reportId: options.report
+    }, options.project);
+  });
 
 graph
   .command("history")
@@ -1371,6 +1581,38 @@ async function printSemanticGraphTool(
     projectRoot: path.resolve(projectRoot)
   });
   console.log(JSON.stringify(result, null, 2));
+}
+
+async function printMeasurementTool(
+  name: LoopgraphMeasurementToolName,
+  input: Record<string, unknown>,
+  projectRoot: string
+): Promise<void> {
+  const result = await callLoopgraphMeasurementTool(name, {
+    ...input,
+    projectRoot: path.resolve(projectRoot)
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function printConnectionTool(
+  name: LoopgraphConnectionToolName,
+  input: Record<string, unknown>,
+  projectRoot: string
+): Promise<void> {
+  const result = await callLoopgraphConnectionTool(name, {
+    ...input,
+    projectRoot: path.resolve(projectRoot)
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function readJsonRecord(filePath: string): Promise<Record<string, unknown>> {
+  const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error(`Expected a JSON object in ${filePath}`);
+  }
+  return parsed;
 }
 
 function parsePositiveInteger(value: string, label: string): number {
