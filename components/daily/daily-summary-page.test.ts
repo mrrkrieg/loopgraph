@@ -20,6 +20,9 @@ function dailySummary(): DailySummary {
     companyId: "company_1",
     date: "2026-07-12",
     companyHealth: 82,
+    healthTruthStatus: "observed",
+    trackedLoopCount: 1,
+    loopsRanCount: 1,
     netSavedMinutes: 120,
     grossSavedMinutes: 180,
     reviewMinutes: 20,
@@ -27,6 +30,10 @@ function dailySummary(): DailySummary {
     botsittingMinutes: 8,
     escalationMinutes: 5,
     governanceMinutes: 4,
+    valueTruthStatus: "observed",
+    metricSampleCount: 1,
+    observedOutcomeCount: 1,
+    valueLedgerEntryCount: 1,
     departments: [{
       departmentId: "sales",
       name: "Sales",
@@ -53,6 +60,7 @@ function dailySummary(): DailySummary {
       undefinedMetricCount: 0,
       netSavedMinutes: 30,
       botsittingMinutes: 4,
+      valueTruthStatus: "observed",
       summary: "Loop ran normally.",
       nextAction: "Monitor"
     }],

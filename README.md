@@ -68,6 +68,7 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 5. **Rehearse locally.** Test positive, missing-context, and risk-escalation cases without API keys or external writes.
 6. **Connect and promote carefully.** New loops begin in shadow mode. Live work stays blocked until routing, capabilities, approvals, and exact prepared-action fingerprints are ready.
 7. **Keep the worker running.** Accepted Hermes routes become durable jobs. The worker claims them atomically, verifies the immutable LoopSpec binding, runs the configured shadow/recommend/approval/autonomous policy, and returns signed lifecycle evidence to Hermes.
+8. **Keep improving.** The continuous controller evaluates durable outcomes, detects missing or weak loops, asks Hermes for only the missing evidence, and applies only low-risk policy-approved additions in shadow mode.
 
 <p align="center">
   <img src="docs/images/hermes-brain-live-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
@@ -497,7 +498,7 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → materialize → visualize → route → durable worker → review/lifecycle-evidence flow is implemented and covered by regression tests. Live provider execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
+Loopgraph is in active early development. The local Hermes discovery → design → materialize → visualize → route → durable worker → review/lifecycle-evidence flow is implemented and covered by regression tests. Project-bound metric evidence, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Live provider execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
 
 The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
@@ -507,6 +508,8 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Hermes design bridge](docs/HERMES-DESIGN-BRIDGE.md) — durable design tasks, focused evidence gaps, secure proactive activation, and callbacks
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
 - [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
+- [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
+- [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts
 - [Hermes examples](docs/HERMES-EXAMPLES.md) — Marketing, Legal / Compliance, and custom flows
 - [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md) — implementation-to-test evidence map
 - [Event-brain integration plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md) — detailed architecture and product plan

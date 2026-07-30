@@ -300,6 +300,12 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_route_worker_run" }),
           expect.objectContaining({ name: "loopgraph_route_job_retry" }),
           expect.objectContaining({ name: "loopgraph_route_job_cancel" }),
+          expect.objectContaining({ name: "loopgraph_metric_samples_ingest" }),
+          expect.objectContaining({ name: "loopgraph_metric_samples_get" }),
+          expect.objectContaining({ name: "loopgraph_outcomes_evaluate" }),
+          expect.objectContaining({ name: "loopgraph_outcomes_get" }),
+          expect.objectContaining({ name: "loopgraph_value_ledger_record" }),
+          expect.objectContaining({ name: "loopgraph_value_ledger_get" }),
           expect.objectContaining({ name: "loopgraph_connections_plan" }),
           expect.objectContaining({ name: "loopgraph_connections_set_manual_fallback" }),
           expect.objectContaining({ name: "loopgraph_loops_list" }),
@@ -330,7 +336,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(51);
+    expect(listLoopgraphMcpTools()).toHaveLength(57);
   });
 
   it("supports a restricted webhook-router exposure for untrusted Hermes event turns", async () => {
@@ -373,6 +379,12 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_route_worker_run",
       "loopgraph_route_job_retry",
       "loopgraph_route_job_cancel",
+      "loopgraph_metric_samples_ingest",
+      "loopgraph_metric_samples_get",
+      "loopgraph_outcomes_evaluate",
+      "loopgraph_outcomes_get",
+      "loopgraph_value_ledger_record",
+      "loopgraph_value_ledger_get",
       "loopgraph_connections_set_manual_fallback",
       "loopgraph_loops_materialize",
       "loopgraph_loops_validate",
@@ -479,6 +491,9 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/hermes-design-task" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-opportunity" }),
           expect.objectContaining({ uri: "loopgraph://schemas/graph-change-set" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/metric-sample" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/observed-outcome" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/value-ledger-entry" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),
@@ -525,6 +540,24 @@ describe("Loopgraph MCP server", () => {
       id: "graph-change-set-schema-resource",
       method: "resources/read",
       params: { uri: "loopgraph://schemas/graph-change-set" }
+    }, { projectRoot }));
+    const metricSampleSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "metric-sample-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/metric-sample" }
+    }, { projectRoot }));
+    const observedOutcomeSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "observed-outcome-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/observed-outcome" }
+    }, { projectRoot }));
+    const valueLedgerSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "value-ledger-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/value-ledger-entry" }
     }, { projectRoot }));
     const session = resourceJson(await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
@@ -573,6 +606,9 @@ describe("Loopgraph MCP server", () => {
       id: "graph-change-set"
     });
     expect(JSON.stringify(graphChangeSetSchema)).toContain("GraphChangeSet");
+    expect(JSON.stringify(metricSampleSchema)).toContain("MetricSample");
+    expect(JSON.stringify(observedOutcomeSchema)).toContain("ObservedOutcome");
+    expect(JSON.stringify(valueLedgerSchema)).toContain("ValueLedgerEntry");
     expect(session).toMatchObject({
       id: "session_resources",
       activeStage: "workspace"
@@ -699,6 +735,86 @@ describe("Loopgraph MCP server", () => {
             loopId: "marketing_ads",
             status: "COMPLETED",
             reviewPacket: expect.objectContaining({ runId })
+          })]
+        }
+      }
+    });
+  });
+
+  it("records and reads project-bound metric evidence through trusted Hermes tools", async () => {
+    const { projectRoot } = await createRoutingProject();
+    const ingest = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "metric-ingest",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_metric_samples_ingest",
+        arguments: {
+          projectRoot: path.join(projectRoot, "untrusted-other-root"),
+          companyId: "company_1",
+          departmentId: "marketing",
+          loopId: "marketing_ads",
+          metricDefinitionId: "metric_cac",
+          metricKey: "cost_per_qualified_customer",
+          value: 42,
+          unit: "USD",
+          window: {
+            start: "2026-07-21T00:00:00.000Z",
+            end: "2026-07-21T23:59:59.999Z"
+          },
+          observedAt: "2026-07-21T23:59:59.999Z",
+          source: {
+            type: "integration",
+            sourceRef: "hermes://google-ads/report-42"
+          },
+          quality: {
+            status: "verified"
+          },
+          truthStatus: "observed",
+          evidenceRefs: ["hermes://google-ads/report-42"]
+        }
+      }
+    }, {
+      projectRoot,
+      now: new Date("2026-07-22T00:00:00.000Z")
+    });
+    const get = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "metric-get",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_metric_samples_get",
+        arguments: {
+          projectRoot: path.join(projectRoot, "untrusted-other-root"),
+          loopId: "marketing_ads"
+        }
+      }
+    }, { projectRoot });
+
+    expect(ingest).toMatchObject({
+      jsonrpc: "2.0",
+      id: "metric-ingest",
+      result: {
+        isError: false,
+        structuredContent: {
+          duplicate: false,
+          record: {
+            loopId: "marketing_ads",
+            value: 42,
+            truthStatus: "observed"
+          }
+        }
+      }
+    });
+    expect(get).toMatchObject({
+      jsonrpc: "2.0",
+      id: "metric-get",
+      result: {
+        isError: false,
+        structuredContent: {
+          samples: [expect.objectContaining({
+            loopId: "marketing_ads",
+            value: 42
           })]
         }
       }

@@ -27,6 +27,7 @@ import {
   startHermesDesignTask,
   type HermesDesignDispatchResult
 } from "./hermes-design-bridge";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import {
@@ -71,6 +72,7 @@ type OpportunityScanContext = {
   projectRoot: string;
   workspace: LoopgraphWorkspaceRegistry;
   routingStore: RoutingStore;
+  outcomeStore: OutcomeStore;
 };
 
 const DEFAULT_THRESHOLDS: OpportunityThresholds = {
@@ -94,6 +96,7 @@ export async function scanLoopOpportunities(
   input: ScanLoopOpportunitiesInput = {},
   options: {
     routingStore?: RoutingStore;
+    outcomeStore?: OutcomeStore;
   } = {}
 ): Promise<ScanLoopOpportunitiesResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
@@ -102,7 +105,8 @@ export async function scanLoopOpportunities(
   const thresholds = normalizeThresholds(input.thresholds);
   const workspace = await readLoopgraphWorkspace(projectRoot);
   const routingStore = options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
-  const context: OpportunityScanContext = { projectRoot, workspace, routingStore };
+  const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
+  const context: OpportunityScanContext = { projectRoot, workspace, routingStore, outcomeStore };
   const signals = await collectOpportunitySignals(context);
   const groups = groupOpportunitySignals({
     signals,
@@ -395,12 +399,14 @@ export async function getGraphChangeSet(
 }
 
 async function collectOpportunitySignals(context: OpportunityScanContext): Promise<LoopOpportunitySignal[]> {
-  const [problems, receipts, corrections, evaluations, jobs] = await Promise.all([
+  const [problems, receipts, corrections, evaluations, jobs, observedOutcomes, valueLedgerEntries] = await Promise.all([
     context.routingStore.listBusinessProblems(),
     context.routingStore.listEventReceipts(),
     context.routingStore.listRoutingCorrections(),
     context.routingStore.listRouterEvaluations(),
-    context.routingStore.listRouteJobs()
+    context.routingStore.listRouteJobs(),
+    context.outcomeStore.listObservedOutcomes(),
+    context.outcomeStore.listValueLedgerEntries()
   ]);
   const problemById = new Map(problems.map((problem) => [problem.id, problem]));
   const eventById = new Map(receipts.map((receipt) => [receipt.eventId, receipt.event]));
@@ -582,6 +588,55 @@ async function collectOpportunitySignals(context: OpportunityScanContext): Promi
         evidenceRefs: [trace.id, output.id]
       }));
     }
+  }
+
+  const latestOutcomes = latestBy(
+    observedOutcomes,
+    (outcome) => `${outcome.loopId}|${outcome.metricDefinitionId}`,
+    (outcome) => outcome.evaluatedAt
+  );
+  for (const outcome of latestOutcomes) {
+    if (outcome.status !== "regressed" && outcome.status !== "incomplete") continue;
+    signals.push(signal({
+      type: outcome.status === "regressed" ? "outcome_regression" : "outcome_incomplete",
+      sourceRef: `outcome:${outcome.id}`,
+      workspaceId: outcome.workspaceId,
+      companyId: outcome.companyId,
+      occurredAt: outcome.evaluatedAt,
+      summary: outcome.status === "regressed"
+        ? `${outcome.metricKey} regressed during the measurement window.`
+        : `${outcome.metricKey} cannot yet be evaluated: ${outcome.evidenceSufficiency.reasons.join("; ") || "measurement evidence is incomplete"}.`,
+      severity: outcome.status === "regressed" ? "high" : "low",
+      problemType: outcome.status === "regressed"
+        ? `${outcome.loopId}_outcome_regression`
+        : `${outcome.loopId}_measurement_gap`,
+      loopId: outcome.loopId,
+      evidenceRefs: [outcome.id, ...outcome.evidenceRefs],
+      metrics: {
+        relativeDeltaPct: outcome.relativeDeltaPct
+      }
+    }));
+  }
+
+  for (const entry of valueLedgerEntries.filter((item) => item.netSavedMinutes < 0)) {
+    signals.push(signal({
+      type: "negative_value",
+      sourceRef: `value-ledger:${entry.id}`,
+      workspaceId: entry.workspaceId,
+      companyId: entry.companyId,
+      occurredAt: entry.recordedAt,
+      summary: `${entry.loopId} recorded ${entry.netSavedMinutes} net saved minutes after operating cost.`,
+      severity: entry.netSavedMinutes <= -30 ? "high" : "medium",
+      problemType: `${entry.loopId}_negative_net_value`,
+      loopId: entry.loopId,
+      evidenceRefs: [entry.id, ...entry.evidenceRefs],
+      metrics: {
+        reviewMinutes: entry.hiddenCostMinutes.review,
+        reworkMinutes: entry.hiddenCostMinutes.rework,
+        botsittingMinutes: entry.hiddenCostMinutes.botsitting,
+        netSavedMinutes: entry.netSavedMinutes
+      }
+    }));
   }
 
   return dedupeSignals(signals);
@@ -842,11 +897,28 @@ function opportunityFingerprint(group: OpportunityGroup): string {
 
 function opportunityKind(group: OpportunityGroup): LoopOpportunityKind {
   if (group.targetLoopIds.length === 0) return "create_loop";
+  if (group.signals.filter((item) => item.type === "negative_value").length >= 3) {
+    return "retire_loop";
+  }
   if (
     group.targetLoopIds.length === 1 &&
     group.signals.filter((item) => item.type === "routing_correction").length >= 3
   ) return "split_loop";
   return "improve_loop";
+}
+
+function latestBy<T>(
+  items: T[],
+  key: (item: T) => string,
+  timestamp: (item: T) => string
+): T[] {
+  const latest = new Map<string, T>();
+  for (const item of items) {
+    const itemKey = key(item);
+    const existing = latest.get(itemKey);
+    if (!existing || timestamp(item) > timestamp(existing)) latest.set(itemKey, item);
+  }
+  return [...latest.values()];
 }
 
 function graphOperation(kind: LoopOpportunityKind): "add" | "update" | "split" | "merge" | "retire" {
@@ -864,6 +936,7 @@ function opportunityTitle(kind: LoopOpportunityKind, group: OpportunityGroup): s
   const department = formatDepartment(group.department);
   if (kind === "create_loop") return `Create a ${department} loop for ${humanize(group.problemType)}`;
   if (kind === "split_loop") return `Split ${group.targetLoopIds[0]} around recurring routing corrections`;
+  if (kind === "retire_loop") return `Review ${group.targetLoopIds.join(", ")} for pause or retirement`;
   return `Improve ${group.targetLoopIds.join(", ")} for ${humanize(group.problemType)}`;
 }
 
@@ -871,6 +944,9 @@ function opportunitySummary(kind: LoopOpportunityKind, group: OpportunityGroup):
   const latest = group.signals.at(-1)?.summary ?? group.problemType;
   if (kind === "create_loop") {
     return `${group.signals.length} observed signal(s) indicate a recurring ${formatDepartment(group.department)} problem with no registered owning loop. Latest evidence: ${latest}`;
+  }
+  if (kind === "retire_loop") {
+    return `${group.signals.length} observed negative-value signal(s) indicate that ${group.targetLoopIds.join(", ")} should be paused or retired after accountable review. Latest evidence: ${latest}`;
   }
   return `${group.signals.length} observed signal(s) indicate that ${group.targetLoopIds.join(", ")} should be revised. Latest evidence: ${latest}`;
 }

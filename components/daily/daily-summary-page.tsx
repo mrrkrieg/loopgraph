@@ -11,6 +11,13 @@ import { UndefinedMetricsList } from "./undefined-metrics-list";
 export function DailySummaryPage({ summary }: { summary: DailySummary }) {
   const blockedLoops = summary.loops.filter((loop) => loop.status === "missing_access" || loop.status === "blocked").length;
   const needsAttention = summary.loops.filter((loop) => loop.status !== "healthy").slice(0, 6);
+  const healthValue = summary.healthTruthStatus === "incomplete"
+    ? "Not measured"
+    : `${summary.companyHealth}%`;
+  const netSavedValue = formatMeasuredMinutes(summary.netSavedMinutes, summary.valueTruthStatus);
+  const botsittingValue = summary.valueTruthStatus === "incomplete"
+    ? "Not measured"
+    : `${summary.botsittingMinutes}m`;
 
   return (
     <>
@@ -21,13 +28,13 @@ export function DailySummaryPage({ summary }: { summary: DailySummary }) {
       />
 
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-7">
-        <DailyMetricCard label="Company Health" value={`${summary.companyHealth}%`} note={summary.date} />
-        <DailyMetricCard label="Loops Ran" value={summary.loops.length} note="Tracked loops" />
+        <DailyMetricCard label="Company Health" value={healthValue} note={`${truthLabel(summary.healthTruthStatus)} · ${summary.date}`} />
+        <DailyMetricCard label="Loops Ran" value={summary.loopsRanCount} note={`${summary.trackedLoopCount} tracked`} />
         <DailyMetricCard label="Open Reviews" value={summary.openReviews.length} note="Human judgment" />
         <DailyMetricCard label="Blocked Loops" value={blockedLoops} note="Access or policy" />
         <DailyMetricCard label="Undefined Metrics" value={summary.undefinedMetrics.length} note="Measurement work" />
-        <DailyMetricCard label="Net Saved" value={`${summary.netSavedMinutes}m`} note="After overhead" />
-        <DailyMetricCard label="Botsitting" value={`${summary.botsittingMinutes}m`} note="Operator time" />
+        <DailyMetricCard label="Net Saved" value={netSavedValue} note={`${truthLabel(summary.valueTruthStatus)} · after overhead`} />
+        <DailyMetricCard label="Botsitting" value={botsittingValue} note={`${truthLabel(summary.valueTruthStatus)} · operator time`} />
       </div>
 
       <div className="mt-6 grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
@@ -67,15 +74,21 @@ export function DailySummaryPage({ summary }: { summary: DailySummary }) {
       <div className="mt-6 grid gap-5 xl:grid-cols-3">
         <SectionCard title="Loop Summaries">
           <div className="space-y-3">
-            {summary.loops.slice(0, 6).map((loop) => (
-              <DailyLoopCard
-                key={loop.loopId}
-                loopName={loop.loopName}
-                metric={loop.mainMetric?.label}
-                nextAction={loop.nextAction ?? loop.summary}
-                status={loop.status}
-              />
-            ))}
+            {summary.loops.length > 0 ? (
+              summary.loops.slice(0, 6).map((loop) => (
+                <DailyLoopCard
+                  key={loop.loopId}
+                  loopName={loop.loopName}
+                  metric={loop.mainMetric?.label}
+                  nextAction={loop.nextAction ?? loop.summary}
+                  status={loop.status}
+                />
+              ))
+            ) : (
+              <div className="rounded-md border border-line bg-paper p-4 text-sm text-ink/60">
+                No loops have been created in this local workspace yet.
+              </div>
+            )}
           </div>
         </SectionCard>
 
@@ -115,4 +128,15 @@ export function DailySummaryPage({ summary }: { summary: DailySummary }) {
       </div>
     </>
   );
+}
+
+function truthLabel(status: DailySummary["valueTruthStatus"]) {
+  if (status === "observed") return "Observed";
+  if (status === "modeled") return "Modeled";
+  return "Incomplete";
+}
+
+function formatMeasuredMinutes(value: number, truthStatus: DailySummary["valueTruthStatus"]) {
+  if (truthStatus === "incomplete") return "Not measured";
+  return truthStatus === "modeled" ? `~${value}m` : `${value}m`;
 }

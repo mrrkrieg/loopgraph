@@ -17,6 +17,7 @@ import { formatReviewPacket } from "../runtime/review-packet";
 import { listEscalationCases, resolveCase } from "../runtime/case-service";
 import { getStorageAdapter, getLoopgraphRoot } from "../runtime/storage-resolver";
 import type { LoopRunTrace } from "../core/trace";
+import type { LoopControllerTriggerType } from "../core";
 import { normalizeLoopgraphMcpExposure, runLoopgraphMcpStdioServer } from "../mcp/server";
 import {
   doctorHermesIntegration,
@@ -48,6 +49,8 @@ import {
   scanLoopOpportunities
 } from "../runtime/loop-opportunity-engine";
 import { runRouteJobWorker } from "../runtime/route-job-worker";
+import { runLoopController } from "../runtime/loop-controller";
+import { FileLoopControllerStore } from "../runtime/loop-controller-store";
 import {
   cancelRouteJob,
   FileRoutingStore,
@@ -131,6 +134,7 @@ const workspace = program.command("workspace").description("Local Loopgraph work
 const events = program.command("events").description("Hermes-normalized event utilities");
 const opportunities = program.command("opportunities").description("Detect missing or weak loops from durable operating evidence");
 const worker = program.command("worker").description("Run and operate the durable Hermes route-job worker");
+const controller = program.command("controller").description("Run the durable Hermes Brain continuous-improvement controller");
 
 workspace
   .command("init")
@@ -206,6 +210,82 @@ opportunities
         resolve();
       });
     });
+  });
+
+controller
+  .command("run")
+  .description("Evaluate durable evidence and take the next policy-bounded loop action")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--trigger-type <type>", "manual, schedule, routing_event, route_job, review, outcome_window, connector_health, or management_cycle", "manual")
+  .option("--trigger-id <id>", "Stable idempotency identity for this trigger")
+  .option("--source-ref <ref>", "Auditable source reference", "loopgraph-cli")
+  .option("--watch", "Keep running controller cycles on an interval")
+  .option("--interval <seconds>", "Watch interval in seconds", "900")
+  .action(async (options: {
+    project: string;
+    triggerType: string;
+    triggerId?: string;
+    sourceRef: string;
+    watch?: boolean;
+    interval: string;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const intervalSeconds = Number(options.interval);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds < 30) {
+      throw new Error("Controller watch interval must be at least 30 seconds.");
+    }
+    let sequence = 0;
+    const runOnce = async () => {
+      const result = await runLoopController({
+        projectRoot,
+        trigger: {
+          type: options.triggerType as LoopControllerTriggerType,
+          id: options.triggerId ?? `${options.triggerType}_${Date.now()}_${sequence++}`,
+          sourceRef: options.sourceRef,
+          requestedBy: "loopgraph-cli"
+        }
+      });
+      console.log(JSON.stringify(result, null, 2));
+    };
+    await runOnce();
+    if (!options.watch) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setInterval(() => {
+        void runOnce().catch((error) => {
+          clearInterval(timer);
+          reject(error);
+        });
+      }, intervalSeconds * 1000);
+      process.once("SIGINT", () => {
+        clearInterval(timer);
+        resolve();
+      });
+      process.once("SIGTERM", () => {
+        clearInterval(timer);
+        resolve();
+      });
+    });
+  });
+
+controller
+  .command("status")
+  .description("Show the current policy, checkpoint, and recent controller decisions")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--limit <count>", "Maximum recent runs to show", "10")
+  .action(async (options: { project: string; limit: string }) => {
+    const projectRoot = path.resolve(options.project);
+    const limit = parsePositiveInteger(options.limit, "Controller status limit");
+    const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
+    const [policy, checkpoint, runs] = await Promise.all([
+      store.readPolicy(),
+      store.readCheckpoint(),
+      store.listRuns()
+    ]);
+    console.log(JSON.stringify({
+      policy,
+      checkpoint,
+      runs: runs.slice(0, limit)
+    }, null, 2));
   });
 
 opportunities

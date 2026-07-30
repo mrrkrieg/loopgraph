@@ -1,8 +1,11 @@
 import {
   buildDemoDiscoverySession,
   generateDemoDailySummary,
+  generateProjectDailySummary,
+  startDiscoverySession,
   loadDiscoverySession
 } from "@/lib/loopgraph-runtime/discovery-engine";
+import { isHostedPreview } from "@/lib/hosted-preview";
 import { getActiveLoopgraphProjectRoot } from "../../lib/loopgraph-runtime/storage-resolver";
 import {
   getDiscoverySession as getHermesDiscoverySession,
@@ -22,7 +25,18 @@ export async function getDiscoverySessionIdFromSearchParams(searchParams?: Disco
 export async function getDiscoverySessionForView(sessionId?: string) {
   const realSession = sessionId ? await getHermesDiscoverySessionForView(sessionId) : undefined;
   if (realSession) return realSession;
-  return (await loadDiscoverySession(demoDiscoverySessionId)) ?? buildDemoDiscoverySession();
+  if (!sessionId) {
+    const sessions = await getHermesDiscoverySessionsForView();
+    if (sessions[0]) return sessions[0];
+  }
+  if (isHostedPreview()) {
+    return (await loadDiscoverySession(demoDiscoverySessionId)) ?? buildDemoDiscoverySession();
+  }
+  return startDiscoverySession({
+    id: "local-empty",
+    companyId: "local-workspace",
+    persist: false
+  }, getActiveLoopgraphProjectRoot());
 }
 
 export async function getHermesDiscoverySessionsForView() {
@@ -35,7 +49,9 @@ export async function getHermesDiscoverySessionForView(sessionId?: string) {
 }
 
 export async function getDailySummaryForView() {
-  return generateDemoDailySummary();
+  return isHostedPreview()
+    ? generateDemoDailySummary()
+    : generateProjectDailySummary(getActiveLoopgraphProjectRoot());
 }
 
 export const discoverySteps = [

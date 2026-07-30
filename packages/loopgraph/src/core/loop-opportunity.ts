@@ -13,6 +13,9 @@ export const loopOpportunitySignalTypeSchema = z.enum([
   "run_failure",
   "verification_failure",
   "review_friction",
+  "outcome_regression",
+  "outcome_incomplete",
+  "negative_value",
   "improvement_signal"
 ]);
 
@@ -51,7 +54,9 @@ export const loopOpportunitySignalSchema = z.object({
   metrics: z.object({
     reviewMinutes: z.number().min(0).optional(),
     reworkMinutes: z.number().min(0).optional(),
-    botsittingMinutes: z.number().min(0).optional()
+    botsittingMinutes: z.number().min(0).optional(),
+    netSavedMinutes: z.number().optional(),
+    relativeDeltaPct: z.number().optional()
   }).default({})
 });
 

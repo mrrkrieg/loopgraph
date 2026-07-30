@@ -18,6 +18,9 @@ import {
   type LoopgraphLifecycleEmitResult
 } from "./lifecycle-events";
 import { loadLoopSpecFromPath } from "./loader";
+import { recordTraceMetricSamples } from "./outcome-service";
+import { FileOutcomeStore } from "./outcome-store";
+import { readProjectMetricDefinitions } from "./outcome-tools";
 import { resolveExistingProjectPath } from "./project-paths";
 import { commitPreparedActions } from "./review-service";
 import {
@@ -47,6 +50,7 @@ export type RouteJobWorkerItemResult = {
   traceStatus?: string;
   duplicate: boolean;
   lifecycleDeliveryIds: string[];
+  metricSampleIds: string[];
   error?: { code: string; message: string };
 };
 
@@ -252,6 +256,7 @@ export async function processClaimedRouteJob(input: {
         runId: current.runId,
         duplicate: false,
         lifecycleDeliveryIds: [],
+        metricSampleIds: [],
         error: {
           code: "ROUTE_JOB_LEASE_LOST",
           message: `Worker no longer owns route job ${current.id}; no stale completion was written.`
@@ -280,6 +285,7 @@ export async function processClaimedRouteJob(input: {
       runId: failedJob.runId,
       duplicate: false,
       lifecycleDeliveryIds: [],
+      metricSampleIds: [],
       error: {
         code: normalized.code ?? "ROUTE_JOB_FAILED",
         message: normalized.message
@@ -414,6 +420,16 @@ async function finalizeRouteJobFromTrace(input: {
       now: input.now
     });
   }
+  const workspace = await readLoopgraphWorkspace(input.projectRoot);
+  const metricSamples = await recordTraceMetricSamples({
+    store: new FileOutcomeStore(getLoopgraphRoot(input.projectRoot)),
+    workspaceId: workspace.projectRootId,
+    companyId: input.context.receipt.event.companyId,
+    trace: input.trace,
+    metricDefinitions: await readProjectMetricDefinitions(input.projectRoot),
+    now: input.now
+  });
+  const metricSampleIds = metricSamples.map((sample) => sample.record.id);
   const commitStatus = routeCommitStatusForTrace(input.trace.status);
   const updatedCommit: RouteCommit = {
     ...input.context.commit,
@@ -465,7 +481,8 @@ async function finalizeRouteJobFromTrace(input: {
       result: {
         traceStatus: input.trace.status,
         completedAt: input.trace.completedAt ?? input.now.toISOString(),
-        lifecycleDeliveryIds
+        lifecycleDeliveryIds,
+        metricSampleIds
       }
     });
   } else {
@@ -488,6 +505,7 @@ async function finalizeRouteJobFromTrace(input: {
       traceStatus: input.trace.status,
       duplicate: input.duplicate,
       lifecycleDeliveryIds,
+      metricSampleIds,
       error: {
         code: "RUN_NOT_SUCCESSFUL",
         message: error.message
@@ -502,7 +520,8 @@ async function finalizeRouteJobFromTrace(input: {
     runId: input.trace.id,
     traceStatus: input.trace.status,
     duplicate: input.duplicate,
-    lifecycleDeliveryIds
+    lifecycleDeliveryIds,
+    metricSampleIds
   };
 }
 

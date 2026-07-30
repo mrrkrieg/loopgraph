@@ -23,9 +23,13 @@ import {
   submitDiscoveryAnswers
 } from "loopgraph/runtime";
 import type { QuestionBundleField } from "loopgraph/core";
+import { isHostedPreview } from "@/lib/hosted-preview";
 import { demoDiscoverySessionId } from "./view-data";
 
 async function loadOrCreateSession() {
+  if (!isHostedPreview()) {
+    throw new Error("Legacy demo recommendation actions are unavailable in local mode. Start or resume a Hermes discovery session.");
+  }
   const session = (await loadDiscoverySession(demoDiscoverySessionId)) ?? await buildDemoDiscoverySession();
   await saveDiscoverySession(session);
   return session;

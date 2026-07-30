@@ -305,7 +305,8 @@ export const routeJobSchema = z.object({
   result: z.object({
     traceStatus: z.string().min(1),
     completedAt: z.string().datetime().optional(),
-    lifecycleDeliveryIds: z.array(z.string().min(1)).default([])
+    lifecycleDeliveryIds: z.array(z.string().min(1)).default([]),
+    metricSampleIds: z.array(z.string().min(1)).default([])
   }).optional(),
   lastError: z.object({
     code: z.string().optional(),
