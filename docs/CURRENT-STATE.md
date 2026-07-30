@@ -57,9 +57,19 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - A durable controller reacts to events, jobs, reviews, outcomes, schedules, and management cycles.
 - Only policy-approved, low-risk, non-customer-facing additions can be committed automatically, and they remain in shadow mode.
 
+### Operating product views
+
+- One focused **Operate** navigation entry opens Opportunities, Change Review, Controller, Learning, and Value views.
+- Opportunities explain recurrence, impact, evidence, risk, status, and the associated graph change.
+- Change Review joins exact semantic operations to accountable approval and transaction receipts.
+- Controller runs expose triggers, decisions, failed policy rules, checkpoints, and safety ceilings.
+- Learning joins connector bindings, scheduled jobs, samples, outcomes, guardrails, missing evidence, and reconciliation repairs.
+- Value keeps observed, modeled, and incomplete net savings separate and shows every hidden cost subtracted.
+- Hosted preview records are explicitly illustrative. A local install reads only its active project and presents guided empty states until Hermes produces real records.
+
 ### Verification
 
-- TypeScript, package build, deterministic fixture simulation, MCP exposure, installer safety, API authorization, routing, worker, outcome, controller, and semantic transaction behavior are covered by the Vitest suite.
+- TypeScript, package and Next.js production builds, deterministic fixture simulation, MCP exposure, installer safety, API authorization, routing, worker, outcome, controller, semantic transaction behavior, and operating-view truth separation are covered by automated tests.
 - Production dependency auditing is separate from development-tool audit output through `npm run audit:prod`.
 
 ## Safety boundary
@@ -72,10 +82,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Add dedicated Opportunities, Change Review, Controller, Learning, and Value product views.
-2. Add hosted authentication, organization/role authorization, tenant-isolated persistence, rate limits, distributed scheduling, immutable audit export, production observability, and backups.
-3. Implement provider API clients and apply provider subscriptions through Hermes-owned connector onboarding; Loopgraph intentionally stores only non-secret references, route metadata, contracts, and receipts.
-4. Consolidate the stacked implementation changes, migrate existing local state where required, and complete a clean-install production release audit.
+1. Add hosted authentication, organization/role authorization, tenant-isolated persistence, rate limits, distributed scheduling, immutable audit export, production observability, and backups.
+2. Implement provider API clients and apply provider subscriptions through Hermes-owned connector onboarding; Loopgraph intentionally stores only non-secret references, route metadata, contracts, and receipts.
+3. Consolidate the stacked implementation changes, migrate existing local state where required, and complete a clean-install production release audit.
 
 ## Key documentation
 

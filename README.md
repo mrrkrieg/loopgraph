@@ -192,7 +192,23 @@ npm run loopgraph -- controller run --project . --trigger-type schedule --watch 
 
 Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Only strict low-risk additions can materialize automatically, and they remain in shadow mode. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md).
 
-### 8. Check before live credentials
+### 8. Operate the improvement cycle
+
+Open Studio and choose **Operate**:
+
+```bash
+npm run loopgraph -- studio --project . --start
+```
+
+- **Opportunities** explains which recurring problem Hermes detected and why it was scored.
+- **Change review** shows the exact add, update, split, merge, or retire operation plus its approval and transaction receipts.
+- **Controller** shows what triggered Hermes, what it decided, and which policy rule allowed or stopped the action.
+- **Learning** traces a connector binding through scheduled measurement jobs to samples, guardrails, and an observed outcome.
+- **Value** subtracts review, rework, botsitting, escalation, and governance cost while keeping observed, modeled, and incomplete claims separate.
+
+The hosted preview uses clearly labeled illustrative records. A fresh local install shows only evidence from the active project and stays empty until Hermes creates or observes something.
+
+### 9. Check before live credentials
 
 Before connecting live provider credentials or production webhook routes, run:
 
@@ -535,7 +551,7 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
+Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. The Operate workspace exposes opportunities, graph change review, controller decisions, learning evidence, and net value as project-local views. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
 
 The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
