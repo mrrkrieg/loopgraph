@@ -17,6 +17,11 @@ import {
   submitDiscoveryAnswers
 } from "./discovery-session";
 import { inspectLoopgraphWorkspace, readLoopgraphWorkspace } from "./workspace";
+import type {
+  LoopSpecMaterializationCommitInput,
+  LoopSpecRegistryStore,
+  StoredLoopSpecArtifact
+} from "./loop-spec-store";
 
 async function temporaryProjectRoot(): Promise<string> {
   return mkdtemp(path.join(tmpdir(), "loopgraph-materialize-"));
@@ -297,6 +302,69 @@ describe("Hermes loop materialization", () => {
     expect((await inspectLoopgraphWorkspace({ projectRoot })).registeredSpecCount).toBe(2);
   });
 
+  it("commits hosted LoopSpecs and the discovery transition through one distributed store call", async () => {
+    const projectRoot = await createCompletedMarketingDiscoverySession();
+    const design = await generateDeterministicLoopDesign({
+      projectRoot,
+      sessionId: "session_materialize",
+      now: new Date("2026-07-21T12:10:00.000Z")
+    });
+    const loopSpecStore = new RecordingDistributedLoopSpecStore();
+
+    const result = await materializeAcceptedLoopDesignProposals({
+      projectRoot,
+      loopSpecStore,
+      designRunId: design.designRun.id,
+      acceptedProposalIds: ["proposal_marketing_ads"],
+      acceptedBy: "browser",
+      now: new Date("2026-07-21T12:20:00.000Z")
+    });
+
+    expect(result).toMatchObject({
+      valid: true,
+      materializedLoops: [
+        expect.objectContaining({
+          loopId: "marketing_ads",
+          specPath: expect.stringContaining("registry://marketing_ads/")
+        })
+      ],
+      workspace: {
+        registeredSpecCount: 1,
+        registeredDepartments: ["marketing"],
+        routingReadySpecCount: 1
+      },
+      materializationPath: expect.stringContaining("registry-commit://")
+    });
+    expect(loopSpecStore.commits).toHaveLength(1);
+    const commit = loopSpecStore.commits[0]!;
+    expect(commit.expectedRevision).toBe(0);
+    expect(commit.artifacts[0]).toMatchObject({
+      loopId: "marketing_ads",
+      source: "hermes_design"
+    });
+    expect(
+      commit.artifacts[0]!.fixtures["fixtures/happy-path.json"]
+    ).toMatchObject({ synthetic: true });
+    expect(commit.discoverySessionTransition).toMatchObject({
+      expectedRevision: expect.any(Number),
+      session: expect.objectContaining({
+        id: "session_materialize",
+        status: "completed",
+        activeStage: "materialization",
+        createdLoopIds: ["marketing_ads"]
+      })
+    });
+    await expect(access(path.join(
+      projectRoot,
+      ".loopgraph",
+      "generated",
+      "hermes",
+      "marketing",
+      "marketing_ads",
+      "loopgraph.yaml"
+    ))).rejects.toThrow();
+  });
+
   it("requires explicit accepted proposal IDs before writing LoopSpecs", async () => {
     const projectRoot = await createCompletedMarketingDiscoverySession();
     const design = await generateDeterministicLoopDesign({
@@ -394,6 +462,68 @@ describe("Hermes loop materialization", () => {
     ))).rejects.toThrow();
   });
 });
+
+class RecordingDistributedLoopSpecStore
+implements LoopSpecRegistryStore {
+  readonly persistence = "distributed" as const;
+  readonly commits: LoopSpecMaterializationCommitInput[] = [];
+  private artifacts: StoredLoopSpecArtifact[] = [];
+
+  async getWorkspace(projectRoot: string) {
+    const registeredSpecs = this.artifacts.map((artifact) => artifact.entry);
+    return {
+      workspace: {
+        version: 1 as const,
+        schemaVersion: "workspace/v1alpha1" as const,
+        projectRoot,
+        projectRootId: "project_hosted",
+        displayName: "Hosted project",
+        demoCatalogEnabled: false,
+        registeredSpecs,
+        initializedAt: "2026-07-21T12:00:00.000Z",
+        updatedAt:
+          this.commits.at(-1)?.committedAt ??
+          "2026-07-21T12:00:00.000Z"
+      },
+      revision: this.commits.length
+    };
+  }
+
+  async listActiveLoopSpecs() {
+    return this.artifacts;
+  }
+
+  async getActiveLoopSpec(_projectRoot: string, loopId: string) {
+    return this.artifacts.find((artifact) => artifact.loopId === loopId);
+  }
+
+  async commitMaterializationAtomically(
+    input: LoopSpecMaterializationCommitInput
+  ) {
+    this.commits.push(input);
+    this.artifacts = input.artifacts.map((artifact) => {
+      const sourceRef =
+        `registry://${artifact.loopId}/${artifact.versionHash}`;
+      return {
+        ...artifact,
+        entry: {
+          ...artifact.entry,
+          path: sourceRef
+        },
+        sourceRef
+      };
+    });
+    const { workspace } = await this.getWorkspace(input.projectRoot);
+    return {
+      workspace,
+      workspaceRevision: this.commits.length,
+      artifacts: this.artifacts,
+      discoverySession: input.discoverySessionTransition?.session,
+      created: true,
+      commitRef: `registry-commit://${input.commitId}`
+    };
+  }
+}
 
 async function createCompletedMarketingDiscoverySession(): Promise<string> {
   const projectRoot = await temporaryProjectRoot();

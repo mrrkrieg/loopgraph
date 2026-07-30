@@ -10,7 +10,11 @@ import {
   rejectRecommendation,
   saveDiscoverySession
 } from "@/lib/loopgraph-runtime/discovery-engine";
-import { getActiveLoopgraphProjectRoot } from "../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
+  getLoopSpecRegistryStore
+} from "../../lib/loopgraph-runtime/storage-resolver";
 import {
   editLoopDesignProposal,
   confirmDiscoveryProjectContext,
@@ -65,6 +69,7 @@ export async function startBrowserDiscoverySessionAction(formData: FormData) {
   const companyName = cleanOptionalString(formData.get("companyName"));
   const session = await startHermesDiscoverySession({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
     companyName,
     createdByActor: "browser"
   });
@@ -78,6 +83,7 @@ export async function confirmBrowserDiscoveryProjectContextAction(formData: Form
   const expectedRevision = optionalFormNumber(formData, "expectedRevision");
   const result = await confirmDiscoveryProjectContext({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
     sessionId,
     expectedRevision,
     displayName: cleanOptionalString(formData.get("displayName")),
@@ -107,6 +113,7 @@ export async function selectBrowserDiscoveryDepartmentsAction(formData: FormData
     : departments[0];
   const session = await selectDiscoveryDepartments({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
     sessionId,
     departments,
     activeDepartment,
@@ -124,6 +131,7 @@ export async function submitBrowserDiscoveryAnswersAction(formData: FormData) {
   const expectedRevision = optionalFormNumber(formData, "expectedRevision");
   const nextQuestions = await getNextDiscoveryQuestions({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
     sessionId
   });
   if (!nextQuestions.bundle || nextQuestions.bundle.id !== bundleId) {
@@ -132,6 +140,7 @@ export async function submitBrowserDiscoveryAnswersAction(formData: FormData) {
 
   const session = await submitDiscoveryAnswers({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
     sessionId,
     bundleId,
     expectedRevision,
@@ -149,6 +158,8 @@ export async function generateBrowserLoopDesignAction(formData: FormData) {
   const department = cleanOptionalString(formData.get("department"));
   const result = await generateDeterministicLoopDesign({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore(),
     sessionId,
     department,
     maxProposals,
@@ -165,6 +176,8 @@ export async function editBrowserLoopDesignProposalAction(formData: FormData) {
   const proposalId = requiredFormString(formData, "proposalId");
   const result = await editLoopDesignProposal({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore(),
     designRunId,
     proposalId,
     expectedOutputHash: cleanOptionalString(formData.get("expectedOutputHash")),
@@ -192,6 +205,8 @@ export async function materializeBrowserLoopDesignAction(formData: FormData) {
 
   const result = await materializeAcceptedLoopDesignProposals({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore(),
     designRunId,
     acceptedProposalIds,
     acceptedBy: "browser"

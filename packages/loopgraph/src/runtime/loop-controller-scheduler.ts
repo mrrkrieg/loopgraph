@@ -52,36 +52,19 @@ export async function runLoopControllerScheduler(
     3600,
     "Controller trigger lease seconds"
   );
-  const claimed = await store.withTriggerLock(async () => {
-    const records = await store.listTriggers();
-    const eligible = records.filter((record) =>
-      record.attempts < maxAttempts &&
-      (
-        record.status === "pending" ||
-        record.status === "failed" ||
-        (
-          record.status === "processing" &&
-          Date.parse(record.updatedAt) + leaseSeconds * 1000 <= now.getTime()
-        )
-      )
-    ).slice(0, limit);
-    const processing: LoopControllerTriggerRecord[] = [];
-    for (const record of eligible) {
-      const updated = loopControllerTriggerRecordSchema.parse({
-        ...record,
-        status: "processing",
-        attempts: record.attempts + 1,
-        error: undefined,
-        updatedAt: now.toISOString()
-      });
-      await store.saveTrigger(updated);
-      processing.push(updated);
-    }
-    return processing;
+  const claimed = await store.claimTriggers({
+    limit,
+    maxAttempts,
+    leaseSeconds,
+    now
   });
 
   const items: LoopControllerSchedulerItem[] = [];
   for (const record of claimed) {
+    const leaseId = record.leaseId;
+    if (!leaseId) {
+      throw new Error(`Claimed controller trigger is missing a lease: ${record.id}`);
+    }
     try {
       const result = await runLoopController({
         projectRoot,
@@ -99,9 +82,11 @@ export async function runLoopControllerScheduler(
           ? result.run.errors.map((item) => item.message).join("; ") || "Controller run failed"
           : undefined,
         updatedAt: now.toISOString(),
+        leaseId: undefined,
+        leaseExpiresAt: undefined,
         ...(result.run.status === "failed" ? {} : { completedAt: now.toISOString() })
       });
-      await store.withTriggerLock(() => store.saveTrigger(completed));
+      await store.settleTrigger(completed, leaseId);
       items.push({
         triggerRecordId: completed.id,
         triggerId: completed.trigger.id,
@@ -116,9 +101,11 @@ export async function runLoopControllerScheduler(
         ...record,
         status: "failed",
         error: message,
-        updatedAt: now.toISOString()
+        updatedAt: now.toISOString(),
+        leaseId: undefined,
+        leaseExpiresAt: undefined
       });
-      await store.withTriggerLock(() => store.saveTrigger(failed));
+      await store.settleTrigger(failed, leaseId);
       items.push({
         triggerRecordId: failed.id,
         triggerId: failed.trigger.id,

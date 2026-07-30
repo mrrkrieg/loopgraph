@@ -2,7 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import { getLoopgraphRoot } from "../loopgraph-runtime/storage-resolver";
-import { loadLoopSpecFromPath } from "loopgraph/runtime";
+import {
+  loadLoopSpecFromPath,
+  type LoopSpecRegistryStore
+} from "loopgraph/runtime";
 import type { LoopSpec } from "loopgraph/core";
 import { createSpecFromTemplate } from "./template-spec";
 import { validateLoopSpec as validateFlatLoopSpec, type LoopSpec as FlatLoopSpec } from "./loop-spec-schema";
@@ -99,6 +102,19 @@ export async function getRegisteredLoopSpecs(projectRoot = getLocalProjectRoot()
   }
 
   return specs;
+}
+
+export async function getRegisteredLoopSpecsFromStore(
+  store: LoopSpecRegistryStore,
+  projectRoot = getLocalProjectRoot()
+): Promise<LoadedRegisteredLoopSpec[]> {
+  return (await store.listActiveLoopSpecs(projectRoot)).map((artifact) => ({
+    ...artifact.entry,
+    templateId: artifact.entry.templateId ?? "hermes-design",
+    department: studioDepartmentKey(artifact.entry.department),
+    sourcePath: artifact.sourceRef ?? artifact.entry.path,
+    spec: artifact.spec
+  }));
 }
 
 export async function createLocalDesignStudioSpec(input: {
@@ -245,6 +261,13 @@ function getTemplateId(spec: LoopSpec) {
 
 function getDepartmentKey(value: string): DepartmentKey {
   return getDepartmentTemplate(value as DepartmentKey) ? (value as DepartmentKey) : "custom";
+}
+
+function studioDepartmentKey(value: string): DepartmentKey {
+  if (value === "ops_finance") return "operations_finance";
+  if (value === "hr_talent") return "hr";
+  if (value === "legal_compliance") return "legal_security";
+  return getDepartmentKey(value);
 }
 
 function toRegistryPath(sourcePath: string, projectRoot: string) {

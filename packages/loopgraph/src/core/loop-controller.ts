@@ -156,6 +156,8 @@ export const loopControllerTriggerRecordSchema = z.object({
   trigger: loopControllerTriggerSchema,
   status: z.enum(["pending", "processing", "completed", "failed"]),
   attempts: z.number().int().min(0).default(0),
+  leaseId: z.string().uuid().optional(),
+  leaseExpiresAt: z.string().datetime().optional(),
   controllerRunId: z.string().min(1).optional(),
   error: z.string().min(1).optional(),
   createdAt: z.string().datetime(),

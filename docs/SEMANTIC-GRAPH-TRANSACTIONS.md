@@ -148,6 +148,8 @@ The API always binds the operation to `LOOPGRAPH_PROJECT_ROOT`; a caller-supplie
 
 ## Durable storage
 
+Local installations keep portable graph history beside the project:
+
 ```text
 .loopgraph/graph/
   approvals/
@@ -161,6 +163,24 @@ The API always binds the operation to `LOOPGRAPH_PROJECT_ROOT`; a caller-supplie
 
 Writes are atomic, transaction application is lock-protected, and generated asset restoration is confined to project-local Loopgraph paths.
 
-## Current promotion boundary
+Authenticated hosted deployments use tenant/project-scoped PostgreSQL tables for snapshots, approval receipts, transactions, promotions, rehearsals, and idempotent graph commit receipts. One `commit_semantic_graph_transaction` database transaction:
+
+1. locks the active LoopSpec workspace revision;
+2. fences the mutation against the exact active `{loopId, versionHash}` set;
+3. verifies the approved receipt is present and bound to the transaction kind and base graph;
+4. inserts immutable LoopSpec versions and replaces the active registry;
+5. advances the workspace revision;
+6. stores base/result snapshots, the transaction, optional promotion, rollback updates, and the applied change set;
+7. returns the original receipt on an identical retry.
+
+Browser roles receive no direct table writes or function execution. The service runtime receives read access and execute access only to the tenant-scoped RPCs. Hosted mutation fails closed if the semantic store or active LoopSpec registry is not distributed.
+
+Graph snapshots include the validated spec and fixture payloads, so rollback can restore a retired version without depending on whatever files or active rows happen to exist later.
+
+## Promotion boundary
 
 Promotion requires a passing, unexpired rehearsal report bound to the exact graph hash, LoopSpec hash, loop ID, and requested next activation mode. Loopgraph verifies the report both when approval is issued and when the transaction is applied. Arbitrary evidence labels cannot satisfy the gate. See [Promotion rehearsal](./PROMOTION-REHEARSAL.md).
+
+## Remaining boundary
+
+The semantic graph and active LoopSpec registry are now multi-replica authorities. Measurement jobs, outcome samples/evaluations, and value-ledger records remain the next distributed data boundary. Provider OAuth, API execution, and subscription application remain Hermes-owned integration work.

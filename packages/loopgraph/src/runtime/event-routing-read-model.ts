@@ -20,6 +20,7 @@ import {
 } from "./routing-ops-tools";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { loopgraph_routing_catalog_get } from "./routing-tools";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const EVENT_ROUTING_OPERATIONS_SCHEMA_VERSION = "event-routing-operations/v1alpha1" as const;
@@ -42,6 +43,7 @@ export type EventRoutingOperationsInput = EventRoutingOperationsFilters & {
   limit?: number;
   now?: Date;
   store?: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 };
 
 export type EventRoutingOperationsRow = {
@@ -247,7 +249,10 @@ export async function loadEventRoutingOperations(
     lifecycleDeliveries,
     webhookPlan
   ] = await Promise.all([
-    loopgraph_routing_catalog_get({ projectRoot }),
+    loopgraph_routing_catalog_get(
+      { projectRoot },
+      { loopSpecStore: input.loopSpecStore }
+    ),
     loopgraph_events_get({
       projectRoot,
       limit,

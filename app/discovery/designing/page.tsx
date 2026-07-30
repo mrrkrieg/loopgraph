@@ -16,7 +16,10 @@ import {
   readLoopDesignProposalSet,
   type HermesGraphProjection
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore
+} from "../../../lib/loopgraph-runtime/storage-resolver";
 import { generateBrowserLoopDesignAction } from "../actions";
 import {
   getHermesDiscoverySessionForView,
@@ -30,12 +33,17 @@ export default async function DiscoveryDesigningPage({ searchParams }: { searchP
   const sessionId = stringParam(query, "sessionId");
   const requestedDesignRunId = stringParam(query, "designRunId");
   const projectRoot = getActiveLoopgraphProjectRoot();
+  const store = getDiscoveryDesignStore();
   const session = await getHermesDiscoverySessionForView(sessionId);
   const designRunId = requestedDesignRunId ?? session?.designRunIds.at(-1);
   const [designContext, designRun, proposalSet] = await Promise.all([
     session ? loadDesignContext(projectRoot, session) : Promise.resolve(undefined),
-    designRunId ? readDesignRun(projectRoot, designRunId) : Promise.resolve(undefined),
-    designRunId ? readLoopDesignProposalSet(projectRoot, designRunId) : Promise.resolve(undefined)
+    designRunId
+      ? readDesignRun(projectRoot, designRunId, store)
+      : Promise.resolve(undefined),
+    designRunId
+      ? readLoopDesignProposalSet(projectRoot, designRunId, store)
+      : Promise.resolve(undefined)
   ]);
   const ready = designContext?.readiness === "ready_for_design";
 
@@ -391,6 +399,7 @@ async function loadDesignContext(
   try {
     return await buildLoopDesignContext({
       projectRoot,
+      store: getDiscoveryDesignStore(),
       sessionId: session.id,
       department: session.activeDepartmentId
     });

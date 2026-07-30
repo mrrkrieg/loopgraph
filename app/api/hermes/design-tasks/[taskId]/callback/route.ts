@@ -1,15 +1,22 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
-  processHermesDesignCallback,
+  createHermesDesignCallbackJob,
+  runHermesDesignCallbackWorker,
   verifyHermesCallbackSignature
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
-  getHermesDesignStore
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
-import { authorizeVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
+import { prepareVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
 import { emitOperationalLog } from "../../../../../../lib/observability/operational-log";
+
+const MAX_CALLBACK_BODY_BYTES = 1024 * 1024;
+
+export const runtime = "nodejs";
 
 export async function POST(
   request: Request,
@@ -25,6 +32,12 @@ export async function POST(
   }
 
   const rawBody = await request.text();
+  if (Buffer.byteLength(rawBody, "utf8") > MAX_CALLBACK_BODY_BYTES) {
+    return NextResponse.json({ error: "Hermes callback body exceeds 1 MiB." }, {
+      status: 413,
+      headers: { "cache-control": "no-store" }
+    });
+  }
   const timestamp = request.headers.get("x-hermes-timestamp") ?? "";
   const signature = request.headers.get("x-hermes-signature") ?? "";
   if (!verifyHermesCallbackSignature({
@@ -54,23 +67,140 @@ export async function POST(
     if (!callbackId) {
       return NextResponse.json({ error: "Hermes callbackId is required" }, { status: 400 });
     }
-    const guardResponse = await authorizeVerifiedHostedMachineRequest({
+    const requestHash = digest(rawBody);
+    const prepared = prepareVerifiedHostedMachineRequest({
       capability: "hermes.design_callback",
       credentialEnvironmentVariable: "LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID",
       requestId: `hermes_${digest(callbackId).slice(0, 32)}`,
-      requestHash: digest(rawBody),
+      requestHash,
       requestedAt: timestamp,
       rateLimit: positiveInteger(
         process.env.LOOPGRAPH_HERMES_CALLBACK_RATE_LIMIT_PER_MINUTE,
         60
       )
     });
-    if (guardResponse) return guardResponse;
-    const result = await processHermesDesignCallback({
-      projectRoot: getActiveLoopgraphProjectRoot(),
-      callback
-    }, { store: getHermesDesignStore() });
-    return NextResponse.json(result, { status: result.duplicate ? 200 : 202 });
+    if (prepared.response) return prepared.response;
+
+    const now = new Date();
+    const job = createHermesDesignCallbackJob({
+      callback,
+      requestHash,
+      now
+    });
+    let acceptance;
+    let store;
+    try {
+      store = getHermesDesignStore();
+      acceptance = await store.acceptCallbackJobAtomically({
+        job,
+        ...(prepared.context
+          ? {
+              machineRequest: {
+                ...prepared.context,
+                capability: "hermes.design_callback" as const
+              }
+            }
+          : {})
+      });
+    } catch (error) {
+      if (prepared.context) {
+        emitOperationalLog({
+          level: "error",
+          event: "hermes.callback.inbox_unavailable",
+          outcome: "error",
+          capability: "hermes.design_callback",
+          credentialId: prepared.context.credentialId,
+          organizationId: prepared.context.organizationId,
+          projectKey: prepared.context.projectKey,
+          requestId: prepared.context.requestId,
+          correlationId: prepared.context.requestId,
+          reason: "callback_acceptance_failed"
+        });
+        return NextResponse.json({
+          error: error instanceof Error
+            ? error.message
+            : "Hermes callback inbox is unavailable"
+        }, {
+          status: 503,
+          headers: { "cache-control": "no-store" }
+        });
+      }
+      throw error;
+    }
+    if (!acceptance.authorized || !acceptance.job) {
+      const rateLimited = acceptance.reason === "rate_limited";
+      emitOperationalLog({
+        level: "warn",
+        event: "hermes.callback.denied",
+        outcome: "denied",
+        capability: "hermes.design_callback",
+        credentialId: prepared.context?.credentialId,
+        organizationId: prepared.context?.organizationId,
+        projectKey: prepared.context?.projectKey,
+        requestId: prepared.context?.requestId,
+        correlationId: prepared.context?.requestId,
+        reason: acceptance.reason
+      });
+      return NextResponse.json({ error: acceptance.reason }, {
+        status: rateLimited ? 429 : 409,
+        headers: {
+          "cache-control": "no-store",
+          ...(rateLimited && acceptance.retryAfterSeconds
+            ? { "retry-after": String(acceptance.retryAfterSeconds) }
+            : {})
+        }
+      });
+    }
+
+    emitOperationalLog({
+      level: "info",
+      event: "hermes.callback.queued",
+      outcome: "accepted",
+      capability: "hermes.design_callback",
+      credentialId: prepared.context?.credentialId,
+      organizationId: prepared.context?.organizationId,
+      projectKey: prepared.context?.projectKey,
+      requestId: prepared.context?.requestId,
+      correlationId: prepared.context?.requestId,
+      reason: acceptance.reason,
+      metadata: {
+        resourceType: "hermes_design_callback_job",
+        resourceId: acceptance.job.id
+      }
+    });
+
+    if (prepared.context) {
+      return NextResponse.json({
+        accepted: true,
+        duplicate: !acceptance.created,
+        callbackJob: acceptance.job
+      }, {
+        status: acceptance.created ? 202 : 200,
+        headers: { "cache-control": "no-store" }
+      });
+    }
+
+    const projectRoot = getActiveLoopgraphProjectRoot();
+    const worker = await runHermesDesignCallbackWorker({
+      projectRoot,
+      store,
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore(),
+      workerId: "hermes-callback-local",
+      limit: 100,
+      leaseSeconds: 300,
+      now
+    });
+    return NextResponse.json({
+      accepted: true,
+      duplicate: !acceptance.created,
+      callbackJob:
+        await store.getCallbackJob(acceptance.job.id) ?? acceptance.job,
+      processing: worker.items.find((item) => item.jobId === acceptance.job?.id)
+    }, {
+      status: acceptance.created ? 202 : 200,
+      headers: { "cache-control": "no-store" }
+    });
   } catch (error) {
     return NextResponse.json({
       error: error instanceof Error ? error.message : "Invalid Hermes callback"

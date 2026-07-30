@@ -1,12 +1,11 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
   DESIGN_RUN_SCHEMA_VERSION,
   LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
   LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION,
-  BusinessDiscoverySessionSchema,
   contentHash,
+  compileRoutingCardFromLoopSpec,
   designRunSchema,
   formatDepartmentType,
   getDepartmentBranchQuestions,
@@ -22,13 +21,20 @@ import {
   type LoopDesignProposal,
   type LoopDesignProposalSet
 } from "../core";
-import { getDiscoverySession, saveDiscoverySession } from "./discovery-session";
+import { getDiscoverySession } from "./discovery-session";
+import {
+  FileDiscoveryDesignStore,
+  type DiscoveryDesignStore
+} from "./discovery-design-store";
 import { inspectProjectManifests } from "./project-inspection";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { inspectLoopgraphWorkspace } from "./workspace";
 
 export type BuildLoopDesignContextInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   sessionId: string;
   department?: string;
 };
@@ -45,6 +51,8 @@ export type GenerateLoopDesignInput = BuildLoopDesignContextInput & {
 
 export type SubmitLoopDesignInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   sessionId: string;
   department?: string;
   proposalSet: unknown;
@@ -52,6 +60,7 @@ export type SubmitLoopDesignInput = {
   modelIdentifier?: string;
   reasoningProfile?: "standard" | "high";
   providerMetadata?: Record<string, unknown>;
+  submissionIdempotencyKey?: string;
   now?: Date;
 };
 
@@ -136,6 +145,8 @@ export type LoopDesignProposalEdit = z.infer<typeof loopDesignProposalEditSchema
 
 export type EditLoopDesignProposalInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   designRunId: string;
   proposalId: string;
   expectedOutputHash?: string;
@@ -157,9 +168,18 @@ export async function buildLoopDesignContext(
   input: BuildLoopDesignContextInput
 ): Promise<LoopDesignContext> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireSession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireSession(input.sessionId, projectRoot, store);
   const departmentType = resolveDesignDepartment(session, input.department);
-  const workspace = await inspectLoopgraphWorkspace({ projectRoot });
+  const [workspace, activeArtifacts] = input.loopSpecStore
+    ? await Promise.all([
+        input.loopSpecStore.getWorkspace(projectRoot),
+        input.loopSpecStore.listActiveLoopSpecs(projectRoot)
+      ])
+    : [
+        await inspectLoopgraphWorkspace({ projectRoot }),
+        undefined
+      ];
   const projectInspection = await inspectProjectManifests({ projectRoot });
   const confirmedAnswers = session.answers
     .filter((answer) => answer.confirmedByUser)
@@ -184,12 +204,29 @@ export async function buildLoopDesignContext(
   const missingBundles = requiredBundles.filter((bundleId) => !answeredBundleIds.has(bundleId));
   const blockers = missingBundles.map((bundleId) => `Question bundle not answered: ${bundleId}`);
   const connectorStatus = inferConnectorStatus(session.answers);
-  const existingLoops = workspace.registry.registeredSpecs.map((spec) => ({
-    loopId: spec.id,
-    name: spec.name,
-    department: spec.department,
-    routingReady: false
-  }));
+  const existingLoops = activeArtifacts
+    ? activeArtifacts.map((artifact) => ({
+        loopId: artifact.loopId,
+        name: artifact.entry.name,
+        department: artifact.entry.department,
+        routingReady: Boolean(
+          compileRoutingCardFromLoopSpec(artifact.spec, {
+            catalogVersion: "design-context"
+          })
+        )
+      }))
+    : workspace.registry.registeredSpecs.map((spec) => ({
+        loopId: spec.id,
+        name: spec.name,
+        department: spec.department,
+        routingReady: false
+      }));
+  const registry = activeArtifacts
+    ? workspace.workspace
+    : workspace.registry;
+  const routingReadySpecCount = activeArtifacts
+    ? existingLoops.filter((loop) => loop.routingReady).length
+    : workspace.routingReadySpecCount;
   const contextWithoutHash = {
     schemaVersion: LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
     sessionId: session.id,
@@ -198,11 +235,13 @@ export async function buildLoopDesignContext(
     readiness: blockers.length === 0 ? "ready_for_design" as const : "needs_answers" as const,
     blockers,
     projectSummary: {
-      projectRootId: workspace.registry.projectRootId,
-      displayName: workspace.registry.displayName,
-      registeredSpecCount: workspace.registeredSpecCount,
-      registeredDepartments: workspace.registeredDepartments,
-      routingReadySpecCount: workspace.routingReadySpecCount
+      projectRootId: registry.projectRootId,
+      displayName: registry.displayName,
+      registeredSpecCount: registry.registeredSpecs.length,
+      registeredDepartments: Array.from(
+        new Set(registry.registeredSpecs.map((spec) => spec.department))
+      ),
+      routingReadySpecCount
     },
     projectInspection,
     confirmedAnswers,
@@ -294,6 +333,7 @@ export async function generateLoopDesignWithProvider(
 
   return persistDesignSubmission({
     projectRoot,
+    store: input.store,
     context,
     proposalSet,
     providerMode: input.provider.mode,
@@ -325,6 +365,8 @@ export async function submitLoopDesignProposalSet(
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const context = await buildLoopDesignContext({
     projectRoot,
+    store: input.store,
+    loopSpecStore: input.loopSpecStore,
     sessionId: input.sessionId,
     department: input.department
   });
@@ -338,6 +380,7 @@ export async function submitLoopDesignProposalSet(
 
   return persistDesignSubmission({
     projectRoot,
+    store: input.store,
     context,
     proposalSet,
     providerMode: "hermes_host",
@@ -357,7 +400,8 @@ export async function submitLoopDesignProposalSet(
         ]
       },
       ...(input.providerMetadata ? { providerMetadata: input.providerMetadata } : {})
-    }
+    },
+    submissionIdempotencyKey: input.submissionIdempotencyKey
   });
 }
 
@@ -365,13 +409,22 @@ export async function editLoopDesignProposal(
   input: EditLoopDesignProposalInput
 ): Promise<LoopDesignSubmissionResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const baseDesignRun = await readDesignRun(projectRoot, input.designRunId);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const baseDesignRun = await readDesignRun(
+    projectRoot,
+    input.designRunId,
+    store
+  );
   if (!baseDesignRun) throw new Error(`Design run not found: ${input.designRunId}`);
   if (input.expectedOutputHash && baseDesignRun.outputHash !== input.expectedOutputHash) {
     throw new Error(`Design run output hash mismatch: expected ${input.expectedOutputHash}, found ${baseDesignRun.outputHash ?? "none"}`);
   }
 
-  const baseProposalSet = await readLoopDesignProposalSet(projectRoot, input.designRunId);
+  const baseProposalSet = await readLoopDesignProposalSet(
+    projectRoot,
+    input.designRunId,
+    store
+  );
   if (!baseProposalSet) throw new Error(`Proposal set not found for design run: ${input.designRunId}`);
   const proposalIndex = baseProposalSet.proposals.findIndex((proposal) => proposal.proposalId === input.proposalId);
   if (proposalIndex < 0) throw new Error(`Proposal not found in design run: ${input.proposalId}`);
@@ -379,6 +432,8 @@ export async function editLoopDesignProposal(
   const edit = loopDesignProposalEditSchema.parse(input.updates);
   const context = await buildLoopDesignContext({
     projectRoot,
+    store,
+    loopSpecStore: input.loopSpecStore,
     sessionId: baseDesignRun.sessionId,
     department: baseDesignRun.departmentType
   });
@@ -397,6 +452,7 @@ export async function editLoopDesignProposal(
 
   return persistDesignSubmission({
     projectRoot,
+    store,
     context,
     proposalSet,
     providerMode: baseDesignRun.providerMode,
@@ -584,6 +640,7 @@ function applyLoopDesignProposalEdit(
 
 async function persistDesignSubmission(input: {
   projectRoot: string;
+  store?: DiscoveryDesignStore;
   context: LoopDesignContext;
   proposalSet: LoopDesignProposalSet;
   providerMode: DesignRun["providerMode"];
@@ -592,6 +649,7 @@ async function persistDesignSubmission(input: {
   reasoningProfile: "standard" | "high";
   now?: Date;
   metadata?: Record<string, unknown>;
+  submissionIdempotencyKey?: string;
 }): Promise<LoopDesignSubmissionResult> {
   const nowIso = (input.now ?? new Date()).toISOString();
   const errors = validateLoopDesignProposalSet(input.proposalSet, input.context);
@@ -604,7 +662,13 @@ async function persistDesignSubmission(input: {
   });
   const designRun = designRunSchema.parse({
     schemaVersion: DESIGN_RUN_SCHEMA_VERSION,
-    id: `design_${contentHash({ contextHash: input.context.contextHash, proposalSet, at: nowIso })}`,
+    id: `design_${contentHash(input.submissionIdempotencyKey
+      ? {
+          contextHash: input.context.contextHash,
+          proposalSet,
+          submissionIdempotencyKey: input.submissionIdempotencyKey
+        }
+      : { contextHash: input.context.contextHash, proposalSet, at: nowIso })}`,
     sessionId: input.context.sessionId,
     departmentType: input.context.departmentType,
     providerMode: input.providerMode,
@@ -621,22 +685,28 @@ async function persistDesignSubmission(input: {
     finalProposalIds: errors.length === 0 ? proposalSet.proposals.map((proposal) => proposal.proposalId) : [],
     metadata: {
       ...(input.metadata ?? {}),
+      ...(input.submissionIdempotencyKey
+        ? { submissionIdempotencyKey: input.submissionIdempotencyKey }
+        : {}),
       proposalCount: proposalSet.proposals.length
     }
   });
-  const designRunPath = designRunFilePath(input.projectRoot, designRun.id);
-  const proposalSetPath = proposalSetFilePath(input.projectRoot, designRun.id);
-  await writeJson(designRunPath, designRun);
-  await writeJson(proposalSetPath, proposalSet);
-  await appendDesignRunToSession(input.projectRoot, input.context.sessionId, designRun.id);
+  const store = resolveDiscoveryDesignStore(input.projectRoot, input.store);
+  const saved = await store.createDesignSubmissionAtomically({
+    context: input.context,
+    designRun,
+    proposalSet
+  });
 
   return {
-    valid: errors.length === 0,
-    errors,
-    designRun,
-    ...(errors.length === 0 ? { proposalSet } : {}),
-    proposalSetPath,
-    designRunPath
+    valid: saved.designRun.validationErrors.length === 0,
+    errors: saved.designRun.validationErrors,
+    designRun: saved.designRun,
+    ...(saved.designRun.validationErrors.length === 0
+      ? { proposalSet: saved.proposalSet }
+      : {}),
+    proposalSetPath: saved.proposalSetRef,
+    designRunPath: saved.designRunRef
   };
 }
 
@@ -1394,8 +1464,12 @@ function normalizeRollout(value?: string): LoopDesignProposal["rolloutStage"] {
   return "shadow";
 }
 
-async function requireSession(sessionId: string, projectRoot: string): Promise<BusinessDiscoverySession> {
-  const session = await getDiscoverySession(sessionId, projectRoot);
+async function requireSession(
+  sessionId: string,
+  projectRoot: string,
+  store?: DiscoveryDesignStore
+): Promise<BusinessDiscoverySession> {
+  const session = await getDiscoverySession(sessionId, projectRoot, store);
   if (!session) throw new Error(`Discovery session not found: ${sessionId}`);
   return session;
 }
@@ -1411,52 +1485,44 @@ function resolveDesignDepartment(session: BusinessDiscoverySession, requested?: 
   return session.activeDepartmentId;
 }
 
-async function appendDesignRunToSession(projectRoot: string, sessionId: string, designRunId: string): Promise<void> {
-  const session = await requireSession(sessionId, projectRoot);
-  const next = BusinessDiscoverySessionSchema.parse({
-    ...session,
-    designRunIds: Array.from(new Set([...session.designRunIds, designRunId])),
-    revision: session.revision + 1,
-    activeStage: "proposal_review" as const,
-    updatedAt: new Date().toISOString()
-  });
-  await saveDiscoverySession(next, projectRoot);
-}
-
-function designRunFilePath(projectRoot: string, designRunId: string): string {
-  return path.join(getLoopgraphRoot(projectRoot), "discovery", "design-runs", `${safeFileId(designRunId)}.json`);
-}
-
-function proposalSetFilePath(projectRoot: string, designRunId: string): string {
-  return path.join(getLoopgraphRoot(projectRoot), "discovery", "proposals", `${safeFileId(designRunId)}.json`);
-}
-
-async function writeJson(filePath: string, data: unknown): Promise<void> {
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(data, null, 2)}\n`);
-}
-
-export async function readDesignRun(projectRoot: string, designRunId: string): Promise<DesignRun | undefined> {
-  try {
-    return designRunSchema.parse(JSON.parse(await readFile(designRunFilePath(projectRoot, designRunId), "utf8")));
-  } catch {
-    return undefined;
-  }
+export async function readDesignRun(
+  projectRoot: string,
+  designRunId: string,
+  store?: DiscoveryDesignStore
+): Promise<DesignRun | undefined> {
+  return resolveDiscoveryDesignStore(
+    path.resolve(projectRoot),
+    store
+  ).getDesignRun(designRunId);
 }
 
 export async function readLoopDesignProposalSet(
   projectRoot: string,
-  designRunId: string
+  designRunId: string,
+  store?: DiscoveryDesignStore
 ): Promise<LoopDesignProposalSet | undefined> {
-  try {
-    return loopDesignProposalSetSchema.parse(JSON.parse(await readFile(proposalSetFilePath(projectRoot, designRunId), "utf8")));
-  } catch {
-    return undefined;
-  }
+  return resolveDiscoveryDesignStore(
+    path.resolve(projectRoot),
+    store
+  ).getProposalSet(designRunId);
 }
 
-function safeFileId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.:-]/g, "_");
+export async function readLoopDesignContext(
+  projectRoot: string,
+  designRunId: string,
+  store?: DiscoveryDesignStore
+): Promise<LoopDesignContext | undefined> {
+  return resolveDiscoveryDesignStore(
+    path.resolve(projectRoot),
+    store
+  ).getDesignContext(designRunId);
+}
+
+function resolveDiscoveryDesignStore(
+  projectRoot: string,
+  store?: DiscoveryDesignStore
+): DiscoveryDesignStore {
+  return store ?? new FileDiscoveryDesignStore(getLoopgraphRoot(projectRoot));
 }
 
 function uniqueStrings(values: string[]): string[] {

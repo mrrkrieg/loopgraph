@@ -1,4 +1,3 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   BusinessDiscoverySessionSchema,
@@ -19,10 +18,15 @@ import {
   getDiscoverySession,
   saveDiscoverySession
 } from "./discovery-session";
+import {
+  FileDiscoveryDesignStore,
+  type DiscoveryDesignStore
+} from "./discovery-design-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export type CompileEvidenceGapsInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   additionalGaps?: EvidenceGap[];
   now?: Date;
@@ -42,6 +46,7 @@ export type EvidenceGapQuestion = {
 
 export type SubmitEvidenceGapAnswerInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   gapId: string;
   answer: unknown;
@@ -55,14 +60,15 @@ export async function compileEvidenceGaps(
   input: CompileEvidenceGapsInput
 ): Promise<EvidenceGapSet> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireSession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireSession(input.sessionId, projectRoot, store);
   const department = session.activeDepartmentId;
   if (!department) {
     throw new Error("Select an active department before compiling evidence gaps.");
   }
 
   const nowIso = (input.now ?? new Date()).toISOString();
-  const existing = await readEvidenceGapSet(session.id, projectRoot);
+  const existing = await readEvidenceGapSet(session.id, projectRoot, store);
   const answers = new Map(session.answers
     .filter((answer) => answer.confirmedByUser)
     .map((answer) => [answer.questionId, answer]));
@@ -130,12 +136,12 @@ export async function compileEvidenceGaps(
     generatedAt: nowIso,
     gaps: [...nextById.values()].sort(compareGaps)
   });
-  await saveEvidenceGapSet(set, projectRoot);
-  return set;
+  return saveEvidenceGapSet(set, store);
 }
 
 export async function getNextEvidenceGapQuestions(input: {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   limit?: number;
   requiredFor?: EvidenceGapRequiredFor;
@@ -190,12 +196,14 @@ export async function submitEvidenceGapAnswer(
   nextQuestions: Awaited<ReturnType<typeof getNextEvidenceGapQuestions>>;
 }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireSession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireSession(input.sessionId, projectRoot, store);
   if (input.expectedRevision !== undefined && input.expectedRevision !== session.revision) {
     throw new Error(`Discovery session revision mismatch: expected ${input.expectedRevision}, found ${session.revision}`);
   }
   const current = await compileEvidenceGaps({
     projectRoot,
+    store,
     sessionId: session.id,
     now: input.now
   });
@@ -237,17 +245,22 @@ export async function submitEvidenceGapAnswer(
     lastTransitionAt: nowIso,
     updatedAt: nowIso
   });
-  await saveDiscoverySession(nextSession, projectRoot);
+  const savedSession = await saveDiscoverySession(nextSession, projectRoot, {
+    store,
+    expectedRevision: session.revision
+  });
   const gaps = await compileEvidenceGaps({
     projectRoot,
+    store,
     sessionId: session.id,
     now: input.now
   });
   return {
-    session: nextSession,
+    session: savedSession,
     gaps,
     nextQuestions: await getNextEvidenceGapQuestions({
       projectRoot,
+      store,
       sessionId: session.id,
       limit: 3
     })
@@ -256,12 +269,14 @@ export async function submitEvidenceGapAnswer(
 
 export async function mergeHermesEvidenceGaps(input: {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   gaps: EvidenceGap[];
   now?: Date;
 }): Promise<EvidenceGapSet> {
   return compileEvidenceGaps({
     projectRoot: input.projectRoot,
+    store: input.store,
     sessionId: input.sessionId,
     additionalGaps: input.gaps,
     now: input.now
@@ -270,29 +285,21 @@ export async function mergeHermesEvidenceGaps(input: {
 
 export async function readEvidenceGapSet(
   sessionId: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: DiscoveryDesignStore
 ): Promise<EvidenceGapSet | undefined> {
-  try {
-    const raw = await readFile(evidenceGapSetPath(sessionId, path.resolve(projectRoot)), "utf8");
-    return evidenceGapSetSchema.parse(JSON.parse(raw));
-  } catch {
-    return undefined;
-  }
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  return resolveDiscoveryDesignStore(
+    resolvedProjectRoot,
+    store
+  ).getEvidenceGapSet(sessionId);
 }
 
-async function saveEvidenceGapSet(set: EvidenceGapSet, projectRoot: string): Promise<void> {
-  const filePath = evidenceGapSetPath(set.sessionId, projectRoot);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(set, null, 2)}\n`);
-}
-
-function evidenceGapSetPath(sessionId: string, projectRoot: string): string {
-  return path.join(
-    getLoopgraphRoot(projectRoot),
-    "discovery",
-    "evidence-gaps",
-    `${encodeURIComponent(sessionId)}.json`
-  );
+async function saveEvidenceGapSet(
+  set: EvidenceGapSet,
+  store: DiscoveryDesignStore
+): Promise<EvidenceGapSet> {
+  return store.putEvidenceGapSetAtomically(set);
 }
 
 function conditionalGaps(
@@ -466,8 +473,19 @@ function normalizeRequiredFor(
   return Array.from(new Set(normalized.length > 0 ? normalized : ["design"]));
 }
 
-async function requireSession(sessionId: string, projectRoot: string): Promise<BusinessDiscoverySession> {
-  const session = await getDiscoverySession(sessionId, projectRoot);
+async function requireSession(
+  sessionId: string,
+  projectRoot: string,
+  store?: DiscoveryDesignStore
+): Promise<BusinessDiscoverySession> {
+  const session = await getDiscoverySession(sessionId, projectRoot, store);
   if (!session) throw new Error(`Discovery session not found: ${sessionId}`);
   return session;
+}
+
+function resolveDiscoveryDesignStore(
+  projectRoot: string,
+  store?: DiscoveryDesignStore
+): DiscoveryDesignStore {
+  return store ?? new FileDiscoveryDesignStore(getLoopgraphRoot(projectRoot));
 }

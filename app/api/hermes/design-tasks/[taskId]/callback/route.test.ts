@@ -58,10 +58,35 @@ describe("Hermes design task callback API", () => {
     });
     expect(accepted.status).toBe(202);
     await expect(accepted.json()).resolves.toMatchObject({
+      accepted: true,
       duplicate: false,
-      task: {
-        id: started.task.id,
-        status: "needs_input"
+      callbackJob: {
+        taskId: started.task.id,
+        callbackId: callback.callbackId,
+        status: "completed"
+      },
+      processing: {
+        status: "completed",
+        duplicate: false
+      }
+    });
+
+    const duplicate = await POST(callbackRequest({
+      taskId: started.task.id,
+      body,
+      timestamp,
+      signature: signLoopgraphTaskPayload(body, timestamp, secret)
+    }), {
+      params: Promise.resolve({ taskId: started.task.id })
+    });
+    expect(duplicate.status).toBe(200);
+    await expect(duplicate.json()).resolves.toMatchObject({
+      accepted: true,
+      duplicate: true,
+      callbackJob: {
+        taskId: started.task.id,
+        callbackId: callback.callbackId,
+        status: "completed"
       }
     });
 
@@ -99,6 +124,24 @@ describe("Hermes design task callback API", () => {
     expect(response.status).toBe(503);
   });
 
+  it("rejects oversized callback bodies before persistence", async () => {
+    vi.stubEnv("LOOPGRAPH_HERMES_CALLBACK_SECRET", "callback-secret");
+    const response = await POST(new Request(
+      "https://loopgraph.local/api/hermes/design-tasks/task_1/callback",
+      {
+        method: "POST",
+        body: "x".repeat(1024 * 1024 + 1)
+      }
+    ), {
+      params: Promise.resolve({ taskId: "task_1" })
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hermes callback body exceeds 1 MiB."
+    });
+  });
+
   it("fails closed in hosted mode when the durable callback guard is unavailable", async () => {
     const secret = "callback-secret";
     const callback = {
@@ -133,7 +176,9 @@ describe("Hermes design task callback API", () => {
 
     expect(response.status).toBe(503);
     await expect(response.json()).resolves.toEqual({
-      error: "Supabase service authorization is not configured."
+      error:
+        "Supabase Hermes design storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
     });
   });
 });
