@@ -5,7 +5,10 @@ import {
   resumeHermesDesignTasksForSession,
   submitEvidenceGapAnswer
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore
+} from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(
   request: Request,
@@ -55,7 +58,7 @@ export async function POST(
     const resumedTasks = await resumeHermesDesignTasksForSession({
       projectRoot: getActiveLoopgraphProjectRoot(),
       sessionId
-    });
+    }, { store: getHermesDesignStore() });
     return NextResponse.json({ ...result, resumedTasks }, { status: 201 });
   } catch (error) {
     return NextResponse.json({

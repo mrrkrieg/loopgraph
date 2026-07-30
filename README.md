@@ -559,6 +559,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md) — complete local setup and event rehearsal
 - [Hermes design bridge](docs/HERMES-DESIGN-BRIDGE.md) — durable design tasks, focused evidence gaps, secure proactive activation, and callbacks
+- [Distributed Hermes design store](docs/DISTRIBUTED-HERMES-DESIGN-STORE.md) — tenant-scoped task idempotency, callback transactions, and hosted replica safety
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
 - [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
 - [Distributed Hermes routing store](docs/DISTRIBUTED-ROUTING-STORE.md) — shared routing evidence, PostgreSQL claims, lease fencing, and hosted queue metrics

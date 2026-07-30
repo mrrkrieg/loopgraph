@@ -6,7 +6,11 @@ import {
   runLoopControllerScheduler
 } from "loopgraph/runtime";
 import { loopControllerTriggerTypeSchema } from "loopgraph/core";
-import { getActiveLoopgraphProjectRoot } from "../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
+  getRoutingStore
+} from "../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -38,6 +42,7 @@ export async function POST(request: Request) {
   try {
     const body = await optionalJson(request);
     const projectRoot = getActiveLoopgraphProjectRoot();
+    const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
     const mode = stringValue(body.mode) ?? "run";
     if (!["enqueue", "drain", "run"].includes(mode)) {
       throw new Error("mode must be enqueue, drain, or run");
@@ -64,6 +69,10 @@ export async function POST(request: Request) {
       limit: integerValue(body.limit, 20, 1, 100),
       maxAttempts: integerValue(body.maxAttempts, 3, 1, 20),
       processingLeaseSeconds: integerValue(body.processingLeaseSeconds, 300, 30, 3600)
+    }, {
+      store,
+      routingStore: getRoutingStore(),
+      designStore: getHermesDesignStore()
     });
     return NextResponse.json({
       enqueue: enqueueResult,

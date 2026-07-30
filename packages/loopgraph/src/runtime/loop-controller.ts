@@ -21,6 +21,7 @@ import {
 import { readConnectionInstances } from "./connector-registry";
 import { readLoopDesignProposalSet } from "./design-service";
 import { getHermesDesignTask } from "./hermes-design-bridge";
+import type { HermesDesignStore } from "./hermes-design-store";
 import {
   FileLoopControllerStore,
   type LoopControllerStore
@@ -36,6 +37,7 @@ import {
 } from "./semantic-graph-transactions";
 import { evaluateObservedOutcome } from "./outcome-service";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import type { RoutingStore } from "./routing-store";
 import { readProjectMetricDefinitions } from "./outcome-tools";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
@@ -55,6 +57,8 @@ export type RunLoopControllerResult = {
 export type LoopControllerRuntimeOptions = {
   store?: LoopControllerStore;
   outcomeStore?: OutcomeStore;
+  routingStore?: RoutingStore;
+  designStore?: HermesDesignStore;
 };
 
 type DueOutcomeEvaluation = {
@@ -146,6 +150,10 @@ export async function runLoopController(
         },
         autoStartDesign: policy.autoStartDesign,
         now
+      }, {
+        routingStore: options.routingStore,
+        outcomeStore,
+        designStore: options.designStore
       });
       const allOutcomes = await outcomeStore.listObservedOutcomes({
         workspaceId: workspace.projectRootId
@@ -167,7 +175,8 @@ export async function runLoopController(
             projectRoot,
             now,
             policy,
-            scan
+            scan,
+            designStore: options.designStore
           });
       const limitedDecisions = decisions.slice(0, policy.maxDecisionsPerRun);
       const completedAt = now.toISOString();
@@ -327,6 +336,7 @@ async function decideControllerActions(input: {
   now: Date;
   policy: LoopControllerPolicy;
   scan: ScanLoopOpportunitiesResult;
+  designStore?: HermesDesignStore;
 }): Promise<LoopControllerDecision[]> {
   if (input.scan.opportunities.length === 0) {
     return [noActionDecision({
@@ -385,7 +395,11 @@ async function decideControllerActions(input: {
       continue;
     }
     const task = opportunity.designTaskId
-      ? await getHermesDesignTask(opportunity.designTaskId, input.projectRoot)
+      ? await getHermesDesignTask(
+          opportunity.designTaskId,
+          input.projectRoot,
+          input.designStore
+        )
       : undefined;
     if (task?.status === "needs_input") {
       decisions.push(decision({
