@@ -70,13 +70,6 @@ export function AppShell({
           }`}
         >
           {!isPaperPage ? workspaceBanner : null}
-          {!isPaperPage && !process.env.NEXT_PUBLIC_SUPABASE_URL ? (
-            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-              {showPreviewFeatures
-                ? "Preview mode — sample data is illustrative and resets with the hosted build."
-                : "Local mode — Loopgraph stores project artifacts under .loopgraph/. Configure Supabase only if you want shared hosted persistence."}
-            </div>
-          ) : null}
           {children}
         </main>
       </div>

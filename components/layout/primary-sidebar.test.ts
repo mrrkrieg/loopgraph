@@ -4,15 +4,17 @@ import HomePage from "../../app/page";
 import TopologyPage from "../../app/topology/page";
 
 describe("primary navigation", () => {
-  it("contains only Hermes Brain, Management, Loops, and Daily", () => {
+  it("keeps loop operation behind one focused navigation entry", () => {
     expect(primaryNav.map((item) => item.label)).toEqual([
       "Hermes Brain",
+      "Operate",
       "Management",
       "Loops",
       "Daily"
     ]);
     expect(primaryNav.map((item) => item.href)).toEqual([
       "/brain",
+      "/operate",
       "/management",
       "/loops",
       "/daily"
