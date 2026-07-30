@@ -3,6 +3,7 @@ const MACHINE_ROUTE_PREFIXES = [
   "/api/cron/",
   "/api/graph/transactions",
   "/api/measurements",
+  "/api/operations/metrics",
   "/api/webhooks/"
 ] as const;
 

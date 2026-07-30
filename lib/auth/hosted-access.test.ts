@@ -62,10 +62,12 @@ describe("hosted access policy", () => {
   it("uses a monotonic organization role hierarchy", () => {
     expect(hostedOrganizationRoles).toEqual(["viewer", "operator", "admin", "owner"]);
     expect(roleHasPermission("viewer", "workspace.read")).toBe(true);
+    expect(roleHasPermission("viewer", "audit.read")).toBe(false);
     expect(roleHasPermission("viewer", "loops.write")).toBe(false);
     expect(roleHasPermission("operator", "loops.write")).toBe(true);
     expect(roleHasPermission("operator", "organization.manage")).toBe(false);
     expect(roleHasPermission("admin", "members.manage")).toBe(true);
+    expect(roleHasPermission("admin", "audit.read")).toBe(true);
     for (const permission of hostedPermissions) {
       expect(roleHasPermission("owner", permission)).toBe(true);
     }

@@ -71,3 +71,8 @@ shared multi-customer filesystem worker is not a supported production topology. 
 Hosted worker, scheduler, signed Hermes callback, and signed provider-forwarding endpoints also
 require the scoped identity, replay, body, and durable rate controls in
 [Machine request guards](docs/MACHINE-REQUEST-GUARDS.md).
+
+Accepted and denied hosted machine decisions are appended to a tenant/project hash chain. Public
+health checks expose status only, while detailed metrics and audit exports require separate
+authorization. See
+[Operational audit and observability](docs/OPERATIONAL-AUDIT-OBSERVABILITY.md).

@@ -42,6 +42,8 @@ LOOPGRAPH_HERMES_CALLBACK_SECRET=SEPARATE_LONG_RANDOM_SECRET
 LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID=hermes_callback
 GITHUB_WEBHOOK_SECRET=SEPARATE_LONG_RANDOM_SECRET
 LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID=github_forwarder
+LOOPGRAPH_OBSERVABILITY_API_TOKEN=SEPARATE_READ_ONLY_LONG_RANDOM_TOKEN
+LOOPGRAPH_OBSERVABILITY_CREDENTIAL_ID=metrics_primary
 ```
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable or copy provider OAuth
@@ -72,6 +74,7 @@ Supabase's database linter and an integration test against the target project.
 | Read workspace | Yes | Yes | Yes | Yes |
 | Design/update loops | No | Yes | Yes | Yes |
 | Start runs and submit reviews | No | Yes | Yes | Yes |
+| Export security audit | No | No | Yes | Yes |
 | Rename organization | No | No | Yes | Yes |
 | Manage members | No | No | Yes | Yes |
 | Delete organization | No | No | No | Yes |
@@ -97,6 +100,10 @@ See [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
 
 Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
 See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).
+
+Machine decisions also append to a tamper-evident security audit chain. Public health responses
+contain status only; detailed metrics and audit export remain separately authorized. See
+[Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md).
 
 The remaining hosted production work is tracked in
 [Current build state](./CURRENT-STATE.md#remaining-product-layers).

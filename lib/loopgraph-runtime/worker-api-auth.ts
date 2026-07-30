@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isHostedAuthRequired, getHostedOrganizationId } from "@/lib/auth/hosted-config";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
+import { emitOperationalLog } from "@/lib/observability/operational-log";
 
 const WORKER_API_TOKEN_ENV = "LOOPGRAPH_WORKER_API_TOKEN";
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
@@ -15,6 +16,7 @@ export type MachineCapability =
   | "graph.transact"
   | "hermes.design_callback"
   | "measurements.collect"
+  | "observability.read"
   | "provider.github_forward"
   | "routing.jobs"
   | "routing.worker"
@@ -62,6 +64,20 @@ export function authorizeCronApiRequest(
   });
 }
 
+export function authorizeObservabilityApiRequest(
+  request: Request
+): Promise<NextResponse | null> {
+  return authorizeBearerApiRequest(request, {
+    environmentVariable: "LOOPGRAPH_OBSERVABILITY_API_TOKEN",
+    credentialEnvironmentVariable: "LOOPGRAPH_OBSERVABILITY_CREDENTIAL_ID",
+    capability: "observability.read",
+    rateLimit: positiveInteger(
+      process.env.LOOPGRAPH_OBSERVABILITY_RATE_LIMIT_PER_MINUTE,
+      60
+    )
+  });
+}
+
 export async function authorizeBearerApiRequest(
   request: Request,
   optionsOrEnvironmentVariable: GuardOptions | string,
@@ -88,6 +104,13 @@ export async function authorizeBearerApiRequest(
     ? authorization.slice("Bearer ".length)
     : "";
   if (!constantTimeTokenEqual(suppliedToken, configuredToken)) {
+    emitOperationalLog({
+      level: "warn",
+      event: "machine.request.denied",
+      outcome: "denied",
+      capability: options.capability,
+      reason: "invalid_bearer"
+    });
     return NextResponse.json({ error: "Unauthorized" }, {
       status: 401,
       headers: {
@@ -130,6 +153,15 @@ async function authorizeHostedMachineRequest(
     !suppliedCredentialId ||
     !constantTimeTokenEqual(suppliedCredentialId, configuredCredentialId)
   ) {
+    emitOperationalLog({
+      level: "warn",
+      event: "machine.request.denied",
+      outcome: "denied",
+      capability: options.capability,
+      organizationId,
+      projectKey,
+      reason: "invalid_machine_identity"
+    });
     return NextResponse.json({ error: "Invalid machine credential identity" }, {
       status: 401,
       headers: { "cache-control": "no-store" }
@@ -141,6 +173,16 @@ async function authorizeHostedMachineRequest(
     (requestedOrganization && requestedOrganization !== organizationId) ||
     (requestedProject && requestedProject !== projectKey)
   ) {
+    emitOperationalLog({
+      level: "warn",
+      event: "machine.request.denied",
+      outcome: "denied",
+      capability: options.capability,
+      credentialId: configuredCredentialId,
+      organizationId,
+      projectKey,
+      reason: "scope_mismatch"
+    });
     return NextResponse.json({ error: "Machine credential scope mismatch" }, {
       status: 403,
       headers: { "cache-control": "no-store" }
@@ -162,6 +204,17 @@ async function authorizeHostedMachineRequest(
     !Number.isFinite(timestamp) ||
     Math.abs(Date.now() - timestamp) > MAX_CLOCK_SKEW_MS
   ) {
+    emitOperationalLog({
+      level: "warn",
+      event: "machine.request.denied",
+      outcome: "denied",
+      capability: options.capability,
+      credentialId: configuredCredentialId,
+      organizationId,
+      projectKey,
+      requestId,
+      reason: "invalid_or_stale_request_metadata"
+    });
     return NextResponse.json({
       error:
         "Hosted machine requests require a valid x-loopgraph-request-id and " +
@@ -174,6 +227,17 @@ async function authorizeHostedMachineRequest(
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > MAX_AUTHENTICATED_BODY_BYTES) {
+    emitOperationalLog({
+      level: "warn",
+      event: "machine.request.denied",
+      outcome: "denied",
+      capability: options.capability,
+      credentialId: configuredCredentialId,
+      organizationId,
+      projectKey,
+      requestId,
+      reason: "body_too_large"
+    });
     return NextResponse.json({ error: "Machine request body exceeds 1 MiB." }, {
       status: 413,
       headers: { "cache-control": "no-store" }
@@ -184,6 +248,17 @@ async function authorizeHostedMachineRequest(
     requestHash = await hashRequest(request);
   } catch (error) {
     if (error instanceof MachineBodyTooLargeError) {
+      emitOperationalLog({
+        level: "warn",
+        event: "machine.request.denied",
+        outcome: "denied",
+        capability: options.capability,
+        credentialId: configuredCredentialId,
+        organizationId,
+        projectKey,
+        requestId,
+        reason: "body_too_large"
+      });
       return NextResponse.json({ error: "Machine request body exceeds 1 MiB." }, {
         status: 413,
         headers: { "cache-control": "no-store" }
@@ -263,6 +338,18 @@ async function recordHostedMachineRequest(input: {
 }): Promise<NextResponse | null> {
   const supabase = createSupabaseAdminClient();
   if (!supabase) {
+    emitOperationalLog({
+      level: "error",
+      event: "machine.guard.unavailable",
+      outcome: "error",
+      capability: input.capability,
+      credentialId: input.credentialId,
+      organizationId: input.organizationId,
+      projectKey: input.projectKey,
+      requestId: input.requestId,
+      correlationId: input.requestId,
+      reason: "service_database_unavailable"
+    });
     return unavailable("Supabase service authorization is not configured.");
   }
   const { data, error } = await supabase.rpc("authorize_machine_request", {
@@ -276,12 +363,36 @@ async function recordHostedMachineRequest(input: {
     p_rate_limit: input.rateLimit
   });
   if (error) {
+    emitOperationalLog({
+      level: "error",
+      event: "machine.guard.unavailable",
+      outcome: "error",
+      capability: input.capability,
+      credentialId: input.credentialId,
+      organizationId: input.organizationId,
+      projectKey: input.projectKey,
+      requestId: input.requestId,
+      correlationId: input.requestId,
+      reason: "authorization_rpc_failed"
+    });
     return unavailable(`Machine request guard is unavailable: ${error.message}`);
   }
   const result = Array.isArray(data) ? data[0] : data;
   if (!result || result.authorized !== true) {
     const reason = typeof result?.reason === "string" ? result.reason : "guard_rejected";
     const rateLimited = reason === "rate_limited";
+    emitOperationalLog({
+      level: "warn",
+      event: "machine.request.denied",
+      outcome: "denied",
+      capability: input.capability,
+      credentialId: input.credentialId,
+      organizationId: input.organizationId,
+      projectKey: input.projectKey,
+      requestId: input.requestId,
+      correlationId: input.requestId,
+      reason
+    });
     return NextResponse.json({ error: reason }, {
       status: rateLimited ? 429 : 409,
       headers: {
@@ -292,6 +403,17 @@ async function recordHostedMachineRequest(input: {
       }
     });
   }
+  emitOperationalLog({
+    level: "info",
+    event: "machine.request.authorized",
+    outcome: "accepted",
+    capability: input.capability,
+    credentialId: input.credentialId,
+    organizationId: input.organizationId,
+    projectKey: input.projectKey,
+    requestId: input.requestId,
+    correlationId: input.requestId
+  });
   return null;
 }
 

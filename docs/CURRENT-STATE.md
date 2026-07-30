@@ -89,6 +89,12 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   window. Bearer routes additionally bind a fresh request identity to the bounded request body.
 - The controller schedule is registered every 15 minutes alongside hourly measurement
   reconciliation and weekly management review.
+- Hosted machine authorization decisions append to a tenant/project hash-chained security audit
+  ledger in the same database transaction as replay and rate enforcement.
+- Public liveness/readiness endpoints reveal only status; protected Prometheus metrics expose the
+  authorization-plane counters through a separate observability credential.
+- Organization admins and owners can export cursor-paged audit events with database-side chain
+  verification.
 - Same-origin browser mutations, signed machine callbacks, worker bearer auth, cron auth, and
   baseline security headers are separated at the web boundary.
 - See [Hosted authentication and tenant security](./HOSTED-SECURITY.md).
@@ -107,8 +113,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    one replica can work safely.
 2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
-3. Export an append-only security audit stream, add production tracing/alerts/SLOs, and prove
-   restore procedures with scheduled backups and migration rollback rehearsals.
+3. Send the tamper-evident audit stream to independent retention, add distributed tracing and
+   deployed alerts/SLOs, and prove restore procedures with scheduled backups and migration
+   rollback rehearsals.
 4. Implement provider API clients and apply provider subscriptions through Hermes-owned connector
    onboarding; Loopgraph intentionally stores only non-secret references, route metadata,
    contracts, and receipts.
@@ -128,3 +135,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)
 - [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md)
 - [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
+- [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md)

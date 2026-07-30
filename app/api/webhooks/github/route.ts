@@ -2,6 +2,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import { NextResponse } from "next/server";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import { authorizeVerifiedHostedMachineRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
+import { emitOperationalLog } from "../../../../lib/observability/operational-log";
 
 function verifyGithubSignature(payload: string, signature: string | null, secret: string) {
   if (!signature?.startsWith("sha256=")) return false;
@@ -38,6 +39,15 @@ export async function POST(request: Request) {
     }, { status: 503 });
   }
   if (!verifyGithubSignature(rawBody, signature, secret)) {
+    emitOperationalLog({
+      level: "warn",
+      event: "provider.github.denied",
+      outcome: "denied",
+      organizationId: process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID,
+      projectKey: process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default",
+      requestId: deliveryId,
+      reason: "invalid_signature"
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
   if (isHostedAuthRequired() && !suppliedDeliveryId) {
