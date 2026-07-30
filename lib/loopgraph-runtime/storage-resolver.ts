@@ -8,13 +8,15 @@ import {
   FileLoopOpportunityStore,
   FileLoopSpecRegistryStore,
   FileRoutingStore,
+  FileSemanticGraphStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
   type DiscoveryDesignStore,
   type HermesDesignStore,
   type LoopControllerStore,
   type LoopOpportunityStore,
   type LoopSpecRegistryStore,
-  type RoutingStore
+  type RoutingStore,
+  type SemanticGraphStore
 } from "loopgraph/runtime";
 import {
   createSupabaseStorageAdapter,
@@ -44,6 +46,10 @@ import {
   createSupabaseLoopOpportunityStore,
   isSupabaseLoopOpportunityStoreEnabled
 } from "@/lib/db/adapters/supabase-loop-opportunity-store";
+import {
+  createSupabaseSemanticGraphStore,
+  isSupabaseSemanticGraphStoreEnabled
+} from "@/lib/db/adapters/supabase-semantic-graph-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
@@ -53,6 +59,7 @@ const cachedDiscoveryDesignStores = new Map<string, DiscoveryDesignStore>();
 const cachedLoopSpecRegistryStores = new Map<string, LoopSpecRegistryStore>();
 const cachedLoopControllerStores = new Map<string, LoopControllerStore>();
 const cachedLoopOpportunityStores = new Map<string, LoopOpportunityStore>();
+const cachedSemanticGraphStores = new Map<string, SemanticGraphStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -301,6 +308,38 @@ export function getLoopOpportunityStore(options?: {
   return store;
 }
 
+export function getSemanticGraphStore(options?: {
+  projectRoot?: string;
+  forceFile?: boolean;
+}): SemanticGraphStore {
+  const organizationId =
+    process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey =
+    process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase =
+    !options?.forceFile && isSupabaseSemanticGraphStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase semantic graph storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const projectRoot = path.resolve(
+    options?.projectRoot ?? getActiveLoopgraphProjectRoot()
+  );
+  const cacheKey = useSupabase
+    ? `supabase-semantic-graph:${organizationId}:${projectKey}`
+    : `file-semantic-graph:${projectRoot}`;
+  if (!options?.forceFile && cachedSemanticGraphStores.has(cacheKey)) {
+    return cachedSemanticGraphStores.get(cacheKey)!;
+  }
+  const store = useSupabase
+    ? createSupabaseSemanticGraphStore()
+    : new FileSemanticGraphStore(getPackageLoopgraphRoot(projectRoot));
+  if (!options?.forceFile) cachedSemanticGraphStores.set(cacheKey, store);
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
@@ -309,6 +348,7 @@ export function resetStorageAdapterCache() {
   cachedLoopSpecRegistryStores.clear();
   cachedLoopControllerStores.clear();
   cachedLoopOpportunityStores.clear();
+  cachedSemanticGraphStores.clear();
 }
 
 const UUID_PATTERN =

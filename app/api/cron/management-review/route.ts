@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateAndPersistManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
+  getLoopSpecRegistryStore,
   getRoutingStore,
+  getSemanticGraphStore,
   getStorageAdapter
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
@@ -30,6 +33,8 @@ export async function GET(request: NextRequest) {
     occurredAt: rollup.generatedAt,
     requestedBy: "loopgraph-management-cron"
   }, { store: controllerStore });
+  const loopSpecStore = getLoopSpecRegistryStore({ projectRoot });
+  const semanticGraphStore = getSemanticGraphStore({ projectRoot });
   const controller = await runLoopControllerScheduler({
     projectRoot,
     limit: 20
@@ -37,9 +42,17 @@ export async function GET(request: NextRequest) {
     store: controllerStore,
     routingStore: getRoutingStore(),
     designStore: getHermesDesignStore(),
+    discoveryDesignStore: getDiscoveryDesignStore(),
     opportunityStore: getLoopOpportunityStore({ projectRoot }),
+    loopSpecStore,
+    semanticGraphStore,
     allowAutoShadowMaterialization:
-      controllerStore.persistence === "file"
+      (controllerStore.persistence === "file" &&
+        loopSpecStore.persistence === "file" &&
+        semanticGraphStore.persistence === "file") ||
+      (controllerStore.persistence === "distributed" &&
+        loopSpecStore.persistence === "distributed" &&
+        semanticGraphStore.persistence === "distributed")
   });
 
   return NextResponse.json({

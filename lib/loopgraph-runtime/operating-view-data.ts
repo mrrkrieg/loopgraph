@@ -1,7 +1,6 @@
 import {
   FileMeasurementStore,
   FileOutcomeStore,
-  FileSemanticGraphStore,
   listGraphChangeSets,
   listLoopOpportunities
 } from "loopgraph/runtime";
@@ -10,7 +9,8 @@ import {
   getActiveLoopgraphProjectRoot,
   getLoopControllerStore,
   getLoopOpportunityStore,
-  getLoopgraphRoot
+  getLoopgraphRoot,
+  getSemanticGraphStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export type OpportunityView = {
@@ -172,7 +172,7 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
 
   const projectRoot = getActiveLoopgraphProjectRoot();
   const loopgraphRoot = getLoopgraphRoot(projectRoot);
-  const graphStore = new FileSemanticGraphStore(loopgraphRoot);
+  const graphStore = getSemanticGraphStore({ projectRoot });
   const controllerStore = getLoopControllerStore({ projectRoot });
   const opportunityStore = getLoopOpportunityStore({ projectRoot });
   const outcomeStore = new FileOutcomeStore(loopgraphRoot);

@@ -3,7 +3,14 @@ import {
   callLoopgraphSemanticGraphTool,
   type LoopgraphSemanticGraphToolName
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopOpportunityStore,
+  getLoopSpecRegistryStore,
+  getSemanticGraphStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeBearerApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -27,8 +34,9 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized;
   try {
     const url = new URL(request.url);
+    const projectRoot = getActiveLoopgraphProjectRoot();
     const result = await callLoopgraphSemanticGraphTool("loopgraph_graph_history_get", {
-      projectRoot: getActiveLoopgraphProjectRoot(),
+      projectRoot,
       transactionId: queryValue(url, "transactionId"),
       snapshotId: queryValue(url, "snapshotId"),
       approvalReceiptId: queryValue(url, "approvalReceiptId"),
@@ -36,7 +44,7 @@ export async function GET(request: Request) {
       rehearsalReportId: queryValue(url, "rehearsalReportId"),
       changeSetId: queryValue(url, "changeSetId"),
       loopId: queryValue(url, "loopId")
-    });
+    }, graphRuntime(projectRoot));
     return NextResponse.json(result, {
       headers: { "cache-control": "no-store" }
     });
@@ -58,10 +66,11 @@ export async function POST(request: Request) {
     delete argumentsWithoutBinding.action;
     delete argumentsWithoutBinding.projectRoot;
     const toolName = GRAPH_ACTION_TO_TOOL[action as keyof typeof GRAPH_ACTION_TO_TOOL];
+    const projectRoot = getActiveLoopgraphProjectRoot();
     const result = await callLoopgraphSemanticGraphTool(toolName, {
       ...argumentsWithoutBinding,
-      projectRoot: getActiveLoopgraphProjectRoot()
-    });
+      projectRoot
+    }, graphRuntime(projectRoot));
     return NextResponse.json(result, {
       status: action === "history" || action === "promotion_rehearsals_get" ? 200 : 202,
       headers: { "cache-control": "no-store" }
@@ -69,6 +78,17 @@ export async function POST(request: Request) {
   } catch (error) {
     return errorResponse(error);
   }
+}
+
+function graphRuntime(projectRoot: string) {
+  return {
+    projectRoot,
+    store: getSemanticGraphStore({ projectRoot }),
+    opportunityStore: getLoopOpportunityStore({ projectRoot }),
+    designStore: getDiscoveryDesignStore(),
+    hermesDesignStore: getHermesDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore({ projectRoot })
+  };
 }
 
 function authorizeGraphTransactionRequest(request: Request) {

@@ -58,9 +58,10 @@ identity for a different opportunity. A new post-implementation recurrence
 creates a new generation instead of erasing history.
 
 Proposed graph changes are stored beside opportunities, but they do not grant
-graph-mutation authority. In authenticated hosted mode the controller returns
-`review_change` until the distributed semantic graph transaction store is
-active. Local projects retain the existing governed automatic-shadow path.
+graph-mutation authority. Authenticated hosted mode now applies only strict
+policy-qualified shadow additions through the distributed semantic graph and
+active LoopSpec registry transaction. If any required store is missing or
+file-backed, automatic mutation fails closed and returns `review_change`.
 
 ## Runtime selection
 
@@ -104,7 +105,5 @@ Coverage includes:
 
 ## Remaining boundary
 
-The next hosted boundary is the semantic graph transaction store: snapshots,
-approvals, transactions, promotion receipts, rehearsals, and rollback assets.
-After that, connection/measurement/outcome/value state and real Hermes-owned
-provider onboarding still need distributed production implementations.
+Connection/measurement/outcome/value state and real Hermes-owned provider
+onboarding still need distributed production implementations.

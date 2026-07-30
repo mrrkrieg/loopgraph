@@ -6,6 +6,10 @@ import {
   type GraphSnapshotEntry
 } from "../core";
 import { loadLoopSpecFromPath } from "./loader";
+import type {
+  LoopSpecRegistryStore,
+  StoredLoopSpecArtifact
+} from "./loop-spec-store";
 import {
   readLoopgraphWorkspace,
   type LoopgraphWorkspaceRegistry
@@ -17,8 +21,33 @@ export type WorkspaceGraphState = {
   graphHash: string;
 };
 
-export async function readWorkspaceGraphState(projectRoot = process.cwd()): Promise<WorkspaceGraphState> {
+export async function readWorkspaceGraphState(
+  projectRoot = process.cwd(),
+  registryStore?: LoopSpecRegistryStore
+): Promise<WorkspaceGraphState> {
   const resolvedProjectRoot = path.resolve(projectRoot);
+  if (registryStore) {
+    const [{ workspace }, artifacts] = await Promise.all([
+      registryStore.getWorkspace(resolvedProjectRoot),
+      registryStore.listActiveLoopSpecs(resolvedProjectRoot)
+    ]);
+    const entries = snapshotEntriesFromArtifacts(artifacts);
+    const workspaceIds = [...workspace.registeredSpecs]
+      .map((entry) => entry.id)
+      .sort();
+    const artifactIds = entries.map((entry) => entry.id).sort();
+    if (contentHash(workspaceIds) !== contentHash(artifactIds)) {
+      throw new Error(
+        "Cannot calculate graph state because the active LoopSpec registry " +
+          "does not match its workspace"
+      );
+    }
+    return {
+      workspace,
+      entries,
+      graphHash: graphHashForEntries(entries)
+    };
+  }
   const workspace = await readLoopgraphWorkspace(resolvedProjectRoot);
   const entries: GraphSnapshotEntry[] = [];
   for (const entry of workspace.registeredSpecs) {
@@ -42,7 +71,8 @@ export async function readWorkspaceGraphState(projectRoot = process.cwd()): Prom
       department: entry.department,
       addedAt: entry.addedAt,
       specHash: loopSpecHash(loaded.spec),
-      spec: loaded.spec
+      spec: loaded.spec,
+      fixtures: {}
     });
   }
   entries.sort((left, right) => left.id.localeCompare(right.id));
@@ -51,6 +81,41 @@ export async function readWorkspaceGraphState(projectRoot = process.cwd()): Prom
     entries,
     graphHash: graphHashForEntries(entries)
   };
+}
+
+export function snapshotEntriesFromArtifacts(
+  artifacts: StoredLoopSpecArtifact[]
+): GraphSnapshotEntry[] {
+  return artifacts
+    .map((artifact) => {
+      if (artifact.loopId !== artifact.entry.id) {
+        throw new Error(
+          `Cannot calculate graph state because artifact ${artifact.loopId} ` +
+            "does not match its registry entry"
+        );
+      }
+      if (artifact.spec.metadata.id !== artifact.loopId) {
+        throw new Error(
+          `Cannot calculate graph state because artifact ${artifact.loopId} ` +
+            "does not match its LoopSpec"
+        );
+      }
+      return {
+        id: artifact.entry.id,
+        name: artifact.entry.name,
+        path: artifact.entry.path,
+        ...(artifact.entry.templateId
+          ? { templateId: artifact.entry.templateId }
+          : {}),
+        department: artifact.entry.department,
+        addedAt: artifact.entry.addedAt,
+        specHash: loopSpecHash(artifact.spec),
+        versionHash: artifact.versionHash,
+        spec: artifact.spec,
+        fixtures: artifact.fixtures
+      };
+    })
+    .sort((left, right) => left.id.localeCompare(right.id));
 }
 
 export function graphHashForEntries(entries: GraphSnapshotEntry[]): string {
