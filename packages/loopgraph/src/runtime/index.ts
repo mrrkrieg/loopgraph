@@ -59,6 +59,7 @@ export * from "./semantic-graph-state";
 export * from "./semantic-graph-store";
 export * from "./semantic-graph-transactions";
 export * from "./semantic-graph-tools";
+export * from "./promotion-rehearsal";
 export * from "./loop-materialization";
 export * from "./loop-tools";
 export * from "./studio";

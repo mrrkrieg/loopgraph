@@ -18,6 +18,7 @@ import {
 } from "./discovery-session";
 import { loadLoopSpecFromPath } from "./loader";
 import { saveGraphChangeSet } from "./loop-opportunity-engine";
+import { runLoopPromotionRehearsal } from "./promotion-rehearsal";
 import { readWorkspaceGraphState } from "./semantic-graph-state";
 import { FileSemanticGraphStore } from "./semantic-graph-store";
 import {
@@ -32,6 +33,7 @@ import {
 } from "./semantic-graph-transactions";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { loadRoutingCardsFromProject } from "./routing-tools";
+import { FileRoutingStore } from "./routing-store";
 import { readLoopgraphWorkspace } from "./workspace";
 
 describe("semantic graph transactions", () => {
@@ -176,6 +178,15 @@ describe("semantic graph transactions", () => {
     expect((await readLoopgraphWorkspace(fixture.projectRoot)).registeredSpecs.map((entry) => entry.id))
       .toEqual(["marketing_ads", "marketing_content_creation"]);
 
+    const rehearsal = await runLoopPromotionRehearsal({
+      projectRoot: fixture.projectRoot,
+      loopId: "marketing_ads",
+      targetMode: "recommend",
+      generatedBy: "test",
+      now: new Date("2026-07-29T13:03:30.000Z")
+    });
+    expect(rehearsal.status).toBe("passed");
+    expect(await new FileRoutingStore(getLoopgraphRoot(fixture.projectRoot)).listRouteJobs()).toEqual([]);
     const promotionApproval = await approveLoopPromotion({
       projectRoot: fixture.projectRoot,
       loopId: "marketing_ads",
@@ -184,6 +195,7 @@ describe("semantic graph transactions", () => {
       actorRole: "department_owner",
       policyVersion: "promotion-policy/v1",
       reason: "The shadow route passed accountable review.",
+      rehearsalReportId: rehearsal.id,
       evidenceRefs: ["routing-evaluation:marketing-ads"],
       now: new Date("2026-07-29T13:04:00.000Z")
     });
@@ -192,6 +204,7 @@ describe("semantic graph transactions", () => {
       loopId: "marketing_ads",
       nextMode: "recommend",
       approvalReceiptId: promotionApproval.id,
+      rehearsalReportId: rehearsal.id,
       gateEvidenceRefs: ["routing-evaluation:marketing-ads"],
       initiatedBy: "growth_owner",
       now: new Date("2026-07-29T13:05:00.000Z")

@@ -5,10 +5,12 @@ import {
   graphSnapshotSchema,
   graphTransactionSchema,
   loopPromotionReceiptSchema,
+  promotionRehearsalReportSchema,
   type GraphChangeApprovalReceipt,
   type GraphSnapshot,
   type GraphTransaction,
-  type LoopPromotionReceipt
+  type LoopPromotionReceipt,
+  type PromotionRehearsalReport
 } from "../core";
 
 export class FileSemanticGraphStore {
@@ -76,6 +78,26 @@ export class FileSemanticGraphStore {
     return receipts.filter((receipt) => !loopId || receipt.loopId === loopId);
   }
 
+  async savePromotionRehearsal(report: PromotionRehearsalReport): Promise<void> {
+    await writeJsonAtomic(
+      this.promotionRehearsalPath(report.id),
+      promotionRehearsalReportSchema.parse(report)
+    );
+  }
+
+  async getPromotionRehearsal(reportId: string): Promise<PromotionRehearsalReport | undefined> {
+    return readJson(this.promotionRehearsalPath(reportId), promotionRehearsalReportSchema);
+  }
+
+  async listPromotionRehearsals(loopId?: string): Promise<PromotionRehearsalReport[]> {
+    const reports = await listJson(
+      this.promotionRehearsalsRoot(),
+      promotionRehearsalReportSchema,
+      (left, right) => right.createdAt.localeCompare(left.createdAt)
+    );
+    return reports.filter((report) => !loopId || report.loopId === loopId);
+  }
+
   async withTransactionLock<T>(operation: () => Promise<T>): Promise<T> {
     await this.ensureDirs();
     const lockPath = path.join(this.graphRoot(), ".transactions.lock");
@@ -114,7 +136,8 @@ export class FileSemanticGraphStore {
       mkdir(this.snapshotsRoot(), { recursive: true, mode: 0o700 }),
       mkdir(this.approvalsRoot(), { recursive: true, mode: 0o700 }),
       mkdir(this.transactionsRoot(), { recursive: true, mode: 0o700 }),
-      mkdir(this.promotionsRoot(), { recursive: true, mode: 0o700 })
+      mkdir(this.promotionsRoot(), { recursive: true, mode: 0o700 }),
+      mkdir(this.promotionRehearsalsRoot(), { recursive: true, mode: 0o700 })
     ]);
   }
 
@@ -138,6 +161,10 @@ export class FileSemanticGraphStore {
     return path.join(this.graphRoot(), "promotions");
   }
 
+  private promotionRehearsalsRoot() {
+    return path.join(this.graphRoot(), "rehearsals");
+  }
+
   private snapshotPath(id: string) {
     return path.join(this.snapshotsRoot(), `${safeFileName(id)}.json`);
   }
@@ -152,6 +179,10 @@ export class FileSemanticGraphStore {
 
   private promotionPath(id: string) {
     return path.join(this.promotionsRoot(), `${safeFileName(id)}.json`);
+  }
+
+  private promotionRehearsalPath(id: string) {
+    return path.join(this.promotionRehearsalsRoot(), `${safeFileName(id)}.json`);
   }
 }
 

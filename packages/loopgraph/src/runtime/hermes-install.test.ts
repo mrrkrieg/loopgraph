@@ -230,9 +230,12 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph://schemas/graph-change-approval-receipt");
     expect(designSkill).toContain("loopgraph://schemas/graph-transaction");
     expect(designSkill).toContain("loopgraph://schemas/loop-promotion-receipt");
+    expect(designSkill).toContain("loopgraph://schemas/promotion-rehearsal");
     expect(designSkill).toContain("loopgraph_graph_change_decide");
     expect(designSkill).toContain("loopgraph_graph_change_apply");
     expect(designSkill).toContain("loopgraph_graph_history_get");
+    expect(designSkill).toContain("loopgraph_promotion_rehearsal_run");
+    expect(designSkill).toContain("loopgraph_promotion_rehearsals_get");
     expect(designSkill).toContain("loopgraph_loop_promotion_approve");
     expect(designSkill).toContain("loopgraph_loop_promote");
     expect(designSkill).toContain("loopgraph_loop_lifecycle_approve");

@@ -10,6 +10,7 @@ import {
   hermesDesignTaskSchema,
   listDepartmentCatalog,
   loopPromotionReceiptSchema,
+  promotionRehearsalReportSchema,
   metricSampleSchema,
   observedOutcomeSchema,
   loopOpportunitySchema,
@@ -175,6 +176,8 @@ import {
   loopLifecycleSetInputSchema,
   loopPromoteInputSchema,
   loopPromotionApproveInputSchema,
+  promotionRehearsalRunInputSchema,
+  promotionRehearsalsGetInputSchema,
   type LoopgraphSemanticGraphToolName
 } from "../runtime/semantic-graph-tools";
 import { loadLoopSpecFromPath } from "../runtime/loader";
@@ -278,6 +281,8 @@ const toolInputSchemas = {
   loopgraph_graph_change_decide: graphChangeDecideInputSchema,
   loopgraph_graph_change_apply: graphChangeApplyInputSchema,
   loopgraph_graph_history_get: graphHistoryGetInputSchema,
+  loopgraph_promotion_rehearsal_run: promotionRehearsalRunInputSchema,
+  loopgraph_promotion_rehearsals_get: promotionRehearsalsGetInputSchema,
   loopgraph_loop_promotion_approve: loopPromotionApproveInputSchema,
   loopgraph_loop_promote: loopPromoteInputSchema,
   loopgraph_loop_lifecycle_approve: loopLifecycleApproveInputSchema,
@@ -367,6 +372,7 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/graph-change-approval-receipt",
   "loopgraph://schemas/graph-transaction",
   "loopgraph://schemas/loop-promotion-receipt",
+  "loopgraph://schemas/promotion-rehearsal",
   "loopgraph://graph/company"
 ] as const;
 
@@ -519,10 +525,16 @@ export async function listLoopgraphMcpResources(
       name: "LoopPromotionReceipt schema",
       description: "Evidence-bound receipt for one ordered loop activation-mode promotion.",
       mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
+      name: "PromotionRehearsal schema",
+      description: "Content-bound simulation, routing, ambiguity, regression, and policy gate report required for promotion.",
+      mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
@@ -1129,6 +1141,13 @@ function schemaResource(id: string) {
       schemaVersion: "mcp-schema-resource/v1alpha1",
       id,
       jsonSchema: zodToJsonSchema(loopPromotionReceiptSchema, "LoopPromotionReceipt")
+    };
+  }
+  if (id === "promotion-rehearsal") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(promotionRehearsalReportSchema, "PromotionRehearsal")
     };
   }
   throw new Error(`Schema resource not found: ${id}`);

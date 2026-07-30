@@ -13,6 +13,7 @@ import {
   graphTransactionSchema,
   loopPromotionReceiptSchema,
   loopSpecHash,
+  promotionRehearsalEvidenceRef,
   routingActivationModeSchema,
   validateLoopSpec,
   type GraphChange,
@@ -36,6 +37,7 @@ import {
   readWorkspaceGraphState
 } from "./semantic-graph-state";
 import { FileSemanticGraphStore } from "./semantic-graph-store";
+import { requirePassingPromotionRehearsal } from "./promotion-rehearsal";
 import {
   readLoopgraphWorkspace,
   writeLoopgraphWorkspace,
@@ -74,7 +76,8 @@ export type PromotionApprovalInput = {
   actorRole: string;
   policyVersion: string;
   reason: string;
-  evidenceRefs: string[];
+  rehearsalReportId: string;
+  evidenceRefs?: string[];
   now?: Date;
 };
 
@@ -83,7 +86,8 @@ export type PromoteLoopInput = {
   loopId: string;
   nextMode: RoutingActivationMode;
   approvalReceiptId: string;
-  gateEvidenceRefs: string[];
+  rehearsalReportId: string;
+  gateEvidenceRefs?: string[];
   initiatedBy: string;
   now?: Date;
 };
@@ -415,6 +419,14 @@ export async function approveLoopPromotion(
     const entry = state.entries.find((candidate) => candidate.id === input.loopId);
     if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
     assertPromotionTransition(entry.spec.routing?.activationMode, input.nextMode);
+    const rehearsal = await requirePassingPromotionRehearsal({
+      projectRoot,
+      reportId: input.rehearsalReportId,
+      loopId: input.loopId,
+      targetMode: input.nextMode,
+      now: input.now,
+      store
+    });
     const decidedAt = (input.now ?? new Date()).toISOString();
     const receipt = graphChangeApprovalReceiptSchema.parse({
       schemaVersion: GRAPH_CHANGE_APPROVAL_RECEIPT_SCHEMA_VERSION,
@@ -422,6 +434,7 @@ export async function approveLoopPromotion(
         subjectType: "promotion",
         loopId: input.loopId,
         nextMode: input.nextMode,
+        promotionRehearsalId: rehearsal.id,
         baseGraphHash: state.graphHash,
         actorId: input.actorId,
         decidedAt
@@ -429,6 +442,7 @@ export async function approveLoopPromotion(
       projectRootId: state.workspace.projectRootId,
       subjectType: "promotion",
       loopId: input.loopId,
+      promotionRehearsalId: rehearsal.id,
       baseGraphHash: state.graphHash,
       decision: "approved",
       approvedChangeIds: [],
@@ -436,7 +450,10 @@ export async function approveLoopPromotion(
       actorRole: required(input.actorRole, "actorRole"),
       policyVersion: required(input.policyVersion, "policyVersion"),
       reason: required(input.reason, "reason"),
-      evidenceRefs: unique(input.evidenceRefs),
+      evidenceRefs: unique([
+        promotionRehearsalEvidenceRef(rehearsal.id),
+        ...(input.evidenceRefs ?? [])
+      ]),
       decidedAt
     });
     await store.saveApproval(receipt);
@@ -451,9 +468,6 @@ export async function promoteLoop(
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
   return store.withTransactionLock(async () => {
-    if (input.gateEvidenceRefs.length === 0) {
-      throw new Error("Promotion requires at least one durable gate evidence reference");
-    }
     const state = await readWorkspaceGraphState(projectRoot);
     const entry = state.entries.find((candidate) => candidate.id === input.loopId);
     if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
@@ -461,10 +475,19 @@ export async function promoteLoop(
     if (!previousMode) throw new Error(`Loop ${input.loopId} has no routing activation mode`);
     const nextMode = routingActivationModeSchema.parse(input.nextMode);
     assertPromotionTransition(previousMode, nextMode);
+    const rehearsal = await requirePassingPromotionRehearsal({
+      projectRoot,
+      reportId: input.rehearsalReportId,
+      loopId: input.loopId,
+      targetMode: nextMode,
+      now: input.now,
+      store
+    });
     const approval = await requireApproval(input.approvalReceiptId, store);
     if (
       approval.subjectType !== "promotion" ||
       approval.loopId !== input.loopId ||
+      approval.promotionRehearsalId !== rehearsal.id ||
       approval.decision !== "approved" ||
       approval.baseGraphHash !== state.graphHash
     ) {
@@ -478,6 +501,7 @@ export async function promoteLoop(
       previousMode,
       nextMode,
       approvalReceiptId: approval.id,
+      promotionRehearsalId: rehearsal.id,
       createdAt
     })}`;
     const baseSnapshot = await captureGraphSnapshot({
@@ -558,11 +582,15 @@ export async function promoteLoop(
         loopId: input.loopId,
         transactionId,
         approvalReceiptId: approval.id,
+        rehearsalReportId: rehearsal.id,
         previousMode,
         nextMode,
         previousSpecHash: entry.specHash,
         nextSpecHash: loopSpecHash(promotedSpec),
-        gateEvidenceRefs: unique(input.gateEvidenceRefs),
+        gateEvidenceRefs: unique([
+          promotionRehearsalEvidenceRef(rehearsal.id),
+          ...(input.gateEvidenceRefs ?? [])
+        ]),
         status: "applied",
         promotedBy: input.initiatedBy,
         promotedAt: createdAt
