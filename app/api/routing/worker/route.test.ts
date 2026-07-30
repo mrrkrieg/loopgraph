@@ -4,6 +4,8 @@ const authorizeWorkerApiRequest = vi.hoisted(() => vi.fn());
 const runRouteJobWorker = vi.hoisted(() => vi.fn());
 const routingStore = vi.hoisted(() => ({ kind: "shared-routing" }));
 const storageAdapter = vi.hoisted(() => ({ kind: "shared-traces" }));
+const loopSpecStore = vi.hoisted(() => ({ kind: "shared-loop-specs" }));
+const controllerStore = vi.hoisted(() => ({ kind: "shared-controller" }));
 
 vi.mock("loopgraph/runtime", () => ({
   runRouteJobWorker
@@ -13,6 +15,8 @@ vi.mock("../../../../lib/loopgraph-runtime/worker-api-auth", () => ({
 }));
 vi.mock("../../../../lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot: () => "/runtime/org/main",
+  getLoopControllerStore: () => controllerStore,
+  getLoopSpecRegistryStore: () => loopSpecStore,
   getRoutingStore: () => routingStore,
   getStorageAdapter: () => storageAdapter
 }));
@@ -47,6 +51,8 @@ describe("route-job worker API", () => {
       limit: 25,
       leaseSeconds: 600,
       store: routingStore,
+      loopSpecStore,
+      controllerStore,
       storage: storageAdapter
     });
   });

@@ -7,7 +7,9 @@ import {
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
-  getHermesDesignStore
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 import { prepareVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
 import { emitOperationalLog } from "../../../../../../lib/observability/operational-log";
@@ -182,6 +184,8 @@ export async function POST(
     const worker = await runHermesDesignCallbackWorker({
       projectRoot,
       store,
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore(),
       workerId: "hermes-callback-local",
       limit: 100,
       leaseSeconds: 300,

@@ -1,4 +1,3 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   BusinessDiscoverySessionSchema,
@@ -18,6 +17,10 @@ import {
   type QuestionBundle
 } from "../core";
 import { buildProjectProfileFromInspection, inspectProjectManifests } from "./project-inspection";
+import {
+  FileDiscoveryDesignStore,
+  type DiscoveryDesignStore
+} from "./discovery-design-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { initLoopgraphWorkspace } from "./workspace";
 
@@ -25,6 +28,7 @@ export type DiscoveryActor = "browser" | "hermes" | "cli" | "api";
 
 export type StartDiscoverySessionInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId?: string;
   companyId?: string;
   companyName?: string;
@@ -34,6 +38,7 @@ export type StartDiscoverySessionInput = {
 
 export type SelectDiscoveryDepartmentsInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   departments: string[];
   activeDepartment?: string;
@@ -44,6 +49,7 @@ export type SelectDiscoveryDepartmentsInput = {
 
 export type ConfirmDiscoveryProjectContextInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   expectedRevision?: number;
   displayName?: string;
@@ -67,6 +73,7 @@ export type ConfirmDiscoveryProjectContextResult = {
 
 export type SubmitDiscoveryAnswersInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   bundleId: string;
   answers: Record<string, unknown>;
@@ -94,12 +101,15 @@ export async function startHermesDiscoverySession(
   input: StartDiscoverySessionInput = {}
 ): Promise<BusinessDiscoverySession> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
   const nowIso = (input.now ?? new Date()).toISOString();
   const actor = input.createdByActor ?? "hermes";
-  await initLoopgraphWorkspace({ projectRoot, createdBy: actor, now: input.now });
+  if (store.persistence === "file") {
+    await initLoopgraphWorkspace({ projectRoot, createdBy: actor, now: input.now });
+  }
 
   if (input.sessionId) {
-    const existing = await loadDiscoverySession(input.sessionId, projectRoot);
+    const existing = await loadDiscoverySession(input.sessionId, projectRoot, store);
     if (existing) return existing;
   }
 
@@ -139,15 +149,15 @@ export async function startHermesDiscoverySession(
     updatedAt: nowIso
   });
 
-  await saveDiscoverySession(session, projectRoot);
-  return session;
+  return (await store.createSessionAtomically(session)).session;
 }
 
 export async function confirmDiscoveryProjectContext(
   input: ConfirmDiscoveryProjectContextInput
 ): Promise<ConfirmDiscoveryProjectContextResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireDiscoverySession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireDiscoverySession(input.sessionId, projectRoot, store);
   assertExpectedRevision(session, input.expectedRevision);
   const nowIso = (input.now ?? new Date()).toISOString();
   const inspection = await inspectProjectManifests({ projectRoot });
@@ -211,48 +221,43 @@ export async function confirmDiscoveryProjectContext(
     updatedAt: nowIso
   });
 
-  await saveDiscoverySession(next, projectRoot);
-  return { session: next, projectProfile, inspection };
+  const saved = await saveDiscoverySession(next, projectRoot, {
+    store,
+    expectedRevision: session.revision
+  });
+  return { session: saved, projectProfile, inspection };
 }
 
 export async function getDiscoverySession(
   sessionId: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: DiscoveryDesignStore
 ): Promise<BusinessDiscoverySession | undefined> {
-  return loadDiscoverySession(sessionId, path.resolve(projectRoot));
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  return loadDiscoverySession(
+    sessionId,
+    resolvedProjectRoot,
+    resolveDiscoveryDesignStore(resolvedProjectRoot, store)
+  );
 }
 
 export async function listHermesDiscoverySessions(
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: DiscoveryDesignStore
 ): Promise<BusinessDiscoverySession[]> {
-  const root = discoverySessionsRoot(path.resolve(projectRoot));
-  let files: string[];
-  try {
-    files = await readdir(root);
-  } catch {
-    return [];
-  }
-
-  const sessions = await Promise.all(files
-    .filter((file) => file.endsWith(".json"))
-    .map(async (file) => {
-      try {
-        return BusinessDiscoverySessionSchema.parse(JSON.parse(await readFile(path.join(root, file), "utf8")));
-      } catch {
-        return undefined;
-      }
-    }));
-
-  return sessions
-    .filter((session): session is BusinessDiscoverySession => Boolean(session))
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  return resolveDiscoveryDesignStore(
+    resolvedProjectRoot,
+    store
+  ).listSessions();
 }
 
 export async function selectDiscoveryDepartments(
   input: SelectDiscoveryDepartmentsInput
 ): Promise<BusinessDiscoverySession> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireDiscoverySession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireDiscoverySession(input.sessionId, projectRoot, store);
   assertExpectedRevision(session, input.expectedRevision);
 
   const selectedDepartmentIds = Array.from(new Set(input.departments.map((department) => {
@@ -292,16 +297,20 @@ export async function selectDiscoveryDepartments(
     lastTransitionAt: nowIso,
     updatedAt: nowIso
   });
-  await saveDiscoverySession(next, projectRoot);
-  return next;
+  return saveDiscoverySession(next, projectRoot, {
+    store,
+    expectedRevision: session.revision
+  });
 }
 
 export async function getNextDiscoveryQuestions(input: {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
 }): Promise<DiscoveryNextQuestionsResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireDiscoverySession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireDiscoverySession(input.sessionId, projectRoot, store);
   const activeDepartmentId = session.activeDepartmentId;
 
   if (!activeDepartmentId) {
@@ -346,7 +355,8 @@ export async function submitDiscoveryAnswers(
   input: SubmitDiscoveryAnswersInput
 ): Promise<BusinessDiscoverySession> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await requireDiscoverySession(input.sessionId, projectRoot);
+  const store = resolveDiscoveryDesignStore(projectRoot, input.store);
+  const session = await requireDiscoverySession(input.sessionId, projectRoot, store);
   assertExpectedRevision(session, input.expectedRevision);
   const activeDepartmentId = session.activeDepartmentId;
   if (!activeDepartmentId) {
@@ -408,35 +418,65 @@ export async function submitDiscoveryAnswers(
     lastTransitionAt: nowIso,
     updatedAt: nowIso
   });
-  await saveDiscoverySession(next, projectRoot);
-  return next;
+  return saveDiscoverySession(next, projectRoot, {
+    store,
+    expectedRevision: session.revision
+  });
 }
 
 export async function saveDiscoverySession(
   session: BusinessDiscoverySession,
-  projectRoot = process.cwd()
-): Promise<void> {
-  const filePath = discoverySessionPath(session.id, projectRoot);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(session, null, 2)}\n`);
+  projectRoot = process.cwd(),
+  options: {
+    store?: DiscoveryDesignStore;
+    expectedRevision?: number;
+  } = {}
+): Promise<BusinessDiscoverySession> {
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  const store = resolveDiscoveryDesignStore(
+    resolvedProjectRoot,
+    options.store
+  );
+  if (options.expectedRevision === undefined) {
+    const existing = await store.getSession(session.id);
+    if (!existing) {
+      return (await store.createSessionAtomically(session)).session;
+    }
+    if (session.revision !== existing.revision + 1) {
+      throw new Error(
+        "Updating an existing discovery session requires an explicit next revision"
+      );
+    }
+    return store.updateSessionAtomically({
+      sessionId: session.id,
+      expectedRevision: existing.revision,
+      session
+    });
+  }
+  return store.updateSessionAtomically({
+    sessionId: session.id,
+    expectedRevision: options.expectedRevision,
+    session
+  });
 }
 
 async function loadDiscoverySession(
   sessionId: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: DiscoveryDesignStore
 ): Promise<BusinessDiscoverySession | undefined> {
-  try {
-    return BusinessDiscoverySessionSchema.parse(JSON.parse(await readFile(discoverySessionPath(sessionId, projectRoot), "utf8")));
-  } catch {
-    return undefined;
-  }
+  return resolveDiscoveryDesignStore(
+    path.resolve(projectRoot),
+    store
+  ).getSession(sessionId);
 }
 
 async function requireDiscoverySession(
   sessionId: string,
-  projectRoot: string
+  projectRoot: string,
+  store?: DiscoveryDesignStore
 ): Promise<BusinessDiscoverySession> {
-  const session = await loadDiscoverySession(sessionId, projectRoot);
+  const session = await loadDiscoverySession(sessionId, projectRoot, store);
   if (!session) throw new Error(`Discovery session not found: ${sessionId}`);
   return session;
 }
@@ -571,14 +611,9 @@ function advanceQuestionQueue(
   });
 }
 
-function discoverySessionPath(sessionId: string, projectRoot: string): string {
-  return path.join(discoverySessionsRoot(projectRoot), `${safeFileId(sessionId)}.json`);
-}
-
-function discoverySessionsRoot(projectRoot: string): string {
-  return path.join(getLoopgraphRoot(projectRoot), "discovery", "sessions");
-}
-
-function safeFileId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.:-]/g, "_");
+function resolveDiscoveryDesignStore(
+  projectRoot: string,
+  store?: DiscoveryDesignStore
+): DiscoveryDesignStore {
+  return store ?? new FileDiscoveryDesignStore(getLoopgraphRoot(projectRoot));
 }

@@ -6,7 +6,10 @@ import {
   loadDiscoverySession
 } from "@/lib/loopgraph-runtime/discovery-engine";
 import { isHostedPreview } from "@/lib/hosted-preview";
-import { getActiveLoopgraphProjectRoot } from "../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore
+} from "../../lib/loopgraph-runtime/storage-resolver";
 import {
   getDiscoverySession as getHermesDiscoverySession,
   listHermesDiscoverySessions
@@ -40,12 +43,19 @@ export async function getDiscoverySessionForView(sessionId?: string) {
 }
 
 export async function getHermesDiscoverySessionsForView() {
-  return listHermesDiscoverySessions(getActiveLoopgraphProjectRoot());
+  return listHermesDiscoverySessions(
+    getActiveLoopgraphProjectRoot(),
+    getDiscoveryDesignStore()
+  );
 }
 
 export async function getHermesDiscoverySessionForView(sessionId?: string) {
   if (!sessionId) return undefined;
-  return getHermesDiscoverySession(sessionId, getActiveLoopgraphProjectRoot());
+  return getHermesDiscoverySession(
+    sessionId,
+    getActiveLoopgraphProjectRoot(),
+    getDiscoveryDesignStore()
+  );
 }
 
 export async function getDailySummaryForView() {

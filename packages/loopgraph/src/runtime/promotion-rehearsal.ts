@@ -28,7 +28,11 @@ import {
 import { FileRoutingStore } from "./routing-store";
 import { simulateLoop } from "./simulator";
 import { readWorkspaceGraphState } from "./semantic-graph-state";
-import { FileSemanticGraphStore } from "./semantic-graph-store";
+import {
+  FileSemanticGraphStore,
+  type SemanticGraphStore
+} from "./semantic-graph-store";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 const REQUIRED_SCENARIOS: PromotionRehearsalScenarioKind[] = [
@@ -66,10 +70,22 @@ type LoadedFixture = {
 
 export async function runLoopPromotionRehearsal(
   input: RunLoopPromotionRehearsalInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: {
+    store?: SemanticGraphStore;
+    loopSpecStore?: LoopSpecRegistryStore;
+  } = {}
 ): Promise<PromotionRehearsalReport> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const state = await readWorkspaceGraphState(projectRoot);
+  const state = await readWorkspaceGraphState(
+    projectRoot,
+    options.loopSpecStore
+  );
+  const artifacts = options.loopSpecStore
+    ? await options.loopSpecStore.listActiveLoopSpecs(projectRoot)
+    : [];
+  const artifactsById = new Map(
+    artifacts.map((artifact) => [artifact.loopId, artifact])
+  );
   const entry = state.entries.find((candidate) => candidate.id === input.loopId);
   if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
   const previousMode = entry.spec.routing?.activationMode;
@@ -104,7 +120,14 @@ export async function runLoopPromotionRehearsal(
     path.join(getLoopgraphRoot(projectRoot), "graph", "rehearsal-simulations", reportSeed)
   );
   const cards = routingCardsForState(state.entries.map(({ spec }) => spec), state.graphHash);
-  const fixtures = await loadRequiredFixtures(projectRoot, entry.path, entry.spec, reportSeed);
+  const fixtures = await loadRequiredFixtures(
+    projectRoot,
+    entry.path,
+    entry.spec,
+    reportSeed,
+    undefined,
+    artifactsById.get(entry.id)?.fixtures
+  );
   const targetCard = cards.find((card) => card.loopId === input.loopId);
   const scenarios: PromotionRehearsalScenarioReceipt[] = [];
 
@@ -204,7 +227,8 @@ export async function runLoopPromotionRehearsal(
         otherEntry.path,
         otherEntry.spec,
         `${reportSeed}:${otherEntry.id}`,
-        ["happy-path"]
+        ["happy-path"],
+        artifactsById.get(otherEntry.id)?.fixtures
       );
       const fixture = otherFixtures.get("happy-path");
       if (!fixture) {
@@ -386,17 +410,27 @@ export async function requirePassingPromotionRehearsal(input: {
   loopId: string;
   targetMode: RoutingActivationMode;
   now?: Date;
-  store?: FileSemanticGraphStore;
+  store?: SemanticGraphStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 }): Promise<PromotionRehearsalReport> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = input.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
   const report = await store.getPromotionRehearsal(input.reportId);
   if (!report) throw new Error(`Promotion rehearsal report not found: ${input.reportId}`);
-  const { id: _id, reportHash: _reportHash, ...body } = report;
+  const mutableBody = structuredClone(report) as Partial<PromotionRehearsalReport>;
+  delete mutableBody.id;
+  delete mutableBody.reportHash;
+  const body = mutableBody as Omit<
+    PromotionRehearsalReport,
+    "id" | "reportHash"
+  >;
   if (promotionRehearsalHash(body) !== report.reportHash || report.id !== `promotion_rehearsal_${report.reportHash}`) {
     throw new Error("Promotion rehearsal report failed integrity validation");
   }
-  const state = await readWorkspaceGraphState(projectRoot);
+  const state = await readWorkspaceGraphState(
+    projectRoot,
+    input.loopSpecStore
+  );
   const entry = state.entries.find((candidate) => candidate.id === input.loopId);
   if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
   if (report.status !== "passed") throw new Error(`Promotion rehearsal ${report.id} did not pass`);
@@ -425,7 +459,8 @@ async function loadRequiredFixtures(
   registeredPath: string,
   spec: LoopSpec,
   seed: string,
-  requiredIds: string[] = ["happy-path", "missing-context", "risk-escalation"]
+  requiredIds: string[] = ["happy-path", "missing-context", "risk-escalation"],
+  storedFixtures?: Record<string, unknown>
 ): Promise<Map<string, LoadedFixture>> {
   const refs = new Map((spec.input.fixtures ?? []).map((fixture) => [fixture.id, fixture]));
   const specPath = resolveSpecPath(projectRoot, registeredPath);
@@ -433,8 +468,14 @@ async function loadRequiredFixtures(
   for (const id of requiredIds) {
     const ref = refs.get(id);
     if (!ref) continue;
-    const fixturePath = resolveConfinedPath(projectRoot, path.resolve(path.dirname(specPath), ref.path));
-    const value = JSON.parse(await readFile(fixturePath, "utf8")) as Record<string, unknown>;
+    const fixturePath = resolveConfinedPath(
+      projectRoot,
+      path.resolve(path.dirname(specPath), ref.path)
+    );
+    const storedValue = storedFixtures?.[ref.path];
+    const value = storedValue === undefined
+      ? JSON.parse(await readFile(fixturePath, "utf8")) as Record<string, unknown>
+      : asFixtureObject(storedValue, ref.path);
     const event = cloneEvent(normalizeHermesRoutingEvent(value), `${seed}:${id}`);
     const normalizedValue = {
       ...value,
@@ -451,6 +492,16 @@ async function loadRequiredFixtures(
     });
   }
   return fixtures;
+}
+
+function asFixtureObject(
+  value: unknown,
+  fixturePath: string
+): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Stored promotion fixture is not an object: ${fixturePath}`);
+  }
+  return structuredClone(value) as Record<string, unknown>;
 }
 
 function routingCardsForState(specs: LoopSpec[], graphHash: string): RoutingCard[] {

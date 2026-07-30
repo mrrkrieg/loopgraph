@@ -9,6 +9,7 @@ import {
   editLoopDesignProposal,
   generateDeterministicLoopDesign,
   generateLoopDesignWithProvider,
+  readLoopDesignContext,
   readLoopDesignProposalSet,
   submitLoopDesignProposalSet,
   type LoopDesignProvider,
@@ -102,6 +103,12 @@ describe("Loop design service", () => {
     }));
     await access(result.designRunPath);
     await access(result.proposalSetPath);
+    await expect(
+      readLoopDesignContext(projectRoot, result.designRun.id)
+    ).resolves.toMatchObject({
+      sessionId: "session_design",
+      contextHash: result.designRun.inputHash
+    });
   });
 
   it("runs an embedded loop design provider through the shared validation and persistence path", async () => {

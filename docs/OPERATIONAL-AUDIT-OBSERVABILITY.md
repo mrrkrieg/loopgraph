@@ -83,11 +83,16 @@ Wire the protected metrics into the deployment monitoring system and begin with:
   inspect the compiler or task-application error;
 - sustained `loopgraph_hermes_callback_expired_leases > 0` or increasing
   `loopgraph_hermes_callback_oldest_due_seconds`: inspect callback-worker health and capacity;
+- increasing `loopgraph_discovery_oldest_active_seconds` while a design is expected to progress:
+  inspect unresolved evidence, outbound Hermes delivery, and proposals waiting for review;
+- increasing `loopgraph_discovery_sessions_active` with no increase in
+  `loopgraph_loop_design_artifacts_total`: inspect the discovery-to-design handoff;
 - an audit-chain verification response of `409`: stop promotion and preserve database evidence.
 
 The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
-Hermes dispatch queue, and inbound Hermes callback inbox. Controller lag and measurement lag
-remain file-backed and are not emitted as deployment metrics.
+Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, and
+immutable design artifacts. Controller lag, measurement lag, and graph-transaction lag remain
+file-backed and are not emitted as deployment metrics.
 
 ## Deployment check
 

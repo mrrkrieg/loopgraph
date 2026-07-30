@@ -41,9 +41,9 @@ describe("operational status", () => {
 
   it("loads a tenant-bound hosted snapshot and formats scrape metrics", async () => {
     hostedEnvironment();
-    rpc.mockImplementation(async (name: string) => name ===
-      "get_hermes_callback_queue_snapshot"
-      ? {
+    rpc.mockImplementation(async (name: string) => {
+      if (name === "get_hermes_callback_queue_snapshot") {
+        return {
           data: {
             hermes_callbacks_queued: 6,
             hermes_callbacks_running: 2,
@@ -53,8 +53,66 @@ describe("operational status", () => {
             hermes_callback_oldest_due_seconds: 33
           },
           error: null
-        }
-      : {
+        };
+      }
+      if (name === "get_discovery_design_snapshot") {
+        return {
+          data: {
+            session_count: 12,
+            active_session_count: 4,
+            evidence_gap_set_count: 9,
+            design_artifact_count: 18,
+            oldest_active_session_seconds: 240
+          },
+          error: null
+        };
+      }
+      if (name === "get_loop_spec_registry_snapshot") {
+        return {
+          data: {
+            workspace_count: 1,
+            active_loop_spec_count: 7,
+            immutable_loop_spec_version_count: 11,
+            loop_spec_commit_count: 8,
+            workspace_revision: 8
+          },
+          error: null
+        };
+      }
+      if (name === "get_opportunity_controller_snapshot") {
+        return {
+          data: {
+            opportunities_total: 13,
+            opportunities_qualified: 4,
+            graph_changes_proposed: 3,
+            controller_runs_total: 20,
+            controller_runs_failed: 1,
+            controller_triggers_pending: 2,
+            controller_triggers_processing: 1,
+            controller_triggers_failed: 1,
+            controller_trigger_expired_leases: 1,
+            controller_oldest_pending_seconds: 80,
+            controller_active_leases: 1
+          },
+          error: null
+        };
+      }
+      if (name === "get_semantic_graph_snapshot") {
+        return {
+          data: {
+            graph_snapshots_total: 12,
+            graph_approvals_total: 6,
+            graph_transactions_total: 5,
+            graph_transactions_failed: 1,
+            graph_promotions_total: 2,
+            graph_rehearsals_total: 3,
+            graph_commits_total: 4,
+            latest_graph_sequence: 11
+          },
+          error: null
+        };
+      }
+      return {
           data: {
             database_ready: true,
             machine_requests_5m: 8,
@@ -77,7 +135,8 @@ describe("operational status", () => {
             hermes_dispatch_oldest_due_seconds: 45
           },
           error: null
-        });
+        };
+    });
 
     const readiness = await getOperationalReadiness();
 
@@ -114,7 +173,27 @@ describe("operational status", () => {
         hermesCallbacksDeadLetter: 1,
         hermesCallbacksDue: 3,
         hermesCallbackExpiredLeases: 1,
-        hermesCallbackOldestDueSeconds: 33
+        hermesCallbackOldestDueSeconds: 33,
+        discoverySessionsTotal: 12,
+        discoverySessionsActive: 4,
+        discoveryEvidenceGapSetsTotal: 9,
+        loopDesignArtifactsTotal: 18,
+        discoveryOldestActiveSeconds: 240,
+        activeLoopSpecs: 7,
+        immutableLoopSpecVersions: 11,
+        loopSpecCommits: 8,
+        loopSpecWorkspaceRevision: 8,
+        opportunitiesTotal: 13,
+        opportunitiesQualified: 4,
+        graphChangesProposed: 3,
+        controllerRunsTotal: 20,
+        controllerRunsFailed: 1,
+        controllerTriggersPending: 2,
+        controllerTriggersProcessing: 1,
+        controllerTriggersFailed: 1,
+        controllerTriggerExpiredLeases: 1,
+        controllerOldestPendingSeconds: 80,
+        controllerActiveLeases: 1
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
@@ -129,6 +208,21 @@ describe("operational status", () => {
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_hermes_callbacks_due 3"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_loop_design_artifacts_total 18"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_active_loop_specs 7"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_controller_triggers_pending 2"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_controller_active_leases 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_graph_commits_total 4"
     );
   });
 

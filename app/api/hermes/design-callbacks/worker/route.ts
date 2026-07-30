@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { runHermesDesignCallbackWorker } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
-  getHermesDesignStore
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../../../lib/loopgraph-runtime/worker-api-auth";
 
@@ -20,6 +22,8 @@ export async function POST(request: Request) {
     const result = await runHermesDesignCallbackWorker({
       projectRoot: getActiveLoopgraphProjectRoot(),
       store: getHermesDesignStore(),
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore(),
       workerId: stringValue(body.workerId),
       limit: integerValue(body.limit, 10, 1, 100),
       leaseSeconds: integerValue(body.leaseSeconds, 300, 30, 3600)
