@@ -58,9 +58,10 @@ Hermes decisions, route commits, corrections, evaluations, and route jobs now us
 tenant/project-scoped Supabase routing store in authenticated hosted mode. Route-job claims are
 atomic across replicas and use leases plus revision fencing.
 
-Design tasks, graph transactions, controller triggers, measurement jobs, outcomes, and generated
-LoopSpec artifacts still have file-backed paths. Until those move, only the routing queue/worker
-boundary may be scaled horizontally; do not treat the full control plane as multi-writer. The
+Hermes design tasks, callback receipts, and outbound design dispatch now use a shared Supabase
+boundary in hosted mode. Graph transactions, controller triggers, measurement jobs, outcomes,
+discovery/evidence sessions, opportunities, and generated LoopSpec artifacts still have
+file-backed paths. Until those move, do not treat the full control plane as multi-writer. The
 remaining stores need:
 
 - atomic claim/update operations;
@@ -71,5 +72,7 @@ remaining stores need:
 - append-only mutation receipts;
 - transactionally consistent graph snapshots.
 
-See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) for the implemented queue
-protocol and exact remaining boundary.
+See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
+[Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md), and
+[Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md) for the implemented protocols
+and exact remaining boundary.
