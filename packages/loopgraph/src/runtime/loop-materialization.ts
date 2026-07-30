@@ -18,6 +18,7 @@ import {
 } from "../core";
 import { loadLoopSpecFromPath } from "./loader";
 import { readDesignRun, readLoopDesignProposalSet } from "./design-service";
+import type { DiscoveryDesignStore } from "./discovery-design-store";
 import { getDiscoverySession, saveDiscoverySession, type DiscoveryActor } from "./discovery-session";
 import { getLoopgraphRoot } from "./storage-resolver";
 import {
@@ -32,6 +33,7 @@ export const LOOP_MATERIALIZATION_SCHEMA_VERSION = "loop-materialization/v1alpha
 
 export type MaterializeLoopDesignInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
   designRunId: string;
   acceptedProposalIds: string[];
   acceptedBy?: string;
@@ -170,8 +172,16 @@ export async function materializeAcceptedLoopDesignProposals(
   })}`;
 
   await initLoopgraphWorkspace({ projectRoot, createdBy: "hermes", now: input.now });
-  const designRun = await readDesignRun(projectRoot, input.designRunId);
-  const proposalSet = await readLoopDesignProposalSet(projectRoot, input.designRunId);
+  const designRun = await readDesignRun(
+    projectRoot,
+    input.designRunId,
+    input.store
+  );
+  const proposalSet = await readLoopDesignProposalSet(
+    projectRoot,
+    input.designRunId,
+    input.store
+  );
   const fatalErrors = validateMaterializationRequest({
     designRunId: input.designRunId,
     acceptedProposalIds,
@@ -233,7 +243,7 @@ export async function materializeAcceptedLoopDesignProposals(
   const materializedLoops = preflight.prepared.map((prepared) => materializedLoopFromPrepared(prepared));
   const registryBeforeTransaction = await readLoopgraphWorkspace(projectRoot);
   const sessionBeforeTransaction = designRun.sessionId
-    ? await getDiscoverySession(designRun.sessionId, projectRoot)
+    ? await getDiscoverySession(designRun.sessionId, projectRoot, input.store)
     : undefined;
   let transaction: MaterializationTransaction | undefined;
 
@@ -275,6 +285,7 @@ export async function materializeAcceptedLoopDesignProposals(
     if (designRun.sessionId) {
       await appendMaterializedLoopsToDiscoverySession({
         projectRoot,
+        store: input.store,
         sessionId: designRun.sessionId,
         loopIds: materializedLoops.map((loop) => loop.loopId),
         actor: normalizeDiscoveryActor(input.acceptedBy),
@@ -286,7 +297,30 @@ export async function materializeAcceptedLoopDesignProposals(
   } catch (error) {
     if (transaction) await rollbackMaterializationTransaction(transaction);
     await writeLoopgraphWorkspace(registryBeforeTransaction, projectRoot);
-    if (sessionBeforeTransaction) await saveDiscoverySession(sessionBeforeTransaction, projectRoot);
+    if (sessionBeforeTransaction) {
+      const current = await getDiscoverySession(
+        sessionBeforeTransaction.id,
+        projectRoot,
+        input.store
+      );
+      if (
+        current &&
+        current.revision === sessionBeforeTransaction.revision + 1
+      ) {
+        await saveDiscoverySession(
+          BusinessDiscoverySessionSchema.parse({
+            ...sessionBeforeTransaction,
+            revision: current.revision + 1,
+            updatedAt: new Date().toISOString()
+          }),
+          projectRoot,
+          {
+            store: input.store,
+            expectedRevision: current.revision
+          }
+        );
+      }
+    }
     await rm(materializationFilePath(projectRoot, materializationId), { force: true });
     const workspace = await inspectLoopgraphWorkspace({ projectRoot });
     return {
@@ -1287,12 +1321,17 @@ function workspaceSummary(workspace: Awaited<ReturnType<typeof inspectLoopgraphW
 
 async function appendMaterializedLoopsToDiscoverySession(input: {
   projectRoot: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   loopIds: string[];
   actor: DiscoveryActor;
   materializedAt: string;
 }): Promise<void> {
-  const session = await getDiscoverySession(input.sessionId, input.projectRoot);
+  const session = await getDiscoverySession(
+    input.sessionId,
+    input.projectRoot,
+    input.store
+  );
   if (!session) return;
   const next = BusinessDiscoverySessionSchema.parse({
     ...session,
@@ -1304,7 +1343,10 @@ async function appendMaterializedLoopsToDiscoverySession(input: {
     lastTransitionAt: input.materializedAt,
     updatedAt: input.materializedAt
   });
-  await saveDiscoverySession(next, input.projectRoot);
+  await saveDiscoverySession(next, input.projectRoot, {
+    store: input.store,
+    expectedRevision: session.revision
+  });
 }
 
 function normalizeDiscoveryActor(value?: string): DiscoveryActor {

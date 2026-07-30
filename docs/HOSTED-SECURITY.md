@@ -94,16 +94,21 @@ route-job claims are database-backed, service-role-only, and scoped by organizat
 multiple worker replicas can safely claim this queue. The worker token is still a deployment
 credential bound to one configured organization/project.
 
-Hermes design tasks, outbound delivery, signed callback acceptance, and callback-worker claims are
-distributed. Discovery/evidence sessions, design-run artifacts, graph transactions, controller
-state, measurements, outcomes, and generated LoopSpecs are not all distributed yet. Keep those
-remaining subsystems to one active writer until their database migrations ship, and never operate
-multiple customer organizations through one shared filesystem namespace.
+Hermes design tasks, outbound delivery, signed callback acceptance, callback-worker claims,
+discovery/evidence sessions, and immutable design contexts/runs/proposals are distributed.
+Discovery updates use revision fencing, evidence gaps are monotonic, and a design artifact plus
+its session transition commit atomically. Graph transactions, opportunities, controller state,
+measurements, outcomes, the workspace registry, and generated/versioned LoopSpecs are not all
+distributed yet. Keep those remaining subsystems to one active writer until their database
+migrations ship, and never operate multiple customer organizations through one shared filesystem
+namespace.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) and
 [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md). The signed inbound delivery boundary
 is described in the
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md).
+The pre-materialization state boundary is described in
+[Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md).
 
 Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
 See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).

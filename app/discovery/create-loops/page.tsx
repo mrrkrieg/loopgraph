@@ -19,7 +19,10 @@ import {
   type HermesGraphProjection,
   type LoopMaterializationResult
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore
+} from "../../../lib/loopgraph-runtime/storage-resolver";
 import {
   editBrowserLoopDesignProposalAction,
   materializeBrowserLoopDesignAction,
@@ -38,11 +41,16 @@ export default async function CreateLoopsPage({ searchParams }: { searchParams?:
   const requestedDesignRunId = stringParam(query, "designRunId");
   const materializationId = stringParam(query, "materializationId");
   const projectRoot = getActiveLoopgraphProjectRoot();
+  const store = getDiscoveryDesignStore();
   const session = await getHermesDiscoverySessionForView(sessionId);
   const designRunId = requestedDesignRunId ?? session?.designRunIds.at(-1);
   const [designRun, proposalSet, materialization, loops, designContext] = await Promise.all([
-    designRunId ? readDesignRun(projectRoot, designRunId) : Promise.resolve(undefined),
-    designRunId ? readLoopDesignProposalSet(projectRoot, designRunId) : Promise.resolve(undefined),
+    designRunId
+      ? readDesignRun(projectRoot, designRunId, store)
+      : Promise.resolve(undefined),
+    designRunId
+      ? readLoopDesignProposalSet(projectRoot, designRunId, store)
+      : Promise.resolve(undefined),
     materializationId ? readLoopMaterializationResult(projectRoot, materializationId) : Promise.resolve(undefined),
     listLoopgraphLoops({ projectRoot }),
     session ? loadDesignContext(projectRoot, session) : Promise.resolve(undefined)
@@ -496,6 +504,7 @@ async function loadDesignContext(
   try {
     return await buildLoopDesignContext({
       projectRoot,
+      store: getDiscoveryDesignStore(),
       sessionId: session.id,
       department: session.activeDepartmentId
     });

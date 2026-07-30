@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runHermesDesignCallbackWorker } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
@@ -18,6 +19,7 @@ export async function GET(request: Request) {
     const result = await runHermesDesignCallbackWorker({
       projectRoot: getActiveLoopgraphProjectRoot(),
       store: getHermesDesignStore(),
+      discoveryStore: getDiscoveryDesignStore(),
       workerId: "hermes-callback-cron",
       limit: 25,
       leaseSeconds: 300

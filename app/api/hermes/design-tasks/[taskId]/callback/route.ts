@@ -7,6 +7,7 @@ import {
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore
 } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 import { prepareVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
@@ -182,6 +183,7 @@ export async function POST(
     const worker = await runHermesDesignCallbackWorker({
       projectRoot,
       store,
+      discoveryStore: getDiscoveryDesignStore(),
       workerId: "hermes-callback-local",
       limit: 100,
       leaseSeconds: 300,

@@ -100,8 +100,13 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Signed inbound Hermes callbacks use a tenant/project-scoped callback inbox. Replay authorization
   and enqueue commit together; leased workers compile callbacks with retries, dead-letter state,
   lease fencing, idempotent proposal artifacts, and protected queue metrics.
+- Discovery sessions, evidence-gap sets, bounded design contexts, design runs, and proposal sets
+  use one tenant/project-scoped hosted store. Session writes use revision compare-and-swap,
+  evidence derivations are monotonic, and immutable design artifacts plus the session transition
+  commit in one database transaction. Local projects keep the equivalent atomic file store.
 - Public liveness/readiness endpoints reveal only status; protected Prometheus metrics expose the
-  authorization-plane counters through a separate observability credential.
+  authorization plane, queue health, active discovery age, and design-artifact counters through a
+  separate observability credential.
 - Organization admins and owners can export cursor-paged audit events with database-side chain
   verification.
 - Same-origin browser mutations, signed machine callbacks, worker bearer auth, cron auth, and
@@ -118,10 +123,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Continue the database migration beyond routing, route jobs, design tasks, callbacks, and
-   outbound Hermes dispatch: move discovery/evidence sessions, opportunities and graph change
-   sets, controller triggers/runs, measurements, outcomes, and versioned LoopSpec artifacts to
-   tenant-scoped atomic stores.
+1. Continue the database migration beyond routing, route jobs, design tasks, callbacks, outbound
+   Hermes dispatch, and discovery/design artifacts: move opportunities and graph change sets,
+   controller triggers/runs, measurements, outcomes, the workspace registry, and versioned
+   LoopSpec artifacts to tenant-scoped atomic stores.
 2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
 3. Send the tamper-evident audit stream to independent retention, add distributed tracing and
@@ -145,6 +150,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md)
 - [Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md)
 - [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md)
+- [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md)
 - [Outcomes and value](./OUTCOMES-AND-VALUE.md)
 - [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)

@@ -33,6 +33,11 @@ deployments select a tenant/project-scoped Supabase store, so task creation, evi
 controller inspection, and callback completion can occur on different replicas without losing
 state. See [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md).
 
+The discovery evidence behind those tasks is distributed as well. Session answers use revision
+compare-and-swap; evidence-gap revisions are monotonic; and a validated bounded context, design
+run, proposal set, and session transition commit atomically. See
+[Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md).
+
 Hosted task creation and initial outbound enqueue are one transaction. Leased workers retry
 failed deliveries with bounded exponential backoff and expose dead-letter state through the
 operational metrics endpoint. See
@@ -101,7 +106,7 @@ POST /api/discovery/session/:sessionId/evidence-gaps
 The callback route requires `LOOPGRAPH_HERMES_CALLBACK_SECRET` (or the compatibility task
 secret), a fresh `X-Hermes-Timestamp`, and `X-Hermes-Signature`. Hosted acceptance commits replay
 authorization and callback enqueue in one database transaction, then a leased worker compiles and
-applies the callback. See the
+applies the callback into the shared discovery/design store. See the
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md). It is an optional remote-worker
 path; the recommended local Hermes path submits answers and proposals through Loopgraph MCP.
 

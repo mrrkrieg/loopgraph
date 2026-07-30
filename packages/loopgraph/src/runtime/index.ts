@@ -50,6 +50,7 @@ export * from "./connector-registry";
 export * from "./connection-plan";
 export * from "./connection-tools";
 export * from "./discovery-session";
+export * from "./discovery-design-store";
 export * from "./discovery-tools";
 export * from "./design-service";
 export * from "./design-tools";

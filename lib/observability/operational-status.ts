@@ -30,6 +30,11 @@ export type OperationalMetrics = {
   hermesCallbacksDue: number;
   hermesCallbackExpiredLeases: number;
   hermesCallbackOldestDueSeconds: number;
+  discoverySessionsTotal: number;
+  discoverySessionsActive: number;
+  discoveryEvidenceGapSetsTotal: number;
+  loopDesignArtifactsTotal: number;
+  discoveryOldestActiveSeconds: number;
   lastMachineRequestAt?: string;
 };
 
@@ -98,7 +103,12 @@ const EMPTY_METRICS: OperationalMetrics = {
   hermesCallbacksDeadLetter: 0,
   hermesCallbacksDue: 0,
   hermesCallbackExpiredLeases: 0,
-  hermesCallbackOldestDueSeconds: 0
+  hermesCallbackOldestDueSeconds: 0,
+  discoverySessionsTotal: 0,
+  discoverySessionsActive: 0,
+  discoveryEvidenceGapSetsTotal: 0,
+  loopDesignArtifactsTotal: 0,
+  discoveryOldestActiveSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -152,7 +162,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     };
   }
 
-  const [operational, callbacks] = await Promise.all([
+  const [operational, callbacks, discoveryDesign] = await Promise.all([
     supabase.rpc("get_loopgraph_operational_snapshot", {
       p_organization_id: organizationId,
       p_project_key: projectKey
@@ -160,13 +170,19 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     supabase.rpc("get_hermes_callback_queue_snapshot", {
       p_organization_id: organizationId,
       p_project_key: projectKey
+    }),
+    supabase.rpc("get_discovery_design_snapshot", {
+      p_organization_id: organizationId,
+      p_project_key: projectKey
     })
   ]);
   if (
     operational.error ||
     callbacks.error ||
+    discoveryDesign.error ||
     !isRecord(operational.data) ||
     !isRecord(callbacks.data) ||
+    !isRecord(discoveryDesign.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -203,7 +219,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     },
     metrics: parseMetrics({
       ...operational.data,
-      ...callbacks.data
+      ...callbacks.data,
+      ...discoveryDesign.data
     })
   };
 }
@@ -347,6 +364,21 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_hermes_callback_oldest_due_seconds Age of the oldest claimable Hermes callback.",
     "# TYPE loopgraph_hermes_callback_oldest_due_seconds gauge",
     `loopgraph_hermes_callback_oldest_due_seconds ${metrics.hermesCallbackOldestDueSeconds}`,
+    "# HELP loopgraph_discovery_sessions_total Durable discovery sessions in this tenant project.",
+    "# TYPE loopgraph_discovery_sessions_total gauge",
+    `loopgraph_discovery_sessions_total ${metrics.discoverySessionsTotal}`,
+    "# HELP loopgraph_discovery_sessions_active Discovery sessions not yet completed.",
+    "# TYPE loopgraph_discovery_sessions_active gauge",
+    `loopgraph_discovery_sessions_active ${metrics.discoverySessionsActive}`,
+    "# HELP loopgraph_discovery_evidence_gap_sets_total Durable evidence-gap sets.",
+    "# TYPE loopgraph_discovery_evidence_gap_sets_total gauge",
+    `loopgraph_discovery_evidence_gap_sets_total ${metrics.discoveryEvidenceGapSetsTotal}`,
+    "# HELP loopgraph_loop_design_artifacts_total Immutable Hermes design artifacts.",
+    "# TYPE loopgraph_loop_design_artifacts_total gauge",
+    `loopgraph_loop_design_artifacts_total ${metrics.loopDesignArtifactsTotal}`,
+    "# HELP loopgraph_discovery_oldest_active_seconds Age of the oldest active discovery session.",
+    "# TYPE loopgraph_discovery_oldest_active_seconds gauge",
+    `loopgraph_discovery_oldest_active_seconds ${metrics.discoveryOldestActiveSeconds}`,
     ""
   ].join("\n");
 }
@@ -390,6 +422,15 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     ),
     hermesCallbackOldestDueSeconds: nonnegative(
       data.hermes_callback_oldest_due_seconds
+    ),
+    discoverySessionsTotal: nonnegative(data.session_count),
+    discoverySessionsActive: nonnegative(data.active_session_count),
+    discoveryEvidenceGapSetsTotal: nonnegative(
+      data.evidence_gap_set_count
+    ),
+    loopDesignArtifactsTotal: nonnegative(data.design_artifact_count),
+    discoveryOldestActiveSeconds: nonnegative(
+      data.oldest_active_session_seconds
     ),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }

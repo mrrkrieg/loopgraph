@@ -58,12 +58,13 @@ Hermes decisions, route commits, corrections, evaluations, and route jobs now us
 tenant/project-scoped Supabase routing store in authenticated hosted mode. Route-job claims are
 atomic across replicas and use leases plus revision fencing.
 
-Hermes design tasks, callback receipts, outbound design dispatch, and the leased inbound callback
-inbox now use a shared Supabase boundary in hosted mode. Graph transactions, controller triggers,
-measurement jobs, outcomes,
-discovery/evidence sessions, opportunities, and generated LoopSpec artifacts still have
-file-backed paths. Until those move, do not treat the full control plane as multi-writer. The
-remaining stores need:
+Hermes design tasks, callback receipts, outbound design dispatch, the leased inbound callback
+inbox, discovery sessions, evidence-gap sets, and immutable design contexts/runs/proposals now use
+a shared Supabase boundary in hosted mode. Graph transactions, opportunities, controller
+triggers, measurement jobs, outcomes, the workspace registry, and generated/versioned LoopSpec
+artifacts still have file-backed paths. Hosted materialization can read a distributed proposal,
+but writing those outputs remains a single-writer operation. Until those records move, do not
+treat the full control plane as multi-writer. The remaining stores need:
 
 - atomic claim/update operations;
 - leases and fencing tokens;
@@ -76,5 +77,6 @@ remaining stores need:
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md),
 [Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md), and
-[Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md) for the implemented protocols
-and exact remaining boundary.
+[Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md), and
+[Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) for the
+implemented protocols and exact remaining boundary.

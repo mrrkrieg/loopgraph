@@ -2,6 +2,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getStorageAdapter,
   resetStorageAdapterCache,
   resolveHostedRuntimeProjectRoot
@@ -67,5 +68,20 @@ describe("hosted runtime namespaces", () => {
     const second = getStorageAdapter({ rootDir: "/tmp/loopgraph-org-b", forceFile: false });
     expect(firstAgain).toBe(first);
     expect(second).not.toBe(first);
+  });
+
+  it("caches discovery design stores per local namespace", () => {
+    const first = getDiscoveryDesignStore({
+      rootDir: "/tmp/loopgraph-discovery-a"
+    });
+    const firstAgain = getDiscoveryDesignStore({
+      rootDir: "/tmp/loopgraph-discovery-a"
+    });
+    const second = getDiscoveryDesignStore({
+      rootDir: "/tmp/loopgraph-discovery-b"
+    });
+    expect(firstAgain).toBe(first);
+    expect(second).not.toBe(first);
+    expect(first.persistence).toBe("file");
   });
 });

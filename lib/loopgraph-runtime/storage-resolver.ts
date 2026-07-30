@@ -3,8 +3,10 @@ import type { StorageAdapter } from "loopgraph/sdk";
 import { FileStorageAdapter } from "loopgraph/sdk";
 import {
   FileHermesDesignStore,
+  FileDiscoveryDesignStore,
   FileRoutingStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
+  type DiscoveryDesignStore,
   type HermesDesignStore,
   type RoutingStore
 } from "loopgraph/runtime";
@@ -20,11 +22,16 @@ import {
   createSupabaseHermesDesignStore,
   isSupabaseHermesDesignStoreEnabled
 } from "@/lib/db/adapters/supabase-hermes-design-store";
+import {
+  createSupabaseDiscoveryDesignStore,
+  isSupabaseDiscoveryDesignStoreEnabled
+} from "@/lib/db/adapters/supabase-discovery-design-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
 const cachedHermesDesignStores = new Map<string, HermesDesignStore>();
+const cachedDiscoveryDesignStores = new Map<string, DiscoveryDesignStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -139,10 +146,46 @@ export function getHermesDesignStore(options?: {
   return store;
 }
 
+export function getDiscoveryDesignStore(options?: {
+  rootDir?: string;
+  forceFile?: boolean;
+}): DiscoveryDesignStore {
+  const organizationId =
+    process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey =
+    process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase =
+    !options?.forceFile && isSupabaseDiscoveryDesignStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase discovery design storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const rootDir = useSupabase
+    ? undefined
+    : path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const cacheKey = useSupabase
+    ? `supabase-discovery-design:${organizationId}:${projectKey}`
+    : `file-discovery-design:${rootDir!}`;
+  if (!options?.forceFile && cachedDiscoveryDesignStores.has(cacheKey)) {
+    return cachedDiscoveryDesignStores.get(cacheKey)!;
+  }
+
+  const store = useSupabase
+    ? createSupabaseDiscoveryDesignStore()
+    : new FileDiscoveryDesignStore(rootDir!);
+  if (!options?.forceFile) {
+    cachedDiscoveryDesignStores.set(cacheKey, store);
+  }
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
   cachedHermesDesignStores.clear();
+  cachedDiscoveryDesignStores.clear();
 }
 
 const UUID_PATTERN =

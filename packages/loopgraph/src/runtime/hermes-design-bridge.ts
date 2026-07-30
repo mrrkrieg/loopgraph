@@ -24,6 +24,10 @@ import {
 } from "./evidence-gap-engine";
 import { getDiscoverySession } from "./discovery-session";
 import {
+  FileDiscoveryDesignStore,
+  type DiscoveryDesignStore
+} from "./discovery-design-store";
+import {
   FileHermesDesignStore,
   type HermesDesignStore,
   type HermesDesignTaskFilters
@@ -118,11 +122,20 @@ export async function startHermesDesignTask(
     taskUrl?: string;
     taskSecret?: string;
     store?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
   } = {}
 ): Promise<HermesDesignDispatchResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = designStoreFor(projectRoot, options.store);
-  const session = await getDiscoverySession(input.sessionId, projectRoot);
+  const discoveryStore = discoveryStoreFor(
+    projectRoot,
+    options.discoveryStore
+  );
+  const session = await getDiscoverySession(
+    input.sessionId,
+    projectRoot,
+    discoveryStore
+  );
   if (!session) throw new Error(`Discovery session not found: ${input.sessionId}`);
   const departmentCandidate = input.department ?? session.activeDepartmentId;
   const department = departmentCandidate ? normalizeDepartmentType(departmentCandidate) : undefined;
@@ -135,11 +148,13 @@ export async function startHermesDesignTask(
   const nowIso = now.toISOString();
   const gapSet = await compileEvidenceGaps({
     projectRoot,
+    store: discoveryStore,
     sessionId: session.id,
     now
   });
   const nextQuestions = await getNextEvidenceGapQuestions({
     projectRoot,
+    store: discoveryStore,
     sessionId: session.id,
     limit: 3
   });
@@ -151,6 +166,7 @@ export async function startHermesDesignTask(
   const context = blockingGaps.length === 0
     ? await buildLoopDesignContext({
         projectRoot,
+        store: discoveryStore,
         sessionId: session.id,
         department
       })
@@ -299,6 +315,7 @@ export async function processHermesDesignCallback(input: {
   now?: Date;
 }, options: {
   store?: HermesDesignStore;
+  discoveryStore?: DiscoveryDesignStore;
 } = {}): Promise<{
   task: HermesDesignTask;
   duplicate: boolean;
@@ -307,6 +324,10 @@ export async function processHermesDesignCallback(input: {
 }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = designStoreFor(projectRoot, options.store);
+  const discoveryStore = discoveryStoreFor(
+    projectRoot,
+    options.discoveryStore
+  );
   const callback = hermesDesignCallbackSchema.parse(input.callback);
   const task = await requireHermesDesignTask(store, callback.taskId);
   if (task.callbackIds.includes(callback.callbackId)) {
@@ -346,12 +367,14 @@ export async function processHermesDesignCallback(input: {
   } else if (callback.type === "task.questions_requested") {
     const gapSet = await mergeHermesEvidenceGaps({
       projectRoot,
+      store: discoveryStore,
       sessionId: task.sessionId,
       gaps: callback.gaps,
       now: input.now
     });
     const nextQuestions = await getNextEvidenceGapQuestions({
       projectRoot,
+      store: discoveryStore,
       sessionId: task.sessionId,
       limit: 3
     });
@@ -368,6 +391,7 @@ export async function processHermesDesignCallback(input: {
   } else if (callback.type === "task.proposal_submitted") {
     const currentGaps = await compileEvidenceGaps({
       projectRoot,
+      store: discoveryStore,
       sessionId: task.sessionId,
       now: input.now
     });
@@ -387,6 +411,7 @@ export async function processHermesDesignCallback(input: {
     } else {
       const result = await submitLoopDesignProposalSet({
         projectRoot,
+        store: discoveryStore,
         sessionId: task.sessionId,
         department: task.department,
         proposalSet: callback.proposalSet,
@@ -464,6 +489,7 @@ export async function resumeHermesDesignTasksForSession(input: {
   taskUrl?: string;
   taskSecret?: string;
   store?: HermesDesignStore;
+  discoveryStore?: DiscoveryDesignStore;
 } = {}): Promise<HermesDesignDispatchResult[]> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = designStoreFor(projectRoot, options.store);
@@ -500,16 +526,23 @@ async function resumeHermesDesignTask(
     taskUrl?: string;
     taskSecret?: string;
     store?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
   }
 ): Promise<HermesDesignDispatchResult> {
   const store = designStoreFor(input.projectRoot, options.store);
+  const discoveryStore = discoveryStoreFor(
+    input.projectRoot,
+    options.discoveryStore
+  );
   const gapSet = await compileEvidenceGaps({
     projectRoot: input.projectRoot,
+    store: discoveryStore,
     sessionId: input.task.sessionId,
     now: input.now
   });
   const nextQuestions = await getNextEvidenceGapQuestions({
     projectRoot: input.projectRoot,
+    store: discoveryStore,
     sessionId: input.task.sessionId,
     limit: 3
   });
@@ -521,6 +554,7 @@ async function resumeHermesDesignTask(
   const context = blocking.length === 0
     ? await buildLoopDesignContext({
         projectRoot: input.projectRoot,
+        store: discoveryStore,
         sessionId: input.task.sessionId,
         department: input.task.department
       })
@@ -760,6 +794,13 @@ function designStoreFor(
   supplied?: HermesDesignStore
 ): HermesDesignStore {
   return supplied ?? new FileHermesDesignStore(getLoopgraphRoot(projectRoot));
+}
+
+function discoveryStoreFor(
+  projectRoot: string,
+  supplied?: DiscoveryDesignStore
+): DiscoveryDesignStore {
+  return supplied ?? new FileDiscoveryDesignStore(getLoopgraphRoot(projectRoot));
 }
 
 function isTerminalDesignTaskStatus(status: HermesDesignTask["status"]): boolean {

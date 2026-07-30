@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   GRAPH_CHANGE_SET_SCHEMA_VERSION,
   LOOP_OPPORTUNITY_SCHEMA_VERSION,
+  BusinessDiscoverySessionSchema,
   contentHash,
   graphChangeSetSchema,
   loopOpportunitySchema,
@@ -832,16 +833,19 @@ async function ensureOpportunityDiscoverySession(input: {
     });
   }
   const profile = session.companyProfile;
-  const updated = {
+  const updated = BusinessDiscoverySessionSchema.parse({
     ...session,
     companyProfile: profile ? {
       ...profile,
       bottlenecks: unique([...profile.bottlenecks, input.opportunity.summary]),
       recurringWork: unique([...profile.recurringWork, input.opportunity.problemType])
-    } : profile
-  };
-  await saveDiscoverySession(updated, input.projectRoot);
-  return updated;
+    } : profile,
+    revision: session.revision + 1,
+    updatedAt: (input.now ?? new Date()).toISOString()
+  });
+  return saveDiscoverySession(updated, input.projectRoot, {
+    expectedRevision: session.revision
+  });
 }
 
 async function saveLoopOpportunity(opportunity: LoopOpportunity, projectRoot: string): Promise<void> {
