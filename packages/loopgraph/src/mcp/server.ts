@@ -3,8 +3,10 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   evidenceGapSetSchema,
   eventEnvelopeSchema,
+  graphChangeSetSchema,
   hermesDesignTaskSchema,
   listDepartmentCatalog,
+  loopOpportunitySchema,
   loopDesignContextSchema,
   loopDesignProposalSetSchema,
   requireDepartmentType,
@@ -90,6 +92,15 @@ import {
   type LoopgraphHermesDesignToolName
 } from "../runtime/hermes-design-tools";
 import {
+  callLoopgraphOpportunityTool,
+  graphChangesGetInputSchema,
+  loopgraphOpportunityToolDefinitions,
+  opportunitiesGetInputSchema,
+  opportunitiesScanInputSchema,
+  opportunityDismissInputSchema,
+  type LoopgraphOpportunityToolName
+} from "../runtime/loop-opportunity-tools";
+import {
   callLoopgraphLoopTool,
   loopgraphLoopToolDefinitions,
   loopsListInputSchema,
@@ -169,6 +180,7 @@ type LoopgraphMcpToolName =
   | LoopgraphProjectToolName
   | LoopgraphDesignToolName
   | LoopgraphHermesDesignToolName
+  | LoopgraphOpportunityToolName
   | LoopgraphConnectionToolName
   | LoopgraphLoopToolName;
 
@@ -190,6 +202,10 @@ const toolInputSchemas = {
   loopgraph_hermes_design_tasks_get: hermesDesignTasksGetInputSchema,
   loopgraph_evidence_gaps_get: evidenceGapsGetInputSchema,
   loopgraph_evidence_gap_answer: evidenceGapAnswerInputSchema,
+  loopgraph_opportunities_scan: opportunitiesScanInputSchema,
+  loopgraph_opportunities_get: opportunitiesGetInputSchema,
+  loopgraph_opportunity_dismiss: opportunityDismissInputSchema,
+  loopgraph_graph_changes_get: graphChangesGetInputSchema,
   loopgraph_connections_plan: connectionsPlanInputSchema,
   loopgraph_connections_set_manual_fallback: connectionsSetManualFallbackInputSchema,
   loopgraph_loops_list: loopsListInputSchema,
@@ -225,6 +241,7 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphProjectToolDefinitions,
   ...loopgraphDesignToolDefinitions,
   ...loopgraphHermesDesignToolDefinitions,
+  ...loopgraphOpportunityToolDefinitions,
   ...loopgraphConnectionToolDefinitions,
   ...loopgraphLoopToolDefinitions,
   ...loopgraphRoutingToolDefinitions,
@@ -257,6 +274,8 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/routing-decision",
   "loopgraph://schemas/evidence-gap-set",
   "loopgraph://schemas/hermes-design-task",
+  "loopgraph://schemas/loop-opportunity",
+  "loopgraph://schemas/graph-change-set",
   "loopgraph://graph/company"
 ] as const;
 
@@ -343,10 +362,22 @@ export async function listLoopgraphMcpResources(
       name: "HermesDesignTask schema",
       description: "Durable Loopgraph-initiated design task and delivery state exposed to trusted Hermes sessions.",
       mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
+      name: "LoopOpportunity schema",
+      description: "Explainable, scored opportunity to create, improve, split, merge, or retire a business loop.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[8],
+      name: "GraphChangeSet schema",
+      description: "Versioned proposed changes to the company loop graph derived from observed evidence.",
+      mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[9],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
@@ -706,6 +737,13 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphOpportunityToolName(name)) {
+    return callLoopgraphOpportunityTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
   if (isLoopgraphProjectToolName(name)) {
     return callLoopgraphProjectTool(name, boundInput, {
       projectRoot: options.projectRoot
@@ -811,6 +849,20 @@ function schemaResource(id: string) {
       jsonSchema: zodToJsonSchema(hermesDesignTaskSchema, "HermesDesignTask")
     };
   }
+  if (id === "loop-opportunity") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(loopOpportunitySchema, "LoopOpportunity")
+    };
+  }
+  if (id === "graph-change-set") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(graphChangeSetSchema, "GraphChangeSet")
+    };
+  }
   throw new Error(`Schema resource not found: ${id}`);
 }
 
@@ -876,6 +928,10 @@ function isLoopgraphHermesDesignToolName(value: unknown): value is LoopgraphHerm
   return typeof value === "string" && loopgraphHermesDesignToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphOpportunityToolName(value: unknown): value is LoopgraphOpportunityToolName {
+  return typeof value === "string" && loopgraphOpportunityToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphProjectToolName(value: unknown): value is LoopgraphProjectToolName {
   return typeof value === "string" && loopgraphProjectToolDefinitions.some((tool) => tool.name === value);
 }
@@ -898,6 +954,7 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphProjectToolName(value) ||
     isLoopgraphDesignToolName(value) ||
     isLoopgraphHermesDesignToolName(value) ||
+    isLoopgraphOpportunityToolName(value) ||
     isLoopgraphConnectionToolName(value) ||
     isLoopgraphLoopToolName(value);
 }
@@ -931,6 +988,8 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
     name === "loopgraph_project_inspect" ||
     name === "loopgraph_design_context_get" ||
     name === "loopgraph_hermes_design_tasks_get" ||
+    name === "loopgraph_opportunities_get" ||
+    name === "loopgraph_graph_changes_get" ||
     name === "loopgraph_connections_plan" ||
     name === "loopgraph_loops_list" ||
     name === "loopgraph_runs_get" ||
@@ -956,6 +1015,7 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
     "loopgraph_design_submit",
     "loopgraph_design_edit",
     "loopgraph_evidence_gap_answer",
+    "loopgraph_opportunity_dismiss",
     "loopgraph_connections_set_manual_fallback",
     "loopgraph_loops_materialize",
     "loopgraph_loops_simulate",

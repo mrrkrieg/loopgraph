@@ -27,6 +27,8 @@ The webhook body includes `event_type: "loopgraph.design_requested"` and a durab
 
 Loopgraph accepts duplicate callbacks and repeated task starts safely. A repeated start for the same discovery revision, department, reason, opportunity, and problem set reuses the existing task.
 
+When the task originated from the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md), it includes `originOpportunityId`. Hermes reads the explainable score, durable signal references, and proposed graph change through Loopgraph MCP before asking for missing evidence.
+
 ## Configure proactive Hermes activation
 
 Enable the Hermes webhook gateway, then create a dedicated route:
@@ -62,6 +64,7 @@ The trusted/admin Loopgraph MCP exposure provides:
 | `loopgraph_hermes_design_tasks_get` | Read one task or list task state |
 | `loopgraph_evidence_gaps_get` | Compile gaps and return at most three focused questions |
 | `loopgraph_evidence_gap_answer` | Persist a user-confirmed answer and resume the active task |
+| `loopgraph_opportunities_get` | Read the scored operating evidence and proposed graph change that initiated a task |
 | `loopgraph_design_context_get` | Read the bounded design context once blocking gaps are resolved |
 | `loopgraph_design_submit` | Submit a structured proposal through the canonical compiler |
 

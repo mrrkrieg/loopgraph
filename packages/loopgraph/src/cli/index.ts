@@ -43,6 +43,10 @@ import {
   loopgraph_route_commit_simulate,
   loopgraph_routing_human_choice_submit
 } from "../runtime/routing-tools";
+import {
+  listLoopOpportunities,
+  scanLoopOpportunities
+} from "../runtime/loop-opportunity-engine";
 
 const HERO_TEMPLATES = [
   {
@@ -119,6 +123,7 @@ async function runHermesDoctor(options: { project: string }): Promise<void> {
 
 const workspace = program.command("workspace").description("Local Loopgraph workspace commands");
 const events = program.command("events").description("Hermes-normalized event utilities");
+const opportunities = program.command("opportunities").description("Detect missing or weak loops from durable operating evidence");
 
 workspace
   .command("init")
@@ -134,6 +139,79 @@ workspace
       createdBy: "cli"
     });
     console.log(JSON.stringify(registry, null, 2));
+  });
+
+opportunities
+  .command("scan")
+  .description("Scan once or continuously for explainable loop opportunities and governed Hermes design tasks")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--qualify-threshold <score>", "Minimum score to qualify an opportunity", "45")
+  .option("--auto-design-threshold <score>", "Minimum score to start a draft Hermes design task", "65")
+  .option("--no-auto-start-design", "Detect and score without starting Hermes design tasks")
+  .option("--watch", "Keep scanning the local workspace on an interval")
+  .option("--interval <seconds>", "Watch interval in seconds", "900")
+  .action(async (options: {
+    project: string;
+    qualifyThreshold: string;
+    autoDesignThreshold: string;
+    autoStartDesign: boolean;
+    watch?: boolean;
+    interval: string;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const qualifyThreshold = Number(options.qualifyThreshold);
+    const autoDesignThreshold = Number(options.autoDesignThreshold);
+    const intervalSeconds = Number(options.interval);
+    if (!Number.isFinite(qualifyThreshold) || !Number.isFinite(autoDesignThreshold)) {
+      throw new Error("Opportunity thresholds must be finite numbers from 0 to 100.");
+    }
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds < 30) {
+      throw new Error("Opportunity watch interval must be at least 30 seconds.");
+    }
+    const runScan = async () => {
+      const result = await scanLoopOpportunities({
+        projectRoot,
+        thresholds: {
+          qualify: qualifyThreshold,
+          autoDesign: autoDesignThreshold
+        },
+        autoStartDesign: options.autoStartDesign
+      });
+      console.log(JSON.stringify(result, null, 2));
+    };
+    await runScan();
+    if (!options.watch) return;
+    const intervalMs = intervalSeconds * 1000;
+    console.error(`Watching ${projectRoot} for loop opportunities every ${intervalMs / 1000} seconds.`);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setInterval(() => {
+        void runScan().catch((error) => {
+          clearInterval(timer);
+          reject(error);
+        });
+      }, intervalMs);
+      process.once("SIGINT", () => {
+        clearInterval(timer);
+        resolve();
+      });
+      process.once("SIGTERM", () => {
+        clearInterval(timer);
+        resolve();
+      });
+    });
+  });
+
+opportunities
+  .command("list")
+  .description("List persisted loop opportunities and their score explanations")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--minimum-score <score>", "Only show opportunities at or above this score")
+  .action(async (options: { project: string; minimumScore?: string }) => {
+    const minimumScore = options.minimumScore === undefined ? undefined : Number(options.minimumScore);
+    const result = await listLoopOpportunities(path.resolve(options.project), {
+      minimumScore: minimumScore !== undefined && Number.isFinite(minimumScore) ? minimumScore : undefined
+    });
+    console.log(JSON.stringify({ opportunities: result }, null, 2));
   });
 
 workspace

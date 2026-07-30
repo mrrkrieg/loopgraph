@@ -187,6 +187,7 @@ describe("Hermes design bridge", () => {
       gaps: [],
       nextQuestions: [],
       allowedLoopgraphTools: [
+        "loopgraph_opportunities_get",
         "loopgraph_evidence_gaps_get",
         "loopgraph_evidence_gap_answer",
         "loopgraph_design_context_get",

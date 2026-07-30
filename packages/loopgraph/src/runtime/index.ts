@@ -42,6 +42,8 @@ export * from "./design-tools";
 export * from "./evidence-gap-engine";
 export * from "./hermes-design-bridge";
 export * from "./hermes-design-tools";
+export * from "./loop-opportunity-engine";
+export * from "./loop-opportunity-tools";
 export * from "./loop-materialization";
 export * from "./loop-tools";
 export * from "./studio";
