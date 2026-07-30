@@ -46,5 +46,6 @@ describe("hosted middleware policy", () => {
     ];
     expect(selectHostedMembership(memberships, "org_owner")?.role).toBe("owner");
     expect(selectHostedMembership(memberships, "unknown")?.role).toBe("viewer");
+    expect(selectHostedMembership(memberships, "unknown", true)).toBeUndefined();
   });
 });

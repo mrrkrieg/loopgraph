@@ -4,6 +4,7 @@ import { cookies } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/db/supabase-server";
 import {
   HOSTED_ORGANIZATION_COOKIE,
+  getHostedOrganizationId,
   isHostedAuthRequired
 } from "./hosted-config";
 
@@ -113,8 +114,11 @@ export async function getHostedIdentity(): Promise<HostedIdentity | undefined> {
       : [];
   });
   const selectedOrganizationId = (await cookies()).get(HOSTED_ORGANIZATION_COOKIE)?.value;
-  const membership = memberships.find((item) => item.organizationId === selectedOrganizationId)
-    ?? memberships[0];
+  const deploymentOrganizationId = getHostedOrganizationId();
+  const membership = deploymentOrganizationId
+    ? memberships.find((item) => item.organizationId === deploymentOrganizationId)
+    : memberships.find((item) => item.organizationId === selectedOrganizationId)
+      ?? memberships[0];
 
   return {
     mode: "hosted",

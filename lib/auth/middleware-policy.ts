@@ -28,11 +28,13 @@ export function canRoleMutateHostedApi(role: unknown): boolean {
 
 export function selectHostedMembership<T extends { organization_id: string }>(
   memberships: T[] | null | undefined,
-  selectedOrganizationId: string | undefined
+  selectedOrganizationId: string | undefined,
+  requireExactMatch = false
 ): T | undefined {
-  return memberships?.find(
+  const exact = memberships?.find(
     (membership) => membership.organization_id === selectedOrganizationId
-  ) ?? memberships?.[0];
+  );
+  return exact ?? (requireExactMatch ? undefined : memberships?.[0]);
 }
 
 export function isSameOriginRequest(requestUrl: string, origin: string | null): boolean {

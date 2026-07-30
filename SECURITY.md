@@ -64,5 +64,6 @@ The current public flow supports local discovery, governed loop design, route pl
 Authenticated hosted deployments additionally require the Supabase Auth, organization membership,
 RLS, and server-only credential boundary described in
 [Hosted authentication and tenant security](docs/HOSTED-SECURITY.md). The current hosted runtime is
-safe only as one organization per worker deployment; a shared multi-customer filesystem worker is
-not a supported production topology.
+safe only as one organization/project and one active writer per persistent runtime deployment; a
+shared multi-customer filesystem worker is not a supported production topology. See
+[Hosted runtime namespaces](docs/HOSTED-RUNTIME-NAMESPACES.md).

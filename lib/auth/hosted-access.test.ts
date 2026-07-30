@@ -5,6 +5,7 @@ import {
   roleHasPermission
 } from "./hosted-access";
 import {
+  getHostedOrganizationId,
   isHostedAuthRequired,
   isPublicHostedPreviewEnvironment
 } from "./hosted-config";
@@ -46,6 +47,16 @@ describe("hosted access policy", () => {
     } as NodeJS.ProcessEnv;
     expect(isPublicHostedPreviewEnvironment(env)).toBe(false);
     expect(isHostedAuthRequired(env)).toBe(true);
+  });
+
+  it("normalizes the deployment organization binding", () => {
+    expect(getHostedOrganizationId({
+      NODE_ENV: "production",
+      LOOPGRAPH_HOSTED_ORGANIZATION_ID: "  org_123  "
+    } as NodeJS.ProcessEnv)).toBe("org_123");
+    expect(getHostedOrganizationId({
+      NODE_ENV: "test"
+    } as NodeJS.ProcessEnv)).toBeUndefined();
   });
 
   it("uses a monotonic organization role hierarchy", () => {

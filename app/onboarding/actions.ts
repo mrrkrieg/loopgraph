@@ -2,7 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { getHostedIdentity } from "@/lib/auth/hosted-access";
-import { HOSTED_ORGANIZATION_COOKIE } from "@/lib/auth/hosted-config";
+import {
+  HOSTED_ORGANIZATION_COOKIE,
+  getHostedOrganizationId
+} from "@/lib/auth/hosted-config";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
 import { cookies } from "next/headers";
 
@@ -14,6 +17,11 @@ export async function createOrganizationAction(formData: FormData) {
   const identity = await getHostedIdentity();
   if (!identity) throw new Error("Hosted authentication is not enabled.");
   if (identity.membership) redirect("/");
+  if (getHostedOrganizationId()) {
+    throw new Error(
+      "This deployment is already bound to an organization. Ask an owner to invite your account."
+    );
+  }
 
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Server provisioning is not configured.");
