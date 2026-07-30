@@ -52,6 +52,7 @@ export type SubmitLoopDesignInput = {
   modelIdentifier?: string;
   reasoningProfile?: "standard" | "high";
   providerMetadata?: Record<string, unknown>;
+  submissionIdempotencyKey?: string;
   now?: Date;
 };
 
@@ -357,7 +358,8 @@ export async function submitLoopDesignProposalSet(
         ]
       },
       ...(input.providerMetadata ? { providerMetadata: input.providerMetadata } : {})
-    }
+    },
+    submissionIdempotencyKey: input.submissionIdempotencyKey
   });
 }
 
@@ -592,6 +594,7 @@ async function persistDesignSubmission(input: {
   reasoningProfile: "standard" | "high";
   now?: Date;
   metadata?: Record<string, unknown>;
+  submissionIdempotencyKey?: string;
 }): Promise<LoopDesignSubmissionResult> {
   const nowIso = (input.now ?? new Date()).toISOString();
   const errors = validateLoopDesignProposalSet(input.proposalSet, input.context);
@@ -604,7 +607,13 @@ async function persistDesignSubmission(input: {
   });
   const designRun = designRunSchema.parse({
     schemaVersion: DESIGN_RUN_SCHEMA_VERSION,
-    id: `design_${contentHash({ contextHash: input.context.contextHash, proposalSet, at: nowIso })}`,
+    id: `design_${contentHash(input.submissionIdempotencyKey
+      ? {
+          contextHash: input.context.contextHash,
+          proposalSet,
+          submissionIdempotencyKey: input.submissionIdempotencyKey
+        }
+      : { contextHash: input.context.contextHash, proposalSet, at: nowIso })}`,
     sessionId: input.context.sessionId,
     departmentType: input.context.departmentType,
     providerMode: input.providerMode,
@@ -621,11 +630,50 @@ async function persistDesignSubmission(input: {
     finalProposalIds: errors.length === 0 ? proposalSet.proposals.map((proposal) => proposal.proposalId) : [],
     metadata: {
       ...(input.metadata ?? {}),
+      ...(input.submissionIdempotencyKey
+        ? { submissionIdempotencyKey: input.submissionIdempotencyKey }
+        : {}),
       proposalCount: proposalSet.proposals.length
     }
   });
   const designRunPath = designRunFilePath(input.projectRoot, designRun.id);
   const proposalSetPath = proposalSetFilePath(input.projectRoot, designRun.id);
+  if (input.submissionIdempotencyKey) {
+    const existingRun = await readDesignRun(input.projectRoot, designRun.id);
+    if (existingRun) {
+      if (
+        existingRun.inputHash !== designRun.inputHash ||
+        existingRun.outputHash !== designRun.outputHash
+      ) {
+        throw new Error(
+          "Idempotent design submission resolved to conflicting content"
+        );
+      }
+      let existingProposalSet = await readLoopDesignProposalSet(
+        input.projectRoot,
+        designRun.id
+      );
+      if (!existingProposalSet) {
+        await writeJson(proposalSetPath, proposalSet);
+        existingProposalSet = proposalSet;
+      }
+      await appendDesignRunToSession(
+        input.projectRoot,
+        input.context.sessionId,
+        designRun.id
+      );
+      return {
+        valid: existingRun.validationErrors.length === 0,
+        errors: existingRun.validationErrors,
+        designRun: existingRun,
+        ...(existingRun.validationErrors.length === 0
+          ? { proposalSet: existingProposalSet }
+          : {}),
+        proposalSetPath,
+        designRunPath
+      };
+    }
+  }
   await writeJson(designRunPath, designRun);
   await writeJson(proposalSetPath, proposalSet);
   await appendDesignRunToSession(input.projectRoot, input.context.sessionId, designRun.id);
@@ -1413,6 +1461,7 @@ function resolveDesignDepartment(session: BusinessDiscoverySession, requested?: 
 
 async function appendDesignRunToSession(projectRoot: string, sessionId: string, designRunId: string): Promise<void> {
   const session = await requireSession(sessionId, projectRoot);
+  if (session.designRunIds.includes(designRunId)) return;
   const next = BusinessDiscoverySessionSchema.parse({
     ...session,
     designRunIds: Array.from(new Set([...session.designRunIds, designRunId])),

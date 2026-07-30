@@ -15,6 +15,7 @@ export type MachineCapability =
   | "controller.operate"
   | "graph.transact"
   | "hermes.design_callback"
+  | "hermes.design_callback_process"
   | "hermes.design_dispatch"
   | "measurements.collect"
   | "observability.read"
@@ -23,6 +24,7 @@ export type MachineCapability =
   | "routing.worker"
   | "schedule.controller"
   | "schedule.hermes_design"
+  | "schedule.hermes_callbacks"
   | "schedule.management"
   | "schedule.measurements";
 
@@ -40,6 +42,22 @@ export type VerifiedHostedMachineRequest = {
   requestHash: string;
   requestedAt: string;
   rateLimit: number;
+};
+
+export type HostedMachineRequestContext = {
+  organizationId: string;
+  projectKey: string;
+  credentialId: string;
+  capability: MachineCapability;
+  requestId: string;
+  requestHash: string;
+  requestedAt: string;
+  rateLimit: number;
+};
+
+export type PreparedVerifiedHostedMachineRequest = {
+  context?: HostedMachineRequestContext;
+  response?: NextResponse;
 };
 
 export function authorizeWorkerApiRequest(
@@ -283,24 +301,42 @@ async function authorizeHostedMachineRequest(
 export async function authorizeVerifiedHostedMachineRequest(
   input: VerifiedHostedMachineRequest
 ): Promise<NextResponse | null> {
-  if (!isHostedAuthRequired()) return null;
+  const prepared = prepareVerifiedHostedMachineRequest(input);
+  if (prepared.response) return prepared.response;
+  if (!prepared.context) return null;
+  return recordHostedMachineRequest(prepared.context);
+}
 
+export function prepareVerifiedHostedMachineRequest(
+  input: VerifiedHostedMachineRequest
+): PreparedVerifiedHostedMachineRequest {
+  if (!isHostedAuthRequired()) return {};
   const organizationId = getHostedOrganizationId();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
   const credentialId =
     process.env[input.credentialEnvironmentVariable]?.trim();
   const requestedAt = Date.parse(input.requestedAt);
   if (!organizationId || !credentialId) {
-    return unavailable(
-      `Hosted ${input.capability} authorization requires ` +
-      `LOOPGRAPH_HOSTED_ORGANIZATION_ID and ${input.credentialEnvironmentVariable}.`
-    );
+    return {
+      response: unavailable(
+        `Hosted ${input.capability} authorization requires ` +
+        `LOOPGRAPH_HOSTED_ORGANIZATION_ID and ${input.credentialEnvironmentVariable}.`
+      )
+    };
   }
   if (!CREDENTIAL_ID_PATTERN.test(credentialId)) {
-    return unavailable(`${input.credentialEnvironmentVariable} has an invalid credential ID.`);
+    return {
+      response: unavailable(
+        `${input.credentialEnvironmentVariable} has an invalid credential ID.`
+      )
+    };
   }
   if (!PROJECT_KEY_PATTERN.test(projectKey)) {
-    return unavailable("LOOPGRAPH_HOSTED_PROJECT_KEY has an invalid project key.");
+    return {
+      response: unavailable(
+        "LOOPGRAPH_HOSTED_PROJECT_KEY has an invalid project key."
+      )
+    };
   }
   if (
     !REQUEST_ID_PATTERN.test(input.requestId) ||
@@ -308,24 +344,28 @@ export async function authorizeVerifiedHostedMachineRequest(
     !Number.isFinite(requestedAt) ||
     Math.abs(Date.now() - requestedAt) > MAX_CLOCK_SKEW_MS
   ) {
-    return NextResponse.json({
-      error: "Verified machine request metadata is invalid or stale."
-    }, {
-      status: 400,
-      headers: { "cache-control": "no-store" }
-    });
+    return {
+      response: NextResponse.json({
+        error: "Verified machine request metadata is invalid or stale."
+      }, {
+        status: 400,
+        headers: { "cache-control": "no-store" }
+      })
+    };
   }
 
-  return recordHostedMachineRequest({
-    organizationId,
-    projectKey,
-    credentialId,
-    capability: input.capability,
-    requestId: input.requestId,
-    requestHash: input.requestHash,
-    requestedAt: new Date(requestedAt).toISOString(),
-    rateLimit: positiveInteger(String(input.rateLimit), 60)
-  });
+  return {
+    context: {
+      organizationId,
+      projectKey,
+      credentialId,
+      capability: input.capability,
+      requestId: input.requestId,
+      requestHash: input.requestHash,
+      requestedAt: new Date(requestedAt).toISOString(),
+      rateLimit: positiveInteger(String(input.rateLimit), 60)
+    }
+  };
 }
 
 async function recordHostedMachineRequest(input: {

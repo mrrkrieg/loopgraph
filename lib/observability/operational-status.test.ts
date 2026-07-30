@@ -41,30 +41,43 @@ describe("operational status", () => {
 
   it("loads a tenant-bound hosted snapshot and formats scrape metrics", async () => {
     hostedEnvironment();
-    rpc.mockResolvedValue({
-      data: {
-        database_ready: true,
-        machine_requests_5m: 8,
-        machine_rate_limited_5m: 2,
-        machine_denied_5m: 3,
-        audit_events_total: 90,
-        audit_head_sequence: 105,
-        route_jobs_queued: 7,
-        route_jobs_running: 2,
-        route_jobs_waiting_review: 1,
-        route_jobs_dead_letter: 4,
-        route_jobs_due: 3,
-        route_job_expired_leases: 1,
-        route_job_oldest_due_seconds: 75,
-        hermes_dispatch_queued: 5,
-        hermes_dispatch_running: 2,
-        hermes_dispatch_dead_letter: 1,
-        hermes_dispatch_due: 4,
-        hermes_dispatch_expired_leases: 1,
-        hermes_dispatch_oldest_due_seconds: 45
-      },
-      error: null
-    });
+    rpc.mockImplementation(async (name: string) => name ===
+      "get_hermes_callback_queue_snapshot"
+      ? {
+          data: {
+            hermes_callbacks_queued: 6,
+            hermes_callbacks_running: 2,
+            hermes_callbacks_dead_letter: 1,
+            hermes_callbacks_due: 3,
+            hermes_callback_expired_leases: 1,
+            hermes_callback_oldest_due_seconds: 33
+          },
+          error: null
+        }
+      : {
+          data: {
+            database_ready: true,
+            machine_requests_5m: 8,
+            machine_rate_limited_5m: 2,
+            machine_denied_5m: 3,
+            audit_events_total: 90,
+            audit_head_sequence: 105,
+            route_jobs_queued: 7,
+            route_jobs_running: 2,
+            route_jobs_waiting_review: 1,
+            route_jobs_dead_letter: 4,
+            route_jobs_due: 3,
+            route_job_expired_leases: 1,
+            route_job_oldest_due_seconds: 75,
+            hermes_dispatch_queued: 5,
+            hermes_dispatch_running: 2,
+            hermes_dispatch_dead_letter: 1,
+            hermes_dispatch_due: 4,
+            hermes_dispatch_expired_leases: 1,
+            hermes_dispatch_oldest_due_seconds: 45
+          },
+          error: null
+        });
 
     const readiness = await getOperationalReadiness();
 
@@ -95,7 +108,13 @@ describe("operational status", () => {
         hermesDispatchDeadLetter: 1,
         hermesDispatchDue: 4,
         hermesDispatchExpiredLeases: 1,
-        hermesDispatchOldestDueSeconds: 45
+        hermesDispatchOldestDueSeconds: 45,
+        hermesCallbacksQueued: 6,
+        hermesCallbacksRunning: 2,
+        hermesCallbacksDeadLetter: 1,
+        hermesCallbacksDue: 3,
+        hermesCallbackExpiredLeases: 1,
+        hermesCallbackOldestDueSeconds: 33
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
@@ -107,6 +126,9 @@ describe("operational status", () => {
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_hermes_dispatch_due 4"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_hermes_callbacks_due 3"
     );
   });
 

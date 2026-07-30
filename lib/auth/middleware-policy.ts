@@ -11,6 +11,12 @@ export function isMachineAuthenticatedRoute(pathname: string): boolean {
   if (/^\/api\/hermes\/design-tasks\/[^/]+\/callback$/.test(pathname)) {
     return true;
   }
+  if (
+    pathname === "/api/hermes/design-dispatch/worker" ||
+    pathname === "/api/hermes/design-callbacks/worker"
+  ) {
+    return true;
+  }
   if (pathname === "/api/routing/worker" || /^\/api\/routing\/jobs\/[^/]+$/.test(pathname)) {
     return true;
   }

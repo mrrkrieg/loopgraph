@@ -3,14 +3,21 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   hermesDesignCallbackSchema,
+  hermesDesignCallbackJobSchema,
   hermesDesignDispatchJobSchema,
   hermesDesignTaskSchema,
+  type HermesDesignCallbackJob,
   type HermesDesignDispatchJob,
   type HermesDesignTask
 } from "loopgraph/core";
 import type {
   HermesDesignCallbackApplyInput,
   HermesDesignCallbackApplyResult,
+  HermesDesignCallbackJobAcceptInput,
+  HermesDesignCallbackJobAcceptResult,
+  HermesDesignCallbackJobClaimInput,
+  HermesDesignCallbackJobFilters,
+  HermesDesignCallbackJobUpdateInput,
   HermesDesignDispatchJobClaimInput,
   HermesDesignDispatchJobCreateResult,
   HermesDesignDispatchJobFilters,
@@ -59,6 +66,27 @@ type CallbackApplyResult = TaskUpdateResult & {
 type DispatchJobRow = {
   payload: unknown;
   revision: number | string;
+};
+
+type CallbackJobRow = {
+  payload: unknown;
+  revision: number | string;
+};
+
+type CallbackJobAcceptResult = {
+  authorized: boolean;
+  reason: string;
+  retry_after_seconds?: number | null;
+  job?: unknown | null;
+  created?: boolean | null;
+  revision?: number | string | null;
+};
+
+type CallbackJobUpdateResult = {
+  updated: boolean;
+  job: unknown | null;
+  revision: number | string | null;
+  conflict_reason: string | null;
 };
 
 type DispatchCreateResult = {
@@ -305,6 +333,180 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
     );
   }
 
+  async acceptCallbackJobAtomically(
+    input: HermesDesignCallbackJobAcceptInput
+  ): Promise<HermesDesignCallbackJobAcceptResult> {
+    const job = hermesDesignCallbackJobSchema.parse(input.job);
+    if (input.machineRequest) {
+      if (
+        input.machineRequest.organizationId !== this.scope.organizationId ||
+        input.machineRequest.projectKey !== this.scope.projectKey
+      ) {
+        throw new Error("Hermes callback machine scope does not match the design store");
+      }
+      if (input.machineRequest.requestHash !== job.requestHash) {
+        throw new Error("Hermes callback machine request hash does not match the job");
+      }
+      const { data, error } = await this.supabase.rpc(
+        "authorize_and_enqueue_hermes_design_callback",
+        {
+          p_organization_id: this.scope.organizationId,
+          p_project_key: this.scope.projectKey,
+          p_credential_id: input.machineRequest.credentialId,
+          p_capability: input.machineRequest.capability,
+          p_request_id: input.machineRequest.requestId,
+          p_request_hash: input.machineRequest.requestHash,
+          p_requested_at: input.machineRequest.requestedAt,
+          p_rate_limit: input.machineRequest.rateLimit,
+          p_job: job
+        }
+      );
+      if (error) {
+        throw new Error(
+          `Failed to authorize and enqueue Hermes callback: ${error.message}`
+        );
+      }
+      return parseCallbackAcceptance(data);
+    }
+
+    const { data, error } = await this.supabase.rpc(
+      "enqueue_hermes_design_callback_job",
+      {
+        p_organization_id: this.scope.organizationId,
+        p_project_key: this.scope.projectKey,
+        p_job: job
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to enqueue Hermes design callback: ${error.message}`);
+    }
+    const result = firstRow<{
+      job: unknown;
+      created: boolean;
+      revision: number | string;
+    }>(data);
+    if (!result || typeof result.created !== "boolean") {
+      throw new Error("Hermes callback enqueue did not return an atomic result");
+    }
+    return {
+      authorized: true,
+      reason: result.created ? "accepted" : "duplicate",
+      created: result.created,
+      job: hermesDesignCallbackJobSchema.parse(result.job)
+    };
+  }
+
+  async getCallbackJob(
+    jobId: string
+  ): Promise<HermesDesignCallbackJob | undefined> {
+    const row = await this.getCallbackJobRow(jobId);
+    return row ? hermesDesignCallbackJobSchema.parse(row.payload) : undefined;
+  }
+
+  async listCallbackJobs(
+    filters: HermesDesignCallbackJobFilters = {}
+  ): Promise<HermesDesignCallbackJob[]> {
+    const jobs: HermesDesignCallbackJob[] = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      let query = this.supabase
+        .from("hermes_design_callback_jobs")
+        .select("payload")
+        .eq("organization_id", this.scope.organizationId)
+        .eq("project_key", this.scope.projectKey);
+      if (filters.taskId) query = query.eq("task_id", filters.taskId);
+      if (filters.callbackId) query = query.eq("callback_id", filters.callbackId);
+      if (filters.status) query = query.eq("status", filters.status);
+      const { data, error } = await query
+        .order("next_run_at", { ascending: true })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (error) {
+        throw new Error(`Failed to list Hermes design callback jobs: ${error.message}`);
+      }
+      const page = (data ?? []) as Array<{ payload: unknown }>;
+      jobs.push(...page.map((row) =>
+        hermesDesignCallbackJobSchema.parse(row.payload)
+      ));
+      if (page.length < PAGE_SIZE) return jobs;
+    }
+  }
+
+  async claimDueCallbackJobsAtomically(
+    input: HermesDesignCallbackJobClaimInput
+  ): Promise<HermesDesignCallbackJob[]> {
+    const { data, error } = await this.supabase.rpc(
+      "claim_hermes_design_callback_jobs",
+      {
+        p_organization_id: this.scope.organizationId,
+        p_project_key: this.scope.projectKey,
+        p_claimed_by: input.claimedBy,
+        p_now: input.now.toISOString(),
+        p_lease_seconds: Math.min(3600, Math.max(30, input.leaseSeconds)),
+        p_limit: Math.min(100, Math.max(1, input.limit))
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to claim Hermes design callback jobs: ${error.message}`);
+    }
+    return (Array.isArray(data) ? data : []).map((row) =>
+      hermesDesignCallbackJobSchema.parse(
+        isRecord(row) && "job" in row ? row.job : row
+      )
+    );
+  }
+
+  async updateCallbackJobAtomically(
+    input: HermesDesignCallbackJobUpdateInput
+  ): Promise<HermesDesignCallbackJob> {
+    for (let attempt = 0; attempt < MAX_ATOMIC_UPDATE_RETRIES; attempt += 1) {
+      const current = await this.getCallbackJobRow(input.jobId);
+      if (!current) {
+        throw new Error(`Hermes design callback job not found: ${input.jobId}`);
+      }
+      const parsedCurrent = hermesDesignCallbackJobSchema.parse(current.payload);
+      if (
+        input.expectedLeaseToken &&
+        parsedCurrent.lease?.leaseToken !== input.expectedLeaseToken
+      ) {
+        throw new Error(`Hermes design callback job lease lost: ${input.jobId}`);
+      }
+      const updated = hermesDesignCallbackJobSchema.parse(input.update(parsedCurrent));
+      assertCallbackJobIdentity(parsedCurrent, updated);
+      const { data, error } = await this.supabase.rpc(
+        "compare_and_swap_hermes_design_callback_job",
+        {
+          p_organization_id: this.scope.organizationId,
+          p_project_key: this.scope.projectKey,
+          p_job_id: input.jobId,
+          p_expected_revision: numericRevision(current.revision),
+          p_expected_lease_token: input.expectedLeaseToken ?? null,
+          p_job: updated
+        }
+      );
+      if (error) {
+        throw new Error(`Failed to update Hermes design callback job: ${error.message}`);
+      }
+      const result = firstRow<CallbackJobUpdateResult>(data);
+      if (!result) throw new Error("Hermes callback job update did not return a result");
+      if (result.updated) return hermesDesignCallbackJobSchema.parse(result.job);
+      if (result.conflict_reason === "not_found") {
+        throw new Error(`Hermes design callback job not found: ${input.jobId}`);
+      }
+      if (result.conflict_reason === "lease_lost") {
+        throw new Error(`Hermes design callback job lease lost: ${input.jobId}`);
+      }
+      if (result.conflict_reason !== "revision_conflict") {
+        throw new Error(
+          `Hermes callback job update failed: ` +
+          `${result.conflict_reason ?? "unknown conflict"}`
+        );
+      }
+    }
+    throw new Error(
+      `Hermes callback job ${input.jobId} changed too many times during atomic update`
+    );
+  }
+
   async enqueueDispatchJobAtomically(
     job: HermesDesignDispatchJob
   ): Promise<HermesDesignDispatchJobCreateResult> {
@@ -464,6 +666,20 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
     }
     return data ? data as DispatchJobRow : null;
   }
+
+  private async getCallbackJobRow(jobId: string): Promise<CallbackJobRow | null> {
+    const { data, error } = await this.supabase
+      .from("hermes_design_callback_jobs")
+      .select("payload, revision")
+      .eq("organization_id", this.scope.organizationId)
+      .eq("project_key", this.scope.projectKey)
+      .eq("job_id", jobId)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`Failed to load Hermes design callback job: ${error.message}`);
+    }
+    return data ? data as CallbackJobRow : null;
+  }
 }
 
 export function isSupabaseHermesDesignStoreEnabled(
@@ -524,6 +740,21 @@ function assertDispatchJobIdentity(
   }
 }
 
+function assertCallbackJobIdentity(
+  current: HermesDesignCallbackJob,
+  updated: HermesDesignCallbackJob
+): void {
+  if (
+    updated.id !== current.id ||
+    updated.idempotencyKey !== current.idempotencyKey ||
+    updated.taskId !== current.taskId ||
+    updated.callbackId !== current.callbackId ||
+    updated.requestHash !== current.requestHash
+  ) {
+    throw new Error("Hermes design callback job identity cannot change");
+  }
+}
+
 function numericRevision(value: number | string): number {
   const revision = Number(value);
   if (!Number.isSafeInteger(revision) || revision < 1) {
@@ -534,6 +765,26 @@ function numericRevision(value: number | string): number {
 
 function firstRow<T>(value: unknown): T | undefined {
   return Array.isArray(value) ? value[0] as T | undefined : undefined;
+}
+
+function parseCallbackAcceptance(
+  value: unknown
+): HermesDesignCallbackJobAcceptResult {
+  const result = firstRow<CallbackJobAcceptResult>(value);
+  if (!result || typeof result.authorized !== "boolean") {
+    throw new Error("Hermes callback acceptance did not return an atomic result");
+  }
+  return {
+    authorized: result.authorized,
+    reason: typeof result.reason === "string" ? result.reason : "guard_rejected",
+    created: result.created === true,
+    ...(result.job
+      ? { job: hermesDesignCallbackJobSchema.parse(result.job) }
+      : {}),
+    ...(typeof result.retry_after_seconds === "number"
+      ? { retryAfterSeconds: result.retry_after_seconds }
+      : {})
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

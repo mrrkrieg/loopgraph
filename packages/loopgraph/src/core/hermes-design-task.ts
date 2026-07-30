@@ -15,6 +15,8 @@ export const HERMES_DESIGN_CALLBACK_SCHEMA_VERSION = "hermes-design-callback/v1a
 export const HERMES_DESIGN_REQUEST_SCHEMA_VERSION = "hermes-design-request/v1alpha1" as const;
 export const HERMES_DESIGN_DISPATCH_JOB_SCHEMA_VERSION =
   "hermes-design-dispatch-job/v1alpha1" as const;
+export const HERMES_DESIGN_CALLBACK_JOB_SCHEMA_VERSION =
+  "hermes-design-callback-job/v1alpha1" as const;
 
 export const hermesDesignTaskStatusSchema = z.enum([
   "queued",
@@ -176,6 +178,87 @@ export const hermesDesignDispatchJobSchema = z.object({
   updatedAt: z.string().datetime()
 });
 
+export const hermesDesignCallbackJobStatusSchema = z.enum([
+  "queued",
+  "claimed",
+  "completed",
+  "failed",
+  "dead_letter",
+  "cancelled"
+]);
+
+export const hermesDesignCallbackJobSchema = z.object({
+  schemaVersion: z.literal(HERMES_DESIGN_CALLBACK_JOB_SCHEMA_VERSION)
+    .default(HERMES_DESIGN_CALLBACK_JOB_SCHEMA_VERSION),
+  id: z.string().min(1).max(160),
+  idempotencyKey: z.string().min(1).max(160),
+  taskId: z.string().min(1).max(256),
+  callbackId: z.string().min(1).max(256),
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+  callback: hermesDesignCallbackSchema,
+  status: hermesDesignCallbackJobStatusSchema,
+  attemptCount: z.number().int().min(0).default(0),
+  maxAttempts: z.number().int().min(1).max(100).default(5),
+  retryPolicy: z.object({
+    baseDelaySeconds: z.number().int().min(1).default(30),
+    maxDelaySeconds: z.number().int().min(1).default(3600),
+    backoffMultiplier: z.number().min(1).default(2)
+  }).default({
+    baseDelaySeconds: 30,
+    maxDelaySeconds: 3600,
+    backoffMultiplier: 2
+  }),
+  nextRunAt: z.string().datetime(),
+  lease: z.object({
+    claimedBy: z.string().min(1),
+    leaseToken: z.string().min(1),
+    claimedAt: z.string().datetime(),
+    expiresAt: z.string().datetime()
+  }).optional(),
+  result: z.object({
+    duplicate: z.boolean(),
+    designRunId: z.string().optional(),
+    validationErrors: z.array(z.string()).default([]),
+    completedAt: z.string().datetime()
+  }).optional(),
+  lastError: z.object({
+    message: z.string().min(1),
+    at: z.string().datetime()
+  }).optional(),
+  deadLetterReason: z.string().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+}).superRefine((job, context) => {
+  if (job.callback.taskId !== job.taskId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["callback", "taskId"],
+      message: "Callback task identity must match its inbox job"
+    });
+  }
+  if (job.callback.callbackId !== job.callbackId) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["callback", "callbackId"],
+      message: "Callback identity must match its inbox job"
+    });
+  }
+  if (job.status === "claimed" && !job.lease) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["lease"],
+      message: "Claimed callback jobs require a lease"
+    });
+  }
+  if (job.status !== "claimed" && job.lease) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["lease"],
+      message: "Only claimed callback jobs may carry a lease"
+    });
+  }
+});
+
 export type HermesDesignTaskStatus = z.infer<typeof hermesDesignTaskStatusSchema>;
 export type HermesDesignTask = z.infer<typeof hermesDesignTaskSchema>;
 export type HermesDesignCallback = z.infer<typeof hermesDesignCallbackSchema>;
@@ -183,3 +266,6 @@ export type HermesDesignRequest = z.infer<typeof hermesDesignRequestSchema>;
 export type HermesDesignDispatchJobStatus =
   z.infer<typeof hermesDesignDispatchJobStatusSchema>;
 export type HermesDesignDispatchJob = z.infer<typeof hermesDesignDispatchJobSchema>;
+export type HermesDesignCallbackJobStatus =
+  z.infer<typeof hermesDesignCallbackJobStatusSchema>;
+export type HermesDesignCallbackJob = z.infer<typeof hermesDesignCallbackJobSchema>;

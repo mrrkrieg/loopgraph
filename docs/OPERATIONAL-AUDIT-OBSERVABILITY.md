@@ -79,10 +79,15 @@ Wire the protected metrics into the deployment monitoring system and begin with:
   its last error;
 - sustained `loopgraph_route_job_expired_leases > 0` or increasing
   `loopgraph_route_job_oldest_due_seconds`: inspect worker health and capacity;
+- any `loopgraph_hermes_callbacks_dead_letter > 0`: preserve the signed callback receipt and
+  inspect the compiler or task-application error;
+- sustained `loopgraph_hermes_callback_expired_leases > 0` or increasing
+  `loopgraph_hermes_callback_oldest_due_seconds`: inspect callback-worker health and capacity;
 - an audit-chain verification response of `409`: stop promotion and preserve database evidence.
 
-The snapshot now covers the hosted authorization plane and database-backed route queue. Controller
-lag and measurement lag remain file-backed and are not emitted as deployment metrics.
+The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
+Hermes dispatch queue, and inbound Hermes callback inbox. Controller lag and measurement lag
+remain file-backed and are not emitted as deployment metrics.
 
 ## Deployment check
 

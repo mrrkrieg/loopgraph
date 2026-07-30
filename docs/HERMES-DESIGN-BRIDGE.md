@@ -91,12 +91,19 @@ POST /api/hermes/design-tasks
 GET  /api/hermes/design-tasks/:taskId
 POST /api/hermes/design-tasks/:taskId/callback
 POST /api/hermes/design-dispatch/worker
+POST /api/hermes/design-callbacks/worker
 GET  /api/cron/hermes-design
+GET  /api/cron/hermes-callbacks
 GET  /api/discovery/session/:sessionId/evidence-gaps
 POST /api/discovery/session/:sessionId/evidence-gaps
 ```
 
-The callback route requires `LOOPGRAPH_HERMES_CALLBACK_SECRET` (or the compatibility task secret), a fresh `X-Hermes-Timestamp`, and `X-Hermes-Signature`. It is an optional remote-worker path; the recommended local Hermes path submits answers and proposals through Loopgraph MCP.
+The callback route requires `LOOPGRAPH_HERMES_CALLBACK_SECRET` (or the compatibility task
+secret), a fresh `X-Hermes-Timestamp`, and `X-Hermes-Signature`. Hosted acceptance commits replay
+authorization and callback enqueue in one database transaction, then a leased worker compiles and
+applies the callback. See the
+[Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md). It is an optional remote-worker
+path; the recommended local Hermes path submits answers and proposals through Loopgraph MCP.
 
 When `LOOPGRAPH_PUBLIC_URL` is set, design requests include the callback URL. When it is absent, Hermes uses MCP only.
 

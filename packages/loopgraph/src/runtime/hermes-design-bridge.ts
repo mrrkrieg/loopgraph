@@ -310,11 +310,16 @@ export async function processHermesDesignCallback(input: {
   const callback = hermesDesignCallbackSchema.parse(input.callback);
   const task = await requireHermesDesignTask(store, callback.taskId);
   if (task.callbackIds.includes(callback.callbackId)) {
+    const repaired = await store.applyCallbackAtomically({
+      taskId: callback.taskId,
+      callback,
+      update: (current) => current
+    });
     return {
-      task,
+      task: repaired.task,
       duplicate: true,
-      designRunId: task.designRunIds.at(-1),
-      validationErrors: task.compilerErrors
+      designRunId: repaired.task.designRunIds.at(-1),
+      validationErrors: repaired.task.compilerErrors
     };
   }
   if (callback.hermesTaskId && task.hermesTaskId && callback.hermesTaskId !== task.hermesTaskId) {
@@ -394,6 +399,7 @@ export async function processHermesDesignCallback(input: {
           hermesDesignTaskId: task.id,
           callbackId: callback.callbackId
         },
+        submissionIdempotencyKey: `hermes-callback:${callback.callbackId}`,
         now: input.now
       });
       designRunId = result.designRun.id;

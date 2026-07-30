@@ -112,19 +112,29 @@ export function getHermesDesignStore(options?: {
   rootDir?: string;
   forceFile?: boolean;
 }): HermesDesignStore {
-  const rootDir = path.resolve(options?.rootDir ?? getLoopgraphRoot());
   const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
-  const cacheKey = isSupabaseHermesDesignStoreEnabled()
+  const useSupabase =
+    !options?.forceFile && isSupabaseHermesDesignStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase Hermes design storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+      "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const rootDir = useSupabase
+    ? undefined
+    : path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const cacheKey = useSupabase
     ? `supabase-hermes-design:${organizationId}:${projectKey}`
-    : `file-hermes-design:${rootDir}`;
+    : `file-hermes-design:${rootDir!}`;
   if (!options?.forceFile && cachedHermesDesignStores.has(cacheKey)) {
     return cachedHermesDesignStores.get(cacheKey)!;
   }
 
-  const store = !options?.forceFile && isSupabaseHermesDesignStoreEnabled()
+  const store = useSupabase
     ? createSupabaseHermesDesignStore()
-    : new FileHermesDesignStore(rootDir);
+    : new FileHermesDesignStore(rootDir!);
   if (!options?.forceFile) cachedHermesDesignStores.set(cacheKey, store);
   return store;
 }

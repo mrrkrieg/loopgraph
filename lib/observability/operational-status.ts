@@ -24,6 +24,12 @@ export type OperationalMetrics = {
   hermesDispatchDue: number;
   hermesDispatchExpiredLeases: number;
   hermesDispatchOldestDueSeconds: number;
+  hermesCallbacksQueued: number;
+  hermesCallbacksRunning: number;
+  hermesCallbacksDeadLetter: number;
+  hermesCallbacksDue: number;
+  hermesCallbackExpiredLeases: number;
+  hermesCallbackOldestDueSeconds: number;
   lastMachineRequestAt?: string;
 };
 
@@ -86,7 +92,13 @@ const EMPTY_METRICS: OperationalMetrics = {
   hermesDispatchDeadLetter: 0,
   hermesDispatchDue: 0,
   hermesDispatchExpiredLeases: 0,
-  hermesDispatchOldestDueSeconds: 0
+  hermesDispatchOldestDueSeconds: 0,
+  hermesCallbacksQueued: 0,
+  hermesCallbacksRunning: 0,
+  hermesCallbacksDeadLetter: 0,
+  hermesCallbacksDue: 0,
+  hermesCallbackExpiredLeases: 0,
+  hermesCallbackOldestDueSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -140,11 +152,23 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     };
   }
 
-  const { data, error } = await supabase.rpc("get_loopgraph_operational_snapshot", {
-    p_organization_id: organizationId,
-    p_project_key: projectKey
-  });
-  if (error || !isRecord(data) || data.database_ready !== true) {
+  const [operational, callbacks] = await Promise.all([
+    supabase.rpc("get_loopgraph_operational_snapshot", {
+      p_organization_id: organizationId,
+      p_project_key: projectKey
+    }),
+    supabase.rpc("get_hermes_callback_queue_snapshot", {
+      p_organization_id: organizationId,
+      p_project_key: projectKey
+    })
+  ]);
+  if (
+    operational.error ||
+    callbacks.error ||
+    !isRecord(operational.data) ||
+    !isRecord(callbacks.data) ||
+    operational.data.database_ready !== true
+  ) {
     emitOperationalLog({
       level: "error",
       event: "operational.readiness.failed",
@@ -177,7 +201,10 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       audit: true,
       runtimeNamespace: true
     },
-    metrics: parseMetrics(data)
+    metrics: parseMetrics({
+      ...operational.data,
+      ...callbacks.data
+    })
   };
 }
 
@@ -302,6 +329,24 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_hermes_dispatch_oldest_due_seconds Age of the oldest claimable Hermes design delivery.",
     "# TYPE loopgraph_hermes_dispatch_oldest_due_seconds gauge",
     `loopgraph_hermes_dispatch_oldest_due_seconds ${metrics.hermesDispatchOldestDueSeconds}`,
+    "# HELP loopgraph_hermes_callbacks_queued Hermes callbacks queued or waiting for retry.",
+    "# TYPE loopgraph_hermes_callbacks_queued gauge",
+    `loopgraph_hermes_callbacks_queued ${metrics.hermesCallbacksQueued}`,
+    "# HELP loopgraph_hermes_callbacks_running Hermes callbacks with an active worker lease.",
+    "# TYPE loopgraph_hermes_callbacks_running gauge",
+    `loopgraph_hermes_callbacks_running ${metrics.hermesCallbacksRunning}`,
+    "# HELP loopgraph_hermes_callbacks_dead_letter Exhausted Hermes callbacks requiring intervention.",
+    "# TYPE loopgraph_hermes_callbacks_dead_letter gauge",
+    `loopgraph_hermes_callbacks_dead_letter ${metrics.hermesCallbacksDeadLetter}`,
+    "# HELP loopgraph_hermes_callbacks_due Claimable Hermes callbacks due now.",
+    "# TYPE loopgraph_hermes_callbacks_due gauge",
+    `loopgraph_hermes_callbacks_due ${metrics.hermesCallbacksDue}`,
+    "# HELP loopgraph_hermes_callback_expired_leases Hermes callbacks with expired worker leases.",
+    "# TYPE loopgraph_hermes_callback_expired_leases gauge",
+    `loopgraph_hermes_callback_expired_leases ${metrics.hermesCallbackExpiredLeases}`,
+    "# HELP loopgraph_hermes_callback_oldest_due_seconds Age of the oldest claimable Hermes callback.",
+    "# TYPE loopgraph_hermes_callback_oldest_due_seconds gauge",
+    `loopgraph_hermes_callback_oldest_due_seconds ${metrics.hermesCallbackOldestDueSeconds}`,
     ""
   ].join("\n");
 }
@@ -335,6 +380,16 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     hermesDispatchExpiredLeases: nonnegative(data.hermes_dispatch_expired_leases),
     hermesDispatchOldestDueSeconds: nonnegative(
       data.hermes_dispatch_oldest_due_seconds
+    ),
+    hermesCallbacksQueued: nonnegative(data.hermes_callbacks_queued),
+    hermesCallbacksRunning: nonnegative(data.hermes_callbacks_running),
+    hermesCallbacksDeadLetter: nonnegative(data.hermes_callbacks_dead_letter),
+    hermesCallbacksDue: nonnegative(data.hermes_callbacks_due),
+    hermesCallbackExpiredLeases: nonnegative(
+      data.hermes_callback_expired_leases
+    ),
+    hermesCallbackOldestDueSeconds: nonnegative(
+      data.hermes_callback_oldest_due_seconds
     ),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
