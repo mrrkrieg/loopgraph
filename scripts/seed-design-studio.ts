@@ -6,7 +6,7 @@
  * Usage: npm run seed:design-studio
  */
 import "./load-env";
-import { createSupabaseAdminClient } from "../lib/db/supabase";
+import { createSupabaseAdminClient } from "../lib/db/supabase-admin";
 
 async function main() {
   const supabase = createSupabaseAdminClient();

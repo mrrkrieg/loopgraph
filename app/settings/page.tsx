@@ -1,10 +1,13 @@
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import { saveOrganizationAction, saveProfileAction } from "./actions";
+import { signOutAction } from "./sign-out-action";
 
 export default async function SettingsPage() {
   const workspace = await getWorkspace();
+  const hosted = isHostedAuthRequired();
 
   return (
     <>
@@ -29,7 +32,12 @@ export default async function SettingsPage() {
           <form action={saveProfileAction} className="grid gap-4">
             <label className="block text-sm font-medium">
               Email
-              <input name="email" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue={workspace.profile.email} />
+              <input
+                name="email"
+                readOnly
+                className="mt-1 w-full rounded-md border border-line bg-slate-50 px-3 py-2 text-muted"
+                defaultValue={workspace.profile.email}
+              />
             </label>
             <label className="block text-sm font-medium">
               Full name
@@ -37,11 +45,11 @@ export default async function SettingsPage() {
             </label>
             <label className="block text-sm font-medium">
               Role
-              <select name="role" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue={workspace.profile.role}>
-                <option value="owner">owner</option>
-                <option value="admin">admin</option>
-                <option value="member">member</option>
-              </select>
+              <input
+                readOnly
+                className="mt-1 w-full rounded-md border border-line bg-slate-50 px-3 py-2 text-muted"
+                value={workspace.profile.role}
+              />
             </label>
             <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">
               Save profile
@@ -49,6 +57,13 @@ export default async function SettingsPage() {
           </form>
         </SectionCard>
       </div>
+      {hosted ? (
+        <form action={signOutAction} className="mt-5">
+          <button className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold" type="submit">
+            Sign out
+          </button>
+        </form>
+      ) : null}
     </>
   );
 }

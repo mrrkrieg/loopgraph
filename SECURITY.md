@@ -60,3 +60,9 @@ Do not commit or paste:
 ## Supported security posture
 
 The current public flow supports local discovery, governed loop design, route planning, webhook fixture rehearsal, simulation, traces, reviews, and case resolution. Live execution and OAuth connector enablement should be treated as an explicit deployment decision, not a default install behavior.
+
+Authenticated hosted deployments additionally require the Supabase Auth, organization membership,
+RLS, and server-only credential boundary described in
+[Hosted authentication and tenant security](docs/HOSTED-SECURITY.md). The current hosted runtime is
+safe only as one organization per worker deployment; a shared multi-customer filesystem worker is
+not a supported production topology.

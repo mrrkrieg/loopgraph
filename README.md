@@ -573,6 +573,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Approval model](docs/approval-model.md) — exact-action review and fingerprint binding
 - [Topology guide](docs/topology-guide.md) — understanding the operating map
 - [Current build state](docs/CURRENT-STATE.md) — what is implemented now
+- [Hosted security](docs/HOSTED-SECURITY.md) — Supabase Auth, organization roles, RLS, service-role boundaries, and production limitations
 
 ## Contributing
 
