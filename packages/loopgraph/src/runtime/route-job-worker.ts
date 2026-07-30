@@ -1,5 +1,6 @@
 import path from "node:path";
 import {
+  contentHash,
   loopSpecHash,
   type BusinessProblem,
   type EventReceipt,
@@ -18,6 +19,7 @@ import {
   type LoopgraphLifecycleEmitResult
 } from "./lifecycle-events";
 import { loadLoopSpecFromPath } from "./loader";
+import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import { recordTraceMetricSamples } from "./outcome-service";
 import { FileOutcomeStore } from "./outcome-store";
 import { readProjectMetricDefinitions } from "./outcome-tools";
@@ -65,6 +67,7 @@ export type RouteJobWorkerRunResult = {
   deadLetter: number;
   reconciledReviews: number;
   items: RouteJobWorkerItemResult[];
+  controllerTrigger?: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 };
 
 export type RouteJobWorkerOptions = {
@@ -117,6 +120,27 @@ export async function runRouteJobWorker(
     }));
   }
 
+  const allItems = [...reconciled, ...items];
+  const controllerTrigger = allItems.length === 0
+    ? undefined
+    : await enqueueLoopControllerTriggerBestEffort({
+        projectRoot,
+        type: "route_job",
+        triggerId: `route-job-batch-${contentHash(allItems.map((item) => ({
+          jobId: item.jobId,
+          status: item.status,
+          runId: item.runId
+        })))}`,
+        sourceRef: `route-job-worker:${workerId}`,
+        occurredAt: now.toISOString(),
+        requestedBy: workerId,
+        evidenceRefs: allItems.flatMap((item) => [
+          item.jobId,
+          ...(item.runId ? [item.runId] : []),
+          ...item.metricSampleIds
+        ])
+      }, { now });
+
   return {
     schemaVersion: ROUTE_JOB_WORKER_SCHEMA_VERSION,
     workerId,
@@ -127,7 +151,8 @@ export async function runRouteJobWorker(
     failed: items.filter((item) => item.status === "failed").length,
     deadLetter: items.filter((item) => item.status === "dead_letter").length,
     reconciledReviews: reconciled.length,
-    items: [...reconciled, ...items]
+    items: allItems,
+    controllerTrigger
   };
 }
 

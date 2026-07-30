@@ -306,6 +306,10 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_outcomes_get" }),
           expect.objectContaining({ name: "loopgraph_value_ledger_record" }),
           expect.objectContaining({ name: "loopgraph_value_ledger_get" }),
+          expect.objectContaining({ name: "loopgraph_controller_run" }),
+          expect.objectContaining({ name: "loopgraph_controller_runs_get" }),
+          expect.objectContaining({ name: "loopgraph_controller_policy_get" }),
+          expect.objectContaining({ name: "loopgraph_controller_policy_set" }),
           expect.objectContaining({ name: "loopgraph_connections_plan" }),
           expect.objectContaining({ name: "loopgraph_connections_set_manual_fallback" }),
           expect.objectContaining({ name: "loopgraph_loops_list" }),
@@ -336,7 +340,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(57);
+    expect(listLoopgraphMcpTools()).toHaveLength(61);
   });
 
   it("supports a restricted webhook-router exposure for untrusted Hermes event turns", async () => {
@@ -385,6 +389,10 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_outcomes_get",
       "loopgraph_value_ledger_record",
       "loopgraph_value_ledger_get",
+      "loopgraph_controller_run",
+      "loopgraph_controller_runs_get",
+      "loopgraph_controller_policy_get",
+      "loopgraph_controller_policy_set",
       "loopgraph_connections_set_manual_fallback",
       "loopgraph_loops_materialize",
       "loopgraph_loops_validate",
@@ -494,6 +502,8 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/metric-sample" }),
           expect.objectContaining({ uri: "loopgraph://schemas/observed-outcome" }),
           expect.objectContaining({ uri: "loopgraph://schemas/value-ledger-entry" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/loop-controller-policy" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/loop-controller-run" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),
@@ -559,6 +569,18 @@ describe("Loopgraph MCP server", () => {
       method: "resources/read",
       params: { uri: "loopgraph://schemas/value-ledger-entry" }
     }, { projectRoot }));
+    const controllerPolicySchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "controller-policy-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/loop-controller-policy" }
+    }, { projectRoot }));
+    const controllerRunSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "controller-run-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/loop-controller-run" }
+    }, { projectRoot }));
     const session = resourceJson(await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
       id: "session-resource",
@@ -609,6 +631,8 @@ describe("Loopgraph MCP server", () => {
     expect(JSON.stringify(metricSampleSchema)).toContain("MetricSample");
     expect(JSON.stringify(observedOutcomeSchema)).toContain("ObservedOutcome");
     expect(JSON.stringify(valueLedgerSchema)).toContain("ValueLedgerEntry");
+    expect(JSON.stringify(controllerPolicySchema)).toContain("LoopControllerPolicy");
+    expect(JSON.stringify(controllerRunSchema)).toContain("LoopControllerRun");
     expect(session).toMatchObject({
       id: "session_resources",
       activeStage: "workspace"
@@ -815,6 +839,61 @@ describe("Loopgraph MCP server", () => {
           samples: [expect.objectContaining({
             loopId: "marketing_ads",
             value: 42
+          })]
+        }
+      }
+    });
+  });
+
+  it("runs and reads the project-bound continuous controller through trusted Hermes tools", async () => {
+    const { projectRoot } = await createRoutingProject();
+    const run = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "controller-run",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_controller_run",
+        arguments: {
+          projectRoot: path.join(projectRoot, "untrusted-other-root"),
+          triggerType: "manual",
+          triggerId: "mcp_controller_1",
+          sourceRef: "test:mcp"
+        }
+      }
+    }, {
+      projectRoot,
+      now: new Date("2026-07-29T18:00:00.000Z")
+    });
+    const get = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "controller-runs-get",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_controller_runs_get",
+        arguments: {
+          projectRoot: path.join(projectRoot, "untrusted-other-root")
+        }
+      }
+    }, { projectRoot });
+
+    expect(run).toMatchObject({
+      result: {
+        isError: false,
+        structuredContent: {
+          duplicate: false,
+          run: {
+            trigger: { id: "mcp_controller_1" },
+            status: "completed"
+          }
+        }
+      }
+    });
+    expect(get).toMatchObject({
+      result: {
+        isError: false,
+        structuredContent: {
+          runs: [expect.objectContaining({
+            trigger: expect.objectContaining({ id: "mcp_controller_1" })
           })]
         }
       }

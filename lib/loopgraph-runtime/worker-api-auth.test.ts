@@ -1,13 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { authorizeWorkerApiRequest } from "./worker-api-auth";
+import { authorizeCronApiRequest, authorizeWorkerApiRequest } from "./worker-api-auth";
 
 const originalToken = process.env.LOOPGRAPH_WORKER_API_TOKEN;
+const originalCronSecret = process.env.CRON_SECRET;
 
 afterEach(() => {
   if (originalToken === undefined) {
     delete process.env.LOOPGRAPH_WORKER_API_TOKEN;
   } else {
     process.env.LOOPGRAPH_WORKER_API_TOKEN = originalToken;
+  }
+  if (originalCronSecret === undefined) {
+    delete process.env.CRON_SECRET;
+  } else {
+    process.env.CRON_SECRET = originalCronSecret;
   }
 });
 
@@ -50,5 +56,15 @@ describe("route-job HTTP API authorization", () => {
     }));
 
     expect(response).toBeNull();
+  });
+
+  it("requires an independently configured cron bearer secret", () => {
+    process.env.CRON_SECRET = "strong-cron-secret";
+    expect(authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
+      headers: { authorization: "Bearer strong-cron-secret" }
+    }))).toBeNull();
+    expect(authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
+      headers: { authorization: "Bearer strong-worker-token" }
+    }))?.status).toBe(401);
   });
 });

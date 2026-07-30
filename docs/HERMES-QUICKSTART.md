@@ -237,7 +237,23 @@ Qualified evidence may start a draft Hermes design task. It cannot materialize a
 
 See the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md) for scoring, dismissal, versioned graph-change, and safety contracts.
 
-## 11. Safe defaults
+## 11. Keep the continuous controller active
+
+Run one project-local controller cycle:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type manual
+```
+
+Keep the trusted trigger queue draining:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
+```
+
+Hermes can inspect the same durable policy and decision receipts through `loopgraph_controller_policy_get`, `loopgraph_controller_runs_get`, and `loopgraph_controller_run`. Event-router and lifecycle-router turns never receive those tools.
+
+## 12. Safe defaults
 
 - All new materialized loops start in shadow routing.
 - Local simulation uses synthetic/redacted fixtures by default.
@@ -245,7 +261,7 @@ See the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md) for scoring, dis
 - Provider webhooks should terminate at Hermes, not at Loopgraph workflow routes.
 - Webhook secrets, OAuth tokens, and API keys stay in Hermes or an approved credential store, never in chat or `.loopgraph`.
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -257,7 +273,7 @@ See the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md) for scoring, dis
 | Hermes design webhook returns `401` | The route secret or V2 signature inputs do not match | Confirm the URL/secret pair returned by `hermes webhook subscribe` and verify the machines' clocks |
 | `hermes webhooks doctor` fails | The local route manifest is stale after loop changes | Rerun `npm run loopgraph -- hermes webhooks sync --project .` |
 
-## 13. Dependency and vulnerability checks
+## 14. Dependency and vulnerability checks
 
 Before connecting live provider credentials or webhook routes, run:
 

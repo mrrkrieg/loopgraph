@@ -1,24 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateAndPersistManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
-import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getStorageAdapter
+} from "@/lib/loopgraph-runtime/storage-resolver";
+import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
+import {
+  enqueueLoopControllerTrigger,
+  runLoopControllerScheduler
+} from "loopgraph/runtime";
 
 export async function GET(request: NextRequest) {
-  const configuredSecret = process.env.CRON_SECRET;
-  const requestSecret = request.headers.get("authorization")?.replace("Bearer ", "");
-
-  if (configuredSecret && configuredSecret !== requestSecret) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const unauthorized = authorizeCronApiRequest(request);
+  if (unauthorized) return unauthorized;
 
   const storage = getStorageAdapter();
   const rollup = await generateAndPersistManagementRollup(storage);
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const enqueue = await enqueueLoopControllerTrigger({
+    projectRoot,
+    type: "management_cycle",
+    triggerId: `management-review-${rollup.weekKey}`,
+    sourceRef: `management-rollup:${rollup.weekKey}`,
+    occurredAt: rollup.generatedAt,
+    requestedBy: "loopgraph-management-cron"
+  });
+  const controller = await runLoopControllerScheduler({ projectRoot, limit: 20 });
 
   return NextResponse.json({
     generatedAt: rollup.generatedAt,
     weekKey: rollup.weekKey,
     openCases: rollup.openCases,
     plans: rollup.plans,
-    decisionsNeeded: rollup.decisionsNeeded
+    decisionsNeeded: rollup.decisionsNeeded,
+    controller: { enqueue, scheduler: controller }
   });
 }
 

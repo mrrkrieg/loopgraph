@@ -28,6 +28,8 @@ export * from "./outcome-tools";
 export * from "./loop-controller-store";
 export * from "./loop-controller";
 export * from "./loop-controller-tools";
+export * from "./loop-controller-triggers";
+export * from "./loop-controller-scheduler";
 export * from "./routing-tools";
 export * from "./routing-ops-tools";
 export * from "./routing-simulation";

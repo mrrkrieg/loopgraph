@@ -50,6 +50,8 @@ Hermes can use the trusted administration surface through:
 
 These tools are intended for the project-bound administration profile. They must not be exposed to untrusted webhook or lifecycle turns.
 
+`loopgraph hermes setup` installs these tools and the controller schema versions into the generated administration profile. The generated Hermes skill explains that a failed policy receipt, review decision, pause, or retirement proposal is not permission to act.
+
 ## Durable records
 
 Controller state is stored locally and atomically:
@@ -58,6 +60,7 @@ Controller state is stored locally and atomically:
 .loopgraph/controller/
   policy.json
   checkpoint.json
+  triggers/
   runs/
 ```
 
@@ -70,7 +73,28 @@ Each run includes:
 - referenced opportunities, graph changes, Hermes tasks, and outcomes;
 - errors and the next eligible evaluation time.
 
-Repeated triggers are idempotent. New triggers with unchanged evidence are suppressed during the configured cooldown.
+Repeated triggers are idempotent. A separate trigger lock allows multiple schedulers to compete safely while only one claims a pending trigger. Failed or abandoned claims can be retried within bounded attempt and lease limits. New triggers with unchanged evidence are suppressed during the configured cooldown.
+
+## Automatic triggers
+
+Loopgraph now enqueues controller work after:
+
+- normalized Hermes event intake and routing decisions;
+- route-job batches, including terminal failures and reconciled reviews;
+- explicit human review decisions;
+- metric samples, outcome evaluation, and value-ledger writes;
+- authenticated management and controller schedules.
+
+Untrusted webhook turns cannot call the controller. They can only create durable bounded routing evidence; Loopgraph internally enqueues the controller trigger, and a trusted scheduler drains it.
+
+Operate the authenticated HTTP worker with:
+
+```text
+GET|POST /api/controller
+GET|POST /api/cron/controller
+```
+
+`/api/controller` requires `LOOPGRAPH_WORKER_API_TOKEN`. The scheduled route requires `CRON_SECRET`. Both fail closed when their secret is absent.
 
 ## Signals and decisions
 
@@ -108,10 +132,9 @@ A policy-approved shadow loop receives no live credentials and no live write aut
 
 ## Current boundary
 
-This slice establishes the durable controller, outcome feedback, local CLI, and trusted tool contracts. The following remain separate product layers:
+The durable controller, trigger queue, authenticated scheduler, outcome feedback, local CLI, MCP administration tools, and Hermes installer integration are implemented. The following remain separate product layers:
 
-- wiring the controller tools into the MCP administration profile and Hermes installer;
-- scheduled hosted execution with tenant authentication and rate limits;
+- hosted tenant authentication, role authorization, rate limits, and database-backed scheduling;
 - semantic graph transactions for update, split, merge, retirement, promotion, and rollback;
 - automatic rehearsal of every generated fixture before promotion;
 - proactive connector-health and webhook-reconciliation triggers;

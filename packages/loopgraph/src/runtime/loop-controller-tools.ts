@@ -3,7 +3,8 @@ import {
   loopControllerPolicySchema,
   loopControllerTriggerTypeSchema,
   type LoopControllerPolicy,
-  type LoopControllerRun
+  type LoopControllerRun,
+  type LoopControllerTriggerRecord
 } from "../core";
 import { runLoopController } from "./loop-controller";
 import { FileLoopControllerStore } from "./loop-controller-store";
@@ -80,7 +81,7 @@ export const loopgraphControllerToolDefinitions = [
 
 export type LoopgraphControllerToolResult =
   | { run: LoopControllerRun; duplicate: boolean }
-  | { run?: LoopControllerRun; runs?: LoopControllerRun[] }
+  | { run?: LoopControllerRun; runs?: LoopControllerRun[]; triggers?: LoopControllerTriggerRecord[] }
   | { policy: LoopControllerPolicy };
 
 export async function callLoopgraphControllerTool(
@@ -116,7 +117,10 @@ export async function callLoopgraphControllerTool(
   if (name === "loopgraph_controller_runs_get") {
     return parsedProject.runId
       ? { run: await store.getRun(parsedProject.runId) }
-      : { runs: await store.listRuns() };
+      : {
+          runs: await store.listRuns(),
+          triggers: await store.listTriggers()
+        };
   }
   if (name === "loopgraph_controller_policy_get") {
     return { policy: (await store.readPolicy()) ?? loopControllerPolicySchema.parse({}) };

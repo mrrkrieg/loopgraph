@@ -49,8 +49,9 @@ import {
   scanLoopOpportunities
 } from "../runtime/loop-opportunity-engine";
 import { runRouteJobWorker } from "../runtime/route-job-worker";
-import { runLoopController } from "../runtime/loop-controller";
 import { FileLoopControllerStore } from "../runtime/loop-controller-store";
+import { enqueueLoopControllerTrigger } from "../runtime/loop-controller-triggers";
+import { runLoopControllerScheduler } from "../runtime/loop-controller-scheduler";
 import {
   cancelRouteJob,
   FileRoutingStore,
@@ -236,16 +237,16 @@ controller
     }
     let sequence = 0;
     const runOnce = async () => {
-      const result = await runLoopController({
+      const triggerId = options.triggerId ?? `${options.triggerType}_${Date.now()}_${sequence++}`;
+      const enqueue = await enqueueLoopControllerTrigger({
         projectRoot,
-        trigger: {
-          type: options.triggerType as LoopControllerTriggerType,
-          id: options.triggerId ?? `${options.triggerType}_${Date.now()}_${sequence++}`,
-          sourceRef: options.sourceRef,
-          requestedBy: "loopgraph-cli"
-        }
+        type: options.triggerType as LoopControllerTriggerType,
+        triggerId,
+        sourceRef: options.sourceRef,
+        requestedBy: "loopgraph-cli"
       });
-      console.log(JSON.stringify(result, null, 2));
+      const scheduler = await runLoopControllerScheduler({ projectRoot, limit: 20 });
+      console.log(JSON.stringify({ enqueue, scheduler }, null, 2));
     };
     await runOnce();
     if (!options.watch) return;
@@ -276,15 +277,17 @@ controller
     const projectRoot = path.resolve(options.project);
     const limit = parsePositiveInteger(options.limit, "Controller status limit");
     const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
-    const [policy, checkpoint, runs] = await Promise.all([
+    const [policy, checkpoint, runs, triggers] = await Promise.all([
       store.readPolicy(),
       store.readCheckpoint(),
-      store.listRuns()
+      store.listRuns(),
+      store.listTriggers()
     ]);
     console.log(JSON.stringify({
       policy,
       checkpoint,
-      runs: runs.slice(0, limit)
+      runs: runs.slice(0, limit),
+      triggers: triggers.slice(-limit)
     }, null, 2));
   });
 

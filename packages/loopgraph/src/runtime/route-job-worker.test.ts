@@ -55,7 +55,12 @@ describe("route job worker", () => {
       processed: 1,
       completed: 1,
       waitingReview: 0,
-      failed: 0
+      failed: 0,
+      controllerTrigger: {
+        enqueued: true,
+        duplicate: false,
+        triggerRecordId: expect.stringMatching(/^controller_trigger_/)
+      }
     });
     expect(result.items[0]).toMatchObject({
       status: "completed",
@@ -148,7 +153,7 @@ describe("route job worker", () => {
     const waitingJob = await jobStore.getRouteJob(fixture.jobId);
     const trace = await storage.getRun(waitingJob!.runId);
     const fingerprints = trace!.preparedActions.map((action) => action.fingerprint);
-    await applyReviewDecision(storage, {
+    const reviewDecision = await applyReviewDecision(storage, {
       runId: trace!.id,
       status: "approved",
       approvedFingerprints: fingerprints,
@@ -156,6 +161,11 @@ describe("route job worker", () => {
       role: "approver"
     }, {
       projectRoot: fixture.projectRoot
+    });
+    expect(reviewDecision.controllerTrigger).toMatchObject({
+      enqueued: true,
+      duplicate: false,
+      triggerRecordId: expect.stringMatching(/^controller_trigger_/)
     });
 
     const reconciled = await runRouteJobWorker({

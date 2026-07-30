@@ -9,6 +9,7 @@ import type { StorageAdapter } from "../sdk/adapters";
 import { getAdapterById } from "../sdk/adapters/index";
 import { evaluateLiveExecutionGate, formatLiveExecutionGateError } from "./executor";
 import { buildImprovementItemFromReview } from "./improvement-service";
+import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import { loadLoopSpecFromPath } from "./loader";
 import { resolveExistingProjectPath } from "./project-paths";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
@@ -54,7 +55,11 @@ export async function applyReviewDecision(
   storage: StorageAdapter,
   input: ApplyReviewDecisionInput,
   options: ApplyReviewDecisionOptions = {}
-): Promise<{ trace: LoopRunTrace; review: HumanReviewTrace }> {
+): Promise<{
+  trace: LoopRunTrace;
+  review: HumanReviewTrace;
+  controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
+}> {
   if (!input.reviewerId.trim()) {
     throw new ReviewServiceError("reviewerId is required for an auditable review decision");
   }
@@ -156,7 +161,17 @@ export async function applyReviewDecision(
     await storage.saveRun(trace);
   }
 
-  return { trace, review: reviewRecord };
+  const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
+    projectRoot: options.projectRoot,
+    type: "review",
+    triggerId: reviewRecord.id,
+    sourceRef: `review:${reviewRecord.id}`,
+    occurredAt: reviewRecord.decidedAt,
+    requestedBy: input.reviewerId,
+    evidenceRefs: [trace.id, reviewRecord.id]
+  });
+
+  return { trace, review: reviewRecord, controllerTrigger };
 }
 
 function mapReviewStatus(status: ReviewDecisionStatus): HumanReviewTrace["status"] {
