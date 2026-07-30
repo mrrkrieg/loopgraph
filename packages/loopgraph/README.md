@@ -52,6 +52,8 @@ npx loopgraph simulate \
 
 Provider webhooks should point at Hermes, not directly at Loopgraph workflow execution. The route manifest stores non-secret metadata only; provider secrets stay in Hermes.
 
+For proactive Loopgraph-initiated design work, configure the dedicated Hermes `loopgraph.design_requested` webhook described in the [Hermes design bridge](../../docs/HERMES-DESIGN-BRIDGE.md). Hermes reads the durable task and submits evidence/proposals through Loopgraph MCP; the webhook only wakes the agent.
+
 See [Hermes examples](../../docs/HERMES-EXAMPLES.md) for the Marketing reference flow, strict Legal / Compliance sensitive-work example, and Custom field-ops example.
 
 ### Runtime API

@@ -251,6 +251,10 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_design_generate" }),
           expect.objectContaining({ name: "loopgraph_design_submit" }),
           expect.objectContaining({ name: "loopgraph_design_edit" }),
+          expect.objectContaining({ name: "loopgraph_hermes_design_start" }),
+          expect.objectContaining({ name: "loopgraph_hermes_design_tasks_get" }),
+          expect.objectContaining({ name: "loopgraph_evidence_gaps_get" }),
+          expect.objectContaining({ name: "loopgraph_evidence_gap_answer" }),
           expect.objectContaining({ name: "loopgraph_connections_plan" }),
           expect.objectContaining({ name: "loopgraph_connections_set_manual_fallback" }),
           expect.objectContaining({ name: "loopgraph_loops_list" }),
@@ -281,7 +285,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(40);
+    expect(listLoopgraphMcpTools()).toHaveLength(44);
   });
 
   it("supports a restricted webhook-router exposure for untrusted Hermes event turns", async () => {
@@ -418,6 +422,8 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/event-envelope" }),
           expect.objectContaining({ uri: "loopgraph://schemas/routing-card" }),
           expect.objectContaining({ uri: "loopgraph://schemas/routing-decision" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/evidence-gap-set" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/hermes-design-task" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),
@@ -440,6 +446,18 @@ describe("Loopgraph MCP server", () => {
       id: "proposal-schema-resource",
       method: "resources/read",
       params: { uri: "loopgraph://schemas/loop-design-proposal-set" }
+    }, { projectRoot }));
+    const evidenceGapSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "evidence-gap-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/evidence-gap-set" }
+    }, { projectRoot }));
+    const designTaskSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "design-task-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/hermes-design-task" }
     }, { projectRoot }));
     const session = resourceJson(await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
@@ -468,6 +486,16 @@ describe("Loopgraph MCP server", () => {
       }
     });
     expect(JSON.stringify(proposalSchema)).toContain("LoopDesignProposalSet");
+    expect(evidenceGapSchema).toMatchObject({
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id: "evidence-gap-set"
+    });
+    expect(JSON.stringify(evidenceGapSchema)).toContain("EvidenceGapSet");
+    expect(designTaskSchema).toMatchObject({
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id: "hermes-design-task"
+    });
+    expect(JSON.stringify(designTaskSchema)).toContain("HermesDesignTask");
     expect(session).toMatchObject({
       id: "session_resources",
       activeStage: "workspace"

@@ -179,6 +179,12 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_design_context_get");
     expect(designSkill).toContain("loopgraph_design_submit");
     expect(designSkill).toContain("loopgraph_design_edit");
+    expect(designSkill).toContain("loopgraph_hermes_design_tasks_get");
+    expect(designSkill).toContain("loopgraph_evidence_gaps_get");
+    expect(designSkill).toContain("loopgraph_evidence_gap_answer");
+    expect(designSkill).toContain("never more than three at once");
+    expect(designSkill).toContain("loopgraph://schemas/evidence-gap-set");
+    expect(designSkill).toContain("loopgraph://schemas/hermes-design-task");
     expect(designSkill).toContain("loopgraph_connections_plan");
     expect(designSkill).toContain("loopgraph_connections_set_manual_fallback");
     expect(designSkill).toContain("loopgraph_loops_materialize");

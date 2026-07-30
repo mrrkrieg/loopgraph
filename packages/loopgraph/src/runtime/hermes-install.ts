@@ -5,7 +5,9 @@ import path from "node:path";
 import YAML from "yaml";
 import {
   contentHash,
+  EVIDENCE_GAP_SET_SCHEMA_VERSION,
   EVENT_ENVELOPE_SCHEMA_VERSION,
+  HERMES_DESIGN_TASK_SCHEMA_VERSION,
   LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
   LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION,
   ROUTE_JOB_SCHEMA_VERSION,
@@ -20,6 +22,7 @@ import {
 import { LOOPGRAPH_CONNECTION_TOOL_NAMES } from "./connection-tools";
 import { LOOPGRAPH_DESIGN_TOOL_NAMES } from "./design-tools";
 import { LOOPGRAPH_DISCOVERY_TOOL_NAMES } from "./discovery-tools";
+import { LOOPGRAPH_HERMES_DESIGN_TOOL_NAMES } from "./hermes-design-tools";
 import { LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES } from "./hermes-webhooks";
 import { LOOPGRAPH_LOOP_TOOL_NAMES } from "./loop-tools";
 import { LOOPGRAPH_ROUTING_OPS_TOOL_NAMES } from "./routing-ops-tools";
@@ -39,6 +42,8 @@ export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   mcpServer: HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION,
   designSkill: HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
   eventRouterSkill: HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION,
+  evidenceGapSet: EVIDENCE_GAP_SET_SCHEMA_VERSION,
+  hermesDesignTask: HERMES_DESIGN_TASK_SCHEMA_VERSION,
   loopDesignContext: LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
   loopDesignProposalSet: LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION,
   eventEnvelope: EVENT_ENVELOPE_SCHEMA_VERSION,
@@ -52,6 +57,7 @@ export const HERMES_LOOPGRAPH_MCP_TOOL_NAMES = [
   ...LOOPGRAPH_DISCOVERY_TOOL_NAMES,
   ...LOOPGRAPH_PROJECT_TOOL_NAMES,
   ...LOOPGRAPH_DESIGN_TOOL_NAMES,
+  ...LOOPGRAPH_HERMES_DESIGN_TOOL_NAMES,
   ...LOOPGRAPH_CONNECTION_TOOL_NAMES,
   ...LOOPGRAPH_LOOP_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_TOOL_NAMES,
@@ -803,40 +809,42 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 5. Call \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\` to start or resume the local session.
 6. Ask permission before project inspection; if granted, call \`loopgraph_project_inspect\` to read only allowlisted manifests and example env key names.
 7. After the user chooses departments, call \`loopgraph_discovery_select_departments\`.
-8. Ask only the next bundle returned by \`loopgraph_discovery_next_questions\`; submit answers with \`loopgraph_discovery_submit_answers\`.
-9. Continue through the five compact discovery bundles, using at most the required follow-ups. If the user already supplied enough information in prose, map it into the bundle fields and ask only for missing required fields.
-10. Call \`loopgraph_design_context_get\` and use the returned bounded context for high-reasoning design.
-11. Confirm the returned design context requests proposal schema \`${LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION}\`; if it does not, stop and ask the operator to run \`loopgraph hermes doctor --project ${projectRoot}\`.
-12. If Hermes hosts the reasoning, submit only a structured proposal set with \`schemaVersion: "${LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION}"\` through \`loopgraph_design_submit\`; if no model path is configured, use \`loopgraph_design_generate\` as the deterministic local fallback.
-13. Explain validated proposals, assumptions, required connections, and topology preview.
-14. If the user asks to change a proposal before materialization, call \`loopgraph_design_edit\` with structured field updates; then explain the newly revalidated design run.
-15. Call \`loopgraph_connections_plan\` to show what is missing, what has a manual fallback, and what is blocking execution.
-16. Record a manual fallback with \`loopgraph_connections_set_manual_fallback\` only after the user explicitly confirms non-secret fallback details.
-17. Keep design reasoning separate from runtime routing decisions.
-18. Materialize only proposals the user explicitly accepts by calling \`loopgraph_loops_materialize\` with the accepted proposal IDs.
-19. Call \`loopgraph_connections_plan\` again after materialization before describing routing readiness.
-20. Call \`loopgraph_hermes_webhooks_plan\` and explain which provider event families should terminate at Hermes.
-21. Call \`loopgraph_hermes_webhooks_sync\` only after the user explicitly asks to write or refresh the project-local Hermes route manifest; it writes non-secret route metadata only.
-22. Call \`loopgraph_hermes_webhooks_doctor\` after sync or when the user asks whether Hermes route metadata is current.
-23. Call \`loopgraph_hermes_webhooks_test\` with a synthetic or redacted normalized fixture when the user asks to test whether a provider event would terminate at Hermes and route correctly in local shadow mode.
-24. Call \`loopgraph_graph_get\` after materialization and show the user the Hermes Brain -> Department -> Loop graph projection; tell the user they can run \`loopgraph studio --project ${projectRoot}\` to open the local graph; call \`loopgraph_loops_list\` when the user wants the registered loop inventory.
-25. Use \`loopgraph_runs_get\` when the user wants local run history, a review-ready run summary, or previously prepared action fingerprints.
-26. Before claiming a loop can run locally, call \`loopgraph_loops_validate\` for that registered \`loopId\`.
-27. Demonstrate a loop locally with \`loopgraph_loops_simulate\` using a generated starter fixture or explicit fixture object.
-28. To test an actual validated Hermes route locally, use \`loopgraph_route_commit_simulate\` only after a trusted human/operator asks to simulate the route commit.
-29. Call \`loopgraph_route_jobs_get\` to inspect durable queue status, leases, retries, and dead-letter state for Hermes-routed work.
-30. Before recommending promotion out of shadow mode, run a trusted fixture batch with \`loopgraph_routing_evaluation_run\`; require passing precision, recall, false-trigger, miss, abstention, and duplicate-suppression gates.
-31. Use \`loopgraph_routing_evaluations_get\` to inspect persisted expected-vs-actual routing results when explaining why a loop can or cannot be promoted.
-32. After \`loopgraph_routing_decision_submit\`, call \`loopgraph_lifecycle_events_get\` when you need to confirm the signed \`loop.route.accepted\` callback prepared for Hermes; after route-commit simulation or case resolution, use the same tool to confirm signed run, escalation, outcome, and terminal lifecycle callbacks.
-33. If simulation returns \`reviewRequired: true\`, call \`loopgraph_runs_get\` with \`includeReviewPacket: true\`, then use \`loopgraph_review_submit\` only after a human explicitly approves, rejects, requests evidence, or reassigns the prepared action fingerprints.
-34. Use \`loopgraph_case_resolve\` only after a human/operator explicitly provides the case resolution summary and outcome. This records the durable outcome and prepares a signed \`loop.outcome.recorded\` callback for Hermes when routing context exists.
-35. Use \`loopgraph_events_replay\` for operator-approved local replay of stored normalized events; do not ask for raw provider payloads.
-36. Use \`loopgraph_routing_human_choice_submit\` only after a human explicitly chooses the route, no-loop, defer, or ignore outcome for an ambiguous event.
-37. Default to simulation and shadow routing. Never enable live writes silently.
+8. When Loopgraph initiates a design task, call \`loopgraph_hermes_design_tasks_get\` and preserve its task ID, session ID, and evidence-gap IDs throughout the conversation.
+9. Call \`loopgraph_evidence_gaps_get\` and ask only the returned focused questions, never more than three at once. Submit each user answer with \`loopgraph_evidence_gap_answer\`; this updates the same discovery session and lets Loopgraph resume the durable Hermes task automatically.
+10. For a user-started session without a durable design task, the five compact bundles remain available through \`loopgraph_discovery_next_questions\` and \`loopgraph_discovery_submit_answers\`. Map information already supplied in prose and ask only for missing required fields.
+11. Do not design while a blocking evidence gap remains. Connection, baseline, and completion-signal gaps may remain explicitly non-blocking for draft design but must be resolved before the stage they declare.
+12. Call \`loopgraph_design_context_get\` and use the returned bounded context for high-reasoning design.
+13. Confirm the returned design context requests proposal schema \`${LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION}\`; if it does not, stop and ask the operator to run \`loopgraph hermes doctor --project ${projectRoot}\`.
+14. If Hermes hosts the reasoning, submit only a structured proposal set with \`schemaVersion: "${LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION}"\` through \`loopgraph_design_submit\` or the signed design-task callback; if no model path is configured, use \`loopgraph_design_generate\` as the deterministic local fallback.
+15. Explain validated proposals, assumptions, required connections, and topology preview.
+16. If the user asks to change a proposal before materialization, call \`loopgraph_design_edit\` with structured field updates; then explain the newly revalidated design run.
+17. Call \`loopgraph_connections_plan\` to show what is missing, what has a manual fallback, and what is blocking execution.
+18. Record a manual fallback with \`loopgraph_connections_set_manual_fallback\` only after the user explicitly confirms non-secret fallback details.
+19. Keep design reasoning separate from runtime routing decisions.
+20. Materialize only proposals the user explicitly accepts by calling \`loopgraph_loops_materialize\` with the accepted proposal IDs.
+21. Call \`loopgraph_connections_plan\` again after materialization before describing routing readiness.
+22. Call \`loopgraph_hermes_webhooks_plan\` and explain which provider event families should terminate at Hermes.
+23. Call \`loopgraph_hermes_webhooks_sync\` only after the user explicitly asks to write or refresh the project-local Hermes route manifest; it writes non-secret route metadata only.
+24. Call \`loopgraph_hermes_webhooks_doctor\` after sync or when the user asks whether Hermes route metadata is current.
+25. Call \`loopgraph_hermes_webhooks_test\` with a synthetic or redacted normalized fixture when the user asks to test whether a provider event would terminate at Hermes and route correctly in local shadow mode.
+26. Call \`loopgraph_graph_get\` after materialization and show the user the Hermes Brain -> Department -> Loop graph projection; tell the user they can run \`loopgraph studio --project ${projectRoot}\` to open the local graph; call \`loopgraph_loops_list\` when the user wants the registered loop inventory.
+27. Use \`loopgraph_runs_get\` when the user wants local run history, a review-ready run summary, or previously prepared action fingerprints.
+28. Before claiming a loop can run locally, call \`loopgraph_loops_validate\` for that registered \`loopId\`.
+29. Demonstrate a loop locally with \`loopgraph_loops_simulate\` using a generated starter fixture or explicit fixture object.
+30. To test an actual validated Hermes route locally, use \`loopgraph_route_commit_simulate\` only after a trusted human/operator asks to simulate the route commit.
+31. Call \`loopgraph_route_jobs_get\` to inspect durable queue status, leases, retries, and dead-letter state for Hermes-routed work.
+32. Before recommending promotion out of shadow mode, run a trusted fixture batch with \`loopgraph_routing_evaluation_run\`; require passing precision, recall, false-trigger, miss, abstention, and duplicate-suppression gates.
+33. Use \`loopgraph_routing_evaluations_get\` to inspect persisted expected-vs-actual routing results when explaining why a loop can or cannot be promoted.
+34. After \`loopgraph_routing_decision_submit\`, call \`loopgraph_lifecycle_events_get\` when you need to confirm the signed \`loop.route.accepted\` callback prepared for Hermes; after route-commit simulation or case resolution, use the same tool to confirm signed run, escalation, outcome, and terminal lifecycle callbacks.
+35. If simulation returns \`reviewRequired: true\`, call \`loopgraph_runs_get\` with \`includeReviewPacket: true\`, then use \`loopgraph_review_submit\` only after a human explicitly approves, rejects, requests evidence, or reassigns the prepared action fingerprints.
+36. Use \`loopgraph_case_resolve\` only after a human/operator explicitly provides the case resolution summary and outcome. This records the durable outcome and prepares a signed \`loop.outcome.recorded\` callback for Hermes when routing context exists.
+37. Use \`loopgraph_events_replay\` for operator-approved local replay of stored normalized events; do not ask for raw provider payloads.
+38. Use \`loopgraph_routing_human_choice_submit\` only after a human explicitly chooses the route, no-loop, defer, or ignore outcome for an ambiguous event.
+39. Default to simulation and shadow routing. Never enable live writes silently.
 
 ## Supporting References
 
-- MCP resources: \`loopgraph://schemas/loop-design-context\`, \`loopgraph://schemas/loop-design-proposal-set\`, \`loopgraph://departments/{departmentType}\`, \`loopgraph://discovery/{sessionId}\`, \`loopgraph://loops/{loopId}\`, and \`loopgraph://graph/company\`.
+- MCP resources: \`loopgraph://schemas/loop-design-context\`, \`loopgraph://schemas/loop-design-proposal-set\`, \`loopgraph://schemas/evidence-gap-set\`, \`loopgraph://schemas/hermes-design-task\`, \`loopgraph://departments/{departmentType}\`, \`loopgraph://discovery/{sessionId}\`, \`loopgraph://loops/{loopId}\`, and \`loopgraph://graph/company\`.
 - \`references/discovery-flow.md\`: exact discovery/design/materialization sequence.
 - \`references/proposal-schema.md\`: structured proposal expectations.
 - \`references/safety-and-approvals.md\`: trust boundaries and approval rules.
@@ -924,17 +932,18 @@ Use this sequence when Hermes is helping a user design local company loops.
 4. Start or resume discovery with \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\`.
 5. Ask permission before project inspection. If granted, call \`loopgraph_project_inspect\`; treat detected stack details as unconfirmed until the user confirms them.
 6. Select departments with \`loopgraph_discovery_select_departments\`.
-7. Ask exactly the next \`QuestionBundle\` returned by \`loopgraph_discovery_next_questions\`.
-8. Submit answers through \`loopgraph_discovery_submit_answers\` with the expected revision.
-9. Keep the conversation proactive: after each answer submission, fetch the next bundle and ask it; if the user answered several fields in prose, prefill them and ask only for missing required details.
-10. After required bundles are complete, call \`loopgraph_design_context_get\`.
-11. In Hermes-hosted mode, produce a schema-constrained proposal set from that bounded context and submit it through \`loopgraph_design_submit\`.
-12. Use \`loopgraph_design_generate\` only as the local deterministic fallback.
-13. Explain only validated proposals, visible assumptions, required connections, risks, and next user actions.
-14. Materialize only explicitly accepted proposal IDs with \`loopgraph_loops_materialize\`.
-15. After materialization, call \`loopgraph_graph_get\`, \`loopgraph_connections_plan\`, and \`loopgraph_hermes_webhooks_plan\` before describing readiness.
+7. If Loopgraph initiated a durable task, inspect it with \`loopgraph_hermes_design_tasks_get\`, then call \`loopgraph_evidence_gaps_get\`.
+8. Ask at most the next three focused evidence-gap questions and submit each answer with \`loopgraph_evidence_gap_answer\` using the expected discovery revision.
+9. If no durable task exists, use the canonical bundle flow. Ask exactly the next \`QuestionBundle\` returned by \`loopgraph_discovery_next_questions\`, then submit it with \`loopgraph_discovery_submit_answers\`.
+10. Keep the conversation proactive: map information already supplied in prose, ask only for missing required details, and stop asking when Loopgraph reports \`completeForDesign: true\`.
+11. After blocking design gaps are resolved, call \`loopgraph_design_context_get\`.
+12. In Hermes-hosted mode, produce a schema-constrained proposal set from that bounded context and submit it through \`loopgraph_design_submit\` or the signed design-task callback.
+13. Use \`loopgraph_design_generate\` only as the local deterministic fallback.
+14. Explain only validated proposals, visible assumptions, required connections, risks, and next user actions.
+15. Materialize only explicitly accepted proposal IDs with \`loopgraph_loops_materialize\`.
+16. After materialization, call \`loopgraph_graph_get\`, \`loopgraph_connections_plan\`, and \`loopgraph_hermes_webhooks_plan\` before describing readiness.
 
-Keep design reasoning separate from runtime event routing. A webhook-triggered turn must never start or edit discovery.
+Keep design reasoning separate from runtime event routing. A provider webhook-triggered turn must never start or edit discovery; only a signed Loopgraph design task or an explicit user request may do so.
 `;
 }
 
