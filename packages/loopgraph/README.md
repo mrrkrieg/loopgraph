@@ -56,6 +56,8 @@ For proactive Loopgraph-initiated design work, configure the dedicated Hermes `l
 
 To detect missing or weak loops from accumulated local problems, routing corrections, failed verification, and review friction, use the [Loop opportunity engine](../../docs/LOOP-OPPORTUNITY-ENGINE.md). Qualified opportunities can start a draft Hermes design task but cannot materialize or execute a loop.
 
+To run the full evidence-to-design cycle, use `loopgraph controller run --project .`. The [continuous loop controller](../../docs/CONTINUOUS-LOOP-CONTROLLER.md) persists idempotent decisions, asks Hermes for missing design evidence, and materializes only strict low-risk additions in shadow mode.
+
 Accepted Hermes routes become durable jobs, including shadow and recommendation routes. Process them once or continuously:
 
 ```bash

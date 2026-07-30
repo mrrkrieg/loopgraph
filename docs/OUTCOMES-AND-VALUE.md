@@ -100,6 +100,6 @@ Local evidence is stored atomically under:
 
 Records are idempotent by their evidence identity, and retention is enforced by the file-backed store. `.loopgraph/` remains local project state and is not committed as sample workspace data.
 
-## What this enables next
+## Continuous improvement
 
-The continuous controller can now base create, improve, pause, and retire proposals on durable evidence instead of run counts or invented value. Semantic graph application, controller policy, and promotion/rollback remain separate follow-on layers.
+The [continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md) can base create, improve, pause, and retire proposals on durable evidence instead of run counts or invented value. Semantic graph transactions and promotion/rollback remain separate follow-on layers.
