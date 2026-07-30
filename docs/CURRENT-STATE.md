@@ -72,6 +72,19 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - TypeScript, package and Next.js production builds, deterministic fixture simulation, MCP exposure, installer safety, API authorization, routing, worker, outcome, controller, semantic transaction behavior, and operating-view truth separation are covered by automated tests.
 - Production dependency auditing is separate from development-tool audit output through `npm run audit:prod`.
 
+### Hosted identity and tenant boundary
+
+- Supabase magic-link authentication is enforced for configured production deployments.
+- User-facing requests use cookie-bound Supabase clients; the service-role client is server-only.
+- Organization membership and `viewer` / `operator` / `admin` / `owner` capabilities are
+  authoritative; editable profile metadata cannot grant access.
+- The Design Studio resolves the active member organization instead of the first database row.
+- Every current public Supabase table has an RLS policy, and anonymous table access is revoked.
+- Runtime Supabase persistence requires and filters by an explicit organization ID.
+- Same-origin browser mutations, signed machine callbacks, worker bearer auth, cron auth, and
+  baseline security headers are separated at the web boundary.
+- See [Hosted authentication and tenant security](./HOSTED-SECURITY.md).
+
 ## Safety boundary
 
 - Webhook turns cannot invoke discovery, design, controller, worker, graph mutation, promotion, lifecycle, or rollback tools.
@@ -82,9 +95,17 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Add hosted authentication, organization/role authorization, tenant-isolated persistence, rate limits, distributed scheduling, immutable audit export, production observability, and backups.
-2. Implement provider API clients and apply provider subscriptions through Hermes-owned connector onboarding; Loopgraph intentionally stores only non-secret references, route metadata, contracts, and receipts.
-3. Consolidate the stacked implementation changes, migrate existing local state where required, and complete a clean-install production release audit.
+1. Bind each hosted organization to a durable runtime namespace and replace filesystem queues with
+   atomic database/queue claims so more than one replica can work safely.
+2. Add distributed rate limits and scoped service accounts for user APIs, Hermes callbacks,
+   connector collectors, controller workers, and cron invocations.
+3. Export an append-only security audit stream, add production tracing/alerts/SLOs, and prove
+   restore procedures with scheduled backups and migration rollback rehearsals.
+4. Implement provider API clients and apply provider subscriptions through Hermes-owned connector
+   onboarding; Loopgraph intentionally stores only non-secret references, route metadata,
+   contracts, and receipts.
+5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
+   staging project, and complete clean-install plus hosted multi-user release audits.
 
 ## Key documentation
 

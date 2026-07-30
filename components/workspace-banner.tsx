@@ -1,4 +1,4 @@
-import { createSupabaseAdminClient } from "@/lib/db/supabase";
+import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
 import { getRegisteredLoopSpecs } from "@/lib/loop-engineering-builder/local-workspace";
 import { getWorkspaceMode, workspaceModeBanner } from "@/lib/loop-engineering-builder/workspace-mode";
 
@@ -6,11 +6,17 @@ export async function WorkspaceBanner({ previewMode = false }: { previewMode?: b
   const supabaseConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL);
   let hasPersistedLoops = false;
 
-  if (supabaseConfigured) {
-    const supabase = createSupabaseAdminClient();
-    if (supabase) {
-      const { count } = await supabase.from("loops").select("*", { count: "exact", head: true });
-      hasPersistedLoops = (count ?? 0) > 0;
+  if (supabaseConfigured && !previewMode) {
+    try {
+      const { client: supabase, organizationId } = await getWorkspaceDatabase("workspace.read");
+      if (supabase) {
+        let query = supabase.from("loops").select("*", { count: "exact", head: true });
+        if (organizationId) query = query.eq("organization_id", organizationId);
+        const { count } = await query;
+        hasPersistedLoops = (count ?? 0) > 0;
+      }
+    } catch {
+      // Sign-in and onboarding pages render before a workspace membership exists.
     }
   }
 
