@@ -15,12 +15,14 @@ export type MachineCapability =
   | "controller.operate"
   | "graph.transact"
   | "hermes.design_callback"
+  | "hermes.design_dispatch"
   | "measurements.collect"
   | "observability.read"
   | "provider.github_forward"
   | "routing.jobs"
   | "routing.worker"
   | "schedule.controller"
+  | "schedule.hermes_design"
   | "schedule.management"
   | "schedule.measurements";
 

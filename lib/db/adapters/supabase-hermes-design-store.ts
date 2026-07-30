@@ -3,14 +3,23 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   hermesDesignCallbackSchema,
+  hermesDesignDispatchJobSchema,
   hermesDesignTaskSchema,
+  type HermesDesignDispatchJob,
   type HermesDesignTask
 } from "loopgraph/core";
 import type {
   HermesDesignCallbackApplyInput,
   HermesDesignCallbackApplyResult,
+  HermesDesignDispatchJobClaimInput,
+  HermesDesignDispatchJobCreateResult,
+  HermesDesignDispatchJobFilters,
+  HermesDesignDispatchJobUpdateInput,
   HermesDesignStore,
+  HermesDesignTaskDispatchUpdateInput,
+  HermesDesignTaskDispatchUpdateResult,
   HermesDesignTaskCreateResult,
+  HermesDesignTaskCreateOptions,
   HermesDesignTaskFilters,
   HermesDesignTaskUpdateInput
 } from "loopgraph/runtime";
@@ -31,6 +40,8 @@ type TaskCreateResult = {
   task: unknown;
   created: boolean;
   revision: number | string;
+  dispatch_job?: unknown | null;
+  dispatch_created?: boolean | null;
 };
 
 type TaskUpdateResult = {
@@ -43,6 +54,29 @@ type TaskUpdateResult = {
 type CallbackApplyResult = TaskUpdateResult & {
   applied: boolean;
   duplicate: boolean;
+};
+
+type DispatchJobRow = {
+  payload: unknown;
+  revision: number | string;
+};
+
+type DispatchCreateResult = {
+  job: unknown;
+  created: boolean;
+  revision: number | string;
+};
+
+type DispatchUpdateResult = {
+  updated: boolean;
+  job: unknown | null;
+  revision: number | string | null;
+  conflict_reason: string | null;
+};
+
+type TaskDispatchUpdateResult = TaskUpdateResult & {
+  dispatch_job: unknown | null;
+  dispatch_created: boolean | null;
 };
 
 export type SupabaseHermesDesignStoreScope = {
@@ -64,13 +98,24 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
   }
 
   async createTaskAtomically(
-    task: HermesDesignTask
+    task: HermesDesignTask,
+    options: HermesDesignTaskCreateOptions = {}
   ): Promise<HermesDesignTaskCreateResult> {
     const parsed = hermesDesignTaskSchema.parse(task);
-    const { data, error } = await this.supabase.rpc("create_hermes_design_task", {
+    const dispatchJob = options.dispatchJob
+      ? hermesDesignDispatchJobSchema.parse(options.dispatchJob)
+      : undefined;
+    if (dispatchJob && dispatchJob.taskId !== parsed.id) {
+      throw new Error("Hermes design dispatch job does not belong to the task");
+    }
+    const functionName = dispatchJob
+      ? "create_hermes_design_task_with_dispatch"
+      : "create_hermes_design_task";
+    const { data, error } = await this.supabase.rpc(functionName, {
       p_organization_id: this.scope.organizationId,
       p_project_key: this.scope.projectKey,
-      p_task: parsed
+      p_task: parsed,
+      ...(dispatchJob ? { p_dispatch_job: dispatchJob } : {})
     });
     if (error) throw new Error(`Failed to create Hermes design task: ${error.message}`);
     const result = firstRow<TaskCreateResult>(data);
@@ -79,7 +124,10 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
     }
     return {
       task: hermesDesignTaskSchema.parse(result.task),
-      created: result.created
+      created: result.created,
+      ...(result.dispatch_job
+        ? { dispatchJob: hermesDesignDispatchJobSchema.parse(result.dispatch_job) }
+        : {})
     };
   }
 
@@ -145,6 +193,64 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
     );
   }
 
+  async updateTaskAndEnqueueDispatchAtomically(
+    input: HermesDesignTaskDispatchUpdateInput
+  ): Promise<HermesDesignTaskDispatchUpdateResult> {
+    for (let attempt = 0; attempt < MAX_ATOMIC_UPDATE_RETRIES; attempt += 1) {
+      const current = await this.getTaskRow(input.taskId);
+      if (!current) throw new Error(`Hermes design task not found: ${input.taskId}`);
+      const parsedCurrent = hermesDesignTaskSchema.parse(current.payload);
+      const candidate = input.update(parsedCurrent);
+      const updated = hermesDesignTaskSchema.parse(candidate.task);
+      const dispatchJob = hermesDesignDispatchJobSchema.parse(
+        candidate.dispatchJob
+      );
+      assertTaskIdentity(parsedCurrent, updated);
+      if (dispatchJob.taskId !== updated.id) {
+        throw new Error("Hermes design dispatch job does not belong to the task");
+      }
+      const { data, error } = await this.supabase.rpc(
+        "compare_and_swap_hermes_design_task_with_dispatch",
+        {
+          p_organization_id: this.scope.organizationId,
+          p_project_key: this.scope.projectKey,
+          p_task_id: input.taskId,
+          p_expected_revision: numericRevision(current.revision),
+          p_task: updated,
+          p_dispatch_job: dispatchJob
+        }
+      );
+      if (error) {
+        throw new Error(
+          `Failed to update Hermes task with dispatch: ${error.message}`
+        );
+      }
+      const result = firstRow<TaskDispatchUpdateResult>(data);
+      if (!result) {
+        throw new Error("Hermes task and dispatch update did not return a result");
+      }
+      if (result.updated && result.dispatch_job) {
+        return {
+          task: hermesDesignTaskSchema.parse(result.task),
+          dispatchJob: hermesDesignDispatchJobSchema.parse(result.dispatch_job),
+          dispatchCreated: result.dispatch_created === true
+        };
+      }
+      if (result.conflict_reason === "not_found") {
+        throw new Error(`Hermes design task not found: ${input.taskId}`);
+      }
+      if (result.conflict_reason !== "revision_conflict") {
+        throw new Error(
+          `Hermes task and dispatch update failed: ` +
+          `${result.conflict_reason ?? "unknown conflict"}`
+        );
+      }
+    }
+    throw new Error(
+      `Hermes design task ${input.taskId} changed too many times during dispatch update`
+    );
+  }
+
   async applyCallbackAtomically(
     input: HermesDesignCallbackApplyInput
   ): Promise<HermesDesignCallbackApplyResult> {
@@ -199,6 +305,140 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
     );
   }
 
+  async enqueueDispatchJobAtomically(
+    job: HermesDesignDispatchJob
+  ): Promise<HermesDesignDispatchJobCreateResult> {
+    const parsed = hermesDesignDispatchJobSchema.parse(job);
+    const { data, error } = await this.supabase.rpc(
+      "enqueue_hermes_design_dispatch_job",
+      {
+        p_organization_id: this.scope.organizationId,
+        p_project_key: this.scope.projectKey,
+        p_job: parsed
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to enqueue Hermes design dispatch job: ${error.message}`);
+    }
+    const result = firstRow<DispatchCreateResult>(data);
+    if (!result || typeof result.created !== "boolean") {
+      throw new Error("Hermes design dispatch enqueue did not return an atomic result");
+    }
+    return {
+      job: hermesDesignDispatchJobSchema.parse(result.job),
+      created: result.created
+    };
+  }
+
+  async getDispatchJob(
+    jobId: string
+  ): Promise<HermesDesignDispatchJob | undefined> {
+    const row = await this.getDispatchJobRow(jobId);
+    return row ? hermesDesignDispatchJobSchema.parse(row.payload) : undefined;
+  }
+
+  async listDispatchJobs(
+    filters: HermesDesignDispatchJobFilters = {}
+  ): Promise<HermesDesignDispatchJob[]> {
+    const jobs: HermesDesignDispatchJob[] = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      let query = this.supabase
+        .from("hermes_design_dispatch_jobs")
+        .select("payload")
+        .eq("organization_id", this.scope.organizationId)
+        .eq("project_key", this.scope.projectKey);
+      if (filters.taskId) query = query.eq("task_id", filters.taskId);
+      if (filters.status) query = query.eq("status", filters.status);
+      const { data, error } = await query
+        .order("next_run_at", { ascending: true })
+        .order("created_at", { ascending: true })
+        .range(offset, offset + PAGE_SIZE - 1);
+      if (error) {
+        throw new Error(`Failed to list Hermes design dispatch jobs: ${error.message}`);
+      }
+      const page = (data ?? []) as Array<{ payload: unknown }>;
+      jobs.push(...page.map((row) =>
+        hermesDesignDispatchJobSchema.parse(row.payload)
+      ));
+      if (page.length < PAGE_SIZE) return jobs;
+    }
+  }
+
+  async claimDueDispatchJobsAtomically(
+    input: HermesDesignDispatchJobClaimInput
+  ): Promise<HermesDesignDispatchJob[]> {
+    const { data, error } = await this.supabase.rpc(
+      "claim_hermes_design_dispatch_jobs",
+      {
+        p_organization_id: this.scope.organizationId,
+        p_project_key: this.scope.projectKey,
+        p_claimed_by: input.claimedBy,
+        p_now: input.now.toISOString(),
+        p_lease_seconds: Math.min(3600, Math.max(30, input.leaseSeconds)),
+        p_limit: Math.min(100, Math.max(1, input.limit))
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to claim Hermes design dispatch jobs: ${error.message}`);
+    }
+    return (Array.isArray(data) ? data : []).map((row) =>
+      hermesDesignDispatchJobSchema.parse(
+        isRecord(row) && "job" in row ? row.job : row
+      )
+    );
+  }
+
+  async updateDispatchJobAtomically(
+    input: HermesDesignDispatchJobUpdateInput
+  ): Promise<HermesDesignDispatchJob> {
+    for (let attempt = 0; attempt < MAX_ATOMIC_UPDATE_RETRIES; attempt += 1) {
+      const current = await this.getDispatchJobRow(input.jobId);
+      if (!current) {
+        throw new Error(`Hermes design dispatch job not found: ${input.jobId}`);
+      }
+      const parsedCurrent = hermesDesignDispatchJobSchema.parse(current.payload);
+      if (
+        input.expectedLeaseToken &&
+        parsedCurrent.lease?.leaseToken !== input.expectedLeaseToken
+      ) {
+        throw new Error(`Hermes design dispatch job lease lost: ${input.jobId}`);
+      }
+      const updated = hermesDesignDispatchJobSchema.parse(input.update(parsedCurrent));
+      assertDispatchJobIdentity(parsedCurrent, updated);
+      const { data, error } = await this.supabase.rpc(
+        "compare_and_swap_hermes_design_dispatch_job",
+        {
+          p_organization_id: this.scope.organizationId,
+          p_project_key: this.scope.projectKey,
+          p_job_id: input.jobId,
+          p_expected_revision: numericRevision(current.revision),
+          p_expected_lease_token: input.expectedLeaseToken ?? null,
+          p_job: updated
+        }
+      );
+      if (error) {
+        throw new Error(`Failed to update Hermes design dispatch job: ${error.message}`);
+      }
+      const result = firstRow<DispatchUpdateResult>(data);
+      if (!result) throw new Error("Hermes design dispatch update did not return a result");
+      if (result.updated) return hermesDesignDispatchJobSchema.parse(result.job);
+      if (result.conflict_reason === "not_found") {
+        throw new Error(`Hermes design dispatch job not found: ${input.jobId}`);
+      }
+      if (result.conflict_reason === "lease_lost") {
+        throw new Error(`Hermes design dispatch job lease lost: ${input.jobId}`);
+      }
+      if (result.conflict_reason !== "revision_conflict") {
+        throw new Error(
+          `Hermes design dispatch update failed: ${result.conflict_reason ?? "unknown conflict"}`
+        );
+      }
+    }
+    throw new Error(
+      `Hermes design dispatch job ${input.jobId} changed too many times during atomic update`
+    );
+  }
+
   private async getTaskRow(taskId: string): Promise<DesignTaskRow | null> {
     const { data, error } = await this.supabase
       .from("hermes_design_tasks")
@@ -209,6 +449,20 @@ export class SupabaseHermesDesignStore implements HermesDesignStore {
       .maybeSingle();
     if (error) throw new Error(`Failed to load Hermes design task: ${error.message}`);
     return data ? data as DesignTaskRow : null;
+  }
+
+  private async getDispatchJobRow(jobId: string): Promise<DispatchJobRow | null> {
+    const { data, error } = await this.supabase
+      .from("hermes_design_dispatch_jobs")
+      .select("payload, revision")
+      .eq("organization_id", this.scope.organizationId)
+      .eq("project_key", this.scope.projectKey)
+      .eq("job_id", jobId)
+      .maybeSingle();
+    if (error) {
+      throw new Error(`Failed to load Hermes design dispatch job: ${error.message}`);
+    }
+    return data ? data as DispatchJobRow : null;
   }
 }
 
@@ -257,6 +511,19 @@ function assertTaskIdentity(current: HermesDesignTask, updated: HermesDesignTask
   }
 }
 
+function assertDispatchJobIdentity(
+  current: HermesDesignDispatchJob,
+  updated: HermesDesignDispatchJob
+): void {
+  if (
+    updated.id !== current.id ||
+    updated.idempotencyKey !== current.idempotencyKey ||
+    updated.taskId !== current.taskId
+  ) {
+    throw new Error("Hermes design dispatch job identity cannot change");
+  }
+}
+
 function numericRevision(value: number | string): number {
   const revision = Number(value);
   if (!Number.isSafeInteger(revision) || revision < 1) {
@@ -267,4 +534,8 @@ function numericRevision(value: number | string): number {
 
 function firstRow<T>(value: unknown): T | undefined {
   return Array.isArray(value) ? value[0] as T | undefined : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

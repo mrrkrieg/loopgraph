@@ -55,6 +55,7 @@ export * from "./design-service";
 export * from "./design-tools";
 export * from "./evidence-gap-engine";
 export * from "./hermes-design-bridge";
+export * from "./hermes-design-dispatch-worker";
 export * from "./hermes-design-store";
 export * from "./hermes-design-tools";
 export * from "./loop-opportunity-engine";

@@ -5,8 +5,10 @@ import { describe, expect, it } from "vitest";
 import {
   hermesDesignTaskSchema,
   type HermesDesignCallback,
+  type HermesDesignRequest,
   type HermesDesignTask
 } from "../core";
+import { createHermesDesignDispatchJob } from "./hermes-design-bridge";
 import { FileHermesDesignStore } from "./hermes-design-store";
 
 describe("file Hermes design store", () => {
@@ -70,6 +72,83 @@ describe("file Hermes design store", () => {
     });
     expect(duplicate.duplicate).toBe(true);
   });
+
+  it("commits a task and its outbound dispatch job as one recoverable operation", async () => {
+    const store = await tempStore();
+    const task = designTask("task_dispatch");
+    const job = createHermesDesignDispatchJob(designRequest(task));
+
+    const created = await store.createTaskAtomically(task, { dispatchJob: job });
+
+    expect(created.created).toBe(true);
+    expect(created.dispatchJob?.id).toBe(job.id);
+    expect(await store.getTask(task.id)).toEqual(task);
+    expect(await store.getDispatchJob(job.id)).toEqual(job);
+  });
+
+  it("leases one dispatch job to only one concurrent worker", async () => {
+    const store = await tempStore();
+    const task = designTask("task_claim");
+    const job = createHermesDesignDispatchJob(
+      designRequest(task),
+      new Date("2026-07-30T12:00:00.000Z")
+    );
+    await store.createTaskAtomically(task, { dispatchJob: job });
+
+    const now = new Date("2026-07-30T12:00:01.000Z");
+    const [first, second] = await Promise.all([
+      store.claimDueDispatchJobsAtomically({
+        claimedBy: "worker_1",
+        now,
+        leaseSeconds: 60,
+        limit: 1
+      }),
+      store.claimDueDispatchJobsAtomically({
+        claimedBy: "worker_2",
+        now,
+        leaseSeconds: 60,
+        limit: 1
+      })
+    ]);
+
+    expect(first.length + second.length).toBe(1);
+    const claimed = [...first, ...second][0];
+    expect(claimed.status).toBe("claimed");
+    expect(claimed.attemptCount).toBe(1);
+    expect(claimed.lease?.claimedBy).toMatch(/^worker_[12]$/);
+  });
+
+  it("updates a resumed task and enqueues its new request under one lock", async () => {
+    const store = await tempStore();
+    const task = designTask("task_resume");
+    await store.createTaskAtomically(task);
+
+    const result = await store.updateTaskAndEnqueueDispatchAtomically({
+      taskId: task.id,
+      update: (current) => {
+        const updated = hermesDesignTaskSchema.parse({
+          ...current,
+          status: "queued",
+          updatedAt: "2026-07-30T12:02:00.000Z"
+        });
+        return {
+          task: updated,
+          dispatchJob: createHermesDesignDispatchJob(
+            designRequest(updated),
+            new Date("2026-07-30T12:02:00.000Z")
+          )
+        };
+      }
+    });
+
+    expect(result.dispatchCreated).toBe(true);
+    expect((await store.getTask(task.id))?.updatedAt).toBe(
+      "2026-07-30T12:02:00.000Z"
+    );
+    expect(await store.getDispatchJob(result.dispatchJob.id)).toEqual(
+      result.dispatchJob
+    );
+  });
 });
 
 async function tempStore(): Promise<FileHermesDesignStore> {
@@ -116,4 +195,22 @@ function callback(
         error: "Hermes stopped",
         retryable: true
       };
+}
+
+function designRequest(task: HermesDesignTask): HermesDesignRequest {
+  return {
+    schemaVersion: "hermes-design-request/v1alpha1" as const,
+    event_type: "loopgraph.design_requested" as const,
+    task,
+    gaps: [],
+    nextQuestions: [],
+    allowedLoopgraphTools: [
+      "loopgraph_opportunities_get",
+      "loopgraph_evidence_gaps_get",
+      "loopgraph_evidence_gap_answer",
+      "loopgraph_design_context_get",
+      "loopgraph_design_submit"
+    ],
+    instructions: []
+  };
 }

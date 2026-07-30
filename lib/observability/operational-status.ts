@@ -18,6 +18,12 @@ export type OperationalMetrics = {
   routeJobsDue: number;
   routeJobExpiredLeases: number;
   routeJobOldestDueSeconds: number;
+  hermesDispatchQueued: number;
+  hermesDispatchRunning: number;
+  hermesDispatchDeadLetter: number;
+  hermesDispatchDue: number;
+  hermesDispatchExpiredLeases: number;
+  hermesDispatchOldestDueSeconds: number;
   lastMachineRequestAt?: string;
 };
 
@@ -74,7 +80,13 @@ const EMPTY_METRICS: OperationalMetrics = {
   routeJobsDeadLetter: 0,
   routeJobsDue: 0,
   routeJobExpiredLeases: 0,
-  routeJobOldestDueSeconds: 0
+  routeJobOldestDueSeconds: 0,
+  hermesDispatchQueued: 0,
+  hermesDispatchRunning: 0,
+  hermesDispatchDeadLetter: 0,
+  hermesDispatchDue: 0,
+  hermesDispatchExpiredLeases: 0,
+  hermesDispatchOldestDueSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -272,6 +284,24 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_route_job_oldest_due_seconds Age of the oldest claimable route job.",
     "# TYPE loopgraph_route_job_oldest_due_seconds gauge",
     `loopgraph_route_job_oldest_due_seconds ${metrics.routeJobOldestDueSeconds}`,
+    "# HELP loopgraph_hermes_dispatch_queued Hermes design deliveries queued or waiting for retry.",
+    "# TYPE loopgraph_hermes_dispatch_queued gauge",
+    `loopgraph_hermes_dispatch_queued ${metrics.hermesDispatchQueued}`,
+    "# HELP loopgraph_hermes_dispatch_running Hermes design deliveries with an active worker lease.",
+    "# TYPE loopgraph_hermes_dispatch_running gauge",
+    `loopgraph_hermes_dispatch_running ${metrics.hermesDispatchRunning}`,
+    "# HELP loopgraph_hermes_dispatch_dead_letter Exhausted Hermes design deliveries requiring intervention.",
+    "# TYPE loopgraph_hermes_dispatch_dead_letter gauge",
+    `loopgraph_hermes_dispatch_dead_letter ${metrics.hermesDispatchDeadLetter}`,
+    "# HELP loopgraph_hermes_dispatch_due Claimable Hermes design deliveries due now.",
+    "# TYPE loopgraph_hermes_dispatch_due gauge",
+    `loopgraph_hermes_dispatch_due ${metrics.hermesDispatchDue}`,
+    "# HELP loopgraph_hermes_dispatch_expired_leases Hermes design deliveries with expired worker leases.",
+    "# TYPE loopgraph_hermes_dispatch_expired_leases gauge",
+    `loopgraph_hermes_dispatch_expired_leases ${metrics.hermesDispatchExpiredLeases}`,
+    "# HELP loopgraph_hermes_dispatch_oldest_due_seconds Age of the oldest claimable Hermes design delivery.",
+    "# TYPE loopgraph_hermes_dispatch_oldest_due_seconds gauge",
+    `loopgraph_hermes_dispatch_oldest_due_seconds ${metrics.hermesDispatchOldestDueSeconds}`,
     ""
   ].join("\n");
 }
@@ -298,6 +328,14 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     routeJobsDue: nonnegative(data.route_jobs_due),
     routeJobExpiredLeases: nonnegative(data.route_job_expired_leases),
     routeJobOldestDueSeconds: nonnegative(data.route_job_oldest_due_seconds),
+    hermesDispatchQueued: nonnegative(data.hermes_dispatch_queued),
+    hermesDispatchRunning: nonnegative(data.hermes_dispatch_running),
+    hermesDispatchDeadLetter: nonnegative(data.hermes_dispatch_dead_letter),
+    hermesDispatchDue: nonnegative(data.hermes_dispatch_due),
+    hermesDispatchExpiredLeases: nonnegative(data.hermes_dispatch_expired_leases),
+    hermesDispatchOldestDueSeconds: nonnegative(
+      data.hermes_dispatch_oldest_due_seconds
+    ),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})

@@ -55,7 +55,13 @@ describe("operational status", () => {
         route_jobs_dead_letter: 4,
         route_jobs_due: 3,
         route_job_expired_leases: 1,
-        route_job_oldest_due_seconds: 75
+        route_job_oldest_due_seconds: 75,
+        hermes_dispatch_queued: 5,
+        hermes_dispatch_running: 2,
+        hermes_dispatch_dead_letter: 1,
+        hermes_dispatch_due: 4,
+        hermes_dispatch_expired_leases: 1,
+        hermes_dispatch_oldest_due_seconds: 45
       },
       error: null
     });
@@ -83,7 +89,13 @@ describe("operational status", () => {
         routeJobsDeadLetter: 4,
         routeJobsDue: 3,
         routeJobExpiredLeases: 1,
-        routeJobOldestDueSeconds: 75
+        routeJobOldestDueSeconds: 75,
+        hermesDispatchQueued: 5,
+        hermesDispatchRunning: 2,
+        hermesDispatchDeadLetter: 1,
+        hermesDispatchDue: 4,
+        hermesDispatchExpiredLeases: 1,
+        hermesDispatchOldestDueSeconds: 45
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
@@ -92,6 +104,9 @@ describe("operational status", () => {
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_route_jobs_dead_letter 4"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_hermes_dispatch_due 4"
     );
   });
 

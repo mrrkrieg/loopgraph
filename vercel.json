@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/measurements",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/hermes-design",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

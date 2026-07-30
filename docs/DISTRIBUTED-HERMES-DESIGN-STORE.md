@@ -33,6 +33,10 @@ Hosted design-task APIs, evidence-gap resume, opportunity scans, and controller 
 the same store. This means a callback received by replica B can complete a task dispatched by
 replica A, and a later controller run can observe the completed design.
 
+Hosted outbound delivery is now backed by the
+[Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md). Task creation plus initial
+dispatch enqueue is atomic, and leased workers handle retries and dead-letter transitions.
+
 ## Access boundary
 
 - Both tables have RLS enabled.
@@ -51,8 +55,8 @@ The signed callback route still verifies HMAC, timestamp freshness, credential i
 identity, and rate limits before it calls the design store. Database callback application then
 protects task state from cross-replica lost updates.
 
-There is one intentionally explicit remaining reliability boundary: callback proposal compilation
-currently runs inline before the final callback transaction. The hosted replay guard prevents the
+The intentionally explicit remaining reliability boundary is callback proposal compilation,
+which currently runs inline before the final callback transaction. The hosted replay guard prevents the
 same callback ID from being accepted twice, but a process failure after guard acceptance and
 before callback completion needs a durable callback inbox plus retry worker. Until that exists,
 operate the callback endpoint with platform retries and alert on accepted machine requests that

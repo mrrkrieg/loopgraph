@@ -2,7 +2,8 @@
 
 The Hermes design bridge lets Loopgraph initiate design work when a user requests a loop, an unhandled problem needs coverage, an opportunity is detected, or an existing loop needs improvement.
 
-Loopgraph remains the durable source of truth. The Hermes webhook wakes the agent; it is not the task queue.
+Loopgraph remains the durable source of truth. In hosted mode, a Loopgraph dispatch queue owns
+outbound delivery; the Hermes webhook only wakes the agent.
 
 ## Architecture
 
@@ -31,6 +32,11 @@ Local projects enforce those guarantees with an atomic file store. Authenticated
 deployments select a tenant/project-scoped Supabase store, so task creation, evidence resume,
 controller inspection, and callback completion can occur on different replicas without losing
 state. See [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md).
+
+Hosted task creation and initial outbound enqueue are one transaction. Leased workers retry
+failed deliveries with bounded exponential backoff and expose dead-letter state through the
+operational metrics endpoint. See
+[Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md).
 
 When the task originated from the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md), it includes `originOpportunityId`. Hermes reads the explainable score, durable signal references, and proposed graph change through Loopgraph MCP before asking for missing evidence.
 
@@ -84,6 +90,8 @@ GET  /api/hermes/design-tasks
 POST /api/hermes/design-tasks
 GET  /api/hermes/design-tasks/:taskId
 POST /api/hermes/design-tasks/:taskId/callback
+POST /api/hermes/design-dispatch/worker
+GET  /api/cron/hermes-design
 GET  /api/discovery/session/:sessionId/evidence-gaps
 POST /api/discovery/session/:sessionId/evidence-gaps
 ```

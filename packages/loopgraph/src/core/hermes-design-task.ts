@@ -1,10 +1,20 @@
 import { z } from "zod";
 import { DepartmentTypeSchema } from "./department-skills";
-import { evidenceGapSchema } from "./evidence-gap";
-import { loopDesignProposalSetSchema } from "./design";
+import { DiscoveryAnswerValueTypeSchema } from "./discovery";
+import {
+  evidenceGapRequiredForSchema,
+  evidenceGapSchema
+} from "./evidence-gap";
+import {
+  loopDesignContextSchema,
+  loopDesignProposalSetSchema
+} from "./design";
 
 export const HERMES_DESIGN_TASK_SCHEMA_VERSION = "hermes-design-task/v1alpha1" as const;
 export const HERMES_DESIGN_CALLBACK_SCHEMA_VERSION = "hermes-design-callback/v1alpha1" as const;
+export const HERMES_DESIGN_REQUEST_SCHEMA_VERSION = "hermes-design-request/v1alpha1" as const;
+export const HERMES_DESIGN_DISPATCH_JOB_SCHEMA_VERSION =
+  "hermes-design-dispatch-job/v1alpha1" as const;
 
 export const hermesDesignTaskStatusSchema = z.enum([
   "queued",
@@ -83,6 +93,93 @@ export const hermesDesignCallbackSchema = z.discriminatedUnion("type", [
   })
 ]);
 
+export const hermesDesignRequestSchema = z.object({
+  schemaVersion: z.literal(HERMES_DESIGN_REQUEST_SCHEMA_VERSION)
+    .default(HERMES_DESIGN_REQUEST_SCHEMA_VERSION),
+  event_type: z.literal("loopgraph.design_requested"),
+  task: hermesDesignTaskSchema,
+  context: loopDesignContextSchema.optional(),
+  gaps: z.array(evidenceGapSchema).default([]),
+  nextQuestions: z.array(z.object({
+    gapId: z.string().min(1),
+    questionId: z.string().min(1).optional(),
+    prompt: z.string().min(1),
+    valueType: DiscoveryAnswerValueTypeSchema,
+    options: z.array(z.string()).optional(),
+    examples: z.array(z.string()).default([]),
+    reason: z.string().min(1),
+    requiredFor: z.array(evidenceGapRequiredForSchema).min(1),
+    blocking: z.boolean()
+  })).default([]),
+  callback: z.object({
+    url: z.string().url(),
+    signatureHeader: z.literal("x-hermes-signature"),
+    timestampHeader: z.literal("x-hermes-timestamp")
+  }).optional(),
+  allowedLoopgraphTools: z.tuple([
+    z.literal("loopgraph_opportunities_get"),
+    z.literal("loopgraph_evidence_gaps_get"),
+    z.literal("loopgraph_evidence_gap_answer"),
+    z.literal("loopgraph_design_context_get"),
+    z.literal("loopgraph_design_submit")
+  ]),
+  instructions: z.array(z.string()).default([])
+});
+
+export const hermesDesignDispatchJobStatusSchema = z.enum([
+  "queued",
+  "claimed",
+  "completed",
+  "failed",
+  "dead_letter",
+  "cancelled"
+]);
+
+export const hermesDesignDispatchJobSchema = z.object({
+  schemaVersion: z.literal(HERMES_DESIGN_DISPATCH_JOB_SCHEMA_VERSION)
+    .default(HERMES_DESIGN_DISPATCH_JOB_SCHEMA_VERSION),
+  id: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  taskId: z.string().min(1),
+  request: hermesDesignRequestSchema,
+  status: hermesDesignDispatchJobStatusSchema,
+  attemptCount: z.number().int().min(0).default(0),
+  maxAttempts: z.number().int().min(1).default(5),
+  retryPolicy: z.object({
+    baseDelaySeconds: z.number().int().min(1).default(30),
+    maxDelaySeconds: z.number().int().min(1).default(3600),
+    backoffMultiplier: z.number().min(1).default(2)
+  }).default({
+    baseDelaySeconds: 30,
+    maxDelaySeconds: 3600,
+    backoffMultiplier: 2
+  }),
+  nextRunAt: z.string().datetime(),
+  lease: z.object({
+    claimedBy: z.string().min(1),
+    leaseToken: z.string().min(1),
+    claimedAt: z.string().datetime(),
+    expiresAt: z.string().datetime()
+  }).optional(),
+  result: z.object({
+    destination: z.string().optional(),
+    responseStatus: z.number().int().optional(),
+    hermesTaskId: z.string().optional(),
+    completedAt: z.string().datetime()
+  }).optional(),
+  lastError: z.object({
+    message: z.string().min(1),
+    at: z.string().datetime()
+  }).optional(),
+  deadLetterReason: z.string().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
 export type HermesDesignTaskStatus = z.infer<typeof hermesDesignTaskStatusSchema>;
 export type HermesDesignTask = z.infer<typeof hermesDesignTaskSchema>;
 export type HermesDesignCallback = z.infer<typeof hermesDesignCallbackSchema>;
+export type HermesDesignRequest = z.infer<typeof hermesDesignRequestSchema>;
+export type HermesDesignDispatchJobStatus =
+  z.infer<typeof hermesDesignDispatchJobStatusSchema>;
+export type HermesDesignDispatchJob = z.infer<typeof hermesDesignDispatchJobSchema>;
