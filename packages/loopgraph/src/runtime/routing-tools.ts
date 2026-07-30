@@ -33,6 +33,7 @@ import {
   type LoopgraphLifecycleEmitResult
 } from "./lifecycle-events";
 import { loadLoopSpecFromPath } from "./loader";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { resolveExistingProjectPath } from "./project-paths";
 import {
   FileRoutingStore,
@@ -65,6 +66,7 @@ export type LoopgraphRoutingToolName = (typeof LOOPGRAPH_ROUTING_TOOL_NAMES)[num
 export type LoopgraphRoutingToolRuntimeOptions = {
   projectRoot?: string;
   store?: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   now?: Date;
   trustedSpecPaths?: string[];
   trustedRoutingCards?: RoutingCard[];
@@ -198,7 +200,8 @@ export async function loopgraph_routing_catalog_get(
   const routingCards = options.trustedRoutingCards ?? await loadRoutingCardsFromProject({
     projectRoot,
     specPaths: options.trustedSpecPaths,
-    catalogVersion: options.trustedCatalogVersion
+    catalogVersion: options.trustedCatalogVersion,
+    loopSpecStore: options.loopSpecStore
   });
   const catalogVersion = options.trustedCatalogVersion ?? deriveCatalogVersion(routingCards);
   const normalizedCards = routingCards.map((card) => routingCardSchema.parse({
@@ -571,7 +574,11 @@ export async function loopgraph_route_commit_simulate(
 
   const receipt = await findEventReceipt(store, commit.eventId);
   if (!receipt) throw new Error(`Event receipt not found for route commit ${commit.id}: ${commit.eventId}`);
-  const loaded = await loadRegisteredLoopSpec(projectRoot, commit.loopId);
+  const loaded = await loadRegisteredLoopSpec(
+    projectRoot,
+    commit.loopId,
+    options.loopSpecStore
+  );
   if (!loaded.ok) {
     return {
       schemaVersion: "route-commit-simulation/v1alpha1",
@@ -733,23 +740,24 @@ export async function loadRoutingCardsFromProject(input: {
   projectRoot: string;
   specPaths?: string[];
   catalogVersion?: string;
+  loopSpecStore?: LoopSpecRegistryStore;
 }): Promise<RoutingCard[]> {
-  const specPaths = input.specPaths ?? await readRegisteredSpecPaths(input.projectRoot);
   const connectionReadinessByCapability = await buildConnectionReadinessIndex(input.projectRoot);
   const compiledCards: RoutingCard[] = [];
 
-  for (const specPath of specPaths) {
-    const absolutePath = await resolveExistingProjectPath(
-      input.projectRoot,
-      specPath,
-      "routing catalog LoopSpec"
-    );
-    const loaded = await loadLoopSpecFromPath(absolutePath);
-    if (!loaded.ok) continue;
-    const card = compileRoutingCardFromLoopSpec(loaded.spec, {
+  const specs = input.loopSpecStore
+    ? (await input.loopSpecStore.listActiveLoopSpecs(input.projectRoot))
+        .map((artifact) => artifact.spec)
+    : await loadRoutingSpecsFromPaths(
+        input.projectRoot,
+        input.specPaths ??
+          await readRegisteredSpecPaths(input.projectRoot)
+      );
+  for (const spec of specs) {
+    const card = compileRoutingCardFromLoopSpec(spec, {
       catalogVersion: input.catalogVersion ?? "catalog_pending",
       currentReadiness: readinessForRequiredConnections(
-        loaded.spec.routing?.requiredConnections ?? [],
+        spec.routing?.requiredConnections ?? [],
         connectionReadinessByCapability
       )
     });
@@ -761,6 +769,23 @@ export async function loadRoutingCardsFromProject(input: {
     ...card,
     catalogVersion
   }));
+}
+
+async function loadRoutingSpecsFromPaths(
+  projectRoot: string,
+  specPaths: string[]
+): Promise<LoopSpec[]> {
+  const specs: LoopSpec[] = [];
+  for (const specPath of specPaths) {
+    const absolutePath = await resolveExistingProjectPath(
+      projectRoot,
+      specPath,
+      "routing catalog LoopSpec"
+    );
+    const loaded = await loadLoopSpecFromPath(absolutePath);
+    if (loaded.ok) specs.push(loaded.spec);
+  }
+  return specs;
 }
 
 function deriveCatalogVersion(cards: RoutingCard[]): string {
@@ -842,7 +867,25 @@ function routeJobStatusForCommitStatus(status: RouteCommit["status"]): RouteJob[
   return "queued";
 }
 
-async function loadRegisteredLoopSpec(projectRoot: string, loopId: string) {
+async function loadRegisteredLoopSpec(
+  projectRoot: string,
+  loopId: string,
+  loopSpecStore?: LoopSpecRegistryStore
+) {
+  if (loopSpecStore) {
+    const artifact = await loopSpecStore.getActiveLoopSpec(projectRoot, loopId);
+    return artifact
+      ? {
+          ok: true as const,
+          spec: artifact.spec,
+          sourcePath: artifact.sourceRef ?? artifact.entry.path
+        }
+      : {
+          ok: false as const,
+          errors: [`Registered LoopSpec not found for loopId: ${loopId}`],
+          sourcePath: projectRoot
+        };
+  }
   const workspace = await readLoopgraphWorkspace(projectRoot);
   const entry = workspace.registeredSpecs.find((candidate) => candidate.id === loopId);
   if (!entry) {

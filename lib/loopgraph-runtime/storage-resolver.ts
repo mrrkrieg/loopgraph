@@ -4,10 +4,12 @@ import { FileStorageAdapter } from "loopgraph/sdk";
 import {
   FileHermesDesignStore,
   FileDiscoveryDesignStore,
+  FileLoopSpecRegistryStore,
   FileRoutingStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
   type DiscoveryDesignStore,
   type HermesDesignStore,
+  type LoopSpecRegistryStore,
   type RoutingStore
 } from "loopgraph/runtime";
 import {
@@ -26,12 +28,17 @@ import {
   createSupabaseDiscoveryDesignStore,
   isSupabaseDiscoveryDesignStoreEnabled
 } from "@/lib/db/adapters/supabase-discovery-design-store";
+import {
+  createSupabaseLoopSpecRegistryStore,
+  isSupabaseLoopSpecRegistryStoreEnabled
+} from "@/lib/db/adapters/supabase-loop-spec-registry-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
 const cachedHermesDesignStores = new Map<string, HermesDesignStore>();
 const cachedDiscoveryDesignStores = new Map<string, DiscoveryDesignStore>();
+const cachedLoopSpecRegistryStores = new Map<string, LoopSpecRegistryStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -181,11 +188,47 @@ export function getDiscoveryDesignStore(options?: {
   return store;
 }
 
+export function getLoopSpecRegistryStore(options?: {
+  projectRoot?: string;
+  forceFile?: boolean;
+}): LoopSpecRegistryStore {
+  const organizationId =
+    process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey =
+    process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase =
+    !options?.forceFile && isSupabaseLoopSpecRegistryStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase LoopSpec registry storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const projectRoot = path.resolve(
+    options?.projectRoot ?? getActiveLoopgraphProjectRoot()
+  );
+  const cacheKey = useSupabase
+    ? `supabase-loop-spec-registry:${organizationId}:${projectKey}`
+    : `file-loop-spec-registry:${projectRoot}`;
+  if (!options?.forceFile && cachedLoopSpecRegistryStores.has(cacheKey)) {
+    return cachedLoopSpecRegistryStores.get(cacheKey)!;
+  }
+
+  const store = useSupabase
+    ? createSupabaseLoopSpecRegistryStore()
+    : new FileLoopSpecRegistryStore(projectRoot);
+  if (!options?.forceFile) {
+    cachedLoopSpecRegistryStores.set(cacheKey, store);
+  }
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
   cachedHermesDesignStores.clear();
   cachedDiscoveryDesignStores.clear();
+  cachedLoopSpecRegistryStores.clear();
 }
 
 const UUID_PATTERN =

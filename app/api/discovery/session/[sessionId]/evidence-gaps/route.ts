@@ -8,7 +8,8 @@ import {
 import {
   getActiveLoopgraphProjectRoot,
   getDiscoveryDesignStore,
-  getHermesDesignStore
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(
@@ -64,7 +65,8 @@ export async function POST(
       sessionId
     }, {
       store: getHermesDesignStore(),
-      discoveryStore: getDiscoveryDesignStore()
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore()
     });
     return NextResponse.json({ ...result, resumedTasks }, { status: 201 });
   } catch (error) {

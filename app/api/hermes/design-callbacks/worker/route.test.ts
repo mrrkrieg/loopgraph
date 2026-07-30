@@ -4,6 +4,7 @@ const authorizeWorkerApiRequest = vi.hoisted(() => vi.fn());
 const runHermesDesignCallbackWorker = vi.hoisted(() => vi.fn());
 const designStore = vi.hoisted(() => ({ kind: "shared-hermes-design" }));
 const discoveryStore = vi.hoisted(() => ({ kind: "shared-discovery-design" }));
+const loopSpecStore = vi.hoisted(() => ({ kind: "shared-loop-specs" }));
 
 vi.mock("loopgraph/runtime", () => ({
   runHermesDesignCallbackWorker
@@ -14,7 +15,8 @@ vi.mock("../../../../../lib/loopgraph-runtime/worker-api-auth", () => ({
 vi.mock("../../../../../lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot: () => "/runtime/org/main",
   getDiscoveryDesignStore: () => discoveryStore,
-  getHermesDesignStore: () => designStore
+  getHermesDesignStore: () => designStore,
+  getLoopSpecRegistryStore: () => loopSpecStore
 }));
 
 import { POST } from "./route";
@@ -52,6 +54,7 @@ describe("Hermes design callback worker API", () => {
       projectRoot: "/runtime/org/main",
       store: designStore,
       discoveryStore,
+      loopSpecStore,
       workerId: "callback-worker-primary",
       limit: 25,
       leaseSeconds: 600

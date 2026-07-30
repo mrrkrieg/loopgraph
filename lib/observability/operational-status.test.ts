@@ -67,6 +67,18 @@ describe("operational status", () => {
           error: null
         };
       }
+      if (name === "get_loop_spec_registry_snapshot") {
+        return {
+          data: {
+            workspace_count: 1,
+            active_loop_spec_count: 7,
+            immutable_loop_spec_version_count: 11,
+            loop_spec_commit_count: 8,
+            workspace_revision: 8
+          },
+          error: null
+        };
+      }
       return {
           data: {
             database_ready: true,
@@ -133,7 +145,11 @@ describe("operational status", () => {
         discoverySessionsActive: 4,
         discoveryEvidenceGapSetsTotal: 9,
         loopDesignArtifactsTotal: 18,
-        discoveryOldestActiveSeconds: 240
+        discoveryOldestActiveSeconds: 240,
+        activeLoopSpecs: 7,
+        immutableLoopSpecVersions: 11,
+        loopSpecCommits: 8,
+        loopSpecWorkspaceRevision: 8
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
@@ -151,6 +167,9 @@ describe("operational status", () => {
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_loop_design_artifacts_total 18"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_active_loop_specs 7"
     );
   });
 

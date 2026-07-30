@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
   getDiscoveryDesignStore,
+  getLoopSpecRegistryStore,
   getStorageAdapter,
   resetStorageAdapterCache,
   resolveHostedRuntimeProjectRoot
@@ -83,5 +84,19 @@ describe("hosted runtime namespaces", () => {
     expect(firstAgain).toBe(first);
     expect(second).not.toBe(first);
     expect(first.persistence).toBe("file");
+  });
+
+  it("caches local LoopSpec registries per project namespace", () => {
+    const first = getLoopSpecRegistryStore({
+      projectRoot: "/tmp/loopgraph-registry-a",
+      forceFile: true
+    });
+    const second = getLoopSpecRegistryStore({
+      projectRoot: "/tmp/loopgraph-registry-b",
+      forceFile: true
+    });
+    expect(first.persistence).toBe("file");
+    expect(second.persistence).toBe("file");
+    expect(second).not.toBe(first);
   });
 });

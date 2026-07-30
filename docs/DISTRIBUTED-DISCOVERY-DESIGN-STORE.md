@@ -79,11 +79,12 @@ path, or proposals that are waiting for review.
 This store makes discovery evidence and pre-materialization design output replica-safe. It does
 not yet make the entire control plane multi-writer.
 
-Materialized/versioned LoopSpecs, the workspace registry, semantic graph snapshots and change
-sets, opportunities, controller state, measurement jobs, and outcomes still have project-local
-paths. Hosted materialization may read distributed proposals, but must remain on one active writer
-until those output records move to their own tenant-scoped transactional store. Provider
-credentials and provider API calls remain Hermes-owned and are intentionally not stored here.
+Materialized/versioned LoopSpecs and the active workspace registry now move through the
+tenant-scoped transactional store described in
+[Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md). Semantic graph snapshots and
+change sets, opportunities, controller state, measurement jobs, outcomes, and the value ledger
+still have project-local paths. Provider credentials and provider API calls remain Hermes-owned
+and are intentionally not stored here.
 
 ## Verification
 

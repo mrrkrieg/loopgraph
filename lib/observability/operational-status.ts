@@ -35,6 +35,10 @@ export type OperationalMetrics = {
   discoveryEvidenceGapSetsTotal: number;
   loopDesignArtifactsTotal: number;
   discoveryOldestActiveSeconds: number;
+  activeLoopSpecs: number;
+  immutableLoopSpecVersions: number;
+  loopSpecCommits: number;
+  loopSpecWorkspaceRevision: number;
   lastMachineRequestAt?: string;
 };
 
@@ -108,7 +112,11 @@ const EMPTY_METRICS: OperationalMetrics = {
   discoverySessionsActive: 0,
   discoveryEvidenceGapSetsTotal: 0,
   loopDesignArtifactsTotal: 0,
-  discoveryOldestActiveSeconds: 0
+  discoveryOldestActiveSeconds: 0,
+  activeLoopSpecs: 0,
+  immutableLoopSpecVersions: 0,
+  loopSpecCommits: 0,
+  loopSpecWorkspaceRevision: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -162,27 +170,34 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     };
   }
 
-  const [operational, callbacks, discoveryDesign] = await Promise.all([
-    supabase.rpc("get_loopgraph_operational_snapshot", {
-      p_organization_id: organizationId,
-      p_project_key: projectKey
-    }),
-    supabase.rpc("get_hermes_callback_queue_snapshot", {
-      p_organization_id: organizationId,
-      p_project_key: projectKey
-    }),
-    supabase.rpc("get_discovery_design_snapshot", {
-      p_organization_id: organizationId,
-      p_project_key: projectKey
-    })
-  ]);
+  const [operational, callbacks, discoveryDesign, loopSpecRegistry] =
+    await Promise.all([
+      supabase.rpc("get_loopgraph_operational_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey
+      }),
+      supabase.rpc("get_hermes_callback_queue_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey
+      }),
+      supabase.rpc("get_discovery_design_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey
+      }),
+      supabase.rpc("get_loop_spec_registry_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey
+      })
+    ]);
   if (
     operational.error ||
     callbacks.error ||
     discoveryDesign.error ||
+    loopSpecRegistry.error ||
     !isRecord(operational.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
+    !isRecord(loopSpecRegistry.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -220,7 +235,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     metrics: parseMetrics({
       ...operational.data,
       ...callbacks.data,
-      ...discoveryDesign.data
+      ...discoveryDesign.data,
+      ...loopSpecRegistry.data
     })
   };
 }
@@ -379,6 +395,18 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_discovery_oldest_active_seconds Age of the oldest active discovery session.",
     "# TYPE loopgraph_discovery_oldest_active_seconds gauge",
     `loopgraph_discovery_oldest_active_seconds ${metrics.discoveryOldestActiveSeconds}`,
+    "# HELP loopgraph_active_loop_specs Active LoopSpecs in the tenant project registry.",
+    "# TYPE loopgraph_active_loop_specs gauge",
+    `loopgraph_active_loop_specs ${metrics.activeLoopSpecs}`,
+    "# HELP loopgraph_immutable_loop_spec_versions Immutable LoopSpec versions retained for rollback and audit.",
+    "# TYPE loopgraph_immutable_loop_spec_versions gauge",
+    `loopgraph_immutable_loop_spec_versions ${metrics.immutableLoopSpecVersions}`,
+    "# HELP loopgraph_loop_spec_commits Atomic LoopSpec registry commits.",
+    "# TYPE loopgraph_loop_spec_commits gauge",
+    `loopgraph_loop_spec_commits ${metrics.loopSpecCommits}`,
+    "# HELP loopgraph_loop_spec_workspace_revision Current active LoopSpec workspace revision.",
+    "# TYPE loopgraph_loop_spec_workspace_revision gauge",
+    `loopgraph_loop_spec_workspace_revision ${metrics.loopSpecWorkspaceRevision}`,
     ""
   ].join("\n");
 }
@@ -432,6 +460,12 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     discoveryOldestActiveSeconds: nonnegative(
       data.oldest_active_session_seconds
     ),
+    activeLoopSpecs: nonnegative(data.active_loop_spec_count),
+    immutableLoopSpecVersions: nonnegative(
+      data.immutable_loop_spec_version_count
+    ),
+    loopSpecCommits: nonnegative(data.loop_spec_commit_count),
+    loopSpecWorkspaceRevision: nonnegative(data.workspace_revision),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})

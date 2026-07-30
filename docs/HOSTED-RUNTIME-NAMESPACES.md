@@ -60,11 +60,11 @@ atomic across replicas and use leases plus revision fencing.
 
 Hermes design tasks, callback receipts, outbound design dispatch, the leased inbound callback
 inbox, discovery sessions, evidence-gap sets, and immutable design contexts/runs/proposals now use
-a shared Supabase boundary in hosted mode. Graph transactions, opportunities, controller
-triggers, measurement jobs, outcomes, the workspace registry, and generated/versioned LoopSpec
-artifacts still have file-backed paths. Hosted materialization can read a distributed proposal,
-but writing those outputs remains a single-writer operation. Until those records move, do not
-treat the full control plane as multi-writer. The remaining stores need:
+a shared Supabase boundary in hosted mode. Accepted LoopSpec versions, fixtures, and the active
+workspace registry use that same tenant/project boundary, and materialization completes the
+discovery transition in the registry transaction. Graph transactions, opportunities, controller
+triggers, measurement jobs, outcomes, and value records still have file-backed paths. Until those
+records move, do not treat the full control plane as multi-writer. The remaining stores need:
 
 - atomic claim/update operations;
 - leases and fencing tokens;
@@ -76,6 +76,7 @@ treat the full control plane as multi-writer. The remaining stores need:
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md),
+[Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md),
 [Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md), and
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md), and
 [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) for the
