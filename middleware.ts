@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/middleware-policy";
 import {
   HOSTED_ORGANIZATION_COOKIE,
+  getHostedOrganizationId,
   isHostedAuthRequired
 } from "@/lib/auth/hosted-config";
 
@@ -79,8 +80,18 @@ export async function middleware(request: NextRequest) {
       .eq("user_id", data.claims.sub)
       .eq("status", "active");
     const selectedOrganizationId = request.cookies.get(HOSTED_ORGANIZATION_COOKIE)?.value;
-    const membership = selectHostedMembership(memberships, selectedOrganizationId);
+    const deploymentOrganizationId = getHostedOrganizationId();
+    const membership = selectHostedMembership(
+      memberships,
+      deploymentOrganizationId ?? selectedOrganizationId,
+      Boolean(deploymentOrganizationId)
+    );
     if (!membership) {
+      if (deploymentOrganizationId) {
+        return secureResponse(NextResponse.json({
+          error: "Your account is not a member of this deployment organization."
+        }, { status: 403 }));
+      }
       if (request.nextUrl.pathname.startsWith("/api/")) {
         return secureResponse(NextResponse.json(
           { error: "Organization membership required" },

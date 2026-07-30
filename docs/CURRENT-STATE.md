@@ -81,6 +81,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - The Design Studio resolves the active member organization instead of the first database row.
 - Every current public Supabase table has an RLS policy, and anonymous table access is revoked.
 - Runtime Supabase persistence requires and filters by an explicit organization ID.
+- Hosted file runtime state resolves under a validated organization/project namespace on an
+  explicit persistent root; the application checkout and generic project-root override are ignored.
+- File storage adapters are cached per resolved namespace instead of globally.
 - Same-origin browser mutations, signed machine callbacks, worker bearer auth, cron auth, and
   baseline security headers are separated at the web boundary.
 - See [Hosted authentication and tenant security](./HOSTED-SECURITY.md).
@@ -95,8 +98,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Bind each hosted organization to a durable runtime namespace and replace filesystem queues with
-   atomic database/queue claims so more than one replica can work safely.
+1. Replace the now tenant-bound filesystem stores with atomic database/queue claims so more than
+   one replica can work safely.
 2. Add distributed rate limits and scoped service accounts for user APIs, Hermes callbacks,
    connector collectors, controller workers, and cron invocations.
 3. Export an append-only security audit stream, add production tracing/alerts/SLOs, and prove
@@ -118,3 +121,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Outcomes and value](./OUTCOMES-AND-VALUE.md)
 - [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)
+- [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md)

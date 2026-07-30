@@ -32,6 +32,8 @@ NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
 SUPABASE_SERVICE_ROLE_KEY=YOUR_SERVER_ONLY_SERVICE_ROLE_KEY
 LOOPGRAPH_HOSTED_MODE=1
 LOOPGRAPH_HOSTED_ORGANIZATION_ID=YOUR_ORGANIZATION_UUID
+LOOPGRAPH_HOSTED_RUNTIME_ROOT=/var/lib/loopgraph
+LOOPGRAPH_HOSTED_PROJECT_KEY=main
 CRON_SECRET=LONG_RANDOM_SECRET
 LOOPGRAPH_WORKER_API_TOKEN=SEPARATE_LONG_RANDOM_TOKEN
 LOOPGRAPH_HERMES_CALLBACK_SECRET=SEPARATE_LONG_RANDOM_SECRET
@@ -79,10 +81,14 @@ deployment connected to customer or company data.
 
 ## Current production limitation
 
-The browser persistence boundary is tenant-aware, but the package runtime still uses a
-project-local `.loopgraph/` root and a deployment-level worker token. Until durable project binding
-and tenant-scoped service accounts ship, use one organization per hosted runtime deployment.
-Do not operate multiple customer organizations through one shared filesystem worker.
+The browser persistence boundary is tenant-aware, while the package runtime uses a
+deployment-bound `.loopgraph/` namespace and a deployment-level worker token. The namespace is
+isolated by organization/project and must live on a persistent volume, but its stores are not yet
+a distributed queue. Until database-backed claims and tenant-scoped service accounts ship, use one
+organization/project and one active writer per hosted runtime deployment. Do not operate multiple
+customer organizations through one shared filesystem worker.
+
+See [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
 
 The remaining hosted production work is tracked in
 [Current build state](./CURRENT-STATE.md#remaining-product-layers).

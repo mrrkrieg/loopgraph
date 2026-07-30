@@ -1,5 +1,12 @@
 export const HOSTED_ORGANIZATION_COOKIE = "loopgraph-organization-id";
 
+export function getHostedOrganizationId(
+  env: NodeJS.ProcessEnv = process.env
+): string | undefined {
+  const value = env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  return value || undefined;
+}
+
 export function isPublicHostedPreviewEnvironment(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.LOOPGRAPH_HOSTED_MODE === "1") return false;
   const productionUrl = env.VERCEL_PROJECT_PRODUCTION_URL
