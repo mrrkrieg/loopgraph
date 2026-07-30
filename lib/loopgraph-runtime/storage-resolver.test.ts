@@ -2,6 +2,10 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
+  getLoopControllerStore,
+  getLoopOpportunityStore,
+  getLoopSpecRegistryStore,
   getStorageAdapter,
   resetStorageAdapterCache,
   resolveHostedRuntimeProjectRoot
@@ -67,5 +71,72 @@ describe("hosted runtime namespaces", () => {
     const second = getStorageAdapter({ rootDir: "/tmp/loopgraph-org-b", forceFile: false });
     expect(firstAgain).toBe(first);
     expect(second).not.toBe(first);
+  });
+
+  it("caches discovery design stores per local namespace", () => {
+    const first = getDiscoveryDesignStore({
+      rootDir: "/tmp/loopgraph-discovery-a"
+    });
+    const firstAgain = getDiscoveryDesignStore({
+      rootDir: "/tmp/loopgraph-discovery-a"
+    });
+    const second = getDiscoveryDesignStore({
+      rootDir: "/tmp/loopgraph-discovery-b"
+    });
+    expect(firstAgain).toBe(first);
+    expect(second).not.toBe(first);
+    expect(first.persistence).toBe("file");
+  });
+
+  it("caches local LoopSpec registries per project namespace", () => {
+    const first = getLoopSpecRegistryStore({
+      projectRoot: "/tmp/loopgraph-registry-a",
+      forceFile: true
+    });
+    const second = getLoopSpecRegistryStore({
+      projectRoot: "/tmp/loopgraph-registry-b",
+      forceFile: true
+    });
+    expect(first.persistence).toBe("file");
+    expect(second.persistence).toBe("file");
+    expect(second).not.toBe(first);
+  });
+
+  it("keeps local controller and opportunity stores scoped by project", () => {
+    const firstController = getLoopControllerStore({
+      projectRoot: "/tmp/loopgraph-controller-a",
+      forceFile: true
+    });
+    const secondController = getLoopControllerStore({
+      projectRoot: "/tmp/loopgraph-controller-b",
+      forceFile: true
+    });
+    const firstOpportunities = getLoopOpportunityStore({
+      projectRoot: "/tmp/loopgraph-opportunities-a",
+      forceFile: true
+    });
+    const secondOpportunities = getLoopOpportunityStore({
+      projectRoot: "/tmp/loopgraph-opportunities-b",
+      forceFile: true
+    });
+    expect(firstController.persistence).toBe("file");
+    expect(firstOpportunities.persistence).toBe("file");
+    expect(secondController).not.toBe(firstController);
+    expect(secondOpportunities).not.toBe(firstOpportunities);
+  });
+
+  it("fails closed instead of using file state for hosted controller data", () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
+    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+    vi.stubEnv("LOOPGRAPH_HOSTED_ORGANIZATION_ID", "");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+
+    expect(() => getLoopControllerStore()).toThrow(
+      "Supabase loop controller storage requires"
+    );
+    expect(() => getLoopOpportunityStore()).toThrow(
+      "Supabase loop opportunity storage requires"
+    );
   });
 });

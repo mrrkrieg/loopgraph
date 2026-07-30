@@ -14,6 +14,8 @@ describe("hosted middleware policy", () => {
     expect(isMachineAuthenticatedRoute("/api/graph/transactions")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/operations/metrics")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-tasks/task_1/callback")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/hermes/design-dispatch/worker")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/hermes/design-callbacks/worker")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-tasks")).toBe(false);
     expect(isMachineAuthenticatedRoute("/api/opportunities")).toBe(false);
   });

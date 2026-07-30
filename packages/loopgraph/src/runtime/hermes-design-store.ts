@@ -12,9 +12,11 @@ import {
 import path from "node:path";
 import {
   hermesDesignCallbackSchema,
+  hermesDesignCallbackJobSchema,
   hermesDesignDispatchJobSchema,
   hermesDesignTaskSchema,
   type HermesDesignCallback,
+  type HermesDesignCallbackJob,
   type HermesDesignDispatchJob,
   type HermesDesignTask
 } from "../core";
@@ -47,6 +49,49 @@ export type HermesDesignCallbackApplyInput = HermesDesignTaskUpdateInput & {
 export type HermesDesignCallbackApplyResult = {
   task: HermesDesignTask;
   duplicate: boolean;
+};
+
+export type HermesDesignCallbackJobFilters = {
+  taskId?: string;
+  callbackId?: string;
+  status?: HermesDesignCallbackJob["status"];
+};
+
+export type HermesDesignCallbackMachineRequest = {
+  organizationId: string;
+  projectKey: string;
+  credentialId: string;
+  capability: "hermes.design_callback";
+  requestId: string;
+  requestHash: string;
+  requestedAt: string;
+  rateLimit: number;
+};
+
+export type HermesDesignCallbackJobAcceptInput = {
+  job: HermesDesignCallbackJob;
+  machineRequest?: HermesDesignCallbackMachineRequest;
+};
+
+export type HermesDesignCallbackJobAcceptResult = {
+  authorized: boolean;
+  reason: "accepted" | "duplicate" | "replayed_request" | "rate_limited" | string;
+  created: boolean;
+  job?: HermesDesignCallbackJob;
+  retryAfterSeconds?: number;
+};
+
+export type HermesDesignCallbackJobClaimInput = {
+  claimedBy: string;
+  now: Date;
+  leaseSeconds: number;
+  limit: number;
+};
+
+export type HermesDesignCallbackJobUpdateInput = {
+  jobId: string;
+  expectedLeaseToken?: string;
+  update: (job: HermesDesignCallbackJob) => HermesDesignCallbackJob;
 };
 
 export type HermesDesignDispatchJobFilters = {
@@ -100,6 +145,19 @@ export interface HermesDesignStore {
   applyCallbackAtomically(
     input: HermesDesignCallbackApplyInput
   ): Promise<HermesDesignCallbackApplyResult>;
+  acceptCallbackJobAtomically(
+    input: HermesDesignCallbackJobAcceptInput
+  ): Promise<HermesDesignCallbackJobAcceptResult>;
+  getCallbackJob(jobId: string): Promise<HermesDesignCallbackJob | undefined>;
+  listCallbackJobs(
+    filters?: HermesDesignCallbackJobFilters
+  ): Promise<HermesDesignCallbackJob[]>;
+  claimDueCallbackJobsAtomically(
+    input: HermesDesignCallbackJobClaimInput
+  ): Promise<HermesDesignCallbackJob[]>;
+  updateCallbackJobAtomically(
+    input: HermesDesignCallbackJobUpdateInput
+  ): Promise<HermesDesignCallbackJob>;
   enqueueDispatchJobAtomically(
     job: HermesDesignDispatchJob
   ): Promise<HermesDesignDispatchJobCreateResult>;
@@ -274,6 +332,171 @@ export class FileHermesDesignStore implements HermesDesignStore {
     });
   }
 
+  async acceptCallbackJobAtomically(
+    input: HermesDesignCallbackJobAcceptInput
+  ): Promise<HermesDesignCallbackJobAcceptResult> {
+    if (input.machineRequest) {
+      throw new Error(
+        "Hosted callback authorization requires the distributed Hermes design store"
+      );
+    }
+    const parsed = hermesDesignCallbackJobSchema.parse(input.job);
+    return this.withLock(async () => {
+      const task = await this.getTask(parsed.taskId);
+      if (!task) {
+        throw new Error(`Hermes design task not found: ${parsed.taskId}`);
+      }
+      const existing = (await this.listCallbackJobs())
+        .find((candidate) =>
+          candidate.id === parsed.id ||
+          candidate.idempotencyKey === parsed.idempotencyKey ||
+          candidate.callbackId === parsed.callbackId
+        );
+      if (existing) {
+        assertCallbackJobReplay(existing, parsed);
+        return {
+          authorized: true,
+          reason: "duplicate",
+          created: false,
+          job: existing
+        };
+      }
+      await this.writeCallbackJob(parsed);
+      return {
+        authorized: true,
+        reason: "accepted",
+        created: true,
+        job: parsed
+      };
+    });
+  }
+
+  async getCallbackJob(
+    jobId: string
+  ): Promise<HermesDesignCallbackJob | undefined> {
+    try {
+      return hermesDesignCallbackJobSchema.parse(
+        JSON.parse(await readFile(this.callbackJobPath(jobId), "utf8"))
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  async listCallbackJobs(
+    filters: HermesDesignCallbackJobFilters = {}
+  ): Promise<HermesDesignCallbackJob[]> {
+    try {
+      const files = await readdir(this.callbackJobsRoot());
+      const jobs = await Promise.all(files
+        .filter((file) => file.endsWith(".json"))
+        .map(async (file) => {
+          try {
+            return hermesDesignCallbackJobSchema.parse(
+              JSON.parse(
+                await readFile(path.join(this.callbackJobsRoot(), file), "utf8")
+              )
+            );
+          } catch {
+            return undefined;
+          }
+        }));
+      return jobs
+        .filter((job): job is HermesDesignCallbackJob => Boolean(job))
+        .filter((job) => !filters.taskId || job.taskId === filters.taskId)
+        .filter((job) => !filters.callbackId || job.callbackId === filters.callbackId)
+        .filter((job) => !filters.status || job.status === filters.status)
+        .sort((left, right) =>
+          left.nextRunAt.localeCompare(right.nextRunAt) ||
+          left.createdAt.localeCompare(right.createdAt)
+        );
+    } catch {
+      return [];
+    }
+  }
+
+  async claimDueCallbackJobsAtomically(
+    input: HermesDesignCallbackJobClaimInput
+  ): Promise<HermesDesignCallbackJob[]> {
+    return this.withLock(async () => {
+      const jobs = await this.listCallbackJobs();
+      const nowIso = input.now.toISOString();
+      for (const job of jobs) {
+        if (
+          job.status === "claimed" &&
+          job.lease &&
+          Date.parse(job.lease.expiresAt) <= input.now.getTime() &&
+          job.attemptCount >= job.maxAttempts
+        ) {
+          await this.writeCallbackJob(hermesDesignCallbackJobSchema.parse({
+            ...job,
+            status: "dead_letter",
+            lease: undefined,
+            deadLetterReason:
+              "Callback worker lease expired after the maximum attempt count.",
+            updatedAt: nowIso
+          }));
+        }
+      }
+      const refreshed = await this.listCallbackJobs();
+      const eligible = refreshed
+        .filter((job) =>
+          job.attemptCount < job.maxAttempts &&
+          (
+            (["queued", "failed"].includes(job.status) &&
+              Date.parse(job.nextRunAt) <= input.now.getTime()) ||
+            (
+              job.status === "claimed" &&
+              job.lease &&
+              Date.parse(job.lease.expiresAt) <= input.now.getTime()
+            )
+          )
+        )
+        .slice(0, input.limit);
+      const claimed: HermesDesignCallbackJob[] = [];
+      for (const job of eligible) {
+        const updated = hermesDesignCallbackJobSchema.parse({
+          ...job,
+          status: "claimed",
+          attemptCount: job.attemptCount + 1,
+          lease: {
+            claimedBy: input.claimedBy,
+            leaseToken: randomUUID(),
+            claimedAt: nowIso,
+            expiresAt: new Date(
+              input.now.getTime() + input.leaseSeconds * 1000
+            ).toISOString()
+          },
+          updatedAt: nowIso
+        });
+        await this.writeCallbackJob(updated);
+        claimed.push(updated);
+      }
+      return claimed;
+    });
+  }
+
+  async updateCallbackJobAtomically(
+    input: HermesDesignCallbackJobUpdateInput
+  ): Promise<HermesDesignCallbackJob> {
+    return this.withLock(async () => {
+      const current = await this.getCallbackJob(input.jobId);
+      if (!current) {
+        throw new Error(`Hermes design callback job not found: ${input.jobId}`);
+      }
+      if (
+        input.expectedLeaseToken &&
+        current.lease?.leaseToken !== input.expectedLeaseToken
+      ) {
+        throw new Error(`Hermes design callback job lease lost: ${input.jobId}`);
+      }
+      const updated = hermesDesignCallbackJobSchema.parse(input.update(current));
+      assertCallbackJobIdentity(current, updated);
+      await this.writeCallbackJob(updated);
+      return updated;
+    });
+  }
+
   async enqueueDispatchJobAtomically(
     job: HermesDesignDispatchJob
   ): Promise<HermesDesignDispatchJobCreateResult> {
@@ -435,6 +658,10 @@ export class FileHermesDesignStore implements HermesDesignStore {
     );
   }
 
+  private async writeCallbackJob(job: HermesDesignCallbackJob): Promise<void> {
+    await writeJson(this.callbackJobPath(job.id), job);
+  }
+
   private async writeDispatchJob(job: HermesDesignDispatchJob): Promise<void> {
     await writeJson(this.dispatchJobPath(job.id), job);
   }
@@ -494,6 +721,10 @@ export class FileHermesDesignStore implements HermesDesignStore {
     return path.join(this.rootDir, "hermes", "design-dispatch-jobs");
   }
 
+  private callbackJobsRoot(): string {
+    return path.join(this.rootDir, "hermes", "design-callback-jobs");
+  }
+
   private transactionsRoot(): string {
     return path.join(this.rootDir, "hermes", "design-transactions");
   }
@@ -504,6 +735,10 @@ export class FileHermesDesignStore implements HermesDesignStore {
 
   private dispatchJobPath(jobId: string): string {
     return path.join(this.dispatchJobsRoot(), `${safeFileName(jobId)}.json`);
+  }
+
+  private callbackJobPath(jobId: string): string {
+    return path.join(this.callbackJobsRoot(), `${safeFileName(jobId)}.json`);
   }
 
   private async withLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -537,6 +772,36 @@ export class FileHermesDesignStore implements HermesDesignStore {
       await handle.close();
       await unlink(lockPath).catch(() => undefined);
     }
+  }
+}
+
+function assertCallbackJobIdentity(
+  current: HermesDesignCallbackJob,
+  updated: HermesDesignCallbackJob
+): void {
+  if (
+    updated.id !== current.id ||
+    updated.idempotencyKey !== current.idempotencyKey ||
+    updated.taskId !== current.taskId ||
+    updated.callbackId !== current.callbackId ||
+    updated.requestHash !== current.requestHash
+  ) {
+    throw new Error("Hermes design callback job identity cannot change");
+  }
+}
+
+function assertCallbackJobReplay(
+  current: HermesDesignCallbackJob,
+  replay: HermesDesignCallbackJob
+): void {
+  if (
+    current.taskId !== replay.taskId ||
+    current.callbackId !== replay.callbackId ||
+    current.requestHash !== replay.requestHash
+  ) {
+    throw new Error(
+      "Hermes callback identity was already used with a different signed payload"
+    );
   }
 }
 

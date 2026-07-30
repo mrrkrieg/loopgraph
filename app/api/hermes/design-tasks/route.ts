@@ -5,7 +5,9 @@ import {
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
-  getHermesDesignStore
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(request: Request) {
@@ -34,7 +36,11 @@ export async function POST(request: Request) {
       originOpportunityId: stringValue(body.originOpportunityId),
       requestedBy: stringValue(body.requestedBy) ?? "api",
       callbackUrl: stringValue(body.callbackUrl)
-    }, { store: getHermesDesignStore() });
+    }, {
+      store: getHermesDesignStore(),
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore()
+    });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {
     return NextResponse.json({

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateAndPersistManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore,
+  getLoopControllerStore,
+  getLoopOpportunityStore,
+  getLoopSpecRegistryStore,
   getRoutingStore,
+  getSemanticGraphStore,
   getStorageAdapter
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
@@ -19,6 +24,7 @@ export async function GET(request: NextRequest) {
   const storage = getStorageAdapter();
   const rollup = await generateAndPersistManagementRollup(storage);
   const projectRoot = getActiveLoopgraphProjectRoot();
+  const controllerStore = getLoopControllerStore({ projectRoot });
   const enqueue = await enqueueLoopControllerTrigger({
     projectRoot,
     type: "management_cycle",
@@ -26,13 +32,27 @@ export async function GET(request: NextRequest) {
     sourceRef: `management-rollup:${rollup.weekKey}`,
     occurredAt: rollup.generatedAt,
     requestedBy: "loopgraph-management-cron"
-  });
+  }, { store: controllerStore });
+  const loopSpecStore = getLoopSpecRegistryStore({ projectRoot });
+  const semanticGraphStore = getSemanticGraphStore({ projectRoot });
   const controller = await runLoopControllerScheduler({
     projectRoot,
     limit: 20
   }, {
+    store: controllerStore,
     routingStore: getRoutingStore(),
-    designStore: getHermesDesignStore()
+    designStore: getHermesDesignStore(),
+    discoveryDesignStore: getDiscoveryDesignStore(),
+    opportunityStore: getLoopOpportunityStore({ projectRoot }),
+    loopSpecStore,
+    semanticGraphStore,
+    allowAutoShadowMaterialization:
+      (controllerStore.persistence === "file" &&
+        loopSpecStore.persistence === "file" &&
+        semanticGraphStore.persistence === "file") ||
+      (controllerStore.persistence === "distributed" &&
+        loopSpecStore.persistence === "distributed" &&
+        semanticGraphStore.persistence === "distributed")
   });
 
   return NextResponse.json({

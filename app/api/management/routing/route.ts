@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { loadEventRoutingOperations, routingOperationsQueryFromUrl } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
+  getLoopSpecRegistryStore,
   getRoutingStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
 
@@ -11,6 +12,7 @@ export async function GET(request: Request) {
     const model = await loadEventRoutingOperations({
       projectRoot: getBrowserProjectRoot(),
       store: getRoutingStore(),
+      loopSpecStore: getLoopSpecRegistryStore(),
       ...query
     });
 

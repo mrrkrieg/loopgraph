@@ -1,8 +1,8 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   GRAPH_CHANGE_SET_SCHEMA_VERSION,
   LOOP_OPPORTUNITY_SCHEMA_VERSION,
+  BusinessDiscoverySessionSchema,
   contentHash,
   graphChangeSetSchema,
   loopOpportunitySchema,
@@ -29,6 +29,11 @@ import {
 } from "./hermes-design-bridge";
 import type { HermesDesignStore } from "./hermes-design-store";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import {
+  FileLoopOpportunityStore,
+  type LoopOpportunityFilters,
+  type LoopOpportunityStore
+} from "./loop-opportunity-store";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readWorkspaceGraphState } from "./semantic-graph-state";
@@ -100,6 +105,7 @@ export async function scanLoopOpportunities(
     routingStore?: RoutingStore;
     outcomeStore?: OutcomeStore;
     designStore?: HermesDesignStore;
+    opportunityStore?: LoopOpportunityStore;
   } = {}
 ): Promise<ScanLoopOpportunitiesResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
@@ -109,6 +115,9 @@ export async function scanLoopOpportunities(
   const workspace = await readLoopgraphWorkspace(projectRoot);
   const routingStore = options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
   const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
+  const opportunityStore =
+    options.opportunityStore ??
+    new FileLoopOpportunityStore(getLoopgraphRoot(projectRoot));
   const context: OpportunityScanContext = { projectRoot, workspace, routingStore, outcomeStore };
   const signals = await collectOpportunitySignals(context);
   const groups = groupOpportunitySignals({
@@ -117,7 +126,7 @@ export async function scanLoopOpportunities(
     workspaceId: input.workspaceId,
     companyId: input.companyId
   });
-  const prior = await listLoopOpportunities(projectRoot);
+  const prior = await opportunityStore.listOpportunities();
   const opportunities: LoopOpportunity[] = [];
   const graphChangeSets: GraphChangeSet[] = [];
   const designDispatches: HermesDesignDispatchResult[] = [];
@@ -133,7 +142,7 @@ export async function scanLoopOpportunities(
     if (existing?.status === "dismissed" || existing?.status === "implemented") {
       opportunities.push(existing);
       const existingChangeSet = existing.graphChangeSetId
-        ? await getGraphChangeSet(existing.graphChangeSetId, projectRoot)
+        ? await opportunityStore.getGraphChangeSet(existing.graphChangeSetId)
         : undefined;
       if (existingChangeSet) graphChangeSets.push(existingChangeSet);
       continue;
@@ -182,7 +191,8 @@ export async function scanLoopOpportunities(
       workspace,
       opportunity,
       existingId: opportunity.graphChangeSetId,
-      now
+      now,
+      store: opportunityStore
     });
     if (existingTask) {
       changeSet = graphChangeSetSchema.parse({
@@ -191,7 +201,7 @@ export async function scanLoopOpportunities(
         designRunId: existingTask.designRunIds.at(-1) ?? changeSet.designRunId,
         updatedAt: nowIso
       });
-      await saveGraphChangeSet(changeSet, projectRoot);
+      await opportunityStore.saveGraphChangeSet(changeSet);
     }
     opportunity = loopOpportunitySchema.parse({
       ...opportunity,
@@ -232,10 +242,10 @@ export async function scanLoopOpportunities(
         designTaskId: dispatch.task.id,
         updatedAt: nowIso
       });
-      await saveGraphChangeSet(changeSet, projectRoot);
+      await opportunityStore.saveGraphChangeSet(changeSet);
     }
 
-    await saveLoopOpportunity(opportunity, projectRoot);
+    await opportunityStore.saveOpportunity(opportunity);
     opportunities.push(opportunity);
     graphChangeSets.push(changeSet);
   }
@@ -254,46 +264,19 @@ export async function scanLoopOpportunities(
 
 export async function listLoopOpportunities(
   projectRoot = process.cwd(),
-  filters: {
-    status?: LoopOpportunity["status"];
-    department?: DepartmentType;
-    minimumScore?: number;
-  } = {}
+  filters: LoopOpportunityFilters = {},
+  store?: LoopOpportunityStore
 ): Promise<LoopOpportunity[]> {
-  const root = opportunityRoot(path.resolve(projectRoot));
-  try {
-    const files = await readdir(root);
-    const opportunities = await Promise.all(files
-      .filter((file) => file.endsWith(".json"))
-      .map(async (file) => {
-        try {
-          return loopOpportunitySchema.parse(JSON.parse(await readFile(path.join(root, file), "utf8")));
-        } catch {
-          return undefined;
-        }
-      }));
-    return opportunities
-      .filter((item): item is LoopOpportunity => Boolean(item))
-      .filter((item) => !filters.status || item.status === filters.status)
-      .filter((item) => !filters.department || item.department === filters.department)
-      .filter((item) => filters.minimumScore === undefined || item.score.total >= filters.minimumScore)
-      .sort((left, right) => right.score.total - left.score.total || right.updatedAt.localeCompare(left.updatedAt));
-  } catch {
-    return [];
-  }
+  return resolveOpportunityStore(projectRoot, store).listOpportunities(filters);
 }
 
 export async function getLoopOpportunity(
   opportunityId: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: LoopOpportunityStore
 ): Promise<LoopOpportunity | undefined> {
-  try {
-    return loopOpportunitySchema.parse(JSON.parse(
-      await readFile(opportunityPath(path.resolve(projectRoot), opportunityId), "utf8")
-    ));
-  } catch {
-    return undefined;
-  }
+  return resolveOpportunityStore(projectRoot, store)
+    .getOpportunity(opportunityId);
 }
 
 export async function dismissLoopOpportunity(input: {
@@ -301,9 +284,12 @@ export async function dismissLoopOpportunity(input: {
   opportunityId: string;
   reason: string;
   now?: Date;
-}): Promise<LoopOpportunity> {
+}, options: {
+  store?: LoopOpportunityStore;
+} = {}): Promise<LoopOpportunity> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const existing = await getLoopOpportunity(input.opportunityId, projectRoot);
+  const store = resolveOpportunityStore(projectRoot, options.store);
+  const existing = await store.getOpportunity(input.opportunityId);
   if (!existing) throw new Error(`Loop opportunity not found: ${input.opportunityId}`);
   const nowIso = (input.now ?? new Date()).toISOString();
   const dismissed = loopOpportunitySchema.parse({
@@ -313,7 +299,7 @@ export async function dismissLoopOpportunity(input: {
     dismissedAt: nowIso,
     updatedAt: nowIso
   });
-  await saveLoopOpportunity(dismissed, projectRoot);
+  await store.saveOpportunity(dismissed);
   return dismissed;
 }
 
@@ -323,13 +309,18 @@ export async function markLoopOpportunityImplemented(input: {
   now?: Date;
 }, options: {
   designStore?: HermesDesignStore;
+  opportunityStore?: LoopOpportunityStore;
 } = {}): Promise<{
   opportunities: LoopOpportunity[];
   graphChangeSets: GraphChangeSet[];
 }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const opportunityStore = resolveOpportunityStore(
+    projectRoot,
+    options.opportunityStore
+  );
   const nowIso = (input.now ?? new Date()).toISOString();
-  const opportunities = await listLoopOpportunities(projectRoot);
+  const opportunities = await opportunityStore.listOpportunities();
   const matched: LoopOpportunity[] = [];
   const appliedSets: GraphChangeSet[] = [];
   for (const opportunity of opportunities) {
@@ -342,10 +333,12 @@ export async function markLoopOpportunityImplemented(input: {
       status: "implemented",
       updatedAt: nowIso
     });
-    await saveLoopOpportunity(implemented, projectRoot);
+    await opportunityStore.saveOpportunity(implemented);
     matched.push(implemented);
     if (opportunity.graphChangeSetId) {
-      const changeSet = await getGraphChangeSet(opportunity.graphChangeSetId, projectRoot);
+      const changeSet = await opportunityStore.getGraphChangeSet(
+        opportunity.graphChangeSetId
+      );
       if (changeSet) {
         const applied = graphChangeSetSchema.parse({
           ...changeSet,
@@ -354,7 +347,7 @@ export async function markLoopOpportunityImplemented(input: {
           appliedAt: nowIso,
           updatedAt: nowIso
         });
-        await saveGraphChangeSet(applied, projectRoot);
+        await opportunityStore.saveGraphChangeSet(applied);
         appliedSets.push(applied);
       }
     }
@@ -367,40 +360,20 @@ export async function markLoopOpportunityImplemented(input: {
 
 export async function listGraphChangeSets(
   projectRoot = process.cwd(),
-  opportunityId?: string
+  opportunityId?: string,
+  store?: LoopOpportunityStore
 ): Promise<GraphChangeSet[]> {
-  const root = graphChangeSetRoot(path.resolve(projectRoot));
-  try {
-    const files = await readdir(root);
-    const sets = await Promise.all(files
-      .filter((file) => file.endsWith(".json"))
-      .map(async (file) => {
-        try {
-          return graphChangeSetSchema.parse(JSON.parse(await readFile(path.join(root, file), "utf8")));
-        } catch {
-          return undefined;
-        }
-      }));
-    return sets
-      .filter((item): item is GraphChangeSet => Boolean(item))
-      .filter((item) => !opportunityId || item.opportunityId === opportunityId)
-      .sort((left, right) => right.version - left.version || right.updatedAt.localeCompare(left.updatedAt));
-  } catch {
-    return [];
-  }
+  return resolveOpportunityStore(projectRoot, store)
+    .listGraphChangeSets(opportunityId);
 }
 
 export async function getGraphChangeSet(
   changeSetId: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: LoopOpportunityStore
 ): Promise<GraphChangeSet | undefined> {
-  try {
-    return graphChangeSetSchema.parse(JSON.parse(
-      await readFile(graphChangeSetPath(path.resolve(projectRoot), changeSetId), "utf8")
-    ));
-  } catch {
-    return undefined;
-  }
+  return resolveOpportunityStore(projectRoot, store)
+    .getGraphChangeSet(changeSetId);
 }
 
 async function collectOpportunitySignals(context: OpportunityScanContext): Promise<LoopOpportunitySignal[]> {
@@ -731,10 +704,11 @@ async function proposeGraphChangeSet(input: {
   opportunity: LoopOpportunity;
   existingId?: string;
   now: Date;
+  store: LoopOpportunityStore;
 }): Promise<GraphChangeSet> {
   const nowIso = input.now.toISOString();
   const existing = input.existingId
-    ? await getGraphChangeSet(input.existingId, input.projectRoot)
+    ? await input.store.getGraphChangeSet(input.existingId)
     : undefined;
   const operation = graphOperation(input.opportunity.kind);
   const baseGraphHash = (await readWorkspaceGraphState(input.projectRoot)).graphHash;
@@ -770,11 +744,11 @@ async function proposeGraphChangeSet(input: {
     return existing;
   }
   if (existing && existing.status === "proposed") {
-    await saveGraphChangeSet(graphChangeSetSchema.parse({
+    await input.store.saveGraphChangeSet(graphChangeSetSchema.parse({
       ...existing,
       status: "superseded",
       updatedAt: nowIso
-    }), input.projectRoot);
+    }));
   }
   const version = (existing?.version ?? 0) + 1;
   const desired = graphChangeSetSchema.parse({
@@ -797,7 +771,7 @@ async function proposeGraphChangeSet(input: {
     createdAt: nowIso,
     updatedAt: nowIso
   });
-  await saveGraphChangeSet(desired, input.projectRoot);
+  await input.store.saveGraphChangeSet(desired);
   return desired;
 }
 
@@ -832,44 +806,36 @@ async function ensureOpportunityDiscoverySession(input: {
     });
   }
   const profile = session.companyProfile;
-  const updated = {
+  const updated = BusinessDiscoverySessionSchema.parse({
     ...session,
     companyProfile: profile ? {
       ...profile,
       bottlenecks: unique([...profile.bottlenecks, input.opportunity.summary]),
       recurringWork: unique([...profile.recurringWork, input.opportunity.problemType])
-    } : profile
-  };
-  await saveDiscoverySession(updated, input.projectRoot);
-  return updated;
+    } : profile,
+    revision: session.revision + 1,
+    updatedAt: (input.now ?? new Date()).toISOString()
+  });
+  return saveDiscoverySession(updated, input.projectRoot, {
+    expectedRevision: session.revision
+  });
 }
 
-async function saveLoopOpportunity(opportunity: LoopOpportunity, projectRoot: string): Promise<void> {
-  const filePath = opportunityPath(projectRoot, opportunity.id);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(loopOpportunitySchema.parse(opportunity), null, 2)}\n`);
+export async function saveGraphChangeSet(
+  changeSet: GraphChangeSet,
+  projectRoot: string,
+  store?: LoopOpportunityStore
+): Promise<void> {
+  return resolveOpportunityStore(projectRoot, store)
+    .saveGraphChangeSet(changeSet);
 }
 
-export async function saveGraphChangeSet(changeSet: GraphChangeSet, projectRoot: string): Promise<void> {
-  const filePath = graphChangeSetPath(projectRoot, changeSet.id);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(graphChangeSetSchema.parse(changeSet), null, 2)}\n`);
-}
-
-function opportunityRoot(projectRoot: string): string {
-  return path.join(getLoopgraphRoot(projectRoot), "opportunities");
-}
-
-function opportunityPath(projectRoot: string, opportunityId: string): string {
-  return path.join(opportunityRoot(projectRoot), `${encodeURIComponent(opportunityId)}.json`);
-}
-
-function graphChangeSetRoot(projectRoot: string): string {
-  return path.join(getLoopgraphRoot(projectRoot), "graph", "change-sets");
-}
-
-function graphChangeSetPath(projectRoot: string, changeSetId: string): string {
-  return path.join(graphChangeSetRoot(projectRoot), `${encodeURIComponent(changeSetId)}.json`);
+function resolveOpportunityStore(
+  projectRoot: string,
+  store?: LoopOpportunityStore
+): LoopOpportunityStore {
+  return store ??
+    new FileLoopOpportunityStore(getLoopgraphRoot(path.resolve(projectRoot)));
 }
 
 function signal(input: Omit<LoopOpportunitySignal, "id" | "metrics"> & {

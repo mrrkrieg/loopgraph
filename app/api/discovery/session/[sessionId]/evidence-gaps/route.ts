@@ -7,7 +7,9 @@ import {
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
-  getHermesDesignStore
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(
@@ -18,14 +20,16 @@ export async function GET(
     const { sessionId } = await context.params;
     const limitValue = Number(new URL(request.url).searchParams.get("limit") ?? 3);
     const projectRoot = getActiveLoopgraphProjectRoot();
+    const store = getDiscoveryDesignStore();
     const next = await getNextEvidenceGapQuestions({
       projectRoot,
+      store,
       sessionId,
       limit: Number.isFinite(limitValue) ? limitValue : 3
     });
     return NextResponse.json({
       ...next,
-      gapSet: await readEvidenceGapSet(sessionId, projectRoot)
+      gapSet: await readEvidenceGapSet(sessionId, projectRoot, store)
     });
   } catch (error) {
     return NextResponse.json({
@@ -46,6 +50,7 @@ export async function POST(
     }
     const result = await submitEvidenceGapAnswer({
       projectRoot: getActiveLoopgraphProjectRoot(),
+      store: getDiscoveryDesignStore(),
       sessionId,
       gapId: body.gapId,
       answer: body.answer,
@@ -58,7 +63,11 @@ export async function POST(
     const resumedTasks = await resumeHermesDesignTasksForSession({
       projectRoot: getActiveLoopgraphProjectRoot(),
       sessionId
-    }, { store: getHermesDesignStore() });
+    }, {
+      store: getHermesDesignStore(),
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore()
+    });
     return NextResponse.json({ ...result, resumedTasks }, { status: 201 });
   } catch (error) {
     return NextResponse.json({

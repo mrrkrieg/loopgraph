@@ -97,8 +97,20 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Hosted initial design dispatch and evidence-resume dispatch use a tenant/project-scoped outbound
   queue. Task changes and enqueue are transactional; leased workers retry, dead-letter, reconcile
   task delivery receipts, and expose queue health through protected metrics.
+- Signed inbound Hermes callbacks use a tenant/project-scoped callback inbox. Replay authorization
+  and enqueue commit together; leased workers compile callbacks with retries, dead-letter state,
+  lease fencing, idempotent proposal artifacts, and protected queue metrics.
+- Discovery sessions, evidence-gap sets, bounded design contexts, design runs, and proposal sets
+  use one tenant/project-scoped hosted store. Session writes use revision compare-and-swap,
+  evidence derivations are monotonic, and immutable design artifacts plus the session transition
+  commit in one database transaction. Local projects keep the equivalent atomic file store.
+- Accepted proposals commit immutable full-digest LoopSpec versions, the active workspace
+  registry, generated fixtures, and the discovery-session transition in one tenant/project
+  transaction. Design, routing, route-job workers, routing operations, and the hosted graph read
+  the same active registry; local projects keep portable files.
 - Public liveness/readiness endpoints reveal only status; protected Prometheus metrics expose the
-  authorization-plane counters through a separate observability credential.
+  authorization plane, queue health, active discovery age, and design-artifact counters through a
+  separate observability credential.
 - Organization admins and owners can export cursor-paged audit events with database-side chain
   verification.
 - Same-origin browser mutations, signed machine callbacks, worker bearer auth, cron auth, and
@@ -115,21 +127,19 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Add a durable inbound Hermes callback inbox and callback worker. Callback proposal compilation
-   currently runs after replay acceptance but before the final task/callback transaction.
-2. Continue the database migration beyond routing, route jobs, design tasks, callbacks, and
-   outbound Hermes dispatch: move discovery/evidence sessions, opportunities and graph change
-   sets, controller triggers/runs, measurements, outcomes, and versioned LoopSpec artifacts to
-   tenant-scoped atomic stores.
-3. Add scoped identities and durable request guards to remaining provider collectors, then add
+1. Continue the database migration beyond routing, route jobs, design tasks, callbacks, outbound
+   Hermes dispatch, discovery/design artifacts, the versioned LoopSpec registry, opportunities,
+   proposed graph changes, controller state, and semantic graph transactions: move measurements,
+   outcomes, and value-ledger records to tenant-scoped atomic stores.
+2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
-4. Send the tamper-evident audit stream to independent retention, add distributed tracing and
+3. Send the tamper-evident audit stream to independent retention, add distributed tracing and
    deployed alerts/SLOs, and prove restore procedures with scheduled backups and migration
    rollback rehearsals.
-5. Implement provider API clients and apply provider subscriptions through Hermes-owned connector
+4. Implement provider API clients and apply provider subscriptions through Hermes-owned connector
    onboarding; Loopgraph intentionally stores only non-secret references, route metadata,
    contracts, and receipts.
-6. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
+5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
 
 ## Key documentation
@@ -143,6 +153,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md)
 - [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md)
 - [Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md)
+- [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md)
+- [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md)
+- [Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md)
+- [Distributed opportunity and controller runtime](./DISTRIBUTED-OPPORTUNITY-CONTROLLER.md)
 - [Outcomes and value](./OUTCOMES-AND-VALUE.md)
 - [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)

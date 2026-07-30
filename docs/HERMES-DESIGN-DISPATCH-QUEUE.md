@@ -93,8 +93,9 @@ Alert on any dead-letter job, sustained expired leases, or oldest-due age above 
 delivery service level. A dead-letter job leaves its task failed unless that task was already
 completed or cancelled.
 
-## Remaining boundary
+## Inbound completion
 
-This queue closes the outbound task-delivery gap. Incoming Hermes callbacks are still compiled
-inline after the replay guard accepts them. A process stop in that interval requires a durable
-callback inbox and callback worker; that is a separate control-plane slice.
+The outbound queue works with the
+[Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md). Signed inbound callback
+authorization, persistence, leased compilation, retries, and dead-letter handling no longer
+depend on one web request remaining alive.

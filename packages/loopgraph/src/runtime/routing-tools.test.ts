@@ -2,7 +2,15 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { LOOPGRAPH_API_VERSION, LOOP_KIND, createEventEnvelopeId, eventEnvelopeSchema, type EventEnvelope } from "../core";
+import {
+  LOOPGRAPH_API_VERSION,
+  LOOP_KIND,
+  createEventEnvelopeId,
+  eventEnvelopeSchema,
+  loopSpecHash,
+  validateLoopSpec,
+  type EventEnvelope
+} from "../core";
 import { FileRoutingStore } from "./routing-store";
 import {
   callLoopgraphRoutingTool,
@@ -16,6 +24,10 @@ import {
 import { FileStorageAdapter } from "../sdk/storage";
 import { listLoopgraphLifecycleDeliveries } from "./lifecycle-events";
 import { loopgraph_graph_get } from "./routing-ops-tools";
+import {
+  createStoredLoopSpecArtifact,
+  type LoopSpecRegistryStore
+} from "./loop-spec-store";
 
 async function createProjectWithRoutingSpec(
   spec = marketingAdsSpec()
@@ -176,6 +188,38 @@ describe("routing tool surface", () => {
       loopId: "marketing_ads",
       loopName: "Ads",
       catalogVersion: catalog.catalogVersion
+    });
+  });
+
+  it("loads the routing catalog from the active distributed LoopSpec registry", async () => {
+    const projectRoot = await mkdtemp(
+      path.join(tmpdir(), "loopgraph-routing-registry-")
+    );
+    const spec = validateLoopSpec(marketingAdsSpec());
+    const artifact = createStoredLoopSpecArtifact({
+      spec,
+      entry: {
+        id: spec.metadata.id,
+        name: spec.metadata.name,
+        path: "registry://marketing_ads",
+        templateId: "hermes-design",
+        department: "marketing",
+        addedAt: "2026-07-21T12:00:00.000Z"
+      },
+      source: "hermes_design",
+      createdAt: "2026-07-21T12:00:00.000Z"
+    });
+    const loopSpecStore = loopSpecStoreWithArtifact(artifact);
+
+    const catalog = await loopgraph_routing_catalog_get(
+      { projectRoot },
+      { loopSpecStore }
+    );
+
+    expect(catalog.count).toBe(1);
+    expect(catalog.routingCards[0]).toMatchObject({
+      loopId: "marketing_ads",
+      loopSpecHash: loopSpecHash(spec)
     });
   });
 
@@ -1015,3 +1059,36 @@ describe("routing tool surface", () => {
       .rejects.toThrow(/routing catalog LoopSpec escapes the project root/);
   });
 });
+
+function loopSpecStoreWithArtifact(
+  artifact: ReturnType<typeof createStoredLoopSpecArtifact>
+): LoopSpecRegistryStore {
+  return {
+    persistence: "distributed",
+    async getWorkspace(projectRoot) {
+      return {
+        workspace: {
+          version: 1,
+          schemaVersion: "workspace/v1alpha1",
+          projectRoot,
+          projectRootId: "project_registry",
+          displayName: "Registry",
+          demoCatalogEnabled: false,
+          registeredSpecs: [artifact.entry],
+          initializedAt: artifact.createdAt,
+          updatedAt: artifact.createdAt
+        },
+        revision: 1
+      };
+    },
+    async listActiveLoopSpecs() {
+      return [artifact];
+    },
+    async getActiveLoopSpec(_projectRoot, loopId) {
+      return loopId === artifact.loopId ? artifact : undefined;
+    },
+    async commitMaterializationAtomically() {
+      throw new Error("not used");
+    }
+  };
+}

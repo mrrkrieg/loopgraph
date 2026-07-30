@@ -34,6 +34,7 @@ import {
 import { registerLoopSpec } from "../loop-engineering-builder/local-workspace";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getLoopgraphRoot,
   getStorageAdapter
 } from "./storage-resolver";
@@ -303,25 +304,60 @@ export async function buildDemoDiscoverySession(projectRoot = process.cwd()) {
   return runDiscoveryPipeline(session, projectRoot);
 }
 
-export async function saveDiscoverySession(session: BusinessDiscoverySession, projectRoot = getActiveLoopgraphProjectRoot()) {
-  await writeJson(path.join(discoveryRoot(projectRoot), "sessions", `${session.id}.json`), session);
-  await Promise.all([
-    ...session.recommendedLoops.map((item) => saveLoopRecommendation(item, projectRoot)),
-    ...session.accessRequirements.map((item) => saveAccessRequirement(item, projectRoot)),
-    ...session.metricDefinitions.map((item) => saveMetricDefinition(item, projectRoot)),
-    ...session.undefinedMetrics.map((item) => saveUndefinedMetric(item, projectRoot))
-  ]);
+export async function saveDiscoverySession(
+  session: BusinessDiscoverySession,
+  projectRoot = getActiveLoopgraphProjectRoot()
+) {
+  const store = getDiscoveryDesignStore({
+    rootDir: getLoopgraphRoot(projectRoot)
+  });
+  const parsed = BusinessDiscoverySessionSchema.parse(session);
+  const existing = await store.getSession(parsed.id);
+  const saved = existing
+    ? await store.updateSessionAtomically({
+        sessionId: parsed.id,
+        expectedRevision: existing.revision,
+        session: BusinessDiscoverySessionSchema.parse({
+          ...parsed,
+          revision: nextLegacyRevision(parsed.revision, existing.revision)
+        })
+      })
+    : (await store.createSessionAtomically(
+        BusinessDiscoverySessionSchema.parse({
+          ...parsed,
+          revision: 0
+        })
+      )).session;
+  Object.assign(session, saved);
+  if (store.persistence === "file") {
+    await Promise.all([
+      ...saved.recommendedLoops.map((item) =>
+        saveLoopRecommendation(item, projectRoot)
+      ),
+      ...saved.accessRequirements.map((item) =>
+        saveAccessRequirement(item, projectRoot)
+      ),
+      ...saved.metricDefinitions.map((item) =>
+        saveMetricDefinition(item, projectRoot)
+      ),
+      ...saved.undefinedMetrics.map((item) =>
+        saveUndefinedMetric(item, projectRoot)
+      )
+    ]);
+  }
+  return saved;
 }
 
 export async function loadDiscoverySession(sessionId: string, projectRoot = getActiveLoopgraphProjectRoot()) {
-  return readJson(
-    path.join(discoveryRoot(projectRoot), "sessions", `${sessionId}.json`),
-    BusinessDiscoverySessionSchema
-  );
+  return getDiscoveryDesignStore({
+    rootDir: getLoopgraphRoot(projectRoot)
+  }).getSession(sessionId);
 }
 
 export async function listDiscoverySessions(projectRoot = getActiveLoopgraphProjectRoot()) {
-  return listJson(path.join(discoveryRoot(projectRoot), "sessions"), BusinessDiscoverySessionSchema);
+  return getDiscoveryDesignStore({
+    rootDir: getLoopgraphRoot(projectRoot)
+  }).listSessions();
 }
 
 export async function saveLoopRecommendation(item: LoopRecommendation, projectRoot = getActiveLoopgraphProjectRoot()) {
@@ -687,6 +723,23 @@ function nextStatusForScope(scope: DiscoveryAnswer["scope"]): BusinessDiscoveryS
     human: "human_requirements"
   };
   return statusByScope[scope];
+}
+
+function nextLegacyRevision(
+  submittedRevision: number,
+  storedRevision: number
+): number {
+  if (submittedRevision < storedRevision) {
+    throw new Error(
+      `Discovery session revision mismatch: submitted ${submittedRevision}, stored ${storedRevision}`
+    );
+  }
+  if (submittedRevision > storedRevision + 1) {
+    throw new Error(
+      `Discovery session revision skipped from ${storedRevision} to ${submittedRevision}`
+    );
+  }
+  return storedRevision + 1;
 }
 
 function discoveryRoot(projectRoot: string) {

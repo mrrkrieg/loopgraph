@@ -9,6 +9,7 @@ import {
   type HermesDesignTask
 } from "../core";
 import { createHermesDesignDispatchJob } from "./hermes-design-bridge";
+import { createHermesDesignCallbackJob } from "./hermes-design-callback-worker";
 import { FileHermesDesignStore } from "./hermes-design-store";
 
 describe("file Hermes design store", () => {
@@ -116,6 +117,50 @@ describe("file Hermes design store", () => {
     expect(claimed.status).toBe("claimed");
     expect(claimed.attemptCount).toBe(1);
     expect(claimed.lease?.claimedBy).toMatch(/^worker_[12]$/);
+  });
+
+  it("deduplicates an exact callback delivery and rejects a changed replay", async () => {
+    const store = await tempStore();
+    const task = designTask("task_callback_inbox");
+    await store.createTaskAtomically(task);
+    const signedCallback = {
+      schemaVersion: "hermes-design-callback/v1alpha1" as const,
+      callbackId: "callback_inbox_1",
+      taskId: task.id,
+      occurredAt: "2026-07-30T12:01:00.000Z",
+      type: "task.acknowledged" as const
+    };
+    const job = createHermesDesignCallbackJob({
+      callback: signedCallback,
+      requestHash: "a".repeat(64),
+      now: new Date("2026-07-30T12:01:00.000Z")
+    });
+
+    const first = await store.acceptCallbackJobAtomically({ job });
+    const duplicate = await store.acceptCallbackJobAtomically({ job });
+    const altered = createHermesDesignCallbackJob({
+      callback: {
+        ...signedCallback,
+        occurredAt: "2026-07-30T12:02:00.000Z"
+      },
+      requestHash: "b".repeat(64),
+      now: new Date("2026-07-30T12:02:00.000Z")
+    });
+
+    expect(first).toMatchObject({
+      authorized: true,
+      reason: "accepted",
+      created: true
+    });
+    expect(duplicate).toMatchObject({
+      authorized: true,
+      reason: "duplicate",
+      created: false,
+      job: { id: job.id }
+    });
+    await expect(
+      store.acceptCallbackJobAtomically({ job: altered })
+    ).rejects.toThrow("different signed payload");
   });
 
   it("updates a resumed task and enqueues its new request under one lock", async () => {

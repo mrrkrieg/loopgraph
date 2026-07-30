@@ -9,7 +9,10 @@ import {
   SupabaseHermesDesignStore,
   isSupabaseHermesDesignStoreEnabled
 } from "./supabase-hermes-design-store";
-import { createHermesDesignDispatchJob } from "loopgraph/runtime";
+import {
+  createHermesDesignCallbackJob,
+  createHermesDesignDispatchJob
+} from "loopgraph/runtime";
 
 const scope = {
   organizationId: "123e4567-e89b-12d3-a456-426614174000",
@@ -217,6 +220,66 @@ describe("Supabase Hermes design store", () => {
     expect(rpc).toHaveBeenCalledTimes(2);
     expect(rpc.mock.calls[0][1]).toMatchObject({ p_expected_revision: 1 });
     expect(rpc.mock.calls[1][1]).toMatchObject({ p_expected_revision: 2 });
+  });
+
+  it("authorizes replay protection and callback enqueue in one database call", async () => {
+    const task = designTask();
+    const callback = {
+      schemaVersion: "hermes-design-callback/v1alpha1" as const,
+      callbackId: "callback_atomic_1",
+      taskId: task.id,
+      occurredAt: "2026-07-30T12:01:00.000Z",
+      type: "task.acknowledged" as const
+    };
+    const job = createHermesDesignCallbackJob({
+      callback,
+      requestHash: "a".repeat(64),
+      now: new Date("2026-07-30T12:01:00.000Z")
+    });
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{
+        authorized: true,
+        reason: "accepted",
+        retry_after_seconds: null,
+        job,
+        created: true,
+        revision: 1
+      }],
+      error: null
+    });
+    const store = new SupabaseHermesDesignStore(
+      { rpc, from: vi.fn() } as unknown as SupabaseClient,
+      scope
+    );
+
+    const result = await store.acceptCallbackJobAtomically({
+      job,
+      machineRequest: {
+        ...scope,
+        credentialId: "hermes_callback",
+        capability: "hermes.design_callback",
+        requestId: "hermes_request_123",
+        requestHash: job.requestHash,
+        requestedAt: "2026-07-30T12:01:00.000Z",
+        rateLimit: 60
+      }
+    });
+
+    expect(result).toEqual({
+      authorized: true,
+      reason: "accepted",
+      created: true,
+      job
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "authorize_and_enqueue_hermes_design_callback",
+      expect.objectContaining({
+        p_organization_id: scope.organizationId,
+        p_project_key: scope.projectKey,
+        p_request_hash: job.requestHash,
+        p_job: job
+      })
+    );
   });
 });
 
