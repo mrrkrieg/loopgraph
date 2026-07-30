@@ -51,10 +51,10 @@ import { getLoopgraphRoot } from "./storage-resolver";
 import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 
-export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha4" as const;
-export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.3.0" as const;
-export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha3" as const;
-export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha3" as const;
+export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha5" as const;
+export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.4.0" as const;
+export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha4" as const;
+export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha4" as const;
 export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha1" as const;
 export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   mcpServer: HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION,
@@ -424,6 +424,7 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
       graphProjection: true,
       semanticGraphTransactions: true,
       graphPromotion: true,
+      promotionRehearsal: true,
       graphLifecycle: true,
       graphRollback: true,
       hermesWebhookPlanning: true,
@@ -915,8 +916,8 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 32. Call \`loopgraph_route_jobs_get\` to inspect durable queue status, leases, retries, and dead-letter state for Hermes-routed work.
 33. In a trusted operator turn, call \`loopgraph_route_worker_run\` to claim and process due jobs. Never call it from the isolated webhook-router or lifecycle-router turn.
 34. Use \`loopgraph_route_job_retry\` or \`loopgraph_route_job_cancel\` only after an operator explicitly supplies the job ID, actor, and reason.
-35. Before recommending promotion out of shadow mode, run a trusted fixture batch with \`loopgraph_routing_evaluation_run\`; require passing precision, recall, false-trigger, miss, abstention, and duplicate-suppression gates.
-36. Use \`loopgraph_routing_evaluations_get\` to inspect persisted expected-vs-actual routing results when explaining why a loop can or cannot be promoted.
+35. Before recommending promotion, call \`loopgraph_promotion_rehearsal_run\` for the exact loop and next ordered activation mode. It must pass loop simulation, routing precision/recall, missing-context, risk, duplicate, no-match, ambiguity, catalog-overlap, graph-regression, and activation-policy checks.
+36. Use \`loopgraph_routing_evaluation_run\` for focused fixture diagnostics and \`loopgraph_routing_evaluations_get\` to inspect persisted expected-vs-actual results when explaining why a rehearsal passed or failed.
 37. After \`loopgraph_routing_decision_submit\`, call \`loopgraph_lifecycle_events_get\` when you need to confirm the signed \`loop.route.accepted\` callback prepared for Hermes; after worker execution, route-commit simulation, or case resolution, use the same tool to confirm signed run, escalation, outcome, and terminal lifecycle callbacks.
 38. If simulation returns \`reviewRequired: true\`, call \`loopgraph_runs_get\` with \`includeReviewPacket: true\`, then use \`loopgraph_review_submit\` only after a human explicitly approves, rejects, requests evidence, or reassigns the prepared action fingerprints.
 39. Use \`loopgraph_case_resolve\` only after a human/operator explicitly provides the case resolution summary and outcome. This records the durable outcome and prepares a signed \`loop.outcome.recorded\` callback for Hermes when routing context exists.
@@ -927,7 +928,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 44. For an opportunity-driven graph change, call \`loopgraph_graph_change_decide\` only after an accountable human approves or rejects the exact proposed operations. Preserve the returned approval receipt ID.
 45. Call \`loopgraph_graph_change_apply\` only with that exact approval receipt, the associated design run, and the explicitly accepted proposal IDs. Never substitute direct materialization for an opportunity-driven semantic graph transaction.
 46. Call \`loopgraph_graph_history_get\` after mutation to explain the base/result graph hashes, operation receipts, and recovery snapshots.
-47. Before promotion, run \`loopgraph_routing_evaluation_run\` and inspect \`loopgraph_routing_evaluations_get\`. Call \`loopgraph_loop_promotion_approve\` only after an accountable human accepts the next ordered activation mode, then call \`loopgraph_loop_promote\` with the exact approval and durable gate-evidence references.
+47. Inspect the durable report with \`loopgraph_promotion_rehearsals_get\`. Call \`loopgraph_loop_promotion_approve\` only with the passing report ID and after an accountable human accepts the next ordered mode. Call \`loopgraph_loop_promote\` with that same report ID and exact approval receipt. Never substitute an arbitrary evidence string for the report.
 48. Use \`loopgraph_loop_lifecycle_approve\` and \`loopgraph_loop_lifecycle_set\` for an explicitly approved pause or resume. A paused loop must remain unavailable to Hermes routing.
 49. Use \`loopgraph_graph_rollback_approve\` and \`loopgraph_graph_rollback\` only after a human approves reverting a specific transaction. Rollback is valid only while the current graph still matches that transaction's result.
 50. Call \`loopgraph_controller_policy_get\` before changing or explaining continuous-improvement behavior. Call \`loopgraph_controller_policy_set\` only after an accountable operator explicitly confirms the complete policy and safety boundaries.
@@ -938,7 +939,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 
 ## Supporting References
 
-- MCP resources: \`loopgraph://schemas/loop-design-context\`, \`loopgraph://schemas/loop-design-proposal-set\`, \`loopgraph://schemas/evidence-gap-set\`, \`loopgraph://schemas/hermes-design-task\`, \`loopgraph://schemas/loop-opportunity\`, \`loopgraph://schemas/graph-change-set\`, \`loopgraph://schemas/graph-snapshot\`, \`loopgraph://schemas/graph-change-approval-receipt\`, \`loopgraph://schemas/graph-transaction\`, \`loopgraph://schemas/loop-promotion-receipt\`, \`loopgraph://schemas/loop-controller-policy\`, \`loopgraph://schemas/loop-controller-run\`, \`loopgraph://departments/{departmentType}\`, \`loopgraph://discovery/{sessionId}\`, \`loopgraph://loops/{loopId}\`, and \`loopgraph://graph/company\`.
+- MCP resources: \`loopgraph://schemas/loop-design-context\`, \`loopgraph://schemas/loop-design-proposal-set\`, \`loopgraph://schemas/evidence-gap-set\`, \`loopgraph://schemas/hermes-design-task\`, \`loopgraph://schemas/loop-opportunity\`, \`loopgraph://schemas/graph-change-set\`, \`loopgraph://schemas/graph-snapshot\`, \`loopgraph://schemas/graph-change-approval-receipt\`, \`loopgraph://schemas/graph-transaction\`, \`loopgraph://schemas/loop-promotion-receipt\`, \`loopgraph://schemas/promotion-rehearsal\`, \`loopgraph://schemas/loop-controller-policy\`, \`loopgraph://schemas/loop-controller-run\`, \`loopgraph://departments/{departmentType}\`, \`loopgraph://discovery/{sessionId}\`, \`loopgraph://loops/{loopId}\`, and \`loopgraph://graph/company\`.
 - \`references/discovery-flow.md\`: exact discovery/design/materialization sequence.
 - \`references/proposal-schema.md\`: structured proposal expectations.
 - \`references/safety-and-approvals.md\`: trust boundaries and approval rules.

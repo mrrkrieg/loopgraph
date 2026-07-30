@@ -342,6 +342,8 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_lifecycle_events_get" }),
           expect.objectContaining({ name: "loopgraph_graph_get" }),
           expect.objectContaining({ name: "loopgraph_routing_evaluation_run" }),
+          expect.objectContaining({ name: "loopgraph_promotion_rehearsal_run" }),
+          expect.objectContaining({ name: "loopgraph_promotion_rehearsals_get" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_plan" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_sync" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_doctor" }),
@@ -349,7 +351,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(70);
+    expect(listLoopgraphMcpTools()).toHaveLength(72);
     const graphApply = listLoopgraphMcpTools()
       .find((tool) => tool.name === "loopgraph_graph_change_apply");
     const graphHistory = listLoopgraphMcpTools()
@@ -581,6 +583,7 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/graph-change-approval-receipt" }),
           expect.objectContaining({ uri: "loopgraph://schemas/graph-transaction" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-promotion-receipt" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/promotion-rehearsal" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),
@@ -682,6 +685,12 @@ describe("Loopgraph MCP server", () => {
       method: "resources/read",
       params: { uri: "loopgraph://schemas/loop-promotion-receipt" }
     }, { projectRoot }));
+    const promotionRehearsalSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "promotion-rehearsal-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/promotion-rehearsal" }
+    }, { projectRoot }));
     const session = resourceJson(await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
       id: "session-resource",
@@ -738,6 +747,7 @@ describe("Loopgraph MCP server", () => {
     expect(JSON.stringify(graphApprovalSchema)).toContain("GraphChangeApprovalReceipt");
     expect(JSON.stringify(graphTransactionSchema)).toContain("GraphTransaction");
     expect(JSON.stringify(promotionReceiptSchema)).toContain("LoopPromotionReceipt");
+    expect(JSON.stringify(promotionRehearsalSchema)).toContain("PromotionRehearsal");
     expect(session).toMatchObject({
       id: "session_resources",
       activeStage: "workspace"

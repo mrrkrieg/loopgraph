@@ -12,6 +12,8 @@ const GRAPH_ACTION_TO_TOOL = {
   decide: "loopgraph_graph_change_decide",
   apply: "loopgraph_graph_change_apply",
   history: "loopgraph_graph_history_get",
+  promotion_rehearse: "loopgraph_promotion_rehearsal_run",
+  promotion_rehearsals_get: "loopgraph_promotion_rehearsals_get",
   promotion_approve: "loopgraph_loop_promotion_approve",
   promote: "loopgraph_loop_promote",
   lifecycle_approve: "loopgraph_loop_lifecycle_approve",
@@ -31,6 +33,7 @@ export async function GET(request: Request) {
       snapshotId: queryValue(url, "snapshotId"),
       approvalReceiptId: queryValue(url, "approvalReceiptId"),
       promotionReceiptId: queryValue(url, "promotionReceiptId"),
+      rehearsalReportId: queryValue(url, "rehearsalReportId"),
       changeSetId: queryValue(url, "changeSetId"),
       loopId: queryValue(url, "loopId")
     });
@@ -60,7 +63,7 @@ export async function POST(request: Request) {
       projectRoot: getActiveLoopgraphProjectRoot()
     });
     return NextResponse.json(result, {
-      status: action === "history" ? 200 : 202,
+      status: action === "history" || action === "promotion_rehearsals_get" ? 200 : 202,
       headers: { "cache-control": "no-store" }
     });
   } catch (error) {

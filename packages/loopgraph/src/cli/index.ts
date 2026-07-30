@@ -91,6 +91,12 @@ function resolvePackageRoot(fromFile: string): string {
   throw new Error("Could not locate loopgraph package templates directory");
 }
 
+function parseIntegerOption(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isInteger(parsed)) throw new Error(`Expected an integer, received: ${value}`);
+  return parsed;
+}
+
 const cliEntryFile = fileURLToPath(import.meta.url);
 const packageRoot = resolvePackageRoot(cliEntryFile);
 const templatesRoot = path.join(packageRoot, "templates");
@@ -238,6 +244,28 @@ graphChange
   });
 
 graphPromotion
+  .command("rehearse")
+  .description("Run and persist the complete promotion gate against the current LoopSpec and graph")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--to <mode>", "The next ordered activation mode")
+  .option("--by <id>", "Actor or service generating the rehearsal", "loopgraph-cli")
+  .option("--valid-for <seconds>", "Validity window in seconds", parseIntegerOption)
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    to: string;
+    by: string;
+    validFor?: number;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_promotion_rehearsal_run", {
+      loopId,
+      targetMode: options.to,
+      generatedBy: options.by,
+      validForSeconds: options.validFor
+    }, options.project);
+  });
+
+graphPromotion
   .command("approve")
   .description("Approve the next ordered activation mode for one loop")
   .argument("<loopId>", "Registered LoopSpec ID")
@@ -246,6 +274,7 @@ graphPromotion
   .requiredOption("--role <role>", "Accountable actor role")
   .requiredOption("--policy <version>", "Promotion policy version")
   .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .requiredOption("--rehearsal <id>", "Passing promotion rehearsal report ID")
   .option("--evidence <refs>", "Comma-separated evidence references")
   .option("--project <root>", "Explicit project root", process.cwd())
   .action(async (loopId: string, options: {
@@ -254,6 +283,7 @@ graphPromotion
     role: string;
     policy: string;
     reason: string;
+    rehearsal: string;
     evidence?: string;
     project: string;
   }) => {
@@ -264,6 +294,7 @@ graphPromotion
       actorRole: options.role,
       policyVersion: options.policy,
       reason: options.reason,
+      rehearsalReportId: options.rehearsal,
       evidenceRefs: commaSeparated(options.evidence)
     }, options.project);
   });
@@ -274,13 +305,15 @@ graphPromotion
   .argument("<loopId>", "Registered LoopSpec ID")
   .requiredOption("--to <mode>", "Approved next activation mode")
   .requiredOption("--approval <id>", "Exact promotion approval receipt ID")
-  .requiredOption("--gate-evidence <refs>", "Comma-separated routing evaluation and readiness evidence references")
+  .requiredOption("--rehearsal <id>", "Passing rehearsal report bound to the approval")
+  .option("--gate-evidence <refs>", "Additional durable evidence references")
   .requiredOption("--by <id>", "Actor initiating the transaction")
   .option("--project <root>", "Explicit project root", process.cwd())
   .action(async (loopId: string, options: {
     to: string;
     approval: string;
-    gateEvidence: string;
+    rehearsal: string;
+    gateEvidence?: string;
     by: string;
     project: string;
   }) => {
@@ -288,6 +321,7 @@ graphPromotion
       loopId,
       nextMode: options.to,
       approvalReceiptId: options.approval,
+      rehearsalReportId: options.rehearsal,
       gateEvidenceRefs: commaSeparated(options.gateEvidence),
       initiatedBy: options.by
     }, options.project);

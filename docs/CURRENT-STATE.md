@@ -34,7 +34,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - `add`, `update`, `split`, `merge`, and `retire` changes are bound to exact content-derived graph hashes.
 - Accountable approval receipts record actor, role, policy, reason, evidence, and approved operations.
 - Atomic transactions capture base/result snapshots, operation receipts, generated assets, and recovery state.
-- Ordered promotion, pause/resume lifecycle changes, and exact-state rollback are implemented.
+- Ordered promotion, automatic content-bound rehearsal gates, pause/resume lifecycle changes, and exact-state rollback are implemented.
 - Trusted Hermes admin MCP tools, explicit CLI commands, and a bearer-authenticated API expose the transaction workflow.
 - Graph mutation tools are unavailable to webhook-router and lifecycle-router turns.
 
@@ -68,12 +68,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Automatically run the full positive, missing-context, ambiguity, duplicate, risk, and regression fixture suite before issuing promotion-ready evidence.
-2. Bind LoopSpec metrics to real connector fields, schedule measurement windows, and reconcile connector/webhook health.
-3. Add dedicated Opportunities, Change Review, Controller, Learning, and Value product views.
-4. Add hosted authentication, organization/role authorization, tenant-isolated persistence, rate limits, distributed scheduling, immutable audit export, production observability, and backups.
-5. Apply provider subscriptions and credentials through Hermes-owned connector onboarding; Loopgraph intentionally stores only non-secret route and capability metadata.
-6. Consolidate the stacked implementation changes, migrate existing local state where required, and complete a clean-install production release audit.
+1. Bind LoopSpec metrics to real connector fields, schedule measurement windows, and reconcile connector/webhook health.
+2. Add dedicated Opportunities, Change Review, Controller, Learning, and Value product views.
+3. Add hosted authentication, organization/role authorization, tenant-isolated persistence, rate limits, distributed scheduling, immutable audit export, production observability, and backups.
+4. Apply provider subscriptions and credentials through Hermes-owned connector onboarding; Loopgraph intentionally stores only non-secret route and capability metadata.
+5. Consolidate the stacked implementation changes, migrate existing local state where required, and complete a clean-install production release audit.
 
 ## Key documentation
 
@@ -81,6 +80,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md)
 - [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md)
 - [Semantic graph transactions](./SEMANTIC-GRAPH-TRANSACTIONS.md)
+- [Promotion rehearsal](./PROMOTION-REHEARSAL.md)
 - [Durable route-job worker](./ROUTE-JOB-WORKER.md)
 - [Outcomes and value](./OUTCOMES-AND-VALUE.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)

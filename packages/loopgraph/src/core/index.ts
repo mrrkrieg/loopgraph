@@ -21,6 +21,7 @@ export * from "./evidence-gap";
 export * from "./hermes-design-task";
 export * from "./loop-opportunity";
 export * from "./graph-transaction";
+export * from "./promotion-rehearsal";
 export * from "./loop-controller";
 export * from "./process-inventory";
 export * from "./loop-recommendation";

@@ -503,6 +503,7 @@ npm run loopgraph -- case resolve <caseId> --summary "Resolved"
 npm run loopgraph -- graph history --project .
 npm run loopgraph -- graph change decide <changeSetId> --help
 npm run loopgraph -- graph promotion approve <loopId> --help
+npm run loopgraph -- graph promotion rehearse <loopId> --to recommend --by <actor>
 npm run loopgraph -- graph rollback approve <transactionId> --help
 ```
 
@@ -533,6 +534,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts
 - [Semantic graph transactions](docs/SEMANTIC-GRAPH-TRANSACTIONS.md) — exact approvals, atomic add/update/split/merge/retire changes, promotion, lifecycle, and rollback
+- [Promotion rehearsal](docs/PROMOTION-REHEARSAL.md) — automatic simulation, routing, ambiguity, regression, policy, and evidence gates before promotion
 - [Hermes examples](docs/HERMES-EXAMPLES.md) — Marketing, Legal / Compliance, and custom flows
 - [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md) — implementation-to-test evidence map
 - [Event-brain integration plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md) — detailed architecture and product plan
