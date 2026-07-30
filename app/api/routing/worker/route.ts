@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runRouteJobWorker } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
+  getLoopControllerStore,
   getLoopSpecRegistryStore,
   getRoutingStore,
   getStorageAdapter
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
       leaseSeconds: integerValue(body.leaseSeconds, 300, 30, 3600),
       store: getRoutingStore(),
       loopSpecStore: getLoopSpecRegistryStore(),
+      controllerStore: getLoopControllerStore(),
       storage: getStorageAdapter()
     });
     return NextResponse.json(result, { status: 202 });

@@ -99,10 +99,12 @@ discovery/evidence sessions, and immutable design contexts/runs/proposals are di
 Discovery updates use revision fencing, evidence gaps are monotonic, and a design artifact plus
 its session transition commit atomically. Accepted LoopSpecs, generated fixtures, the active
 workspace registry, and discovery completion also commit atomically through the distributed
-version registry. Graph transactions, opportunities, controller state, measurements, outcomes,
-and value records are not all distributed yet. Keep those remaining subsystems to one active
-writer until their database migrations ship, and never operate multiple customer organizations
-through one shared filesystem namespace.
+version registry. Opportunities, proposed graph changes, controller policies/checkpoints/runs,
+and controller triggers now use a tenant/project-scoped database boundary with atomic claims,
+UUID lease fencing, and a renewable controller lease. Graph snapshots, approvals, transactions,
+promotions, measurements, outcomes, and value records are not all distributed yet. Hosted
+automatic graph mutation therefore remains disabled, and those remaining subsystems must stay
+behind one active writer until their database migrations ship.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) and
 [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md). The signed inbound delivery boundary
@@ -110,6 +112,8 @@ is described in the
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md).
 The pre-materialization state boundary is described in
 [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md).
+The evidence-to-design control boundary is described in
+[Distributed opportunity and controller runtime](./DISTRIBUTED-OPPORTUNITY-CONTROLLER.md).
 The materialization boundary is described in the
 [Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md).
 

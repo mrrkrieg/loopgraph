@@ -6,6 +6,7 @@ import {
 import {
   getActiveLoopgraphProjectRoot,
   getHermesDesignStore,
+  getLoopOpportunityStore,
   getRoutingStore
 } from "../../../lib/loopgraph-runtime/storage-resolver";
 
@@ -13,13 +14,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const minimumScoreParam = url.searchParams.get("minimumScore");
   const minimumScoreValue = minimumScoreParam === null ? undefined : Number(minimumScoreParam);
-  const opportunities = await listLoopOpportunities(getActiveLoopgraphProjectRoot(), {
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const opportunities = await listLoopOpportunities(projectRoot, {
     status: opportunityStatus(url.searchParams.get("status")),
     department: departmentValue(url.searchParams.get("department")),
     minimumScore: minimumScoreValue !== undefined && Number.isFinite(minimumScoreValue)
       ? minimumScoreValue
       : undefined
-  });
+  }, getLoopOpportunityStore({ projectRoot }));
   return NextResponse.json({ opportunities });
 }
 
@@ -28,15 +30,17 @@ export async function POST(request: Request) {
     const body = await optionalJson(request);
     const qualify = numberValue(body.qualifyThreshold, 45);
     const autoDesign = numberValue(body.autoDesignThreshold, 65);
+    const projectRoot = getActiveLoopgraphProjectRoot();
     const result = await scanLoopOpportunities({
-      projectRoot: getActiveLoopgraphProjectRoot(),
+      projectRoot,
       workspaceId: stringValue(body.workspaceId),
       companyId: stringValue(body.companyId),
       thresholds: { qualify, autoDesign },
       autoStartDesign: body.autoStartDesign === true
     }, {
       routingStore: getRoutingStore(),
-      designStore: getHermesDesignStore()
+      designStore: getHermesDesignStore(),
+      opportunityStore: getLoopOpportunityStore({ projectRoot })
     });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {

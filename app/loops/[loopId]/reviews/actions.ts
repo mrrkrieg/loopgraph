@@ -9,6 +9,7 @@ import {
 } from "@/lib/loopgraph-runtime/review-service";
 import {
   getActiveLoopgraphProjectRoot,
+  getLoopControllerStore,
   getStorageAdapter
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import type { ReviewRole } from "@/lib/loopgraph-core/constants";
@@ -34,6 +35,7 @@ export async function submitHumanReviewAction(formData: FormData) {
   }
 
   try {
+    const projectRoot = getActiveLoopgraphProjectRoot();
     const storage = getStorageAdapter();
     const trace = await storage.getRun(runId);
     if (trace && decision === "approved") {
@@ -56,7 +58,8 @@ export async function submitHumanReviewAction(formData: FormData) {
       escalationMinutes: Number(formData.get("escalation_minutes") ?? 0),
       governanceMinutes: Number(formData.get("governance_minutes") ?? 0)
     }, {
-      projectRoot: getActiveLoopgraphProjectRoot()
+      projectRoot,
+      controllerStore: getLoopControllerStore({ projectRoot })
     });
   } catch (error) {
     const message = encodeURIComponent(error instanceof ReviewServiceError ? error.message : "Review failed");

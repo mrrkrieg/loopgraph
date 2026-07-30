@@ -46,22 +46,17 @@ export async function enqueueLoopControllerTrigger(
     id: trigger.id
   })}`;
 
-  return store.withTriggerLock(async () => {
-    const existing = await store.getTrigger(recordId);
-    if (existing) return { record: existing, duplicate: true };
-    const record = loopControllerTriggerRecordSchema.parse({
-      schemaVersion: LOOP_CONTROLLER_TRIGGER_RECORD_SCHEMA_VERSION,
-      id: recordId,
-      projectRootId: workspace.projectRootId,
-      trigger,
-      status: "pending",
-      attempts: 0,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString()
-    });
-    await store.saveTrigger(record);
-    return { record, duplicate: false };
+  const record = loopControllerTriggerRecordSchema.parse({
+    schemaVersion: LOOP_CONTROLLER_TRIGGER_RECORD_SCHEMA_VERSION,
+    id: recordId,
+    projectRootId: workspace.projectRootId,
+    trigger,
+    status: "pending",
+    attempts: 0,
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString()
   });
+  return store.enqueueTrigger(record);
 }
 
 export async function enqueueLoopControllerTriggerBestEffort(

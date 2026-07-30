@@ -4,13 +4,19 @@ import { FileStorageAdapter } from "loopgraph/sdk";
 import {
   FileHermesDesignStore,
   FileDiscoveryDesignStore,
+  FileLoopControllerStore,
+  FileLoopOpportunityStore,
   FileLoopSpecRegistryStore,
   FileRoutingStore,
+  FileSemanticGraphStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
   type DiscoveryDesignStore,
   type HermesDesignStore,
+  type LoopControllerStore,
+  type LoopOpportunityStore,
   type LoopSpecRegistryStore,
-  type RoutingStore
+  type RoutingStore,
+  type SemanticGraphStore
 } from "loopgraph/runtime";
 import {
   createSupabaseStorageAdapter,
@@ -32,6 +38,18 @@ import {
   createSupabaseLoopSpecRegistryStore,
   isSupabaseLoopSpecRegistryStoreEnabled
 } from "@/lib/db/adapters/supabase-loop-spec-registry-store";
+import {
+  createSupabaseLoopControllerStore,
+  isSupabaseLoopControllerStoreEnabled
+} from "@/lib/db/adapters/supabase-loop-controller-store";
+import {
+  createSupabaseLoopOpportunityStore,
+  isSupabaseLoopOpportunityStoreEnabled
+} from "@/lib/db/adapters/supabase-loop-opportunity-store";
+import {
+  createSupabaseSemanticGraphStore,
+  isSupabaseSemanticGraphStoreEnabled
+} from "@/lib/db/adapters/supabase-semantic-graph-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
@@ -39,6 +57,9 @@ const cachedRoutingStores = new Map<string, RoutingStore>();
 const cachedHermesDesignStores = new Map<string, HermesDesignStore>();
 const cachedDiscoveryDesignStores = new Map<string, DiscoveryDesignStore>();
 const cachedLoopSpecRegistryStores = new Map<string, LoopSpecRegistryStore>();
+const cachedLoopControllerStores = new Map<string, LoopControllerStore>();
+const cachedLoopOpportunityStores = new Map<string, LoopOpportunityStore>();
+const cachedSemanticGraphStores = new Map<string, SemanticGraphStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -223,12 +244,111 @@ export function getLoopSpecRegistryStore(options?: {
   return store;
 }
 
+export function getLoopControllerStore(options?: {
+  projectRoot?: string;
+  forceFile?: boolean;
+}): LoopControllerStore {
+  const organizationId =
+    process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey =
+    process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase =
+    !options?.forceFile && isSupabaseLoopControllerStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase loop controller storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const projectRoot = path.resolve(
+    options?.projectRoot ?? getActiveLoopgraphProjectRoot()
+  );
+  const cacheKey = useSupabase
+    ? `supabase-loop-controller:${organizationId}:${projectKey}`
+    : `file-loop-controller:${projectRoot}`;
+  if (!options?.forceFile && cachedLoopControllerStores.has(cacheKey)) {
+    return cachedLoopControllerStores.get(cacheKey)!;
+  }
+  const store = useSupabase
+    ? createSupabaseLoopControllerStore()
+    : new FileLoopControllerStore(getPackageLoopgraphRoot(projectRoot));
+  if (!options?.forceFile) cachedLoopControllerStores.set(cacheKey, store);
+  return store;
+}
+
+export function getLoopOpportunityStore(options?: {
+  projectRoot?: string;
+  forceFile?: boolean;
+}): LoopOpportunityStore {
+  const organizationId =
+    process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey =
+    process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase =
+    !options?.forceFile && isSupabaseLoopOpportunityStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase loop opportunity storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const projectRoot = path.resolve(
+    options?.projectRoot ?? getActiveLoopgraphProjectRoot()
+  );
+  const cacheKey = useSupabase
+    ? `supabase-loop-opportunities:${organizationId}:${projectKey}`
+    : `file-loop-opportunities:${projectRoot}`;
+  if (!options?.forceFile && cachedLoopOpportunityStores.has(cacheKey)) {
+    return cachedLoopOpportunityStores.get(cacheKey)!;
+  }
+  const store = useSupabase
+    ? createSupabaseLoopOpportunityStore()
+    : new FileLoopOpportunityStore(getPackageLoopgraphRoot(projectRoot));
+  if (!options?.forceFile) cachedLoopOpportunityStores.set(cacheKey, store);
+  return store;
+}
+
+export function getSemanticGraphStore(options?: {
+  projectRoot?: string;
+  forceFile?: boolean;
+}): SemanticGraphStore {
+  const organizationId =
+    process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey =
+    process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase =
+    !options?.forceFile && isSupabaseSemanticGraphStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error(
+      "Supabase semantic graph storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    );
+  }
+  const projectRoot = path.resolve(
+    options?.projectRoot ?? getActiveLoopgraphProjectRoot()
+  );
+  const cacheKey = useSupabase
+    ? `supabase-semantic-graph:${organizationId}:${projectKey}`
+    : `file-semantic-graph:${projectRoot}`;
+  if (!options?.forceFile && cachedSemanticGraphStores.has(cacheKey)) {
+    return cachedSemanticGraphStores.get(cacheKey)!;
+  }
+  const store = useSupabase
+    ? createSupabaseSemanticGraphStore()
+    : new FileSemanticGraphStore(getPackageLoopgraphRoot(projectRoot));
+  if (!options?.forceFile) cachedSemanticGraphStores.set(cacheKey, store);
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
   cachedHermesDesignStores.clear();
   cachedDiscoveryDesignStores.clear();
   cachedLoopSpecRegistryStores.clear();
+  cachedLoopControllerStores.clear();
+  cachedLoopOpportunityStores.clear();
+  cachedSemanticGraphStores.clear();
 }
 
 const UUID_PATTERN =

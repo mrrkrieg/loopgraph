@@ -30,13 +30,27 @@ import {
   markLoopOpportunityImplemented,
   saveGraphChangeSet
 } from "./loop-opportunity-engine";
+import type { LoopOpportunityStore } from "./loop-opportunity-store";
 import { materializeAcceptedLoopDesignProposals } from "./loop-materialization";
+import { InMemoryLoopSpecRegistryStore } from "./in-memory-loop-spec-registry-store";
+import type { DiscoveryDesignStore } from "./discovery-design-store";
+import type { HermesDesignStore } from "./hermes-design-store";
+import {
+  createStoredLoopSpecArtifact,
+  type LoopSpecRegistryStore,
+  type StoredLoopSpecArtifact
+} from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import {
   graphChangeSetHash,
-  readWorkspaceGraphState
+  graphHashForEntries,
+  readWorkspaceGraphState,
+  snapshotEntriesFromArtifacts
 } from "./semantic-graph-state";
-import { FileSemanticGraphStore } from "./semantic-graph-store";
+import {
+  FileSemanticGraphStore,
+  type SemanticGraphStore
+} from "./semantic-graph-store";
 import { requirePassingPromotionRehearsal } from "./promotion-rehearsal";
 import {
   readLoopgraphWorkspace,
@@ -132,18 +146,30 @@ export type RollbackGraphTransactionInput = {
   now?: Date;
 };
 
+export type SemanticGraphRuntimeOptions = {
+  store?: SemanticGraphStore;
+  opportunityStore?: LoopOpportunityStore;
+  designStore?: DiscoveryDesignStore;
+  hermesDesignStore?: HermesDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+};
+
 export async function captureGraphSnapshot(input: {
   projectRoot?: string;
   reason: string;
   createdBy: string;
   transactionId?: string;
   now?: Date;
-  store?: FileSemanticGraphStore;
+  store?: SemanticGraphStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 }): Promise<GraphSnapshot> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const loopgraphRoot = getLoopgraphRoot(projectRoot);
   const store = input.store ?? new FileSemanticGraphStore(loopgraphRoot);
-  const state = await readWorkspaceGraphState(projectRoot);
+  const state = await readWorkspaceGraphState(
+    projectRoot,
+    input.loopSpecStore
+  );
   const sequence = Math.max(-1, ...(await store.listSnapshots()).map((snapshot) => snapshot.sequence)) + 1;
   const createdAt = (input.now ?? new Date()).toISOString();
   const snapshotId = `graph_snapshot_${contentHash({
@@ -153,8 +179,10 @@ export async function captureGraphSnapshot(input: {
     reason: input.reason,
     createdAt
   })}`;
-  const assetsRoot = store.snapshotAssetsRoot(snapshotId);
-  await mkdir(assetsRoot, { recursive: true, mode: 0o700 });
+  const assetsRoot = store.snapshotAssetsRoot?.(snapshotId);
+  if (assetsRoot) {
+    await mkdir(assetsRoot, { recursive: true, mode: 0o700 });
+  }
 
   const entries = [];
   for (const entry of state.entries) {
@@ -163,7 +191,11 @@ export async function captureGraphSnapshot(input: {
       : path.resolve(projectRoot, entry.path);
     const registeredPathKind = isSpecFilePath(registeredPath) ? "file" as const : "directory" as const;
     const assetRoot = registeredPathKind === "file" ? path.dirname(registeredPath) : registeredPath;
-    if (isWithin(loopgraphRoot, assetRoot) && await pathExists(assetRoot)) {
+    if (
+      assetsRoot &&
+      isWithin(loopgraphRoot, assetRoot) &&
+      await pathExists(assetRoot)
+    ) {
       const archivedAssetsPath = path.join(assetsRoot, safeFileName(entry.id));
       await cp(assetRoot, archivedAssetsPath, { recursive: true, force: false, errorOnExist: true });
       entries.push({
@@ -196,16 +228,23 @@ export async function captureGraphSnapshot(input: {
 
 export async function approveGraphChangeSet(
   input: GraphApprovalInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<{ receipt: GraphChangeApprovalReceipt; changeSet: NonNullable<Awaited<ReturnType<typeof getGraphChangeSet>>> }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
   return store.withTransactionLock(async () => {
-    const changeSet = await requireChangeSet(input.changeSetId, projectRoot);
+    const changeSet = await requireChangeSet(
+      input.changeSetId,
+      projectRoot,
+      options.opportunityStore
+    );
     if (!["proposed", "approved"].includes(changeSet.status)) {
       throw new Error(`Graph change set ${changeSet.id} cannot be reviewed from status=${changeSet.status}`);
     }
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     if (input.decision === "approved" && state.graphHash !== changeSet.baseGraphHash) {
       throw new Error(
         `Graph change set ${changeSet.id} is stale: expected ${changeSet.baseGraphHash}, current ${state.graphHash}`
@@ -253,22 +292,36 @@ export async function approveGraphChangeSet(
       approvalReceiptIds: unique([...changeSet.approvalReceiptIds, receipt.id]),
       updatedAt: decidedAt
     };
-    await saveGraphChangeSet(reviewed, projectRoot);
+    await saveGraphChangeSet(
+      reviewed,
+      projectRoot,
+      options.opportunityStore
+    );
     return { receipt, changeSet: reviewed };
   });
 }
 
 export async function applyGraphChangeSet(
   input: ApplyGraphChangeSetInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<{
   transaction: GraphTransaction;
   changeSet: NonNullable<Awaited<ReturnType<typeof getGraphChangeSet>>>;
 }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
+  if (store.persistence === "distributed") {
+    return applyGraphChangeSetDistributed(input, {
+      ...options,
+      store
+    });
+  }
   return store.withTransactionLock(async () => {
-    const changeSet = await requireChangeSet(input.changeSetId, projectRoot);
+    const changeSet = await requireChangeSet(
+      input.changeSetId,
+      projectRoot,
+      options.opportunityStore
+    );
     const approval = await requireApproval(input.approvalReceiptId, store);
     validateChangeApproval(changeSet, approval);
     if (changeSet.status === "applied" && changeSet.appliedTransactionId) {
@@ -278,7 +331,10 @@ export async function applyGraphChangeSet(
     if (changeSet.status !== "approved") {
       throw new Error(`Graph change set ${changeSet.id} cannot be applied from status=${changeSet.status}`);
     }
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     if (state.graphHash !== changeSet.baseGraphHash) {
       throw new Error(
         `Graph change set ${changeSet.id} is stale: expected ${changeSet.baseGraphHash}, current ${state.graphHash}`
@@ -299,7 +355,8 @@ export async function applyGraphChangeSet(
       createdBy: input.initiatedBy,
       transactionId,
       now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     let transaction = graphTransactionSchema.parse({
       schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
@@ -374,12 +431,19 @@ export async function applyGraphChangeSet(
         appliedAt: createdAt,
         updatedAt: createdAt
       };
-      await saveGraphChangeSet(applied, projectRoot);
+      await saveGraphChangeSet(
+        applied,
+        projectRoot,
+        options.opportunityStore
+      );
       if (applied.designRunId) {
         await markLoopOpportunityImplemented({
           projectRoot,
           designRunId: applied.designRunId,
           now
+        }, {
+          designStore: options.hermesDesignStore,
+          opportunityStore: options.opportunityStore
         });
       }
       return { transaction, changeSet: applied };
@@ -402,7 +466,7 @@ export async function applyGraphChangeSet(
         appliedTransactionId: undefined,
         resultGraphHash: undefined,
         updatedAt: createdAt
-      }, projectRoot);
+      }, projectRoot, options.opportunityStore);
       throw error;
     }
   });
@@ -410,12 +474,15 @@ export async function applyGraphChangeSet(
 
 export async function approveLoopPromotion(
   input: PromotionApprovalInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<GraphChangeApprovalReceipt> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
   return store.withTransactionLock(async () => {
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     const entry = state.entries.find((candidate) => candidate.id === input.loopId);
     if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
     assertPromotionTransition(entry.spec.routing?.activationMode, input.nextMode);
@@ -425,7 +492,8 @@ export async function approveLoopPromotion(
       loopId: input.loopId,
       targetMode: input.nextMode,
       now: input.now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     const decidedAt = (input.now ?? new Date()).toISOString();
     const receipt = graphChangeApprovalReceiptSchema.parse({
@@ -463,12 +531,21 @@ export async function approveLoopPromotion(
 
 export async function promoteLoop(
   input: PromoteLoopInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<{ transaction: GraphTransaction; promotion: LoopPromotionReceipt }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
+  if (store.persistence === "distributed") {
+    return promoteLoopDistributed(input, {
+      ...options,
+      store
+    });
+  }
   return store.withTransactionLock(async () => {
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     const entry = state.entries.find((candidate) => candidate.id === input.loopId);
     if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
     const previousMode = entry.spec.routing?.activationMode;
@@ -481,7 +558,8 @@ export async function promoteLoop(
       loopId: input.loopId,
       targetMode: nextMode,
       now: input.now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     const approval = await requireApproval(input.approvalReceiptId, store);
     if (
@@ -510,7 +588,8 @@ export async function promoteLoop(
       createdBy: input.initiatedBy,
       transactionId,
       now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     let transaction = graphTransactionSchema.parse({
       schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
@@ -612,7 +691,7 @@ export async function promoteLoop(
 
 export async function approveGraphRollback(
   input: RollbackApprovalInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<GraphChangeApprovalReceipt> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
@@ -621,7 +700,10 @@ export async function approveGraphRollback(
     if (transaction.status !== "committed") {
       throw new Error(`Only a committed graph transaction can be rolled back (status=${transaction.status})`);
     }
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     if (transaction.resultGraphHash !== state.graphHash) {
       throw new Error(
         `Cannot approve rollback because the graph advanced from ${transaction.resultGraphHash} to ${state.graphHash}`
@@ -657,12 +739,15 @@ export async function approveGraphRollback(
 
 export async function approveLoopLifecycleChange(
   input: LoopLifecycleApprovalInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<GraphChangeApprovalReceipt> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
   return store.withTransactionLock(async () => {
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     const entry = state.entries.find((candidate) => candidate.id === input.loopId);
     if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
     const currentStatus = entry.spec.metadata.labels?.lifecycleStatus === "paused" ? "paused" : "active";
@@ -701,12 +786,21 @@ export async function approveLoopLifecycleChange(
 
 export async function setLoopLifecycleStatus(
   input: SetLoopLifecycleStatusInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<{ transaction: GraphTransaction; status: "active" | "paused" }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
+  if (store.persistence === "distributed") {
+    return setLoopLifecycleStatusDistributed(input, {
+      ...options,
+      store
+    });
+  }
   return store.withTransactionLock(async () => {
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     const entry = state.entries.find((candidate) => candidate.id === input.loopId);
     if (!entry) throw new Error(`Registered loop not found: ${input.loopId}`);
     const currentStatus = entry.spec.metadata.labels?.lifecycleStatus === "paused" ? "paused" : "active";
@@ -739,7 +833,8 @@ export async function setLoopLifecycleStatus(
       createdBy: input.initiatedBy,
       transactionId,
       now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     let transaction = graphTransactionSchema.parse({
       schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
@@ -810,10 +905,16 @@ export async function setLoopLifecycleStatus(
 
 export async function rollbackGraphTransaction(
   input: RollbackGraphTransactionInput,
-  options: { store?: FileSemanticGraphStore } = {}
+  options: SemanticGraphRuntimeOptions = {}
 ): Promise<{ original: GraphTransaction; rollback: GraphTransaction }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = options.store ?? new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
+  if (store.persistence === "distributed") {
+    return rollbackGraphTransactionDistributed(input, {
+      ...options,
+      store
+    });
+  }
   return store.withTransactionLock(async () => {
     const original = await requireTransaction(input.transactionId, store);
     if (original.status === "rolled_back" && original.rollbackTransactionId) {
@@ -824,7 +925,10 @@ export async function rollbackGraphTransaction(
       throw new Error(`Only a committed graph transaction can be rolled back (status=${original.status})`);
     }
     const approval = await requireApproval(input.approvalReceiptId, store);
-    const state = await readWorkspaceGraphState(projectRoot);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      options.loopSpecStore
+    );
     if (
       approval.subjectType !== "rollback" ||
       approval.transactionId !== original.id ||
@@ -854,7 +958,8 @@ export async function rollbackGraphTransaction(
       createdBy: input.initiatedBy,
       transactionId: rollbackId,
       now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     await restoreGraphSnapshot({
       projectRoot,
@@ -867,7 +972,8 @@ export async function rollbackGraphTransaction(
       createdBy: input.initiatedBy,
       transactionId: rollbackId,
       now,
-      store
+      store,
+      loopSpecStore: options.loopSpecStore
     });
     if (resultSnapshot.graphHash !== original.baseGraphHash) {
       await restoreGraphSnapshot({
@@ -911,7 +1017,11 @@ export async function rollbackGraphTransaction(
     });
     await store.saveTransaction(rolledBackOriginal);
     if (original.changeSetId) {
-      const changeSet = await getGraphChangeSet(original.changeSetId, projectRoot);
+      const changeSet = await getGraphChangeSet(
+        original.changeSetId,
+        projectRoot,
+        options.opportunityStore
+      );
       if (changeSet) {
         await saveGraphChangeSet({
           ...changeSet,
@@ -919,7 +1029,7 @@ export async function rollbackGraphTransaction(
           rolledBackAt: createdAt,
           rolledBackBy: input.initiatedBy,
           updatedAt: createdAt
-        }, projectRoot);
+        }, projectRoot, options.opportunityStore);
       }
     }
     for (const promotion of await store.listPromotions()) {
@@ -932,6 +1042,900 @@ export async function rollbackGraphTransaction(
     }
     return { original: rolledBackOriginal, rollback };
   });
+}
+
+async function applyGraphChangeSetDistributed(
+  input: ApplyGraphChangeSetInput,
+  options: SemanticGraphRuntimeOptions & { store: SemanticGraphStore }
+): Promise<{
+  transaction: GraphTransaction;
+  changeSet: NonNullable<Awaited<ReturnType<typeof getGraphChangeSet>>>;
+}> {
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const runtime = requireDistributedRuntime(options, {
+    design: true,
+    opportunities: true
+  });
+  return runtime.store.withTransactionLock(async () => {
+    const changeSet = await requireChangeSet(
+      input.changeSetId,
+      projectRoot,
+      runtime.opportunityStore
+    );
+    const approval = await requireApproval(
+      input.approvalReceiptId,
+      runtime.store
+    );
+    validateChangeApproval(changeSet, approval);
+    if (changeSet.status === "applied" && changeSet.appliedTransactionId) {
+      const existing = await runtime.store.getTransaction(
+        changeSet.appliedTransactionId
+      );
+      if (existing) return { transaction: existing, changeSet };
+    }
+    if (changeSet.status !== "approved") {
+      throw new Error(
+        `Graph change set ${changeSet.id} cannot be applied from status=${changeSet.status}`
+      );
+    }
+
+    const [workspaceSnapshot, activeArtifacts] = await Promise.all([
+      runtime.loopSpecStore.getWorkspace(projectRoot),
+      runtime.loopSpecStore.listActiveLoopSpecs(projectRoot)
+    ]);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      runtime.loopSpecStore
+    );
+    if (state.graphHash !== changeSet.baseGraphHash) {
+      throw new Error(
+        `Graph change set ${changeSet.id} is stale: expected ${changeSet.baseGraphHash}, current ${state.graphHash}`
+      );
+    }
+    const now = input.now ?? new Date();
+    const createdAt = now.toISOString();
+    const transactionId = `graph_transaction_${contentHash({
+      kind: "change_set",
+      changeSetId: changeSet.id,
+      approvalReceiptId: approval.id,
+      baseGraphHash: state.graphHash
+    })}`;
+    const existingTransaction = await runtime.store.getTransaction(
+      transactionId
+    );
+    if (existingTransaction?.status === "committed") {
+      return { transaction: existingTransaction, changeSet };
+    }
+    const baseSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: state.workspace,
+      artifacts: activeArtifacts,
+      reason: `Before applying ${changeSet.id}`,
+      createdBy: input.initiatedBy,
+      transactionId,
+      createdAt
+    });
+    const stagedRegistry = new InMemoryLoopSpecRegistryStore({
+      snapshot: workspaceSnapshot,
+      artifacts: activeArtifacts
+    });
+    const operationReceipts: GraphOperationReceipt[] = [];
+
+    for (const change of changeSet.changes) {
+      const resultLoopIds = change.operation === "retire"
+        ? []
+        : await materializeChangeResultsDistributed({
+            projectRoot,
+            change,
+            designRunId: input.designRunId ?? changeSet.designRunId,
+            acceptedProposalIds: proposalIdsForChange(
+              input,
+              change,
+              changeSet.changes.length
+            ),
+            initiatedBy: input.initiatedBy,
+            now,
+            designStore: runtime.designStore,
+            loopSpecStore: stagedRegistry
+          });
+      validateOperationCardinality(change, resultLoopIds);
+      const retiredLoopIds = retiredLoopsForOperation(
+        change,
+        resultLoopIds
+      );
+      const currentIds = new Set(
+        (await stagedRegistry.listActiveLoopSpecs(projectRoot))
+          .map((artifact) => artifact.loopId)
+      );
+      const missing = retiredLoopIds.filter((loopId) => !currentIds.has(loopId));
+      if (missing.length > 0) {
+        throw new Error(
+          `Cannot retire unregistered loop(s): ${missing.join(", ")}`
+        );
+      }
+      stagedRegistry.retire(retiredLoopIds, createdAt);
+      const stagedArtifacts = await stagedRegistry.listActiveLoopSpecs(
+        projectRoot
+      );
+      operationReceipts.push({
+        changeId: change.id,
+        operation: change.operation,
+        department: change.department,
+        targetLoopIds: [...change.targetLoopIds],
+        resultLoopIds,
+        retiredLoopIds,
+        specHashes: Object.fromEntries(
+          stagedArtifacts
+            .filter((artifact) => resultLoopIds.includes(artifact.loopId))
+            .map((artifact) => [
+              artifact.loopId,
+              loopSpecHash(artifact.spec)
+            ])
+        )
+      });
+    }
+
+    const finalArtifacts = runtime.store.normalizeArtifacts(
+      await stagedRegistry.listActiveLoopSpecs(projectRoot)
+    );
+    stagedRegistry.replaceArtifacts(finalArtifacts, createdAt);
+    const finalWorkspace = (
+      await stagedRegistry.getWorkspace(projectRoot)
+    ).workspace;
+    const resultSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: finalWorkspace,
+      artifacts: finalArtifacts,
+      reason: `After applying ${changeSet.id}`,
+      createdBy: input.initiatedBy,
+      transactionId,
+      createdAt,
+      sequence: baseSnapshot.sequence + 1
+    });
+    const transaction = graphTransactionSchema.parse({
+      schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
+      id: transactionId,
+      projectRootId: state.workspace.projectRootId,
+      kind: "change_set",
+      status: "committed",
+      changeSetId: changeSet.id,
+      approvalReceiptId: approval.id,
+      initiatedBy: required(input.initiatedBy, "initiatedBy"),
+      baseSnapshotId: baseSnapshot.id,
+      resultSnapshotId: resultSnapshot.id,
+      baseGraphHash: baseSnapshot.graphHash,
+      resultGraphHash: resultSnapshot.graphHash,
+      operationReceipts,
+      createdAt,
+      committedAt: createdAt
+    });
+    const applied = {
+      ...changeSet,
+      status: "applied" as const,
+      designRunId: input.designRunId ?? changeSet.designRunId,
+      appliedTransactionId: transaction.id,
+      resultGraphHash: resultSnapshot.graphHash,
+      appliedAt: createdAt,
+      updatedAt: createdAt
+    };
+    const committed = await runtime.store.commitGraphMutationAtomically!({
+      commitId: transaction.id,
+      idempotencyKey: transaction.id,
+      projectRoot,
+      expectedWorkspaceRevision: workspaceSnapshot.revision,
+      expectedArtifacts: artifactBindings(activeArtifacts),
+      committedAt: createdAt,
+      workspace: finalWorkspace,
+      artifacts: finalArtifacts,
+      baseSnapshot,
+      resultSnapshot,
+      transaction,
+      changeSet: applied
+    });
+    if (applied.designRunId) {
+      await markLoopOpportunityImplemented({
+        projectRoot,
+        designRunId: applied.designRunId,
+        now
+      }, {
+        designStore: options.hermesDesignStore,
+        opportunityStore: runtime.opportunityStore
+      });
+    }
+    return {
+      transaction: committed.transaction,
+      changeSet: applied
+    };
+  });
+}
+
+async function promoteLoopDistributed(
+  input: PromoteLoopInput,
+  options: SemanticGraphRuntimeOptions & { store: SemanticGraphStore }
+): Promise<{ transaction: GraphTransaction; promotion: LoopPromotionReceipt }> {
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const runtime = requireDistributedRuntime(options);
+  return runtime.store.withTransactionLock(async () => {
+    const [workspaceSnapshot, activeArtifacts] = await Promise.all([
+      runtime.loopSpecStore.getWorkspace(projectRoot),
+      runtime.loopSpecStore.listActiveLoopSpecs(projectRoot)
+    ]);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      runtime.loopSpecStore
+    );
+    const artifact = activeArtifacts.find(
+      (candidate) => candidate.loopId === input.loopId
+    );
+    const entry = state.entries.find(
+      (candidate) => candidate.id === input.loopId
+    );
+    if (!artifact || !entry) {
+      throw new Error(`Registered loop not found: ${input.loopId}`);
+    }
+    const previousMode = entry.spec.routing?.activationMode;
+    if (!previousMode) {
+      throw new Error(`Loop ${input.loopId} has no routing activation mode`);
+    }
+    const nextMode = routingActivationModeSchema.parse(input.nextMode);
+    assertPromotionTransition(previousMode, nextMode);
+    const rehearsal = await requirePassingPromotionRehearsal({
+      projectRoot,
+      reportId: input.rehearsalReportId,
+      loopId: input.loopId,
+      targetMode: nextMode,
+      now: input.now,
+      store: runtime.store,
+      loopSpecStore: runtime.loopSpecStore
+    });
+    const approval = await requireApproval(
+      input.approvalReceiptId,
+      runtime.store
+    );
+    if (
+      approval.subjectType !== "promotion" ||
+      approval.loopId !== input.loopId ||
+      approval.promotionRehearsalId !== rehearsal.id ||
+      approval.decision !== "approved" ||
+      approval.baseGraphHash !== state.graphHash
+    ) {
+      throw new Error(
+        "Promotion approval is not bound to this loop and current graph"
+      );
+    }
+    const now = input.now ?? new Date();
+    const createdAt = now.toISOString();
+    const transactionId = `graph_transaction_${contentHash({
+      kind: "promotion",
+      loopId: input.loopId,
+      previousMode,
+      nextMode,
+      approvalReceiptId: approval.id,
+      promotionRehearsalId: rehearsal.id,
+      baseGraphHash: state.graphHash
+    })}`;
+    const existing = await runtime.store.getTransaction(transactionId);
+    if (existing?.status === "committed") {
+      const promotion = (await runtime.store.listPromotions(input.loopId))
+        .find((candidate) => candidate.transactionId === transactionId);
+      if (!promotion) {
+        throw new Error(
+          `Promotion receipt is missing for committed transaction ${transactionId}`
+        );
+      }
+      return { transaction: existing, promotion };
+    }
+    const baseSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: state.workspace,
+      artifacts: activeArtifacts,
+      reason: `Before promoting ${input.loopId} from ${previousMode} to ${nextMode}`,
+      createdBy: input.initiatedBy,
+      transactionId,
+      createdAt
+    });
+    const promotedSpec = validateLoopSpec({
+      ...entry.spec,
+      metadata: {
+        ...entry.spec.metadata,
+        labels: {
+          ...(entry.spec.metadata.labels ?? {}),
+          lifecycleStatus: "active",
+          activationMode: nextMode,
+          promotedAt: createdAt,
+          promotionApprovalReceiptId: approval.id
+        }
+      },
+      routing: {
+        ...entry.spec.routing!,
+        activationMode: nextMode
+      }
+    });
+    const updatedArtifact = createStoredLoopSpecArtifact({
+      spec: promotedSpec,
+      entry: {
+        ...artifact.entry,
+        name: promotedSpec.metadata.name
+      },
+      fixtures: artifact.fixtures,
+      source: "semantic_graph",
+      sourceRef: artifact.sourceRef,
+      createdAt
+    });
+    const finalArtifacts = runtime.store.normalizeArtifacts(
+      activeArtifacts.map((candidate) =>
+        candidate.loopId === input.loopId ? updatedArtifact : candidate
+      )
+    );
+    const finalWorkspace = {
+      ...state.workspace,
+      registeredSpecs: finalArtifacts
+        .map((candidate) => candidate.entry)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      updatedAt: createdAt
+    };
+    const resultSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: finalWorkspace,
+      artifacts: finalArtifacts,
+      reason: `After promoting ${input.loopId} to ${nextMode}`,
+      createdBy: input.initiatedBy,
+      transactionId,
+      createdAt,
+      sequence: baseSnapshot.sequence + 1
+    });
+    const transaction = graphTransactionSchema.parse({
+      schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
+      id: transactionId,
+      projectRootId: state.workspace.projectRootId,
+      kind: "promotion",
+      status: "committed",
+      approvalReceiptId: approval.id,
+      initiatedBy: required(input.initiatedBy, "initiatedBy"),
+      baseSnapshotId: baseSnapshot.id,
+      resultSnapshotId: resultSnapshot.id,
+      baseGraphHash: baseSnapshot.graphHash,
+      resultGraphHash: resultSnapshot.graphHash,
+      operationReceipts: [{
+        changeId: `promotion:${input.loopId}`,
+        operation: "update",
+        department: entry.department,
+        targetLoopIds: [input.loopId],
+        resultLoopIds: [input.loopId],
+        retiredLoopIds: [],
+        specHashes: { [input.loopId]: loopSpecHash(promotedSpec) }
+      }],
+      createdAt,
+      committedAt: createdAt
+    });
+    const promotion = loopPromotionReceiptSchema.parse({
+      schemaVersion: LOOP_PROMOTION_RECEIPT_SCHEMA_VERSION,
+      id: `loop_promotion_${contentHash({
+        loopId: input.loopId,
+        transactionId,
+        previousMode,
+        nextMode
+      })}`,
+      projectRootId: state.workspace.projectRootId,
+      loopId: input.loopId,
+      transactionId,
+      approvalReceiptId: approval.id,
+      rehearsalReportId: rehearsal.id,
+      previousMode,
+      nextMode,
+      previousSpecHash: entry.specHash,
+      nextSpecHash: loopSpecHash(promotedSpec),
+      gateEvidenceRefs: unique([
+        promotionRehearsalEvidenceRef(rehearsal.id),
+        ...(input.gateEvidenceRefs ?? [])
+      ]),
+      status: "applied",
+      promotedBy: input.initiatedBy,
+      promotedAt: createdAt
+    });
+    const committed = await runtime.store.commitGraphMutationAtomically!({
+      commitId: transaction.id,
+      idempotencyKey: transaction.id,
+      projectRoot,
+      expectedWorkspaceRevision: workspaceSnapshot.revision,
+      expectedArtifacts: artifactBindings(activeArtifacts),
+      committedAt: createdAt,
+      workspace: finalWorkspace,
+      artifacts: finalArtifacts,
+      baseSnapshot,
+      resultSnapshot,
+      transaction,
+      promotion
+    });
+    return {
+      transaction: committed.transaction,
+      promotion: committed.promotion ?? promotion
+    };
+  });
+}
+
+async function setLoopLifecycleStatusDistributed(
+  input: SetLoopLifecycleStatusInput,
+  options: SemanticGraphRuntimeOptions & { store: SemanticGraphStore }
+): Promise<{ transaction: GraphTransaction; status: "active" | "paused" }> {
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const runtime = requireDistributedRuntime(options);
+  return runtime.store.withTransactionLock(async () => {
+    const [workspaceSnapshot, activeArtifacts] = await Promise.all([
+      runtime.loopSpecStore.getWorkspace(projectRoot),
+      runtime.loopSpecStore.listActiveLoopSpecs(projectRoot)
+    ]);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      runtime.loopSpecStore
+    );
+    const artifact = activeArtifacts.find(
+      (candidate) => candidate.loopId === input.loopId
+    );
+    const entry = state.entries.find(
+      (candidate) => candidate.id === input.loopId
+    );
+    if (!artifact || !entry) {
+      throw new Error(`Registered loop not found: ${input.loopId}`);
+    }
+    const currentStatus =
+      entry.spec.metadata.labels?.lifecycleStatus === "paused"
+        ? "paused"
+        : "active";
+    if (currentStatus === input.nextStatus) {
+      throw new Error(`Loop ${input.loopId} is already ${input.nextStatus}`);
+    }
+    const approval = await requireApproval(
+      input.approvalReceiptId,
+      runtime.store
+    );
+    if (
+      approval.subjectType !== "lifecycle" ||
+      approval.loopId !== input.loopId ||
+      approval.nextLifecycleStatus !== input.nextStatus ||
+      approval.decision !== "approved" ||
+      approval.baseGraphHash !== state.graphHash
+    ) {
+      throw new Error(
+        "Lifecycle approval is not bound to this loop, status, and current graph"
+      );
+    }
+    const now = input.now ?? new Date();
+    const createdAt = now.toISOString();
+    const transactionId = `graph_transaction_${contentHash({
+      kind: "lifecycle",
+      loopId: input.loopId,
+      currentStatus,
+      nextStatus: input.nextStatus,
+      approvalReceiptId: approval.id,
+      baseGraphHash: state.graphHash
+    })}`;
+    const existing = await runtime.store.getTransaction(transactionId);
+    if (existing?.status === "committed") {
+      return { transaction: existing, status: input.nextStatus };
+    }
+    const baseSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: state.workspace,
+      artifacts: activeArtifacts,
+      reason: `Before setting ${input.loopId} ${input.nextStatus}`,
+      createdBy: input.initiatedBy,
+      transactionId,
+      createdAt
+    });
+    const nextSpec = validateLoopSpec({
+      ...entry.spec,
+      metadata: {
+        ...entry.spec.metadata,
+        labels: {
+          ...(entry.spec.metadata.labels ?? {}),
+          lifecycleStatus: input.nextStatus,
+          lifecycleChangedAt: createdAt,
+          lifecycleApprovalReceiptId: approval.id
+        }
+      }
+    });
+    const updatedArtifact = createStoredLoopSpecArtifact({
+      spec: nextSpec,
+      entry: {
+        ...artifact.entry,
+        name: nextSpec.metadata.name
+      },
+      fixtures: artifact.fixtures,
+      source: "semantic_graph",
+      sourceRef: artifact.sourceRef,
+      createdAt
+    });
+    const finalArtifacts = runtime.store.normalizeArtifacts(
+      activeArtifacts.map((candidate) =>
+        candidate.loopId === input.loopId ? updatedArtifact : candidate
+      )
+    );
+    const finalWorkspace = {
+      ...state.workspace,
+      registeredSpecs: finalArtifacts
+        .map((candidate) => candidate.entry)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      updatedAt: createdAt
+    };
+    const resultSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: finalWorkspace,
+      artifacts: finalArtifacts,
+      reason: `After setting ${input.loopId} ${input.nextStatus}`,
+      createdBy: input.initiatedBy,
+      transactionId,
+      createdAt,
+      sequence: baseSnapshot.sequence + 1
+    });
+    const transaction = graphTransactionSchema.parse({
+      schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
+      id: transactionId,
+      projectRootId: state.workspace.projectRootId,
+      kind: "lifecycle",
+      status: "committed",
+      approvalReceiptId: approval.id,
+      initiatedBy: required(input.initiatedBy, "initiatedBy"),
+      baseSnapshotId: baseSnapshot.id,
+      resultSnapshotId: resultSnapshot.id,
+      baseGraphHash: baseSnapshot.graphHash,
+      resultGraphHash: resultSnapshot.graphHash,
+      operationReceipts: [{
+        changeId: `lifecycle:${input.loopId}:${input.nextStatus}`,
+        operation: "update",
+        department: entry.department,
+        targetLoopIds: [input.loopId],
+        resultLoopIds: [input.loopId],
+        retiredLoopIds: [],
+        specHashes: { [input.loopId]: loopSpecHash(nextSpec) }
+      }],
+      createdAt,
+      committedAt: createdAt
+    });
+    const committed = await runtime.store.commitGraphMutationAtomically!({
+      commitId: transaction.id,
+      idempotencyKey: transaction.id,
+      projectRoot,
+      expectedWorkspaceRevision: workspaceSnapshot.revision,
+      expectedArtifacts: artifactBindings(activeArtifacts),
+      committedAt: createdAt,
+      workspace: finalWorkspace,
+      artifacts: finalArtifacts,
+      baseSnapshot,
+      resultSnapshot,
+      transaction
+    });
+    return {
+      transaction: committed.transaction,
+      status: input.nextStatus
+    };
+  });
+}
+
+async function rollbackGraphTransactionDistributed(
+  input: RollbackGraphTransactionInput,
+  options: SemanticGraphRuntimeOptions & { store: SemanticGraphStore }
+): Promise<{ original: GraphTransaction; rollback: GraphTransaction }> {
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const runtime = requireDistributedRuntime(options);
+  return runtime.store.withTransactionLock(async () => {
+    const original = await requireTransaction(
+      input.transactionId,
+      runtime.store
+    );
+    if (original.status === "rolled_back" && original.rollbackTransactionId) {
+      return {
+        original,
+        rollback: await requireTransaction(
+          original.rollbackTransactionId,
+          runtime.store
+        )
+      };
+    }
+    if (original.status !== "committed") {
+      throw new Error(
+        `Only a committed graph transaction can be rolled back (status=${original.status})`
+      );
+    }
+    const approval = await requireApproval(
+      input.approvalReceiptId,
+      runtime.store
+    );
+    const [workspaceSnapshot, activeArtifacts] = await Promise.all([
+      runtime.loopSpecStore.getWorkspace(projectRoot),
+      runtime.loopSpecStore.listActiveLoopSpecs(projectRoot)
+    ]);
+    const state = await readWorkspaceGraphState(
+      projectRoot,
+      runtime.loopSpecStore
+    );
+    if (
+      approval.subjectType !== "rollback" ||
+      approval.transactionId !== original.id ||
+      approval.decision !== "approved" ||
+      approval.baseGraphHash !== state.graphHash
+    ) {
+      throw new Error(
+        "Rollback approval is not bound to this transaction and current graph"
+      );
+    }
+    if (original.resultGraphHash !== state.graphHash) {
+      throw new Error(
+        `Cannot rollback ${original.id}: graph advanced from ${original.resultGraphHash} to ${state.graphHash}`
+      );
+    }
+    const baseSnapshot = await runtime.store.getSnapshot(
+      original.baseSnapshotId
+    );
+    if (!baseSnapshot) {
+      throw new Error(
+        `Base graph snapshot not found: ${original.baseSnapshotId}`
+      );
+    }
+    const now = input.now ?? new Date();
+    const createdAt = now.toISOString();
+    const rollbackId = `graph_transaction_${contentHash({
+      kind: "rollback",
+      originalTransactionId: original.id,
+      approvalReceiptId: approval.id,
+      baseGraphHash: state.graphHash
+    })}`;
+    const existing = await runtime.store.getTransaction(rollbackId);
+    if (existing?.status === "committed") {
+      return { original, rollback: existing };
+    }
+    const beforeRollback = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: state.workspace,
+      artifacts: activeArtifacts,
+      reason: `Before rolling back ${original.id}`,
+      createdBy: input.initiatedBy,
+      transactionId: rollbackId,
+      createdAt
+    });
+    const restoredArtifacts = runtime.store.normalizeArtifacts(
+      artifactsFromSnapshot(baseSnapshot, activeArtifacts, createdAt)
+    );
+    const restoredWorkspace = {
+      ...state.workspace,
+      registeredSpecs: restoredArtifacts
+        .map((artifact) => artifact.entry)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+      updatedAt: createdAt
+    };
+    const resultSnapshot = await buildDistributedSnapshot({
+      store: runtime.store,
+      workspace: restoredWorkspace,
+      artifacts: restoredArtifacts,
+      reason: `After rolling back ${original.id}`,
+      createdBy: input.initiatedBy,
+      transactionId: rollbackId,
+      createdAt,
+      sequence: beforeRollback.sequence + 1
+    });
+    if (resultSnapshot.graphHash !== original.baseGraphHash) {
+      throw new Error(
+        `Rollback verification failed: expected ${original.baseGraphHash}, restored ${resultSnapshot.graphHash}`
+      );
+    }
+    const rollback = graphTransactionSchema.parse({
+      schemaVersion: GRAPH_TRANSACTION_SCHEMA_VERSION,
+      id: rollbackId,
+      projectRootId: state.workspace.projectRootId,
+      kind: "rollback",
+      status: "committed",
+      changeSetId: original.changeSetId,
+      approvalReceiptId: approval.id,
+      initiatedBy: required(input.initiatedBy, "initiatedBy"),
+      baseSnapshotId: beforeRollback.id,
+      resultSnapshotId: resultSnapshot.id,
+      baseGraphHash: beforeRollback.graphHash,
+      resultGraphHash: resultSnapshot.graphHash,
+      operationReceipts: original.operationReceipts.map((operation) => ({
+        ...operation,
+        targetLoopIds: operation.resultLoopIds,
+        resultLoopIds: operation.targetLoopIds,
+        retiredLoopIds: operation.resultLoopIds.filter(
+          (id) => !operation.targetLoopIds.includes(id)
+        )
+      })),
+      rollbackOfTransactionId: original.id,
+      createdAt,
+      committedAt: createdAt
+    });
+    const rolledBackOriginal = graphTransactionSchema.parse({
+      ...original,
+      status: "rolled_back",
+      rollbackTransactionId: rollback.id,
+      rolledBackAt: createdAt
+    });
+    const promotionUpdates = (await runtime.store.listPromotions())
+      .filter(
+        (promotion) =>
+          promotion.transactionId === original.id &&
+          promotion.status !== "rolled_back"
+      )
+      .map((promotion) =>
+        loopPromotionReceiptSchema.parse({
+          ...promotion,
+          status: "rolled_back",
+          rolledBackAt: createdAt
+        })
+      );
+    const changeSet = original.changeSetId
+      ? await getGraphChangeSet(
+          original.changeSetId,
+          projectRoot,
+          options.opportunityStore
+        )
+      : undefined;
+    const rolledBackChangeSet = changeSet
+      ? {
+          ...changeSet,
+          status: "rolled_back" as const,
+          rolledBackAt: createdAt,
+          rolledBackBy: input.initiatedBy,
+          updatedAt: createdAt
+        }
+      : undefined;
+    const committed = await runtime.store.commitGraphMutationAtomically!({
+      commitId: rollback.id,
+      idempotencyKey: rollback.id,
+      projectRoot,
+      expectedWorkspaceRevision: workspaceSnapshot.revision,
+      expectedArtifacts: artifactBindings(activeArtifacts),
+      committedAt: createdAt,
+      workspace: restoredWorkspace,
+      artifacts: restoredArtifacts,
+      baseSnapshot: beforeRollback,
+      resultSnapshot,
+      transaction: rollback,
+      ...(rolledBackChangeSet ? { changeSet: rolledBackChangeSet } : {}),
+      transactionUpdates: [rolledBackOriginal],
+      promotionUpdates
+    });
+    return {
+      original: rolledBackOriginal,
+      rollback: committed.transaction
+    };
+  });
+}
+
+async function materializeChangeResultsDistributed(input: {
+  projectRoot: string;
+  change: GraphChange;
+  designRunId?: string;
+  acceptedProposalIds: string[];
+  initiatedBy: string;
+  now: Date;
+  designStore: DiscoveryDesignStore;
+  loopSpecStore: LoopSpecRegistryStore;
+}): Promise<string[]> {
+  if (!input.designRunId) {
+    throw new Error(
+      `Graph operation ${input.change.id} requires a designRunId`
+    );
+  }
+  if (input.acceptedProposalIds.length === 0) {
+    throw new Error(
+      `Graph operation ${input.change.id} requires accepted proposal IDs`
+    );
+  }
+  const result = await materializeAcceptedLoopDesignProposals({
+    projectRoot: input.projectRoot,
+    store: input.designStore,
+    loopSpecStore: input.loopSpecStore,
+    designRunId: input.designRunId,
+    acceptedProposalIds: input.acceptedProposalIds,
+    acceptedBy: input.initiatedBy,
+    overwriteExisting: input.change.operation !== "add",
+    allowedExistingLoopIds: input.change.targetLoopIds,
+    now: input.now
+  });
+  if (!result.valid) {
+    throw new Error(
+      `Graph operation ${input.change.id} failed materialization: ${result.errors.join("; ")}`
+    );
+  }
+  return unique(result.materializedLoops.map((loop) => loop.loopId));
+}
+
+async function buildDistributedSnapshot(input: {
+  store: SemanticGraphStore;
+  workspace: Awaited<ReturnType<LoopSpecRegistryStore["getWorkspace"]>>["workspace"];
+  artifacts: StoredLoopSpecArtifact[];
+  reason: string;
+  createdBy: string;
+  transactionId: string;
+  createdAt: string;
+  sequence?: number;
+}): Promise<GraphSnapshot> {
+  const entries = snapshotEntriesFromArtifacts(input.artifacts);
+  const sequence = input.sequence ?? (
+    Math.max(
+      -1,
+      ...(await input.store.listSnapshots())
+        .map((snapshot) => snapshot.sequence)
+    ) + 1
+  );
+  const graphHash = graphHashForEntries(entries);
+  return graphSnapshotSchema.parse({
+    schemaVersion: GRAPH_SNAPSHOT_SCHEMA_VERSION,
+    id: `graph_snapshot_${contentHash({
+      projectRootId: input.workspace.projectRootId,
+      graphHash,
+      sequence,
+      reason: input.reason,
+      createdAt: input.createdAt
+    })}`,
+    projectRootId: input.workspace.projectRootId,
+    graphHash,
+    sequence,
+    reason: input.reason,
+    transactionId: input.transactionId,
+    entries,
+    createdAt: input.createdAt,
+    createdBy: required(input.createdBy, "createdBy")
+  });
+}
+
+function artifactsFromSnapshot(
+  snapshot: GraphSnapshot,
+  currentArtifacts: StoredLoopSpecArtifact[],
+  createdAt: string
+): StoredLoopSpecArtifact[] {
+  void currentArtifacts;
+  return snapshot.entries.map((entry) => {
+    return createStoredLoopSpecArtifact({
+      spec: entry.spec,
+      entry: snapshotEntryToRegistry(entry),
+      fixtures: entry.fixtures,
+      source: "semantic_graph",
+      sourceRef: entry.path,
+      createdAt
+    });
+  });
+}
+
+function artifactBindings(artifacts: StoredLoopSpecArtifact[]) {
+  return artifacts
+    .map(({ loopId, versionHash }) => ({ loopId, versionHash }))
+    .sort((left, right) => left.loopId.localeCompare(right.loopId));
+}
+
+function requireDistributedRuntime(
+  options: SemanticGraphRuntimeOptions & { store: SemanticGraphStore },
+  requiredStores: { design?: boolean; opportunities?: boolean } = {}
+) {
+  if (
+    options.store.persistence !== "distributed" ||
+    !options.store.commitGraphMutationAtomically
+  ) {
+    throw new Error(
+      "Distributed semantic graph mutation requires an atomic graph store"
+    );
+  }
+  if (!options.loopSpecStore || options.loopSpecStore.persistence !== "distributed") {
+    throw new Error(
+      "Distributed semantic graph mutation requires the active LoopSpec registry"
+    );
+  }
+  if (requiredStores.design && !options.designStore) {
+    throw new Error(
+      "Distributed graph change application requires the Hermes design store"
+    );
+  }
+  if (requiredStores.opportunities && !options.opportunityStore) {
+    throw new Error(
+      "Distributed graph change application requires the opportunity store"
+    );
+  }
+  return {
+    store: options.store,
+    loopSpecStore: options.loopSpecStore,
+    designStore: options.designStore!,
+    opportunityStore: options.opportunityStore!
+  };
 }
 
 export async function restoreGraphSnapshot(input: {
@@ -1139,19 +2143,30 @@ function assertPromotionTransition(
   }
 }
 
-async function requireChangeSet(changeSetId: string, projectRoot: string) {
-  const changeSet = await getGraphChangeSet(changeSetId, projectRoot);
+async function requireChangeSet(
+  changeSetId: string,
+  projectRoot: string,
+  opportunityStore?: LoopOpportunityStore
+) {
+  const changeSet = await getGraphChangeSet(
+    changeSetId,
+    projectRoot,
+    opportunityStore
+  );
   if (!changeSet) throw new Error(`Graph change set not found: ${changeSetId}`);
   return changeSet;
 }
 
-async function requireApproval(receiptId: string, store: FileSemanticGraphStore) {
+async function requireApproval(receiptId: string, store: SemanticGraphStore) {
   const receipt = await store.getApproval(receiptId);
   if (!receipt) throw new Error(`Graph approval receipt not found: ${receiptId}`);
   return receipt;
 }
 
-async function requireTransaction(transactionId: string, store: FileSemanticGraphStore) {
+async function requireTransaction(
+  transactionId: string,
+  store: SemanticGraphStore
+) {
   const transaction = await store.getTransaction(transactionId);
   if (!transaction) throw new Error(`Graph transaction not found: ${transactionId}`);
   return transaction;

@@ -128,9 +128,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ## Remaining product layers
 
 1. Continue the database migration beyond routing, route jobs, design tasks, callbacks, outbound
-   Hermes dispatch, discovery/design artifacts, and the versioned LoopSpec registry: move
-   opportunities and graph change sets, controller triggers/runs, measurements, outcomes, and
-   value-ledger records to tenant-scoped atomic stores.
+   Hermes dispatch, discovery/design artifacts, the versioned LoopSpec registry, opportunities,
+   proposed graph changes, controller state, and semantic graph transactions: move measurements,
+   outcomes, and value-ledger records to tenant-scoped atomic stores.
 2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
 3. Send the tamper-evident audit stream to independent retention, add distributed tracing and
@@ -156,6 +156,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md)
 - [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md)
 - [Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md)
+- [Distributed opportunity and controller runtime](./DISTRIBUTED-OPPORTUNITY-CONTROLLER.md)
 - [Outcomes and value](./OUTCOMES-AND-VALUE.md)
 - [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)
