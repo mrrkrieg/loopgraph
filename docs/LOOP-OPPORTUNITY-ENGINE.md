@@ -2,7 +2,7 @@
 
 Loopgraph should not wait for an operator to notice every missing automation. The opportunity engine turns durable operating evidence into explainable proposals to create or revise loops, then lets Hermes gather only the missing context.
 
-It does not let a model silently rewrite the company graph. Detection and design initiation are automatic; materialization and live execution remain explicit decisions.
+It does not let a model silently rewrite the company graph. Detection and design initiation are automatic; every resulting mutation crosses the semantic transaction boundary, and live execution remains separately governed.
 
 ## Evidence sources
 
@@ -50,7 +50,7 @@ Each opportunity creates a versioned `GraphChangeSet` against a hash of the regi
 - `merge`: reserved for evidence that multiple loops duplicate the same business problem;
 - `retire`: reserved for evidence that a loop no longer has a valid outcome.
 
-Every change requires explicit approval. Once an accepted Hermes proposal is materialized, the existing Loopgraph registry and graph projection remain the authoritative graph.
+Every change requires a content-bound approval receipt. User-driven and higher-risk changes require an accountable human decision. The controller can issue a policy receipt only for a low-risk, non-customer-facing `add` that stays in shadow mode. Accepted changes are applied atomically against the exact reviewed graph hash, and the Loopgraph registry remains authoritative.
 
 The design graph includes non-executable `opportunity` and `graph_change` nodes so users can see:
 
@@ -73,7 +73,9 @@ durable events/problems/runs/reviews
   -> focused EvidenceGap questions
   -> schema-constrained proposal
   -> Loopgraph compiler
-  -> explicit acceptance/materialization
+  -> content-bound approval
+  -> atomic semantic graph transaction
+  -> result snapshot and operation receipts
 ```
 
 Hermes reads the opportunity through `loopgraph_opportunities_get`. The opportunity is context and evidence, not an instruction to execute. Hermes still uses the bounded design context and the canonical proposal compiler.
@@ -86,8 +88,11 @@ Hermes reads the opportunity through `loopgraph_opportunities_get`. The opportun
 | `loopgraph_opportunities_get` | Read opportunities, scores, signals, graph-change references, and design state |
 | `loopgraph_graph_changes_get` | Read versioned proposed graph changes |
 | `loopgraph_opportunity_dismiss` | Record an explicit dismissal reason and suppress automatic redesign |
+| `loopgraph_graph_change_decide` | Approve or reject exact semantic operations with actor, policy, reason, and evidence |
+| `loopgraph_graph_change_apply` | Atomically apply the approved add/update/split/merge/retire change set |
+| `loopgraph_graph_history_get` | Inspect graph snapshots, approvals, transactions, promotions, and rollbacks |
 
-These tools are available only in the trusted/admin MCP exposure. Provider-webhook and lifecycle-router turns cannot scan, dismiss, or start design work.
+These tools are available only in the trusted/admin MCP exposure. Provider-webhook and lifecycle-router turns cannot scan, dismiss, start design work, approve graph changes, or mutate the graph.
 
 ## Local API
 
@@ -97,6 +102,8 @@ POST /api/opportunities
 GET  /api/opportunities/:opportunityId
 POST /api/opportunities/:opportunityId
 GET  /api/graph/change-sets
+GET  /api/graph/transactions
+POST /api/graph/transactions
 ```
 
 Example local scan without automatically waking Hermes:
@@ -115,7 +122,7 @@ curl -X POST http://localhost:3000/api/opportunities/OPPORTUNITY_ID \
   -d '{"action":"dismiss","reason":"Planned experiment; do not automate this pattern."}'
 ```
 
-The local server binds all operations to `LOOPGRAPH_PROJECT_ROOT`; a request body cannot redirect a scan to another filesystem path.
+The local server binds all operations to `LOOPGRAPH_PROJECT_ROOT`; a request body cannot redirect a scan or transaction to another filesystem path. The transaction endpoint requires `LOOPGRAPH_WORKER_API_TOKEN`.
 
 HTTP scans default to detection only. Set `"autoStartDesign":true` explicitly to allow the request to wake Hermes. The trusted MCP and local CLI scan commands default to starting qualified draft tasks.
 
@@ -144,3 +151,5 @@ npx loopgraph opportunities scan --project . --no-auto-start-design
 ```
 
 A production scheduler/worker should call the same scan operation; it should not contain separate scoring logic.
+
+See [Semantic graph transactions](SEMANTIC-GRAPH-TRANSACTIONS.md) for approval, apply, promotion, lifecycle, rollback, CLI, API, and storage contracts.

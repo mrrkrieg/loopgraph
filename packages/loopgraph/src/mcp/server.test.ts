@@ -297,6 +297,15 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_opportunities_get" }),
           expect.objectContaining({ name: "loopgraph_opportunity_dismiss" }),
           expect.objectContaining({ name: "loopgraph_graph_changes_get" }),
+          expect.objectContaining({ name: "loopgraph_graph_change_decide" }),
+          expect.objectContaining({ name: "loopgraph_graph_change_apply" }),
+          expect.objectContaining({ name: "loopgraph_graph_history_get" }),
+          expect.objectContaining({ name: "loopgraph_loop_promotion_approve" }),
+          expect.objectContaining({ name: "loopgraph_loop_promote" }),
+          expect.objectContaining({ name: "loopgraph_loop_lifecycle_approve" }),
+          expect.objectContaining({ name: "loopgraph_loop_lifecycle_set" }),
+          expect.objectContaining({ name: "loopgraph_graph_rollback_approve" }),
+          expect.objectContaining({ name: "loopgraph_graph_rollback" }),
           expect.objectContaining({ name: "loopgraph_route_worker_run" }),
           expect.objectContaining({ name: "loopgraph_route_job_retry" }),
           expect.objectContaining({ name: "loopgraph_route_job_cancel" }),
@@ -340,7 +349,21 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(61);
+    expect(listLoopgraphMcpTools()).toHaveLength(70);
+    const graphApply = listLoopgraphMcpTools()
+      .find((tool) => tool.name === "loopgraph_graph_change_apply");
+    const graphHistory = listLoopgraphMcpTools()
+      .find((tool) => tool.name === "loopgraph_graph_history_get");
+    expect(graphApply?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false
+    });
+    expect(graphHistory?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true
+    });
   });
 
   it("supports a restricted webhook-router exposure for untrusted Hermes event turns", async () => {
@@ -365,6 +388,8 @@ describe("Loopgraph MCP server", () => {
     expect(toolNames).not.toContain("loopgraph_loops_materialize");
     expect(toolNames).not.toContain("loopgraph_hermes_webhooks_sync");
     expect(toolNames).not.toContain("loopgraph_route_worker_run");
+    expect(toolNames).not.toContain("loopgraph_graph_change_apply");
+    expect(toolNames).not.toContain("loopgraph_graph_rollback");
     expect(listLoopgraphMcpTools({ exposure: "lifecycle_router" }).map((tool) => tool.name)).toEqual([
       ...LOOPGRAPH_LIFECYCLE_ROUTER_MCP_TOOL_NAMES
     ]);
@@ -380,6 +405,15 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_opportunities_get",
       "loopgraph_opportunity_dismiss",
       "loopgraph_graph_changes_get",
+      "loopgraph_graph_change_decide",
+      "loopgraph_graph_change_apply",
+      "loopgraph_graph_history_get",
+      "loopgraph_loop_promotion_approve",
+      "loopgraph_loop_promote",
+      "loopgraph_loop_lifecycle_approve",
+      "loopgraph_loop_lifecycle_set",
+      "loopgraph_graph_rollback_approve",
+      "loopgraph_graph_rollback",
       "loopgraph_route_worker_run",
       "loopgraph_route_job_retry",
       "loopgraph_route_job_cancel",
@@ -419,6 +453,15 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_routing_decision_submit",
       "loopgraph_problems_get",
       "loopgraph_routing_decision_get",
+      "loopgraph_graph_change_decide",
+      "loopgraph_graph_change_apply",
+      "loopgraph_graph_history_get",
+      "loopgraph_loop_promotion_approve",
+      "loopgraph_loop_promote",
+      "loopgraph_loop_lifecycle_approve",
+      "loopgraph_loop_lifecycle_set",
+      "loopgraph_graph_rollback_approve",
+      "loopgraph_graph_rollback",
       "loopgraph_loops_simulate",
       "loopgraph_route_commit_simulate"
     ]) {
@@ -465,6 +508,36 @@ describe("Loopgraph MCP server", () => {
     });
   });
 
+  it("exposes semantic graph history only to trusted admin turns", async () => {
+    const { projectRoot } = await createRoutingProject();
+    const response = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "graph-history",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_graph_history_get",
+        arguments: { projectRoot: "/tmp/caller-project-must-be-rebound" }
+      }
+    }, {
+      projectRoot,
+      exposure: "admin"
+    });
+
+    expect(response).toMatchObject({
+      jsonrpc: "2.0",
+      id: "graph-history",
+      result: {
+        isError: false,
+        structuredContent: {
+          transactions: [],
+          snapshots: [],
+          approvals: [],
+          promotions: []
+        }
+      }
+    });
+  });
+
   it("lists and reads project-bound Loopgraph MCP resources for Hermes", async () => {
     const { projectRoot } = await createRoutingProject();
     await handleLoopgraphMcpMessage({
@@ -504,6 +577,10 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/value-ledger-entry" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-controller-policy" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-controller-run" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/graph-snapshot" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/graph-change-approval-receipt" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/graph-transaction" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/loop-promotion-receipt" }),
           expect.objectContaining({ uri: "loopgraph://departments/marketing" }),
           expect.objectContaining({ uri: "loopgraph://discovery/session_resources" }),
           expect.objectContaining({ uri: "loopgraph://loops/marketing_ads" }),
@@ -581,6 +658,30 @@ describe("Loopgraph MCP server", () => {
       method: "resources/read",
       params: { uri: "loopgraph://schemas/loop-controller-run" }
     }, { projectRoot }));
+    const graphSnapshotSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "graph-snapshot-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/graph-snapshot" }
+    }, { projectRoot }));
+    const graphApprovalSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "graph-approval-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/graph-change-approval-receipt" }
+    }, { projectRoot }));
+    const graphTransactionSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "graph-transaction-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/graph-transaction" }
+    }, { projectRoot }));
+    const promotionReceiptSchema = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "promotion-receipt-schema-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://schemas/loop-promotion-receipt" }
+    }, { projectRoot }));
     const session = resourceJson(await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
       id: "session-resource",
@@ -633,6 +734,10 @@ describe("Loopgraph MCP server", () => {
     expect(JSON.stringify(valueLedgerSchema)).toContain("ValueLedgerEntry");
     expect(JSON.stringify(controllerPolicySchema)).toContain("LoopControllerPolicy");
     expect(JSON.stringify(controllerRunSchema)).toContain("LoopControllerRun");
+    expect(JSON.stringify(graphSnapshotSchema)).toContain("GraphSnapshot");
+    expect(JSON.stringify(graphApprovalSchema)).toContain("GraphChangeApprovalReceipt");
+    expect(JSON.stringify(graphTransactionSchema)).toContain("GraphTransaction");
+    expect(JSON.stringify(promotionReceiptSchema)).toContain("LoopPromotionReceipt");
     expect(session).toMatchObject({
       id: "session_resources",
       activeStage: "workspace"

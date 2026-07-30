@@ -8,7 +8,7 @@ business evidence
   -> opportunity detection
   -> Hermes design task
   -> policy decision
-  -> shadow-only materialization or accountable review
+  -> shadow-only semantic graph transaction or accountable review
   -> new evidence
 ```
 
@@ -110,7 +110,7 @@ It can decide to:
 - request the missing evidence through the durable Hermes design task;
 - start or wait for Hermes design;
 - request accountable graph-change review;
-- materialize an eligible proposal in shadow mode;
+- commit an eligible proposal through a content-bound shadow-mode semantic graph transaction;
 - propose pause or retirement for a repeatedly negative-value loop.
 
 Pause and retirement remain human-owned.
@@ -128,14 +128,13 @@ Automatic materialization passes only when every configured rule passes. The def
 - no unresolved questions, owner decisions, policy decisions, or approvals;
 - every routing or simulation capability to be connected or have a declared manual fallback.
 
-A policy-approved shadow loop receives no live credentials and no live write authority. Proposals that fail one rule become review decisions with the failed rule and evidence attached.
+A policy-approved shadow loop receives no live credentials and no live write authority. The controller creates a policy approval receipt and applies the addition through the same atomic graph transaction boundary used by human-approved changes. Proposals that fail one rule become review decisions with the failed rule and evidence attached.
 
 ## Current boundary
 
-The durable controller, trigger queue, authenticated scheduler, outcome feedback, local CLI, MCP administration tools, and Hermes installer integration are implemented. The following remain separate product layers:
+The durable controller, trigger queue, authenticated scheduler, outcome feedback, semantic graph transaction engine, local CLI, MCP administration tools, authenticated transaction API, and Hermes installer integration are implemented. The following remain separate product layers:
 
 - hosted tenant authentication, role authorization, rate limits, and database-backed scheduling;
-- semantic graph transactions for update, split, merge, retirement, promotion, and rollback;
 - automatic rehearsal of every generated fixture before promotion;
 - proactive connector-health and webhook-reconciliation triggers;
 - dedicated Opportunities, Change Review, Value, Learning, and Controller views.

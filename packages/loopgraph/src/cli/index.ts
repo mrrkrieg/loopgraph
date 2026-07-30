@@ -57,6 +57,10 @@ import {
   FileRoutingStore,
   retryRouteJob
 } from "../runtime/routing-store";
+import {
+  callLoopgraphSemanticGraphTool,
+  type LoopgraphSemanticGraphToolName
+} from "../runtime/semantic-graph-tools";
 
 const HERO_TEMPLATES = [
   {
@@ -136,6 +140,258 @@ const events = program.command("events").description("Hermes-normalized event ut
 const opportunities = program.command("opportunities").description("Detect missing or weak loops from durable operating evidence");
 const worker = program.command("worker").description("Run and operate the durable Hermes route-job worker");
 const controller = program.command("controller").description("Run the durable Hermes Brain continuous-improvement controller");
+const graph = program.command("graph").description("Review and apply semantic company graph transactions");
+const graphChange = graph.command("change").description("Approve and apply add, update, split, merge, or retire change sets");
+const graphPromotion = graph.command("promotion").description("Approve and apply ordered loop activation-mode promotions");
+const graphLifecycle = graph.command("lifecycle").description("Approve and apply loop pause or resume transactions");
+const graphRollback = graph.command("rollback").description("Approve and apply exact graph transaction rollback");
+
+graph
+  .command("history")
+  .description("Read semantic graph snapshots, approvals, transactions, promotions, and rollbacks")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--transaction <id>", "Read one transaction")
+  .option("--snapshot <id>", "Read one graph snapshot")
+  .option("--approval <id>", "Read one graph approval receipt")
+  .option("--promotion <id>", "Read one loop promotion receipt")
+  .option("--change-set <id>", "Filter approval receipts by graph change set")
+  .option("--loop <id>", "Filter promotion receipts by loop")
+  .action(async (options: {
+    project: string;
+    transaction?: string;
+    snapshot?: string;
+    approval?: string;
+    promotion?: string;
+    changeSet?: string;
+    loop?: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_history_get", {
+      transactionId: options.transaction,
+      snapshotId: options.snapshot,
+      approvalReceiptId: options.approval,
+      promotionReceiptId: options.promotion,
+      changeSetId: options.changeSet,
+      loopId: options.loop
+    }, options.project);
+  });
+
+graphChange
+  .command("decide")
+  .description("Record an accountable approval or rejection for an exact graph change set")
+  .argument("<changeSetId>", "Graph change set ID")
+  .requiredOption("--decision <decision>", "approved or rejected")
+  .option("--approved-changes <ids>", "Comma-separated approved change IDs; defaults to all operations")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Approval policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (changeSetId: string, options: {
+    decision: string;
+    approvedChanges?: string;
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_change_decide", {
+      changeSetId,
+      decision: options.decision,
+      approvedChangeIds: commaSeparated(options.approvedChanges),
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphChange
+  .command("apply")
+  .description("Atomically apply an approved semantic graph change set")
+  .argument("<changeSetId>", "Graph change set ID")
+  .requiredOption("--approval <id>", "Exact graph approval receipt ID")
+  .option("--design-run <id>", "Validated design run ID")
+  .option("--proposals <ids>", "Comma-separated accepted proposal IDs")
+  .option("--proposal-map <json>", "JSON object mapping change IDs to accepted proposal ID arrays")
+  .requiredOption("--by <id>", "Actor initiating the transaction")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (changeSetId: string, options: {
+    approval: string;
+    designRun?: string;
+    proposals?: string;
+    proposalMap?: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_change_apply", {
+      changeSetId,
+      approvalReceiptId: options.approval,
+      designRunId: options.designRun,
+      acceptedProposalIds: commaSeparated(options.proposals),
+      proposalIdsByChangeId: parseStringArrayRecord(options.proposalMap),
+      initiatedBy: options.by
+    }, options.project);
+  });
+
+graphPromotion
+  .command("approve")
+  .description("Approve the next ordered activation mode for one loop")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--to <mode>", "simulate, shadow, recommend, execute_with_approval, or autonomous_low_risk")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Promotion policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    to: string;
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_promotion_approve", {
+      loopId,
+      nextMode: options.to,
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphPromotion
+  .command("apply")
+  .description("Apply an approved promotion with durable gate evidence")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--to <mode>", "Approved next activation mode")
+  .requiredOption("--approval <id>", "Exact promotion approval receipt ID")
+  .requiredOption("--gate-evidence <refs>", "Comma-separated routing evaluation and readiness evidence references")
+  .requiredOption("--by <id>", "Actor initiating the transaction")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    to: string;
+    approval: string;
+    gateEvidence: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_promote", {
+      loopId,
+      nextMode: options.to,
+      approvalReceiptId: options.approval,
+      gateEvidenceRefs: commaSeparated(options.gateEvidence),
+      initiatedBy: options.by
+    }, options.project);
+  });
+
+graphLifecycle
+  .command("approve")
+  .description("Approve pausing or resuming one registered loop")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--status <status>", "active or paused")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Lifecycle policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    status: string;
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_lifecycle_approve", {
+      loopId,
+      nextStatus: options.status,
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphLifecycle
+  .command("apply")
+  .description("Apply an approved loop pause or resume transaction")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--status <status>", "active or paused")
+  .requiredOption("--approval <id>", "Exact lifecycle approval receipt ID")
+  .requiredOption("--by <id>", "Actor initiating the transaction")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    status: string;
+    approval: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_lifecycle_set", {
+      loopId,
+      nextStatus: options.status,
+      approvalReceiptId: options.approval,
+      initiatedBy: options.by
+    }, options.project);
+  });
+
+graphRollback
+  .command("approve")
+  .description("Approve restoring the exact base snapshot of a graph transaction")
+  .argument("<transactionId>", "Committed graph transaction ID")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Rollback policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (transactionId: string, options: {
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_rollback_approve", {
+      transactionId,
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphRollback
+  .command("apply")
+  .description("Restore an exact pre-transaction graph snapshot")
+  .argument("<transactionId>", "Committed graph transaction ID")
+  .requiredOption("--approval <id>", "Exact rollback approval receipt ID")
+  .requiredOption("--by <id>", "Actor initiating the rollback")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (transactionId: string, options: {
+    approval: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_rollback", {
+      transactionId,
+      approvalReceiptId: options.approval,
+      initiatedBy: options.by
+    }, options.project);
+  });
 
 workspace
   .command("init")
@@ -1051,6 +1307,36 @@ function splitCsv(value?: string): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function commaSeparated(value?: string): string[] {
+  return splitCsv(value);
+}
+
+function parseStringArrayRecord(value?: string): Record<string, string[]> {
+  if (!value) return {};
+  const parsed = JSON.parse(value) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("--proposal-map must be a JSON object mapping change IDs to proposal ID arrays.");
+  }
+  return Object.fromEntries(Object.entries(parsed).map(([changeId, proposalIds]) => {
+    if (!Array.isArray(proposalIds) || proposalIds.some((proposalId) => typeof proposalId !== "string" || !proposalId.trim())) {
+      throw new Error(`--proposal-map value for ${changeId} must be an array of non-empty proposal IDs.`);
+    }
+    return [changeId, proposalIds.map((proposalId) => proposalId.trim())];
+  }));
+}
+
+async function printSemanticGraphTool(
+  name: LoopgraphSemanticGraphToolName,
+  input: Record<string, unknown>,
+  projectRoot: string
+): Promise<void> {
+  const result = await callLoopgraphSemanticGraphTool(name, {
+    ...input,
+    projectRoot: path.resolve(projectRoot)
+  });
+  console.log(JSON.stringify(result, null, 2));
 }
 
 function parsePositiveInteger(value: string, label: string): number {
