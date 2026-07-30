@@ -6,6 +6,8 @@ import {
 import {
   getActiveLoopgraphProjectRoot,
   getHermesDesignStore,
+  getLoopControllerStore,
+  getLoopOpportunityStore,
   getRoutingStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
@@ -17,6 +19,7 @@ export async function GET(request: Request) {
   if (unauthorized) return unauthorized;
   const now = new Date();
   const projectRoot = getActiveLoopgraphProjectRoot();
+  const store = getLoopControllerStore({ projectRoot });
   const bucket = Math.floor(now.getTime() / (15 * 60 * 1000));
   const enqueue = await enqueueLoopControllerTrigger({
     projectRoot,
@@ -25,14 +28,17 @@ export async function GET(request: Request) {
     sourceRef: "loopgraph-cron",
     occurredAt: now.toISOString(),
     requestedBy: "loopgraph-cron"
-  }, { now });
+  }, { now, store });
   const scheduler = await runLoopControllerScheduler({
     projectRoot,
     limit: 20,
     now
   }, {
+    store,
     routingStore: getRoutingStore(),
-    designStore: getHermesDesignStore()
+    designStore: getHermesDesignStore(),
+    opportunityStore: getLoopOpportunityStore({ projectRoot }),
+    allowAutoShadowMaterialization: store.persistence === "file"
   });
   return NextResponse.json({ enqueue, scheduler }, {
     status: 202,

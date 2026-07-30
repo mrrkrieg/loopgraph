@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import {
-  FileLoopControllerStore,
   enqueueLoopControllerTrigger,
-  getLoopgraphRoot,
   runLoopControllerScheduler
 } from "loopgraph/runtime";
 import { loopControllerTriggerTypeSchema } from "loopgraph/core";
 import {
   getActiveLoopgraphProjectRoot,
   getHermesDesignStore,
+  getLoopControllerStore,
+  getLoopOpportunityStore,
   getRoutingStore
 } from "../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../lib/loopgraph-runtime/worker-api-auth";
@@ -19,7 +19,7 @@ export async function GET(request: Request) {
   const unauthorized = await authorizeWorkerApiRequest(request, "controller.operate");
   if (unauthorized) return unauthorized;
   const projectRoot = getActiveLoopgraphProjectRoot();
-  const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
+  const store = getLoopControllerStore({ projectRoot });
   const [policy, checkpoint, runs, triggers] = await Promise.all([
     store.readPolicy(),
     store.readCheckpoint(),
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   try {
     const body = await optionalJson(request);
     const projectRoot = getActiveLoopgraphProjectRoot();
-    const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
+    const store = getLoopControllerStore({ projectRoot });
     const mode = stringValue(body.mode) ?? "run";
     if (!["enqueue", "drain", "run"].includes(mode)) {
       throw new Error("mode must be enqueue, drain, or run");
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
         occurredAt: stringValue(body.occurredAt),
         requestedBy: stringValue(body.requestedBy) ?? "controller-api",
         evidenceRefs: stringArray(body.evidenceRefs)
-      }, { now });
+      }, { now, store });
     }
     if (mode === "enqueue") {
       return NextResponse.json({ enqueue: enqueueResult }, { status: 202 });
@@ -72,7 +72,9 @@ export async function POST(request: Request) {
     }, {
       store,
       routingStore: getRoutingStore(),
-      designStore: getHermesDesignStore()
+      designStore: getHermesDesignStore(),
+      opportunityStore: getLoopOpportunityStore({ projectRoot }),
+      allowAutoShadowMaterialization: store.persistence === "file"
     });
     return NextResponse.json({
       enqueue: enqueueResult,

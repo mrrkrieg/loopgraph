@@ -31,6 +31,7 @@ import {
   scanLoopOpportunities,
   type ScanLoopOpportunitiesResult
 } from "./loop-opportunity-engine";
+import type { LoopOpportunityStore } from "./loop-opportunity-store";
 import {
   applyGraphChangeSet,
   approveGraphChangeSet
@@ -59,6 +60,8 @@ export type LoopControllerRuntimeOptions = {
   outcomeStore?: OutcomeStore;
   routingStore?: RoutingStore;
   designStore?: HermesDesignStore;
+  opportunityStore?: LoopOpportunityStore;
+  allowAutoShadowMaterialization?: boolean;
 };
 
 type DueOutcomeEvaluation = {
@@ -153,7 +156,8 @@ export async function runLoopController(
       }, {
         routingStore: options.routingStore,
         outcomeStore,
-        designStore: options.designStore
+        designStore: options.designStore,
+        opportunityStore: options.opportunityStore
       });
       const allOutcomes = await outcomeStore.listObservedOutcomes({
         workspaceId: workspace.projectRootId
@@ -176,7 +180,10 @@ export async function runLoopController(
             now,
             policy,
             scan,
-            designStore: options.designStore
+            designStore: options.designStore,
+            opportunityStore: options.opportunityStore,
+            allowAutoShadowMaterialization:
+              options.allowAutoShadowMaterialization !== false
           });
       const limitedDecisions = decisions.slice(0, policy.maxDecisionsPerRun);
       const completedAt = now.toISOString();
@@ -234,9 +241,14 @@ export async function evaluateAutoShadowPolicy(input: {
   opportunity: LoopOpportunity;
   proposals: LoopDesignProposal[];
   policy: LoopControllerPolicy;
+  opportunityStore?: LoopOpportunityStore;
 }): Promise<{ passed: boolean; rules: LoopControllerPolicyRule[] }> {
   const changeSet = input.opportunity.graphChangeSetId
-    ? await getGraphChangeSet(input.opportunity.graphChangeSetId, input.projectRoot)
+    ? await getGraphChangeSet(
+        input.opportunity.graphChangeSetId,
+        input.projectRoot,
+        input.opportunityStore
+      )
     : undefined;
   const instances = await readConnectionInstances(input.projectRoot);
   const readyCapabilities = new Set(instances
@@ -337,6 +349,8 @@ async function decideControllerActions(input: {
   policy: LoopControllerPolicy;
   scan: ScanLoopOpportunitiesResult;
   designStore?: HermesDesignStore;
+  opportunityStore?: LoopOpportunityStore;
+  allowAutoShadowMaterialization: boolean;
 }): Promise<LoopControllerDecision[]> {
   if (input.scan.opportunities.length === 0) {
     return [noActionDecision({
@@ -440,11 +454,32 @@ async function decideControllerActions(input: {
         }));
         continue;
       }
+      if (!input.allowAutoShadowMaterialization) {
+        decisions.push(decision({
+          ...base,
+          designRunId,
+          action: "review_change",
+          summary: `${opportunity.title}: distributed graph review required`,
+          reason: "Automatic graph mutation is disabled until the hosted semantic graph transaction store is authoritative.",
+          policy: {
+            passed: false,
+            rules: [
+              rule(
+                "distributed-graph-authority",
+                false,
+                "A shared semantic graph transaction store is required before automatic shadow materialization."
+              )
+            ]
+          }
+        }));
+        continue;
+      }
       const gate = await evaluateAutoShadowPolicy({
         projectRoot: input.projectRoot,
         opportunity,
         proposals: proposalSet.proposals,
-        policy: input.policy
+        policy: input.policy,
+        opportunityStore: input.opportunityStore
       });
       if (!gate.passed) {
         decisions.push(decision({

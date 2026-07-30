@@ -25,6 +25,7 @@ import type { LoopSpec } from "../core/loop-spec";
 import { FileStorageAdapter } from "../sdk/storage";
 import { buildConnectionPlan } from "./connection-plan";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
+import type { LoopControllerStore } from "./loop-controller-store";
 import {
   emitEscalationCreatedLifecycleEvent,
   emitLoopRunLifecycleEvent,
@@ -67,6 +68,7 @@ export type LoopgraphRoutingToolRuntimeOptions = {
   projectRoot?: string;
   store?: RoutingStore;
   loopSpecStore?: LoopSpecRegistryStore;
+  controllerStore?: LoopControllerStore;
   now?: Date;
   trustedSpecPaths?: string[];
   trustedRoutingCards?: RoutingCard[];
@@ -242,7 +244,7 @@ export async function loopgraph_events_ingest(
     occurredAt: result.receipt.event.receivedAt,
     requestedBy: "loopgraph-event-ingest",
     evidenceRefs: [result.receipt.id, result.receipt.eventId]
-  }, { now: options.now });
+  }, { now: options.now, store: options.controllerStore });
 
   return {
     ...result,
@@ -360,6 +362,7 @@ export async function loopgraph_routing_decision_submit(
     routingCards: catalog.routingCards,
     catalogVersion: catalog.catalogVersion,
     now: options.now,
+    controllerStore: options.controllerStore,
     hermesMetadata: parsed.hermesMetadata
   });
 }
@@ -478,6 +481,7 @@ export async function loopgraph_routing_human_choice_submit(
     routingCards: catalog.routingCards,
     catalogVersion: catalog.catalogVersion,
     now: options.now,
+    controllerStore: options.controllerStore,
     hermesMetadata: {
       ...parsed.hermesMetadata,
       humanChoice: true,
@@ -500,6 +504,7 @@ async function submitRoutingDecisionWithAcceptedLifecycle(input: {
   routingCards: RoutingCard[];
   catalogVersion: string;
   now?: Date;
+  controllerStore?: LoopControllerStore;
   hermesMetadata?: Record<string, unknown>;
 }): Promise<RoutingDecisionSubmissionWithLifecycle> {
   const submission = await submitRoutingDecision({
@@ -537,7 +542,7 @@ async function submitRoutingDecisionWithAcceptedLifecycle(input: {
       ...(submission.problem ? [submission.problem.id] : []),
       ...submission.routeJobs.map((job) => job.id)
     ]
-  }, { now: input.now });
+  }, { now: input.now, store: input.controllerStore });
 
   return {
     ...submission,

@@ -14,6 +14,10 @@ import {
   scanLoopOpportunities,
   type ScanLoopOpportunitiesResult
 } from "./loop-opportunity-engine";
+import type { HermesDesignStore } from "./hermes-design-store";
+import type { LoopOpportunityStore } from "./loop-opportunity-store";
+import type { OutcomeStore } from "./outcome-store";
+import type { RoutingStore } from "./routing-store";
 
 export const LOOPGRAPH_OPPORTUNITY_TOOL_NAMES = [
   "loopgraph_opportunities_scan",
@@ -27,6 +31,10 @@ export type LoopgraphOpportunityToolName = (typeof LOOPGRAPH_OPPORTUNITY_TOOL_NA
 export type LoopgraphOpportunityToolRuntimeOptions = {
   projectRoot?: string;
   now?: Date;
+  opportunityStore?: LoopOpportunityStore;
+  routingStore?: RoutingStore;
+  outcomeStore?: OutcomeStore;
+  designStore?: HermesDesignStore;
 };
 
 export type LoopgraphOpportunityToolResult =
@@ -138,6 +146,11 @@ export async function callLoopgraphOpportunityTool(
       },
       autoStartDesign: parsed.autoStartDesign,
       now: options.now
+    }, {
+      opportunityStore: options.opportunityStore,
+      routingStore: options.routingStore,
+      outcomeStore: options.outcomeStore,
+      designStore: options.designStore
     });
   }
   if (name === "loopgraph_opportunities_get") {
@@ -145,7 +158,11 @@ export async function callLoopgraphOpportunityTool(
     const projectRoot = parsed.projectRoot ?? options.projectRoot ?? process.cwd();
     if (parsed.opportunityId) {
       return {
-        opportunity: await getLoopOpportunity(parsed.opportunityId, projectRoot)
+        opportunity: await getLoopOpportunity(
+          parsed.opportunityId,
+          projectRoot,
+          options.opportunityStore
+        )
       };
     }
     return {
@@ -153,7 +170,7 @@ export async function callLoopgraphOpportunityTool(
         status: parsed.status,
         department: parsed.department,
         minimumScore: parsed.minimumScore
-      })
+      }, options.opportunityStore)
     };
   }
   if (name === "loopgraph_opportunity_dismiss") {
@@ -164,7 +181,7 @@ export async function callLoopgraphOpportunityTool(
         opportunityId: parsed.opportunityId,
         reason: parsed.reason,
         now: options.now
-      })
+      }, { store: options.opportunityStore })
     };
   }
   if (name === "loopgraph_graph_changes_get") {
@@ -172,11 +189,19 @@ export async function callLoopgraphOpportunityTool(
     const projectRoot = parsed.projectRoot ?? options.projectRoot ?? process.cwd();
     if (parsed.changeSetId) {
       return {
-        changeSet: await getGraphChangeSet(parsed.changeSetId, projectRoot)
+        changeSet: await getGraphChangeSet(
+          parsed.changeSetId,
+          projectRoot,
+          options.opportunityStore
+        )
       };
     }
     return {
-      changeSets: await listGraphChangeSets(projectRoot, parsed.opportunityId)
+      changeSets: await listGraphChangeSets(
+        projectRoot,
+        parsed.opportunityId,
+        options.opportunityStore
+      )
     };
   }
   throw new Error(`Unknown Loopgraph opportunity tool: ${String(name)}`);

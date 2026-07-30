@@ -62,9 +62,13 @@ Hermes design tasks, callback receipts, outbound design dispatch, the leased inb
 inbox, discovery sessions, evidence-gap sets, and immutable design contexts/runs/proposals now use
 a shared Supabase boundary in hosted mode. Accepted LoopSpec versions, fixtures, and the active
 workspace registry use that same tenant/project boundary, and materialization completes the
-discovery transition in the registry transaction. Graph transactions, opportunities, controller
-triggers, measurement jobs, outcomes, and value records still have file-backed paths. Until those
-records move, do not treat the full control plane as multi-writer. The remaining stores need:
+discovery transition in the registry transaction. Opportunities, proposed graph changes,
+controller policies/checkpoints/runs, and controller triggers also use tenant/project-scoped
+Supabase stores; queue claims use row locks and UUID lease fencing, and the controller holds a
+renewable database lease. Graph snapshots, approvals, transactions, promotions, measurement jobs,
+outcomes, and value records still have file-backed paths. Hosted automatic graph mutation remains
+disabled until the semantic graph boundary moves. Until all remaining records move, do not treat
+the full control plane as multi-writer. The remaining stores need:
 
 - atomic claim/update operations;
 - leases and fencing tokens;
@@ -77,6 +81,7 @@ records move, do not treat the full control plane as multi-writer. The remaining
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md),
 [Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md),
+[Distributed opportunity and controller runtime](./DISTRIBUTED-OPPORTUNITY-CONTROLLER.md),
 [Hermes design dispatch queue](./HERMES-DESIGN-DISPATCH-QUEUE.md), and
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md), and
 [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) for the

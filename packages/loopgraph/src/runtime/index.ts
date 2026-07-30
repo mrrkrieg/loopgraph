@@ -61,6 +61,7 @@ export * from "./hermes-design-dispatch-worker";
 export * from "./hermes-design-store";
 export * from "./hermes-design-tools";
 export * from "./loop-opportunity-engine";
+export * from "./loop-opportunity-store";
 export * from "./loop-opportunity-tools";
 export * from "./semantic-graph-state";
 export * from "./semantic-graph-store";

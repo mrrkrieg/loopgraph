@@ -100,12 +100,14 @@ the expected tenant baseline.
 
 ## Current boundary
 
-This registry completes the distributed design-to-routing handoff. It does not
-yet make every learning system distributed. Semantic graph snapshots and
-change sets, opportunities, controller triggers/runs, provider measurement
-jobs, outcome windows, and the value ledger still need tenant/project stores.
-Real provider OAuth, webhook subscription application, and write-capable API
-clients remain Hermes-owned integration work.
+This registry completes the distributed design-to-routing handoff. The
+[distributed opportunity and controller runtime](./DISTRIBUTED-OPPORTUNITY-CONTROLLER.md)
+now covers opportunity/change-set records plus controller triggers, runs,
+policies, checkpoints, and leases. Semantic graph snapshots, approvals,
+transactions, promotions, provider measurement jobs, outcome windows, and the
+value ledger still need tenant/project stores. Real provider OAuth, webhook
+subscription application, and write-capable API clients remain Hermes-owned
+integration work.
 
 ## Verification
 

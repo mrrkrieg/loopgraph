@@ -39,6 +39,17 @@ export type OperationalMetrics = {
   immutableLoopSpecVersions: number;
   loopSpecCommits: number;
   loopSpecWorkspaceRevision: number;
+  opportunitiesTotal: number;
+  opportunitiesQualified: number;
+  graphChangesProposed: number;
+  controllerRunsTotal: number;
+  controllerRunsFailed: number;
+  controllerTriggersPending: number;
+  controllerTriggersProcessing: number;
+  controllerTriggersFailed: number;
+  controllerTriggerExpiredLeases: number;
+  controllerOldestPendingSeconds: number;
+  controllerActiveLeases: number;
   lastMachineRequestAt?: string;
 };
 
@@ -116,7 +127,18 @@ const EMPTY_METRICS: OperationalMetrics = {
   activeLoopSpecs: 0,
   immutableLoopSpecVersions: 0,
   loopSpecCommits: 0,
-  loopSpecWorkspaceRevision: 0
+  loopSpecWorkspaceRevision: 0,
+  opportunitiesTotal: 0,
+  opportunitiesQualified: 0,
+  graphChangesProposed: 0,
+  controllerRunsTotal: 0,
+  controllerRunsFailed: 0,
+  controllerTriggersPending: 0,
+  controllerTriggersProcessing: 0,
+  controllerTriggersFailed: 0,
+  controllerTriggerExpiredLeases: 0,
+  controllerOldestPendingSeconds: 0,
+  controllerActiveLeases: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -170,7 +192,13 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     };
   }
 
-  const [operational, callbacks, discoveryDesign, loopSpecRegistry] =
+  const [
+    operational,
+    callbacks,
+    discoveryDesign,
+    loopSpecRegistry,
+    opportunityController
+  ] =
     await Promise.all([
       supabase.rpc("get_loopgraph_operational_snapshot", {
         p_organization_id: organizationId,
@@ -187,6 +215,10 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       supabase.rpc("get_loop_spec_registry_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      supabase.rpc("get_opportunity_controller_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey
       })
     ]);
   if (
@@ -194,10 +226,12 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     callbacks.error ||
     discoveryDesign.error ||
     loopSpecRegistry.error ||
+    opportunityController.error ||
     !isRecord(operational.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
     !isRecord(loopSpecRegistry.data) ||
+    !isRecord(opportunityController.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -236,7 +270,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       ...operational.data,
       ...callbacks.data,
       ...discoveryDesign.data,
-      ...loopSpecRegistry.data
+      ...loopSpecRegistry.data,
+      ...opportunityController.data
     })
   };
 }
@@ -407,6 +442,39 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_loop_spec_workspace_revision Current active LoopSpec workspace revision.",
     "# TYPE loopgraph_loop_spec_workspace_revision gauge",
     `loopgraph_loop_spec_workspace_revision ${metrics.loopSpecWorkspaceRevision}`,
+    "# HELP loopgraph_opportunities_total Durable loop opportunities.",
+    "# TYPE loopgraph_opportunities_total gauge",
+    `loopgraph_opportunities_total ${metrics.opportunitiesTotal}`,
+    "# HELP loopgraph_opportunities_qualified Opportunities currently qualified for design or review.",
+    "# TYPE loopgraph_opportunities_qualified gauge",
+    `loopgraph_opportunities_qualified ${metrics.opportunitiesQualified}`,
+    "# HELP loopgraph_graph_changes_proposed Proposed graph changes awaiting a governed decision.",
+    "# TYPE loopgraph_graph_changes_proposed gauge",
+    `loopgraph_graph_changes_proposed ${metrics.graphChangesProposed}`,
+    "# HELP loopgraph_controller_runs_total Durable controller runs.",
+    "# TYPE loopgraph_controller_runs_total gauge",
+    `loopgraph_controller_runs_total ${metrics.controllerRunsTotal}`,
+    "# HELP loopgraph_controller_runs_failed Failed controller runs.",
+    "# TYPE loopgraph_controller_runs_failed gauge",
+    `loopgraph_controller_runs_failed ${metrics.controllerRunsFailed}`,
+    "# HELP loopgraph_controller_triggers_pending Controller triggers waiting for a worker.",
+    "# TYPE loopgraph_controller_triggers_pending gauge",
+    `loopgraph_controller_triggers_pending ${metrics.controllerTriggersPending}`,
+    "# HELP loopgraph_controller_triggers_processing Controller triggers currently leased by workers.",
+    "# TYPE loopgraph_controller_triggers_processing gauge",
+    `loopgraph_controller_triggers_processing ${metrics.controllerTriggersProcessing}`,
+    "# HELP loopgraph_controller_triggers_failed Controller triggers waiting for retry or operator action.",
+    "# TYPE loopgraph_controller_triggers_failed gauge",
+    `loopgraph_controller_triggers_failed ${metrics.controllerTriggersFailed}`,
+    "# HELP loopgraph_controller_trigger_expired_leases Controller triggers with expired worker leases.",
+    "# TYPE loopgraph_controller_trigger_expired_leases gauge",
+    `loopgraph_controller_trigger_expired_leases ${metrics.controllerTriggerExpiredLeases}`,
+    "# HELP loopgraph_controller_oldest_pending_seconds Age of the oldest pending controller trigger.",
+    "# TYPE loopgraph_controller_oldest_pending_seconds gauge",
+    `loopgraph_controller_oldest_pending_seconds ${metrics.controllerOldestPendingSeconds}`,
+    "# HELP loopgraph_controller_active_leases Active controller and maintenance leases.",
+    "# TYPE loopgraph_controller_active_leases gauge",
+    `loopgraph_controller_active_leases ${metrics.controllerActiveLeases}`,
     ""
   ].join("\n");
 }
@@ -466,6 +534,23 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     ),
     loopSpecCommits: nonnegative(data.loop_spec_commit_count),
     loopSpecWorkspaceRevision: nonnegative(data.workspace_revision),
+    opportunitiesTotal: nonnegative(data.opportunities_total),
+    opportunitiesQualified: nonnegative(data.opportunities_qualified),
+    graphChangesProposed: nonnegative(data.graph_changes_proposed),
+    controllerRunsTotal: nonnegative(data.controller_runs_total),
+    controllerRunsFailed: nonnegative(data.controller_runs_failed),
+    controllerTriggersPending: nonnegative(data.controller_triggers_pending),
+    controllerTriggersProcessing: nonnegative(
+      data.controller_triggers_processing
+    ),
+    controllerTriggersFailed: nonnegative(data.controller_triggers_failed),
+    controllerTriggerExpiredLeases: nonnegative(
+      data.controller_trigger_expired_leases
+    ),
+    controllerOldestPendingSeconds: nonnegative(
+      data.controller_oldest_pending_seconds
+    ),
+    controllerActiveLeases: nonnegative(data.controller_active_leases),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})

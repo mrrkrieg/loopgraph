@@ -21,6 +21,7 @@ import {
 import { loadLoopSpecFromPath } from "./loader";
 import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
+import type { LoopControllerStore } from "./loop-controller-store";
 import { recordTraceMetricSamples } from "./outcome-service";
 import { FileOutcomeStore } from "./outcome-store";
 import { readProjectMetricDefinitions } from "./outcome-tools";
@@ -79,6 +80,7 @@ export type RouteJobWorkerOptions = {
   now?: Date;
   store?: RoutingStore;
   loopSpecStore?: LoopSpecRegistryStore;
+  controllerStore?: LoopControllerStore;
   storage?: StorageAdapter;
   simulate?: typeof simulateLoop;
   execute?: (input: Parameters<typeof executeLoop>[0]) => Promise<ExecuteResult>;
@@ -143,7 +145,7 @@ export async function runRouteJobWorker(
           ...(item.runId ? [item.runId] : []),
           ...item.metricSampleIds
         ])
-      }, { now });
+      }, { now, store: options.controllerStore });
 
   return {
     schemaVersion: ROUTE_JOB_WORKER_SCHEMA_VERSION,

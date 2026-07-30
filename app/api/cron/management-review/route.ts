@@ -3,6 +3,8 @@ import { generateAndPersistManagementRollup } from "@/lib/loopgraph-runtime/mana
 import {
   getActiveLoopgraphProjectRoot,
   getHermesDesignStore,
+  getLoopControllerStore,
+  getLoopOpportunityStore,
   getRoutingStore,
   getStorageAdapter
 } from "@/lib/loopgraph-runtime/storage-resolver";
@@ -19,6 +21,7 @@ export async function GET(request: NextRequest) {
   const storage = getStorageAdapter();
   const rollup = await generateAndPersistManagementRollup(storage);
   const projectRoot = getActiveLoopgraphProjectRoot();
+  const controllerStore = getLoopControllerStore({ projectRoot });
   const enqueue = await enqueueLoopControllerTrigger({
     projectRoot,
     type: "management_cycle",
@@ -26,13 +29,17 @@ export async function GET(request: NextRequest) {
     sourceRef: `management-rollup:${rollup.weekKey}`,
     occurredAt: rollup.generatedAt,
     requestedBy: "loopgraph-management-cron"
-  });
+  }, { store: controllerStore });
   const controller = await runLoopControllerScheduler({
     projectRoot,
     limit: 20
   }, {
+    store: controllerStore,
     routingStore: getRoutingStore(),
-    designStore: getHermesDesignStore()
+    designStore: getHermesDesignStore(),
+    opportunityStore: getLoopOpportunityStore({ projectRoot }),
+    allowAutoShadowMaterialization:
+      controllerStore.persistence === "file"
   });
 
   return NextResponse.json({
