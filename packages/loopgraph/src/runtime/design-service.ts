@@ -5,6 +5,7 @@ import {
   LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
   LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION,
   contentHash,
+  compileRoutingCardFromLoopSpec,
   designRunSchema,
   formatDepartmentType,
   getDepartmentBranchQuestions,
@@ -26,12 +27,14 @@ import {
   type DiscoveryDesignStore
 } from "./discovery-design-store";
 import { inspectProjectManifests } from "./project-inspection";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { inspectLoopgraphWorkspace } from "./workspace";
 
 export type BuildLoopDesignContextInput = {
   projectRoot?: string;
   store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   sessionId: string;
   department?: string;
 };
@@ -49,6 +52,7 @@ export type GenerateLoopDesignInput = BuildLoopDesignContextInput & {
 export type SubmitLoopDesignInput = {
   projectRoot?: string;
   store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   sessionId: string;
   department?: string;
   proposalSet: unknown;
@@ -142,6 +146,7 @@ export type LoopDesignProposalEdit = z.infer<typeof loopDesignProposalEditSchema
 export type EditLoopDesignProposalInput = {
   projectRoot?: string;
   store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   designRunId: string;
   proposalId: string;
   expectedOutputHash?: string;
@@ -166,7 +171,15 @@ export async function buildLoopDesignContext(
   const store = resolveDiscoveryDesignStore(projectRoot, input.store);
   const session = await requireSession(input.sessionId, projectRoot, store);
   const departmentType = resolveDesignDepartment(session, input.department);
-  const workspace = await inspectLoopgraphWorkspace({ projectRoot });
+  const [workspace, activeArtifacts] = input.loopSpecStore
+    ? await Promise.all([
+        input.loopSpecStore.getWorkspace(projectRoot),
+        input.loopSpecStore.listActiveLoopSpecs(projectRoot)
+      ])
+    : [
+        await inspectLoopgraphWorkspace({ projectRoot }),
+        undefined
+      ];
   const projectInspection = await inspectProjectManifests({ projectRoot });
   const confirmedAnswers = session.answers
     .filter((answer) => answer.confirmedByUser)
@@ -191,12 +204,29 @@ export async function buildLoopDesignContext(
   const missingBundles = requiredBundles.filter((bundleId) => !answeredBundleIds.has(bundleId));
   const blockers = missingBundles.map((bundleId) => `Question bundle not answered: ${bundleId}`);
   const connectorStatus = inferConnectorStatus(session.answers);
-  const existingLoops = workspace.registry.registeredSpecs.map((spec) => ({
-    loopId: spec.id,
-    name: spec.name,
-    department: spec.department,
-    routingReady: false
-  }));
+  const existingLoops = activeArtifacts
+    ? activeArtifacts.map((artifact) => ({
+        loopId: artifact.loopId,
+        name: artifact.entry.name,
+        department: artifact.entry.department,
+        routingReady: Boolean(
+          compileRoutingCardFromLoopSpec(artifact.spec, {
+            catalogVersion: "design-context"
+          })
+        )
+      }))
+    : workspace.registry.registeredSpecs.map((spec) => ({
+        loopId: spec.id,
+        name: spec.name,
+        department: spec.department,
+        routingReady: false
+      }));
+  const registry = activeArtifacts
+    ? workspace.workspace
+    : workspace.registry;
+  const routingReadySpecCount = activeArtifacts
+    ? existingLoops.filter((loop) => loop.routingReady).length
+    : workspace.routingReadySpecCount;
   const contextWithoutHash = {
     schemaVersion: LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
     sessionId: session.id,
@@ -205,11 +235,13 @@ export async function buildLoopDesignContext(
     readiness: blockers.length === 0 ? "ready_for_design" as const : "needs_answers" as const,
     blockers,
     projectSummary: {
-      projectRootId: workspace.registry.projectRootId,
-      displayName: workspace.registry.displayName,
-      registeredSpecCount: workspace.registeredSpecCount,
-      registeredDepartments: workspace.registeredDepartments,
-      routingReadySpecCount: workspace.routingReadySpecCount
+      projectRootId: registry.projectRootId,
+      displayName: registry.displayName,
+      registeredSpecCount: registry.registeredSpecs.length,
+      registeredDepartments: Array.from(
+        new Set(registry.registeredSpecs.map((spec) => spec.department))
+      ),
+      routingReadySpecCount
     },
     projectInspection,
     confirmedAnswers,
@@ -334,6 +366,7 @@ export async function submitLoopDesignProposalSet(
   const context = await buildLoopDesignContext({
     projectRoot,
     store: input.store,
+    loopSpecStore: input.loopSpecStore,
     sessionId: input.sessionId,
     department: input.department
   });
@@ -400,6 +433,7 @@ export async function editLoopDesignProposal(
   const context = await buildLoopDesignContext({
     projectRoot,
     store,
+    loopSpecStore: input.loopSpecStore,
     sessionId: baseDesignRun.sessionId,
     department: baseDesignRun.departmentType
   });

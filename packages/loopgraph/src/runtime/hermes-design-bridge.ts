@@ -32,6 +32,7 @@ import {
   type HermesDesignStore,
   type HermesDesignTaskFilters
 } from "./hermes-design-store";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export {
@@ -123,6 +124,7 @@ export async function startHermesDesignTask(
     taskSecret?: string;
     store?: HermesDesignStore;
     discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
   } = {}
 ): Promise<HermesDesignDispatchResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
@@ -167,6 +169,7 @@ export async function startHermesDesignTask(
     ? await buildLoopDesignContext({
         projectRoot,
         store: discoveryStore,
+        loopSpecStore: options.loopSpecStore,
         sessionId: session.id,
         department
       })
@@ -316,6 +319,7 @@ export async function processHermesDesignCallback(input: {
 }, options: {
   store?: HermesDesignStore;
   discoveryStore?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 } = {}): Promise<{
   task: HermesDesignTask;
   duplicate: boolean;
@@ -412,6 +416,7 @@ export async function processHermesDesignCallback(input: {
       const result = await submitLoopDesignProposalSet({
         projectRoot,
         store: discoveryStore,
+        loopSpecStore: options.loopSpecStore,
         sessionId: task.sessionId,
         department: task.department,
         proposalSet: callback.proposalSet,
@@ -490,6 +495,7 @@ export async function resumeHermesDesignTasksForSession(input: {
   taskSecret?: string;
   store?: HermesDesignStore;
   discoveryStore?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 } = {}): Promise<HermesDesignDispatchResult[]> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const store = designStoreFor(projectRoot, options.store);
@@ -527,6 +533,7 @@ async function resumeHermesDesignTask(
     taskSecret?: string;
     store?: HermesDesignStore;
     discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
   }
 ): Promise<HermesDesignDispatchResult> {
   const store = designStoreFor(input.projectRoot, options.store);
@@ -555,6 +562,7 @@ async function resumeHermesDesignTask(
     ? await buildLoopDesignContext({
         projectRoot: input.projectRoot,
         store: discoveryStore,
+        loopSpecStore: options.loopSpecStore,
         sessionId: input.task.sessionId,
         department: input.task.department
       })

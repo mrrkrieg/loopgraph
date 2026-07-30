@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 
 export function contentHash(value: unknown): string {
+  return contentDigest(value).slice(0, 16);
+}
+
+export function contentDigest(value: unknown): string {
   const normalized =
     value === undefined || value === null
       ? String(value)
       : typeof value === "string"
         ? value
         : stableStringify(value);
-  return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+  return createHash("sha256").update(normalized).digest("hex");
 }
 
 export function idempotencyKey(input: {
@@ -24,6 +28,10 @@ export function idempotencyKey(input: {
 
 export function loopSpecHash(spec: unknown): string {
   return contentHash(spec);
+}
+
+export function loopSpecVersionHash(spec: unknown): string {
+  return contentDigest(spec);
 }
 
 export function runId(input: { loopSpecHash: string; idempotencyKey: string }): string {

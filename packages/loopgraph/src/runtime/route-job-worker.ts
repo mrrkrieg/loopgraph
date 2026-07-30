@@ -19,7 +19,9 @@ import {
   type LoopgraphLifecycleEmitResult
 } from "./lifecycle-events";
 import { loadLoopSpecFromPath } from "./loader";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
+import type { LoopControllerStore } from "./loop-controller-store";
 import { recordTraceMetricSamples } from "./outcome-service";
 import { FileOutcomeStore } from "./outcome-store";
 import { readProjectMetricDefinitions } from "./outcome-tools";
@@ -77,6 +79,8 @@ export type RouteJobWorkerOptions = {
   leaseSeconds?: number;
   now?: Date;
   store?: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  controllerStore?: LoopControllerStore;
   storage?: StorageAdapter;
   simulate?: typeof simulateLoop;
   execute?: (input: Parameters<typeof executeLoop>[0]) => Promise<ExecuteResult>;
@@ -93,6 +97,7 @@ export async function runRouteJobWorker(
   const reconciled = await reconcileReviewedRouteJobs({
     projectRoot,
     store,
+    loopSpecStore: options.loopSpecStore,
     storage,
     now,
     workerId,
@@ -112,6 +117,7 @@ export async function runRouteJobWorker(
     items.push(await processClaimedRouteJob({
       projectRoot,
       store,
+      loopSpecStore: options.loopSpecStore,
       storage,
       job,
       now,
@@ -139,7 +145,7 @@ export async function runRouteJobWorker(
           ...(item.runId ? [item.runId] : []),
           ...item.metricSampleIds
         ])
-      }, { now });
+      }, { now, store: options.controllerStore });
 
   return {
     schemaVersion: ROUTE_JOB_WORKER_SCHEMA_VERSION,
@@ -159,6 +165,7 @@ export async function runRouteJobWorker(
 export async function processClaimedRouteJob(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   storage: StorageAdapter;
   job: RouteJob;
   now?: Date;
@@ -175,6 +182,7 @@ export async function processClaimedRouteJob(input: {
     const context = await validateRouteJobContext({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job: input.job
     });
     const existingTrace = await input.storage.getRun(input.job.runId);
@@ -182,6 +190,7 @@ export async function processClaimedRouteJob(input: {
       return finalizeRouteJobFromTrace({
         projectRoot: input.projectRoot,
         store: input.store,
+        loopSpecStore: input.loopSpecStore,
         job: input.job,
         context,
         trace: existingTrace,
@@ -248,6 +257,7 @@ export async function processClaimedRouteJob(input: {
     return finalizeRouteJobFromTrace({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job: input.job,
       context: {
         ...context,
@@ -429,6 +439,7 @@ function routeJobLeaseSeconds(job: RouteJob): number {
 async function finalizeRouteJobFromTrace(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   job: RouteJob;
   context: RouteJobContext;
   trace: LoopRunTrace;
@@ -445,7 +456,9 @@ async function finalizeRouteJobFromTrace(input: {
       now: input.now
     });
   }
-  const workspace = await readLoopgraphWorkspace(input.projectRoot);
+  const workspace = input.loopSpecStore
+    ? (await input.loopSpecStore.getWorkspace(input.projectRoot)).workspace
+    : await readLoopgraphWorkspace(input.projectRoot);
   const metricSamples = await recordTraceMetricSamples({
     store: new FileOutcomeStore(getLoopgraphRoot(input.projectRoot)),
     workspaceId: workspace.projectRootId,
@@ -553,6 +566,7 @@ async function finalizeRouteJobFromTrace(input: {
 async function reconcileReviewedRouteJobs(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   storage: StorageAdapter;
   now: Date;
   workerId: string;
@@ -583,12 +597,14 @@ async function reconcileReviewedRouteJobs(input: {
     const context = await validateRouteJobContext({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job,
       allowCompletedCommit: true
     });
     results.push(await finalizeRouteJobFromTrace({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job,
       context,
       trace,
@@ -632,6 +648,7 @@ type RouteJobContext = {
 async function validateRouteJobContext(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   job: RouteJob;
   allowCompletedCommit?: boolean;
 }): Promise<RouteJobContext> {
@@ -651,6 +668,33 @@ async function validateRouteJobContext(input: {
     throw workerError("ROUTE_COMMIT_ALREADY_COMPLETED", `Route commit is already completed: ${commit.id}`);
   }
   assertRouteJobBindings(input.job, commit, receipt, problem);
+
+  if (input.loopSpecStore) {
+    const artifact = await input.loopSpecStore.getActiveLoopSpec(
+      input.projectRoot,
+      input.job.loopId
+    );
+    if (!artifact) {
+      throw workerError(
+        "LOOP_SPEC_NOT_REGISTERED",
+        `Registered LoopSpec not found: ${input.job.loopId}`
+      );
+    }
+    const hash = loopSpecHash(artifact.spec);
+    if (hash !== input.job.loopSpecHash || hash !== commit.loopSpecHash) {
+      throw workerError(
+        "LOOP_SPEC_HASH_MISMATCH",
+        `Registered LoopSpec hash ${hash} does not match immutable route binding ${input.job.loopSpecHash}`
+      );
+    }
+    if (artifact.spec.routing?.activationMode !== input.job.activationMode) {
+      throw workerError(
+        "ACTIVATION_MODE_MISMATCH",
+        `LoopSpec activation mode ${artifact.spec.routing?.activationMode ?? "missing"} does not match route job ${input.job.activationMode}`
+      );
+    }
+    return { receipt, problem, commit, spec: artifact.spec };
+  }
 
   const workspace = await readLoopgraphWorkspace(input.projectRoot);
   const registered = workspace.registeredSpecs.find((entry) => entry.id === input.job.loopId);

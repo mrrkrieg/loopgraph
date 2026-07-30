@@ -132,9 +132,8 @@ A policy-approved shadow loop receives no live credentials and no live write aut
 
 ## Current boundary
 
-The durable controller, trigger queue, authenticated scheduler, outcome feedback, semantic graph transaction engine, local CLI, MCP administration tools, authenticated transaction API, and Hermes installer integration are implemented. The following remain separate product layers:
+The durable controller, trigger queue, authenticated scheduler, outcome feedback, local and distributed semantic graph transaction engines, local CLI, MCP administration tools, authenticated transaction API, and Hermes installer integration are implemented. Strict policy-qualified hosted shadow additions can cross the same approval and atomic graph boundary as local changes when every required store is distributed. The following remain separate product layers:
 
-- hosted tenant authentication, role authorization, rate limits, and database-backed scheduling;
-- automatic rehearsal of every generated fixture before promotion;
-- proactive connector-health and webhook-reconciliation triggers;
-- dedicated Opportunities, Change Review, Value, Learning, and Controller views.
+- distributed measurement, outcome, and value-ledger persistence;
+- production Hermes-owned provider OAuth, API execution, and webhook subscription application;
+- independent audit retention, deployed alerts/SLOs, backup restore drills, and staging-scale multi-user validation.

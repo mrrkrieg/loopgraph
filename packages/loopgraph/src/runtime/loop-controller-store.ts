@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { open, readFile, readdir, rename, stat, unlink, writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -16,7 +17,15 @@ export type ControllerRunSaveResult = {
   duplicate: boolean;
 };
 
+export type ClaimControllerTriggersInput = {
+  limit: number;
+  maxAttempts: number;
+  leaseSeconds: number;
+  now: Date;
+};
+
 export interface LoopControllerStore {
+  readonly persistence: "file" | "distributed";
   saveRun(run: LoopControllerRun): Promise<ControllerRunSaveResult>;
   getRun(runId: string): Promise<LoopControllerRun | undefined>;
   findRunByIdempotencyKey(idempotencyKey: string): Promise<LoopControllerRun | undefined>;
@@ -26,6 +35,17 @@ export interface LoopControllerStore {
   readPolicy(): Promise<LoopControllerPolicy | undefined>;
   savePolicy(policy: LoopControllerPolicy): Promise<void>;
   saveTrigger(record: LoopControllerTriggerRecord): Promise<void>;
+  enqueueTrigger(record: LoopControllerTriggerRecord): Promise<{
+    record: LoopControllerTriggerRecord;
+    duplicate: boolean;
+  }>;
+  claimTriggers(
+    input: ClaimControllerTriggersInput
+  ): Promise<LoopControllerTriggerRecord[]>;
+  settleTrigger(
+    record: LoopControllerTriggerRecord,
+    expectedLeaseId: string
+  ): Promise<void>;
   getTrigger(triggerRecordId: string): Promise<LoopControllerTriggerRecord | undefined>;
   listTriggers(status?: LoopControllerTriggerRecord["status"]): Promise<LoopControllerTriggerRecord[]>;
   withControllerLock<T>(operation: () => Promise<T>): Promise<T>;
@@ -33,6 +53,8 @@ export interface LoopControllerStore {
 }
 
 export class FileLoopControllerStore implements LoopControllerStore {
+  readonly persistence = "file" as const;
+
   constructor(private readonly loopgraphRoot = path.join(process.cwd(), ".loopgraph")) {}
 
   async saveRun(run: LoopControllerRun): Promise<ControllerRunSaveResult> {
@@ -97,6 +119,87 @@ export class FileLoopControllerStore implements LoopControllerStore {
       this.triggerPath(record.id),
       loopControllerTriggerRecordSchema.parse(record)
     );
+  }
+
+  async enqueueTrigger(record: LoopControllerTriggerRecord): Promise<{
+    record: LoopControllerTriggerRecord;
+    duplicate: boolean;
+  }> {
+    const parsed = loopControllerTriggerRecordSchema.parse(record);
+    return this.withTriggerLock(async () => {
+      const existing = await this.getTrigger(parsed.id);
+      if (existing) {
+        if (
+          existing.projectRootId !== parsed.projectRootId ||
+          existing.trigger.type !== parsed.trigger.type ||
+          existing.trigger.id !== parsed.trigger.id
+        ) {
+          throw new Error(`Controller trigger identity conflict: ${parsed.id}`);
+        }
+        return { record: existing, duplicate: true };
+      }
+      await this.saveTrigger(parsed);
+      return { record: parsed, duplicate: false };
+    });
+  }
+
+  async claimTriggers(
+    input: ClaimControllerTriggersInput
+  ): Promise<LoopControllerTriggerRecord[]> {
+    return this.withTriggerLock(async () => {
+      const eligible = (await this.listTriggers())
+        .filter(
+          (record) =>
+            record.attempts < input.maxAttempts &&
+            (record.status === "pending" ||
+              record.status === "failed" ||
+              (record.status === "processing" &&
+                Date.parse(
+                  record.leaseExpiresAt ?? record.updatedAt
+                ) <= input.now.getTime()))
+        )
+        .slice(0, input.limit);
+      const claimed: LoopControllerTriggerRecord[] = [];
+      for (const record of eligible) {
+        const leaseId = randomUUID();
+        const updated = loopControllerTriggerRecordSchema.parse({
+          ...record,
+          status: "processing",
+          attempts: record.attempts + 1,
+          leaseId,
+          leaseExpiresAt: new Date(
+            input.now.getTime() + input.leaseSeconds * 1000
+          ).toISOString(),
+          error: undefined,
+          updatedAt: input.now.toISOString()
+        });
+        await this.saveTrigger(updated);
+        claimed.push(updated);
+      }
+      return claimed;
+    });
+  }
+
+  async settleTrigger(
+    record: LoopControllerTriggerRecord,
+    expectedLeaseId: string
+  ): Promise<void> {
+    const parsed = loopControllerTriggerRecordSchema.parse(record);
+    await this.withTriggerLock(async () => {
+      const current = await this.getTrigger(parsed.id);
+      if (
+        !current ||
+        current.status !== "processing" ||
+        current.leaseId !== expectedLeaseId
+      ) {
+        throw new Error(`Controller trigger lease is no longer owned: ${parsed.id}`);
+      }
+      await this.saveTrigger({
+        ...parsed,
+        leaseId: undefined,
+        leaseExpiresAt: undefined
+      });
+    });
   }
 
   async getTrigger(triggerRecordId: string): Promise<LoopControllerTriggerRecord | undefined> {

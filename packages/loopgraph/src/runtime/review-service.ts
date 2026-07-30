@@ -10,6 +10,7 @@ import { getAdapterById } from "../sdk/adapters/index";
 import { evaluateLiveExecutionGate, formatLiveExecutionGateError } from "./executor";
 import { buildImprovementItemFromReview } from "./improvement-service";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
+import type { LoopControllerStore } from "./loop-controller-store";
 import { loadLoopSpecFromPath } from "./loader";
 import { resolveExistingProjectPath } from "./project-paths";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
@@ -42,6 +43,7 @@ export type ApplyReviewDecisionInput = {
 export type ApplyReviewDecisionOptions = {
   projectRoot?: string;
   routingStore?: RoutingStore;
+  controllerStore?: LoopControllerStore;
 };
 
 export class ReviewServiceError extends Error {
@@ -169,7 +171,7 @@ export async function applyReviewDecision(
     occurredAt: reviewRecord.decidedAt,
     requestedBy: input.reviewerId,
     evidenceRefs: [trace.id, reviewRecord.id]
-  });
+  }, { store: options.controllerStore });
 
   return { trace, review: reviewRecord, controllerTrigger };
 }

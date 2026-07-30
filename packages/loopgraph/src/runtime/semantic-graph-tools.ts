@@ -14,7 +14,14 @@ import {
 import {
   runLoopPromotionRehearsal
 } from "./promotion-rehearsal";
-import { FileSemanticGraphStore } from "./semantic-graph-store";
+import {
+  FileSemanticGraphStore,
+  type SemanticGraphStore
+} from "./semantic-graph-store";
+import type { DiscoveryDesignStore } from "./discovery-design-store";
+import type { HermesDesignStore } from "./hermes-design-store";
+import type { LoopOpportunityStore } from "./loop-opportunity-store";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const LOOPGRAPH_SEMANTIC_GRAPH_TOOL_NAMES = [
@@ -215,8 +222,23 @@ export const loopgraphSemanticGraphToolDefinitions = [
 export async function callLoopgraphSemanticGraphTool(
   name: LoopgraphSemanticGraphToolName,
   input: unknown,
-  options: { projectRoot?: string; now?: Date } = {}
+  options: {
+    projectRoot?: string;
+    now?: Date;
+    store?: SemanticGraphStore;
+    opportunityStore?: LoopOpportunityStore;
+    designStore?: DiscoveryDesignStore;
+    hermesDesignStore?: HermesDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
+  } = {}
 ) {
+  const runtimeOptions = {
+    store: options.store,
+    opportunityStore: options.opportunityStore,
+    designStore: options.designStore,
+    hermesDesignStore: options.hermesDesignStore,
+    loopSpecStore: options.loopSpecStore
+  };
   if (name === "loopgraph_graph_change_decide") {
     const parsed = graphChangeDecideInputSchema.parse(input);
     return approveGraphChangeSet({
@@ -224,7 +246,7 @@ export async function callLoopgraphSemanticGraphTool(
       projectRoot: parsed.projectRoot ?? options.projectRoot,
       approvedChangeIds: parsed.approvedChangeIds.length > 0 ? parsed.approvedChangeIds : undefined,
       now: options.now
-    });
+    }, runtimeOptions);
   }
   if (name === "loopgraph_graph_change_apply") {
     const parsed = graphChangeApplyInputSchema.parse(input);
@@ -234,12 +256,14 @@ export async function callLoopgraphSemanticGraphTool(
       acceptedProposalIds: parsed.acceptedProposalIds,
       proposalIdsByChangeId: parsed.proposalIdsByChangeId,
       now: options.now
-    });
+    }, runtimeOptions);
   }
   if (name === "loopgraph_graph_history_get") {
     const parsed = graphHistoryGetInputSchema.parse(input);
     const projectRoot = path.resolve(parsed.projectRoot ?? options.projectRoot ?? process.cwd());
-    const store = new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
+    const store =
+      options.store ??
+      new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
     if (parsed.transactionId) return { transaction: await store.getTransaction(parsed.transactionId) };
     if (parsed.snapshotId) return { snapshot: await store.getSnapshot(parsed.snapshotId) };
     if (parsed.approvalReceiptId) return { approval: await store.getApproval(parsed.approvalReceiptId) };
@@ -263,13 +287,18 @@ export async function callLoopgraphSemanticGraphTool(
         ...parsed,
         projectRoot: parsed.projectRoot ?? options.projectRoot,
         now: options.now
+      }, {
+        store: options.store,
+        loopSpecStore: options.loopSpecStore
       })
     };
   }
   if (name === "loopgraph_promotion_rehearsals_get") {
     const parsed = promotionRehearsalsGetInputSchema.parse(input);
     const projectRoot = path.resolve(parsed.projectRoot ?? options.projectRoot ?? process.cwd());
-    const store = new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
+    const store =
+      options.store ??
+      new FileSemanticGraphStore(getLoopgraphRoot(projectRoot));
     if (parsed.reportId) return { report: await store.getPromotionRehearsal(parsed.reportId) };
     return { reports: await store.listPromotionRehearsals(parsed.loopId) };
   }
@@ -280,7 +309,7 @@ export async function callLoopgraphSemanticGraphTool(
         ...parsed,
         projectRoot: parsed.projectRoot ?? options.projectRoot,
         now: options.now
-      })
+      }, runtimeOptions)
     };
   }
   if (name === "loopgraph_loop_promote") {
@@ -289,7 +318,7 @@ export async function callLoopgraphSemanticGraphTool(
       ...parsed,
       projectRoot: parsed.projectRoot ?? options.projectRoot,
       now: options.now
-    });
+    }, runtimeOptions);
   }
   if (name === "loopgraph_loop_lifecycle_approve") {
     const parsed = loopLifecycleApproveInputSchema.parse(input);
@@ -298,7 +327,7 @@ export async function callLoopgraphSemanticGraphTool(
         ...parsed,
         projectRoot: parsed.projectRoot ?? options.projectRoot,
         now: options.now
-      })
+      }, runtimeOptions)
     };
   }
   if (name === "loopgraph_loop_lifecycle_set") {
@@ -307,7 +336,7 @@ export async function callLoopgraphSemanticGraphTool(
       ...parsed,
       projectRoot: parsed.projectRoot ?? options.projectRoot,
       now: options.now
-    });
+    }, runtimeOptions);
   }
   if (name === "loopgraph_graph_rollback_approve") {
     const parsed = graphRollbackApproveInputSchema.parse(input);
@@ -316,7 +345,7 @@ export async function callLoopgraphSemanticGraphTool(
         ...parsed,
         projectRoot: parsed.projectRoot ?? options.projectRoot,
         now: options.now
-      })
+      }, runtimeOptions)
     };
   }
   if (name === "loopgraph_graph_rollback") {
@@ -325,7 +354,7 @@ export async function callLoopgraphSemanticGraphTool(
       ...parsed,
       projectRoot: parsed.projectRoot ?? options.projectRoot,
       now: options.now
-    });
+    }, runtimeOptions);
   }
   throw new Error(`Unknown semantic graph tool: ${String(name)}`);
 }

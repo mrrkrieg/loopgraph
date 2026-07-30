@@ -190,7 +190,7 @@ Or keep the trusted local controller processing idempotent triggers:
 npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
 ```
 
-Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Only strict low-risk additions can materialize automatically, and they remain in shadow mode. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md).
+Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Local projects may materialize strict low-risk additions in shadow mode. Authenticated hosted deployments now persist opportunities, proposed graph changes, approvals, snapshots, graph transactions, promotions, rehearsals, active LoopSpecs, policies, checkpoints, runs, and leased triggers across replicas. Hosted automatic shadow materialization is enabled only when the controller, discovery, active LoopSpec registry, and semantic graph all resolve to their tenant-scoped distributed stores; a partial configuration fails closed. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md), [distributed opportunity/controller runtime](docs/DISTRIBUTED-OPPORTUNITY-CONTROLLER.md), and [semantic graph transaction authority](docs/SEMANTIC-GRAPH-TRANSACTIONS.md).
 
 ### 8. Operate the improvement cycle
 
@@ -551,7 +551,7 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. The Operate workspace exposes opportunities, graph change review, controller decisions, learning evidence, and net value as project-local views. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Hosted Hermes delivery uses durable outbound dispatch and inbound callback queues with atomic acceptance, leased workers, retry, and dead-letter handling. Discovery sessions, evidence gaps, bounded contexts, design runs, and proposals are tenant-scoped and replica-safe; graph transactions, the workspace registry, and materialized/versioned LoopSpecs remain the next distributed persistence boundary. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
+Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. The Operate workspace exposes opportunities, graph change review, controller decisions, learning evidence, and net value as project-local views. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Hosted Hermes delivery uses durable outbound dispatch and inbound callback queues with atomic acceptance, leased workers, retry, and dead-letter handling. Discovery sessions, evidence gaps, bounded contexts, design runs, proposals, immutable active LoopSpec versions, opportunities, proposed graph changes, and controller triggers/runs are tenant-scoped and replica-safe. Semantic graph snapshots/approvals/transactions/promotions, measurements, outcomes, and value records remain the next distributed persistence boundary; hosted automatic graph mutation is disabled until that graph boundary is complete. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
 
 The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
@@ -563,6 +563,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Hermes design callback inbox](docs/HERMES-DESIGN-CALLBACK-INBOX.md) — atomic signed-callback acceptance, leased compilation, retry, and dead-letter recovery
 - [Distributed discovery and design artifacts](docs/DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) — revisioned discovery, monotonic evidence gaps, and atomic immutable Hermes design submissions
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
+- [Distributed opportunity and controller runtime](docs/DISTRIBUTED-OPPORTUNITY-CONTROLLER.md) — tenant-scoped opportunities, proposed graph changes, leased triggers, policies, checkpoints, and runs
 - [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
 - [Distributed Hermes routing store](docs/DISTRIBUTED-ROUTING-STORE.md) — shared routing evidence, PostgreSQL claims, lease fencing, and hosted queue metrics
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
@@ -579,6 +580,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Current build state](docs/CURRENT-STATE.md) — what is implemented now
 - [Hosted security](docs/HOSTED-SECURITY.md) — Supabase Auth, organization roles, RLS, service-role boundaries, and production limitations
 - [Hosted runtime namespaces](docs/HOSTED-RUNTIME-NAMESPACES.md) — organization/project isolation for persistent runtime state and its current single-writer boundary
+- [Versioned LoopSpec registry](docs/VERSIONED-LOOPSPEC-REGISTRY.md) — atomic Hermes materialization, immutable versions, active routing state, and hosted readers
 - [Machine request guards](docs/MACHINE-REQUEST-GUARDS.md) — scoped worker identities, replay protection, durable rate windows, and schedule authentication
 - [Operational audit and observability](docs/OPERATIONAL-AUDIT-OBSERVABILITY.md) — tamper-evident machine decisions, readiness, protected metrics, and administrator export
 

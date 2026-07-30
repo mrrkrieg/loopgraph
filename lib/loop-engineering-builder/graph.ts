@@ -199,13 +199,14 @@ export function buildGraphFromRegisteredSpecs(input: {
   organization?: WorkspaceData["organization"];
   specs: LoadedRegisteredLoopSpec[];
   selectedNodeId?: string;
+  sourceLabel?: string;
 }): LoopGraph {
   const organization = input.organization ?? { id: "local_workspace", name: "Local Loopgraph workspace" };
   return buildLoopGraph({
     organization,
     loops: input.specs.map((item) => loopRecordFromRegisteredSpec(item, organization.id)),
     selectedNodeId: input.selectedNodeId,
-    sourceLabel: "Local LoopSpec"
+    sourceLabel: input.sourceLabel ?? "Local LoopSpec"
   });
 }
 

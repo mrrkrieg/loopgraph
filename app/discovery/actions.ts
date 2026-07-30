@@ -12,7 +12,8 @@ import {
 } from "@/lib/loopgraph-runtime/discovery-engine";
 import {
   getActiveLoopgraphProjectRoot,
-  getDiscoveryDesignStore
+  getDiscoveryDesignStore,
+  getLoopSpecRegistryStore
 } from "../../lib/loopgraph-runtime/storage-resolver";
 import {
   editLoopDesignProposal,
@@ -158,6 +159,7 @@ export async function generateBrowserLoopDesignAction(formData: FormData) {
   const result = await generateDeterministicLoopDesign({
     projectRoot: getActiveLoopgraphProjectRoot(),
     store: getDiscoveryDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore(),
     sessionId,
     department,
     maxProposals,
@@ -175,6 +177,7 @@ export async function editBrowserLoopDesignProposalAction(formData: FormData) {
   const result = await editLoopDesignProposal({
     projectRoot: getActiveLoopgraphProjectRoot(),
     store: getDiscoveryDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore(),
     designRunId,
     proposalId,
     expectedOutputHash: cleanOptionalString(formData.get("expectedOutputHash")),
@@ -203,6 +206,7 @@ export async function materializeBrowserLoopDesignAction(formData: FormData) {
   const result = await materializeAcceptedLoopDesignProposals({
     projectRoot: getActiveLoopgraphProjectRoot(),
     store: getDiscoveryDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore(),
     designRunId,
     acceptedProposalIds,
     acceptedBy: "browser"

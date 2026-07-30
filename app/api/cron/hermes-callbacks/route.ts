@@ -3,7 +3,8 @@ import { runHermesDesignCallbackWorker } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
   getDiscoveryDesignStore,
-  getHermesDesignStore
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
       projectRoot: getActiveLoopgraphProjectRoot(),
       store: getHermesDesignStore(),
       discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore(),
       workerId: "hermes-callback-cron",
       limit: 25,
       leaseSeconds: 300

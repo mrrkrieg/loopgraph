@@ -23,15 +23,21 @@ import { generateImplementationArtifacts } from "./implementation-generator";
 import {
   createLocalDesignStudioSpec,
   getRegisteredLoopSpecs,
+  getRegisteredLoopSpecsFromStore,
   getStudioAnswers,
   getStudioGeneratedSpec,
   unregisterLoopSpec,
-  updateLocalLoopLogic
+  updateLocalLoopLogic,
+  type LoadedRegisteredLoopSpec
 } from "./local-workspace";
 import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
 import { v1alpha1ToFlat } from "loopgraph/core";
-import { getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getLoopSpecRegistryStore,
+  getStorageAdapter
+} from "../loopgraph-runtime/storage-resolver";
 import { isHostedAuthRequired } from "../auth/hosted-config";
 import { loadImprovementsFromStorage, loadLatestManagementRollup } from "loopgraph/runtime";
 import {
@@ -102,14 +108,27 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     .order("created_at", { ascending: true });
 
   if (!loopRows || loopRows.length === 0) {
-    return database.hosted
-      ? selectEmptyLocalWorkspace(organization, {
-          id: database.userId ?? "hosted_user",
-          email: database.email ?? "",
-          fullName: database.email?.split("@")[0] ?? "Loopgraph operator",
-          role: database.role ?? "viewer"
+    if (!database.hosted) return selectLocalWorkspace(selectedLoopId);
+    const profile = {
+      id: database.userId ?? "hosted_user",
+      email: database.email ?? "",
+      fullName:
+        database.email?.split("@")[0] ?? "Loopgraph operator",
+      role: database.role ?? "viewer"
+    };
+    const registeredSpecs = await getRegisteredLoopSpecsFromStore(
+      getLoopSpecRegistryStore(),
+      getActiveLoopgraphProjectRoot()
+    );
+    return registeredSpecs.length > 0
+      ? selectRegisteredWorkspace({
+          selectedLoopId,
+          registeredSpecs,
+          organization,
+          profile,
+          sourceLabel: "Hosted LoopSpec registry"
         })
-      : selectLocalWorkspace(selectedLoopId);
+      : selectEmptyLocalWorkspace(organization, profile);
   }
 
   const loops = await Promise.all(loopRows.map((row) => mapLoopRecord(supabase, row as LoopRow)));
@@ -769,12 +788,34 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
     return selectEmptyLocalWorkspace();
   }
 
-  const organization = {
-    id: "local_workspace",
-    name: "Local Loopgraph workspace"
-  };
+  return selectRegisteredWorkspace({
+    selectedLoopId,
+    registeredSpecs,
+    organization: {
+      id: "local_workspace",
+      name: "Local Loopgraph workspace"
+    },
+    profile: {
+      id: "profile_local",
+      email: "operator@example.com",
+      fullName: "Loop Operator",
+      role: "owner"
+    },
+    sourceLabel: "Local LoopSpec"
+  });
+}
+
+async function selectRegisteredWorkspace(input: {
+  selectedLoopId?: string;
+  registeredSpecs: LoadedRegisteredLoopSpec[];
+  organization: WorkspaceData["organization"];
+  profile: WorkspaceData["profile"];
+  sourceLabel: string;
+}) {
+  const { registeredSpecs, organization } = input;
   const loops = registeredSpecs.map((item) => loopRecordFromRegisteredSpec(item, organization.id));
-  const selectedLoop = loops.find((item) => item.id === selectedLoopId) ?? loops[0];
+  const selectedLoop =
+    loops.find((item) => item.id === input.selectedLoopId) ?? loops[0];
   const selectedSpec = registeredSpecs.find((item) => item.spec.metadata.id === selectedLoop.id) ?? registeredSpecs[0];
   const storedAnswers = getStudioAnswers(selectedSpec.spec);
   const answers = {
@@ -788,7 +829,8 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   const graph = buildGraphFromRegisteredSpecs({
     organization,
     specs: registeredSpecs,
-    selectedNodeId: `loop:${selectedLoop.id}`
+    selectedNodeId: `loop:${selectedLoop.id}`,
+    sourceLabel: input.sourceLabel
   });
   const storage = getStorageAdapter();
   const improvements = await loadImprovementsFromStorage(storage, selectedLoop.id);
@@ -796,12 +838,7 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
 
   return {
     organization,
-    profile: {
-      id: "profile_local",
-      email: "operator@example.com",
-      fullName: "Loop Operator",
-      role: "owner"
-    },
+    profile: input.profile,
     templates: getDepartmentTemplates(),
     loops,
     loop: selectedLoop,

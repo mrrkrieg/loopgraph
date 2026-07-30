@@ -8,6 +8,7 @@ import {
 import { processHermesDesignCallback } from "./hermes-design-bridge";
 import type { DiscoveryDesignStore } from "./discovery-design-store";
 import type { HermesDesignStore } from "./hermes-design-store";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 
 export type HermesDesignCallbackWorkerItem = {
   jobId: string;
@@ -65,6 +66,7 @@ export async function runHermesDesignCallbackWorker(input: {
   projectRoot?: string;
   store: HermesDesignStore;
   discoveryStore?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   workerId?: string;
   limit?: number;
   leaseSeconds?: number;
@@ -86,6 +88,7 @@ export async function runHermesDesignCallbackWorker(input: {
       projectRoot: input.projectRoot,
       store: input.store,
       discoveryStore: input.discoveryStore,
+      loopSpecStore: input.loopSpecStore,
       job,
       now
     }));
@@ -104,6 +107,7 @@ async function processClaimedCallback(input: {
   projectRoot?: string;
   store: HermesDesignStore;
   discoveryStore?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   job: HermesDesignCallbackJob;
   now: Date;
 }): Promise<HermesDesignCallbackWorkerItem> {
@@ -118,7 +122,8 @@ async function processClaimedCallback(input: {
       now: input.now
     }, {
       store: input.store,
-      discoveryStore: input.discoveryStore
+      discoveryStore: input.discoveryStore,
+      loopSpecStore: input.loopSpecStore
     });
     const completedAt = input.now.toISOString();
     const saved = await input.store.updateCallbackJobAtomically({
