@@ -2,8 +2,10 @@ import path from "node:path";
 import type { StorageAdapter } from "loopgraph/sdk";
 import { FileStorageAdapter } from "loopgraph/sdk";
 import {
+  FileHermesDesignStore,
   FileRoutingStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
+  type HermesDesignStore,
   type RoutingStore
 } from "loopgraph/runtime";
 import {
@@ -14,10 +16,15 @@ import {
   createSupabaseRoutingStore,
   isSupabaseRoutingStoreEnabled
 } from "@/lib/db/adapters/supabase-routing-store";
+import {
+  createSupabaseHermesDesignStore,
+  isSupabaseHermesDesignStoreEnabled
+} from "@/lib/db/adapters/supabase-hermes-design-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
+const cachedHermesDesignStores = new Map<string, HermesDesignStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -101,9 +108,31 @@ export function getRoutingStore(options?: {
   return store;
 }
 
+export function getHermesDesignStore(options?: {
+  rootDir?: string;
+  forceFile?: boolean;
+}): HermesDesignStore {
+  const rootDir = path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const cacheKey = isSupabaseHermesDesignStoreEnabled()
+    ? `supabase-hermes-design:${organizationId}:${projectKey}`
+    : `file-hermes-design:${rootDir}`;
+  if (!options?.forceFile && cachedHermesDesignStores.has(cacheKey)) {
+    return cachedHermesDesignStores.get(cacheKey)!;
+  }
+
+  const store = !options?.forceFile && isSupabaseHermesDesignStoreEnabled()
+    ? createSupabaseHermesDesignStore()
+    : new FileHermesDesignStore(rootDir);
+  if (!options?.forceFile) cachedHermesDesignStores.set(cacheKey, store);
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
+  cachedHermesDesignStores.clear();
 }
 
 const UUID_PATTERN =

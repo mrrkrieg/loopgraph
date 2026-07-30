@@ -84,7 +84,9 @@ deployment metrics, not one replica's memory.
 ## Remaining distributed boundary
 
 Routing decisions and route jobs are now safe to share across web/worker replicas. Other runtime
-subsystems still have file-backed stores, including design tasks, controller triggers,
-measurements, graph transactions, and some generated LoopSpec artifacts. Do not call the whole
-runtime horizontally scalable until those stores and versioned artifacts receive equivalent
-tenant-scoped atomic persistence.
+subsystems still have file-backed stores, including controller triggers, measurements, graph
+transactions, and some generated LoopSpec artifacts. Hermes design tasks and callbacks now use
+the tenant-scoped shared boundary described in
+[Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md). Do not call the whole
+runtime horizontally scalable until the remaining stores and versioned artifacts receive
+equivalent tenant-scoped atomic persistence.

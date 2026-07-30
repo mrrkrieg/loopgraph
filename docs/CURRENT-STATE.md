@@ -91,6 +91,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   reconciliation and weekly management review.
 - Hosted machine authorization decisions append to a tenant/project hash-chained security audit
   ledger in the same database transaction as replay and rate enforcement.
+- Hosted routing state, route jobs, Hermes design tasks, and Hermes callback receipts use
+  tenant/project-scoped Supabase stores. Active design-task creation is idempotent, and task plus
+  callback updates use revision fencing so independent replicas cannot overwrite one another.
 - Public liveness/readiness endpoints reveal only status; protected Prometheus metrics expose the
   authorization-plane counters through a separate observability credential.
 - Organization admins and owners can export cursor-paged audit events with database-side chain
@@ -109,9 +112,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Continue the database migration beyond the implemented distributed routing state/route-job
-   queue: move design tasks, graph transactions, controller triggers, measurements, outcomes, and
-   versioned LoopSpec artifacts to tenant-scoped atomic stores.
+1. Continue the database migration beyond the implemented distributed routing state, route-job
+   queue, and Hermes design-task store: move discovery/evidence sessions, opportunities and graph
+   change sets, controller triggers/runs, measurements, outcomes, and versioned LoopSpec artifacts
+   to tenant-scoped atomic stores.
 2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
 3. Send the tamper-evident audit stream to independent retention, add distributed tracing and
@@ -132,6 +136,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Promotion rehearsal](./PROMOTION-REHEARSAL.md)
 - [Durable route-job worker](./ROUTE-JOB-WORKER.md)
 - [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md)
+- [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md)
 - [Outcomes and value](./OUTCOMES-AND-VALUE.md)
 - [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)

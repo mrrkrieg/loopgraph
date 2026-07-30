@@ -4,7 +4,10 @@ import {
   processHermesDesignCallback,
   verifyHermesCallbackSignature
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore
+} from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
 import { emitOperationalLog } from "../../../../../../lib/observability/operational-log";
 
@@ -66,7 +69,7 @@ export async function POST(
     const result = await processHermesDesignCallback({
       projectRoot: getActiveLoopgraphProjectRoot(),
       callback
-    });
+    }, { store: getHermesDesignStore() });
     return NextResponse.json(result, { status: result.duplicate ? 200 : 202 });
   } catch (error) {
     return NextResponse.json({

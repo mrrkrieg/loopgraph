@@ -3,8 +3,11 @@ import {
   loopControllerTriggerRecordSchema,
   type LoopControllerTriggerRecord
 } from "../core";
-import { runLoopController } from "./loop-controller";
-import { FileLoopControllerStore, type LoopControllerStore } from "./loop-controller-store";
+import {
+  runLoopController,
+  type LoopControllerRuntimeOptions
+} from "./loop-controller";
+import { FileLoopControllerStore } from "./loop-controller-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const LOOP_CONTROLLER_SCHEDULER_SCHEMA_VERSION = "loop-controller-scheduler/v1alpha1" as const;
@@ -36,7 +39,7 @@ export type LoopControllerSchedulerResult = {
 
 export async function runLoopControllerScheduler(
   input: RunLoopControllerSchedulerInput = {},
-  options: { store?: LoopControllerStore } = {}
+  options: LoopControllerRuntimeOptions = {}
 ): Promise<LoopControllerSchedulerResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
@@ -84,7 +87,10 @@ export async function runLoopControllerScheduler(
         projectRoot,
         trigger: record.trigger,
         now
-      }, { store });
+      }, {
+        ...options,
+        store
+      });
       const completed = loopControllerTriggerRecordSchema.parse({
         ...record,
         status: result.run.status === "failed" ? "failed" : "completed",

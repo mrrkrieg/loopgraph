@@ -3,7 +3,11 @@ import {
   enqueueLoopControllerTrigger,
   runLoopControllerScheduler
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
+  getRoutingStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -26,6 +30,9 @@ export async function GET(request: Request) {
     projectRoot,
     limit: 20,
     now
+  }, {
+    routingStore: getRoutingStore(),
+    designStore: getHermesDesignStore()
   });
   return NextResponse.json({ enqueue, scheduler }, {
     status: 202,

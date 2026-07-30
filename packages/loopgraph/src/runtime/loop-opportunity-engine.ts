@@ -27,6 +27,7 @@ import {
   startHermesDesignTask,
   type HermesDesignDispatchResult
 } from "./hermes-design-bridge";
+import type { HermesDesignStore } from "./hermes-design-store";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
@@ -98,6 +99,7 @@ export async function scanLoopOpportunities(
   options: {
     routingStore?: RoutingStore;
     outcomeStore?: OutcomeStore;
+    designStore?: HermesDesignStore;
   } = {}
 ): Promise<ScanLoopOpportunitiesResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
@@ -140,7 +142,7 @@ export async function scanLoopOpportunities(
     const score = scoreOpportunity(group);
     const kind = opportunityKind(group);
     const existingTask = existing?.designTaskId
-      ? await getHermesDesignTask(existing.designTaskId, projectRoot)
+      ? await getHermesDesignTask(existing.designTaskId, projectRoot, options.designStore)
       : undefined;
     const status: LoopOpportunity["status"] = opportunityStatusFromTask(existingTask?.status) ??
       (score.total >= thresholds.qualify ? "qualified" : "detected");
@@ -216,7 +218,7 @@ export async function scanLoopOpportunities(
         originOpportunityId: opportunity.id,
         requestedBy: "loopgraph-opportunity-engine",
         now
-      });
+      }, { store: options.designStore });
       designDispatches.push(dispatch);
       opportunity = loopOpportunitySchema.parse({
         ...opportunity,
@@ -319,7 +321,9 @@ export async function markLoopOpportunityImplemented(input: {
   projectRoot?: string;
   designRunId: string;
   now?: Date;
-}): Promise<{
+}, options: {
+  designStore?: HermesDesignStore;
+} = {}): Promise<{
   opportunities: LoopOpportunity[];
   graphChangeSets: GraphChangeSet[];
 }> {
@@ -330,7 +334,7 @@ export async function markLoopOpportunityImplemented(input: {
   const appliedSets: GraphChangeSet[] = [];
   for (const opportunity of opportunities) {
     const task = opportunity.designTaskId
-      ? await getHermesDesignTask(opportunity.designTaskId, projectRoot)
+      ? await getHermesDesignTask(opportunity.designTaskId, projectRoot, options.designStore)
       : undefined;
     if (!task?.designRunIds.includes(input.designRunId)) continue;
     const implemented = loopOpportunitySchema.parse({

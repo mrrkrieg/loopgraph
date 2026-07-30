@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { generateAndPersistManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
 import {
   getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
+  getRoutingStore,
   getStorageAdapter
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
@@ -25,7 +27,13 @@ export async function GET(request: NextRequest) {
     occurredAt: rollup.generatedAt,
     requestedBy: "loopgraph-management-cron"
   });
-  const controller = await runLoopControllerScheduler({ projectRoot, limit: 20 });
+  const controller = await runLoopControllerScheduler({
+    projectRoot,
+    limit: 20
+  }, {
+    routingStore: getRoutingStore(),
+    designStore: getHermesDesignStore()
+  });
 
   return NextResponse.json({
     generatedAt: rollup.generatedAt,

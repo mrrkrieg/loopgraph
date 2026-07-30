@@ -27,6 +27,11 @@ The webhook body includes `event_type: "loopgraph.design_requested"` and a durab
 
 Loopgraph accepts duplicate callbacks and repeated task starts safely. A repeated start for the same discovery revision, department, reason, opportunity, and problem set reuses the existing task.
 
+Local projects enforce those guarantees with an atomic file store. Authenticated hosted
+deployments select a tenant/project-scoped Supabase store, so task creation, evidence resume,
+controller inspection, and callback completion can occur on different replicas without losing
+state. See [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md).
+
 When the task originated from the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md), it includes `originOpportunityId`. Hermes reads the explainable score, durable signal references, and proposed graph change through Loopgraph MCP before asking for missing evidence.
 
 ## Configure proactive Hermes activation

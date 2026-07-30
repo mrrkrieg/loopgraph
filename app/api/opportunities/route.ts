@@ -3,7 +3,11 @@ import {
   listLoopOpportunities,
   scanLoopOpportunities
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
+  getRoutingStore
+} from "../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -30,6 +34,9 @@ export async function POST(request: Request) {
       companyId: stringValue(body.companyId),
       thresholds: { qualify, autoDesign },
       autoStartDesign: body.autoStartDesign === true
+    }, {
+      routingStore: getRoutingStore(),
+      designStore: getHermesDesignStore()
     });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {
