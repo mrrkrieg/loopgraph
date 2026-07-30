@@ -149,6 +149,10 @@ describe("Hermes integration installer", () => {
         routingEvaluation: true,
         lifecycleEvents: true,
         graphProjection: true,
+        semanticGraphTransactions: true,
+        graphPromotion: true,
+        graphLifecycle: true,
+        graphRollback: true,
         hermesWebhookPlanning: true,
         hermesWebhookSync: true,
         hermesWebhookDoctor: true,
@@ -222,6 +226,20 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_controller_policy_set");
     expect(designSkill).toContain("loopgraph://schemas/loop-controller-policy");
     expect(designSkill).toContain("loopgraph://schemas/loop-controller-run");
+    expect(designSkill).toContain("loopgraph://schemas/graph-snapshot");
+    expect(designSkill).toContain("loopgraph://schemas/graph-change-approval-receipt");
+    expect(designSkill).toContain("loopgraph://schemas/graph-transaction");
+    expect(designSkill).toContain("loopgraph://schemas/loop-promotion-receipt");
+    expect(designSkill).toContain("loopgraph_graph_change_decide");
+    expect(designSkill).toContain("loopgraph_graph_change_apply");
+    expect(designSkill).toContain("loopgraph_graph_history_get");
+    expect(designSkill).toContain("loopgraph_loop_promotion_approve");
+    expect(designSkill).toContain("loopgraph_loop_promote");
+    expect(designSkill).toContain("loopgraph_loop_lifecycle_approve");
+    expect(designSkill).toContain("loopgraph_loop_lifecycle_set");
+    expect(designSkill).toContain("loopgraph_graph_rollback_approve");
+    expect(designSkill).toContain("loopgraph_graph_rollback");
+    expect(designSkill).toContain("Never substitute direct materialization");
     expect(designSkill).toContain("Never reinterpret a review, pause, retirement, or failed policy receipt as permission to act");
     expect(designSkill).toContain("loopgraph_review_submit");
     expect(designSkill).toContain("loopgraph_case_resolve");
@@ -253,6 +271,8 @@ describe("Hermes integration installer", () => {
     expect(routerSkill).toContain("loopgraph_routing_decision_get");
     expect(routerSkill).not.toContain("loopgraph_route_jobs_get");
     expect(routerSkill).not.toContain("loopgraph_lifecycle_events_get");
+    expect(routerSkill).not.toContain("loopgraph_graph_change_apply");
+    expect(routerSkill).not.toContain("loopgraph_graph_rollback");
     expect(routerSkill).toContain("notification-only Loopgraph lifecycle events");
     expect(routerSkill).toContain("Do not call `loopgraph_route_commit_simulate` from an untrusted webhook turn");
     expect(routerSkill).toContain("Never bypass a rejected decision");
@@ -261,6 +281,8 @@ describe("Hermes integration installer", () => {
     expect(proposalReference).toContain("routing contract with problem types");
     expect(proposalReference).toContain("Proposal set schema: `loop-design-proposal-set/v1alpha1`");
     expect(safetyReference).toContain("Provider webhooks terminate at Hermes");
+    expect(safetyReference).toContain("content-bound approval receipts");
+    expect(safetyReference).toContain("Do not expose graph transaction tools");
     expect(productExample).toContain("Hermes Brain -> Product -> Feedback Clustering");
     expect(productExample).toContain("Release Learning");
     expect(marketingExample).toContain("Hermes Brain -> Marketing -> Ads");

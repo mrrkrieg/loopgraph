@@ -1066,7 +1066,10 @@ async function writeRegisteredLoopSpec(projectRoot: string, registeredPath: stri
   assertWithin(projectRoot, filePath, "registered LoopSpec");
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(tempPath, `${YAML.stringify(spec)}\n`, { mode: 0o600 });
+  const serialized = path.extname(filePath).toLowerCase() === ".json"
+    ? JSON.stringify(spec, null, 2)
+    : YAML.stringify(spec);
+  await writeFile(tempPath, `${serialized}\n`, { mode: 0o600 });
   await rename(tempPath, filePath);
 }
 

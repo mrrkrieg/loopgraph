@@ -113,13 +113,13 @@ export const loopgraphSemanticGraphToolDefinitions = [
     name: "loopgraph_graph_change_decide",
     description: "Record an accountable, content-bound approval or rejection for a proposed semantic graph change.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_graph_change_apply",
     description: "Atomically apply an approved add, update, split, merge, or retire operation against the reviewed graph hash.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_graph_history_get",
@@ -131,37 +131,37 @@ export const loopgraphSemanticGraphToolDefinitions = [
     name: "loopgraph_loop_promotion_approve",
     description: "Approve one ordered loop activation-mode promotion against the exact current graph.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_loop_promote",
     description: "Apply an approved promotion with durable gate evidence and a reversible graph transaction.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_loop_lifecycle_approve",
     description: "Approve pausing or resuming one registered loop against the exact current graph.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_loop_lifecycle_set",
     description: "Apply an approved pause or resume and update routing eligibility through a reversible transaction.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_graph_rollback_approve",
     description: "Approve rollback only when the current graph still equals the selected transaction result.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   },
   {
     name: "loopgraph_graph_rollback",
     description: "Restore the exact pre-transaction graph snapshot using a rollback-specific approval receipt.",
     readOnly: false,
-    idempotent: true
+    idempotent: false
   }
 ] satisfies Array<{
   name: LoopgraphSemanticGraphToolName;

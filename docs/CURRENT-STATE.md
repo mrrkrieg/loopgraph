@@ -1,116 +1,86 @@
 # Loopgraph current build state
 
-Last updated: 2026-06-29 · Branch: `loopgraph/canvas-first`
+Last updated: 2026-07-29
 
 ## One-line summary
 
-Loopgraph is a **code-first, fixture-driven** loop runtime with **browser governance**: define `loopgraph.yaml`, simulate locally, inspect traces, approve fingerprints in CLI or UI, resolve escalation cases — **without API keys** in the default simulate path.
+Loopgraph is a local-first governed control plane for Hermes Brain: it discovers recurring business problems, asks only for missing evidence, compiles validated LoopSpecs, routes normalized company events, runs durable jobs, records outcomes, and evolves the company graph through accountable transactions.
 
----
+## Implemented
 
-## What works today (code-first core ≈ 100%)
+### Hermes setup and discovery
 
-### LoopSpec contract (`lib/loopgraph-core`)
+- A clean local install starts with no demo loops.
+- `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
+- Hermes immediately presents canonical departments and guides the user through five compact question bundles.
+- Project inspection reads allowlisted manifests and environment key names only after permission.
+- Durable Hermes design tasks can be dispatched over a signed transport, request focused evidence gaps, resume after answers, and submit schema-constrained proposals.
 
-- Versioned `loopgraph/v1alpha1` schema with YAML/JSON loader
-- JSON Schema export (`docs/schemas/loop-v1alpha1.json`)
-- Semantic validation (write-capable tools need policy; escalation rules need owner + SLA)
-- Types: trace, review, escalation, evidence, context, policy
+### Loop design and graph
 
-### Runtime (`lib/loopgraph-runtime`)
+- High-reasoning design receives a bounded `LoopDesignContext`; deterministic local design remains a fallback.
+- Accepted proposals compile into versioned LoopSpecs, routing cards, connection requirements, graph nodes, and three starter fixtures.
+- The company graph visualizes `Hermes Brain → Department → Loop` plus routing signals, evidence returns, opportunities, and graph changes.
+- Local workspaces show only their registered loops; the hosted preview can show a rich demonstration graph.
 
-- **`simulate`** — deterministic fixture path via `loop-runner.ts`
-- **`execute`** — experimental; OpenAI assessment + `LOOPGRAPH_EXECUTE_ENABLED` (not the default demo)
-- Context compiler → immutable `ContextSnapshot` with content hashes
-- Fixture assessment provider (heuristics + template rules)
-- Policy evaluation, verifiers (schema, policy, evidence, approval_required, numeric_threshold)
-- **`review-service`** — shared CLI + UI approval binding
-- **`review-packet`** — human-readable decision packet for reviewers
-- **`case-service`** — list/show/resolve cases; resolve writes outcome + improvement signal to source trace
-- **`management-consumer`** — deterministic plan from `EscalationCase` (not raw tickets)
-- File storage: `.loopgraph/traces/`, `.loopgraph/cases/`, `.loopgraph/reviews/`
+### Automatic opportunity detection
 
-### CLI (`scripts/loopgraph.ts`)
+- Durable problems, routing corrections, failed evaluations, jobs, runs, reviews, human friction, and outcome evidence feed explainable opportunity scoring.
+- Qualified opportunities can proactively dispatch Hermes design tasks.
+- Opportunity generations preserve history instead of silently mutating earlier evidence.
 
-| Command | Purpose |
-|---------|---------|
-| `init` | Copy hero template + fixtures |
-| `validate` | LoopSpec + semantic checks |
-| `simulate --fixture` | Deterministic run (primary demo) |
-| `trace [--review]` | JSON trace or decision packet |
-| `review packet` | Full review decision packet |
-| `review approve/reject/...` | Fingerprint-bound decisions |
-| `case list/show/resolve` | EscalationCase lifecycle |
-| `export-graph` | Topology JSON from spec |
-| `adapter test` | Mock adapter conformance |
-| `execute --event` | Experimental live assessment |
+### Semantic graph governance
 
-CLI loads `.env` via `scripts/load-env.ts` (optional keys for execute only).
+- `add`, `update`, `split`, `merge`, and `retire` changes are bound to exact content-derived graph hashes.
+- Accountable approval receipts record actor, role, policy, reason, evidence, and approved operations.
+- Atomic transactions capture base/result snapshots, operation receipts, generated assets, and recovery state.
+- Ordered promotion, pause/resume lifecycle changes, and exact-state rollback are implemented.
+- Trusted Hermes admin MCP tools, explicit CLI commands, and a bearer-authenticated API expose the transaction workflow.
+- Graph mutation tools are unavailable to webhook-router and lifecycle-router turns.
 
-### Hero templates + fixtures
+### Hermes event brain and durable execution
 
-- **GitHub Issue Triage** — 4 fixtures + expected trace summaries
-- **Strategic Account Escalation** — 5 fixtures + expected trace summaries
-- **Support Ticket Triage** — 5 fixtures + expected trace summaries
-- **Management Review** — weekly open-cases fixture
-- Snapshot tests lock deterministic behavior
+- Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision.
+- Loopgraph validates route eligibility, evidence, confidence, readiness, deduplication, cooldown, concurrency, fan-out, policy, and immutable LoopSpec identity.
+- Accepted routes create durable jobs with atomic claims, leases, retries, dead-letter state, activation gates, and review reconciliation.
+- Signed lifecycle events return route, run, escalation, outcome, and terminal evidence to Hermes.
 
-### Tests & CI
+### Outcomes and continuous improvement
 
-- **70 vitest tests** (governance path, support-ticket triage, full fixture snapshots)
-- CI runs all 14 hero fixture simulates + validate for 4 examples
-- `npm run typecheck`, `npm run build` pass
+- Metric samples distinguish observed, modeled, and incomplete evidence.
+- Outcome evaluation compares baselines and post-loop windows without inventing missing measurements.
+- The value ledger subtracts review, rework, supervision, escalation, and governance cost.
+- A durable controller reacts to events, jobs, reviews, outcomes, schedules, and management cycles.
+- Only policy-approved, low-risk, non-customer-facing additions can be committed automatically, and they remain in shadow mode.
 
-### Web UI (governance path on file storage)
+### Verification
 
-- Run history (filtered by loop), trace detail with mode badges, reviews with partial approval UX
-- Case page with resolve form + management consumer
-- Workspace mode banner (demo / local / persisted / empty)
-- Design Studio topology still mixes catalog loops; Supabase parity partial
+- TypeScript, package build, deterministic fixture simulation, MCP exposure, installer safety, API authorization, routing, worker, outcome, controller, and semantic transaction behavior are covered by the Vitest suite.
+- Production dependency auditing is separate from development-tool audit output through `npm run audit:prod`.
 
-### Execute (experimental)
+## Safety boundary
 
-- Context compiler uses live GitHub adapter when `LOOPGRAPH_EXECUTE_ENABLED` + GitHub env
-- `LOOPGRAPH_ASSESSMENT_PROVIDER=fixture` for execute without OpenAI
-- See [github-production-setup.md](./github-production-setup.md)
+- Webhook turns cannot invoke discovery, design, controller, worker, graph mutation, promotion, lifecycle, or rollback tools.
+- Provider secrets, OAuth tokens, signing keys, and raw payloads remain in Hermes or an approved credential store.
+- Model output, repository text, and webhook text are untrusted until validated by Loopgraph contracts.
+- Simulation and shadow routing do not perform external writes.
+- Live execution remains experimental and requires connector readiness, policy, approvals, and exact prepared-action fingerprints.
 
-### V1.1 scaffolding (in repo, not production-complete)
+## Remaining product layers
 
-- OpenAI `AssessmentProvider`, GitHub adapter, webhook route, Supabase storage adapter + migration
-- In-memory job queue, orchestration helpers, measurement module, improvement signals
+1. Automatically run the full positive, missing-context, ambiguity, duplicate, risk, and regression fixture suite before issuing promotion-ready evidence.
+2. Bind LoopSpec metrics to real connector fields, schedule measurement windows, and reconcile connector/webhook health.
+3. Add dedicated Opportunities, Change Review, Controller, Learning, and Value product views.
+4. Add hosted authentication, organization/role authorization, tenant-isolated persistence, rate limits, distributed scheduling, immutable audit export, production observability, and backups.
+5. Apply provider subscriptions and credentials through Hermes-owned connector onboarding; Loopgraph intentionally stores only non-secret route and capability metadata.
+6. Consolidate the stacked implementation changes, migrate existing local state where required, and complete a clean-install production release audit.
 
----
+## Key documentation
 
-## Architecture (default path)
-
-```text
-loopgraph.yaml
-  → validate
-  → simulate --fixture
-  → loop-runner (fixture provider, mock adapters)
-  → trace + optional EscalationCase → .loopgraph/
-  → review packet → approve fingerprints → case resolve → trace outcome
-```
-
-**Simulate never calls external APIs.** Tool commits in simulate mode record `mock_committed` results after approval.
-
----
-
-## Known gaps
-
-See [BUILD-PLAN.md](./BUILD-PLAN.md) (comprehensive) and [NEXT-PRIORITIES.md](./NEXT-PRIORITIES.md) (weekly punch list).
-
-- UI / Design Studio parity incomplete
-- Live execute (GitHub context + writes) not end-to-end
-- No Intercom example yet
-- Supabase storage untested multi-user
-
----
-
-## Key docs
-
-- [DAN-WALKTHROUGH.md](./DAN-WALKTHROUGH.md) — 15-minute CLI tour
-- [NEXT-PRIORITIES.md](./NEXT-PRIORITIES.md) — tomorrow's build order
-- [approval-model.md](./approval-model.md)
-- [escalation-case.md](./escalation-case.md)
-- [roadmap.md](./roadmap.md)
+- [Hermes quickstart](./HERMES-QUICKSTART.md)
+- [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md)
+- [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md)
+- [Semantic graph transactions](./SEMANTIC-GRAPH-TRANSACTIONS.md)
+- [Durable route-job worker](./ROUTE-JOB-WORKER.md)
+- [Outcomes and value](./OUTCOMES-AND-VALUE.md)
+- [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)

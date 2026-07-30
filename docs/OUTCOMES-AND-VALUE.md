@@ -102,4 +102,4 @@ Records are idempotent by their evidence identity, and retention is enforced by 
 
 ## Continuous improvement
 
-The [continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md) can base create, improve, pause, and retire proposals on durable evidence instead of run counts or invented value. Semantic graph transactions and promotion/rollback remain separate follow-on layers.
+The [continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md) can base create, improve, pause, and retire proposals on durable evidence instead of run counts or invented value. Approved changes, promotion, pause/resume, and rollback now cross the content-bound [semantic graph transaction](./SEMANTIC-GRAPH-TRANSACTIONS.md) boundary. Automatic connector-backed measurement and automatic promotion rehearsal remain follow-on layers.
