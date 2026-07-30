@@ -14,6 +14,7 @@ import {
   type RoutingDecision
 } from "../core";
 import { FileStorageAdapter } from "../sdk/storage";
+import { FileOutcomeStore } from "./outcome-store";
 import { applyReviewDecision } from "./review-service";
 import { runRouteJobWorker } from "./route-job-worker";
 import {
@@ -25,6 +26,7 @@ import {
   markRouteJobCompleted,
   submitRoutingDecision
 } from "./routing-store";
+import { simulateLoop } from "./simulator";
 import { initLoopgraphWorkspace, writeLoopgraphWorkspace } from "./workspace";
 
 describe("route job worker", () => {
@@ -34,7 +36,17 @@ describe("route job worker", () => {
     const result = await runRouteJobWorker({
       projectRoot: fixture.projectRoot,
       workerId: "worker_a",
-      now: new Date("2026-07-29T12:00:10.000Z")
+      now: new Date("2026-07-29T12:00:10.000Z"),
+      simulate: async (input) => {
+        const simulated = await simulateLoop(input);
+        simulated.trace.metrics.push({
+          name: "activation_rate",
+          value: 61,
+          unit: "percent",
+          observed: true
+        });
+        return simulated;
+      }
     });
 
     expect(result.items[0].error).toBeUndefined();
@@ -51,6 +63,7 @@ describe("route job worker", () => {
       duplicate: false
     });
     expect(result.items[0].lifecycleDeliveryIds).toHaveLength(2);
+    expect(result.items[0].metricSampleIds).toHaveLength(1);
 
     const store = new FileRoutingStore(path.join(fixture.projectRoot, ".loopgraph"));
     const job = await store.getRouteJob(fixture.jobId);
@@ -60,12 +73,24 @@ describe("route job worker", () => {
       status: "completed",
       result: {
         traceStatus: "COMPLETED",
-        lifecycleDeliveryIds: expect.any(Array)
+        lifecycleDeliveryIds: expect.any(Array),
+        metricSampleIds: result.items[0].metricSampleIds
       }
     });
     expect(job?.lease).toBeUndefined();
     expect(commit.status).toBe("completed");
     expect(problem?.status).toBe("routed");
+    const samples = await new FileOutcomeStore(path.join(fixture.projectRoot, ".loopgraph"))
+      .listMetricSamples({ loopId: "product_activation_worker" });
+    expect(samples).toMatchObject([{
+      metricKey: "activation_rate",
+      value: 61,
+      truthStatus: "observed",
+      source: {
+        type: "trace",
+        runId: result.items[0].runId
+      }
+    }]);
   });
 
   it("uses an atomic file lock so two workers cannot claim the same due job", async () => {
@@ -370,6 +395,23 @@ async function createWorkerFixture(input: {
     addedAt: "2026-07-29T11:59:00.000Z"
   }];
   await writeLoopgraphWorkspace(workspace, projectRoot);
+  const metricsDirectory = path.join(projectRoot, ".loopgraph", "metrics");
+  await mkdir(metricsDirectory, { recursive: true });
+  await writeFile(path.join(metricsDirectory, "activation-rate.json"), `${JSON.stringify({
+    id: "metric_activation_rate",
+    companyId: "company_worker",
+    departmentId: "product",
+    loopId: spec.metadata.id,
+    key: "activation_rate",
+    label: "Activation rate",
+    description: "Share of users reaching activation.",
+    type: "rate",
+    source: "trace",
+    baselineRequired: true,
+    unit: "percent",
+    desiredDirection: "increase",
+    displayInDailySummary: true
+  }, null, 2)}\n`);
 
   const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
   const event = productEvent();

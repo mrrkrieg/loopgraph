@@ -12,10 +12,31 @@ import {
 import { LoopRecommendationSchema, type LoopRecommendation } from "loopgraph/core";
 import { MetricDefinitionSchema, UndefinedMetricSchema, type MetricDefinition, type UndefinedMetric } from "loopgraph/core";
 import type { ProcessInventoryItem } from "loopgraph/core";
-import type { DailySummary } from "loopgraph/core";
+import {
+  DailySummarySchema,
+  humanReviewTraceSchema,
+  metricSampleSchema,
+  observedOutcomeSchema,
+  valueLedgerEntrySchema,
+  type DailySummary,
+  type HumanReviewTrace,
+  type MetricSample,
+  type ObservedOutcome,
+  type ValueLedgerEntry
+} from "loopgraph/core";
 import type { LoopSpec } from "loopgraph/core";
+import {
+  FileOutcomeStore,
+  loadLoopSpecFromPath,
+  readLoopgraphWorkspace,
+  resolveExistingProjectPath
+} from "loopgraph/runtime";
 import { registerLoopSpec } from "../loop-engineering-builder/local-workspace";
-import { getActiveLoopgraphProjectRoot, getLoopgraphRoot } from "./storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getLoopgraphRoot,
+  getStorageAdapter
+} from "./storage-resolver";
 import { generateAccessPlan as planAccess } from "./access-planner";
 import { generateDailySummary } from "./daily-summary-generator";
 import { generateHumanRequirementPlan } from "./human-requirement-planner";
@@ -340,7 +361,78 @@ export async function saveDailySummary(summary: DailySummary, projectRoot = getA
 }
 
 export async function loadDailySummary(date: string, projectRoot = getActiveLoopgraphProjectRoot()) {
-  return readJson(path.join(rootDir(projectRoot, "daily-summary"), `${date}.json`), undefined);
+  return readJson(path.join(rootDir(projectRoot, "daily-summary"), `${date}.json`), DailySummarySchema);
+}
+
+export async function generateProjectDailySummary(
+  projectRoot = getActiveLoopgraphProjectRoot(),
+  date = new Date().toISOString().slice(0, 10)
+) {
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  const workspace = await readLoopgraphWorkspace(resolvedProjectRoot);
+  const [accessRequirements, metricDefinitions, undefinedMetrics, sessions] = await Promise.all([
+    listAccessRequirements(resolvedProjectRoot),
+    listMetricDefinitions(resolvedProjectRoot),
+    listUndefinedMetrics(resolvedProjectRoot),
+    listDiscoverySessions(resolvedProjectRoot)
+  ]);
+  const loopSpecs = (await Promise.all(workspace.registeredSpecs.map(async (entry) => {
+    try {
+      const specPath = await resolveExistingProjectPath(
+        resolvedProjectRoot,
+        entry.path,
+        "registered LoopSpec"
+      );
+      const loaded = await loadLoopSpecFromPath(specPath);
+      return loaded.ok ? loaded.spec : undefined;
+    } catch {
+      return undefined;
+    }
+  }))).filter((spec): spec is LoopSpec => Boolean(spec));
+  const storage = getStorageAdapter({
+    rootDir: getLoopgraphRoot(resolvedProjectRoot),
+    forceFile: true
+  });
+  const [runRefs, caseRefs, reviews] = await Promise.all([
+    storage.listRuns(),
+    storage.listCases(),
+    listJson<HumanReviewTrace>(
+      path.join(getLoopgraphRoot(resolvedProjectRoot), "reviews"),
+      humanReviewTraceSchema
+    )
+  ]);
+  const [traces, cases] = await Promise.all([
+    Promise.all(runRefs.map((run) => storage.getRun(run.id))),
+    Promise.all(caseRefs.map((caseItem) => storage.getEscalationCase(caseItem.id)))
+  ]);
+  const outcomeStore = new FileOutcomeStore(getLoopgraphRoot(resolvedProjectRoot));
+  const [metricSamples, observedOutcomes, valueLedgerEntries] = await Promise.all([
+    outcomeStore.listMetricSamples(),
+    outcomeStore.listObservedOutcomes(),
+    outcomeStore.listValueLedgerEntries()
+  ]);
+  const companyId = metricDefinitions[0]?.companyId ??
+    metricSamples[0]?.companyId ??
+    observedOutcomes[0]?.companyId ??
+    valueLedgerEntries[0]?.companyId ??
+    sessions[0]?.companyId ??
+    workspace.projectRootId;
+  const summary = generateDailySummary({
+    companyId,
+    loopSpecs,
+    traces: traces.filter((trace): trace is NonNullable<typeof trace> => Boolean(trace)),
+    cases: cases.filter((caseItem): caseItem is NonNullable<typeof caseItem> => Boolean(caseItem)),
+    reviews,
+    accessRequirements,
+    metricDefinitions,
+    undefinedMetrics,
+    improvements: [],
+    metricSamples,
+    observedOutcomes,
+    valueLedgerEntries,
+    date
+  });
+  return { summary, loopSpecs };
 }
 
 export async function generateDemoDailySummary(projectRoot = process.cwd()) {
@@ -364,6 +456,7 @@ export async function generateDemoDailySummary(projectRoot = process.cwd()) {
       return result.ok ? result.spec : undefined;
     })
     .filter((spec): spec is LoopSpec => Boolean(spec));
+  const evidence = buildDemoOutcomeEvidence(accepted, loopSpecs);
 
   const summary = generateDailySummary({
     companyId: accepted.companyId,
@@ -374,9 +467,183 @@ export async function generateDemoDailySummary(projectRoot = process.cwd()) {
     accessRequirements: accepted.accessRequirements,
     metricDefinitions: accepted.metricDefinitions,
     undefinedMetrics: accepted.undefinedMetrics,
-    improvements: []
+    improvements: [],
+    metricSamples: evidence.metricSamples,
+    observedOutcomes: evidence.observedOutcomes,
+    valueLedgerEntries: evidence.valueLedgerEntries
   });
   return { session: accepted, summary, loopSpecs };
+}
+
+function buildDemoOutcomeEvidence(
+  session: BusinessDiscoverySession,
+  loopSpecs: LoopSpec[]
+): {
+  metricSamples: MetricSample[];
+  observedOutcomes: ObservedOutcome[];
+  valueLedgerEntries: ValueLedgerEntry[];
+} {
+  const today = new Date().toISOString().slice(0, 10);
+  const prior = new Date(`${today}T00:00:00.000Z`);
+  prior.setUTCDate(prior.getUTCDate() - 30);
+  const baselineWindow = {
+    start: prior.toISOString(),
+    end: prior.toISOString().replace("00:00:00.000Z", "23:59:59.999Z")
+  };
+  const evaluationWindow = {
+    start: `${today}T00:00:00.000Z`,
+    end: `${today}T23:59:59.999Z`
+  };
+  const metricSamples: MetricSample[] = [];
+  const observedOutcomes: ObservedOutcome[] = [];
+  const valueLedgerEntries: ValueLedgerEntry[] = [];
+
+  loopSpecs.forEach((spec, index) => {
+    const definition = session.metricDefinitions.find((metric) =>
+      metric.loopId === spec.metadata.id ||
+      metric.loopRecommendationId === spec.metadata.labels?.recommendationId
+    );
+    if (!definition) return;
+    const desiredDirection = definition.desiredDirection ?? "increase";
+    const baselineValue = definition.baselineValue ?? 100;
+    const observedValue = desiredDirection === "decrease"
+      ? baselineValue * 0.85
+      : desiredDirection === "target"
+        ? definition.target ?? baselineValue
+        : desiredDirection === "maintain"
+          ? baselineValue
+          : baselineValue * 1.15;
+    const absoluteDelta = observedValue - baselineValue;
+    const relativeDeltaPct = baselineValue === 0
+      ? undefined
+      : (absoluteDelta / Math.abs(baselineValue)) * 100;
+    const outcomeStatus = desiredDirection === "target"
+      ? "target_met"
+      : desiredDirection === "maintain"
+        ? "unchanged"
+        : "improved";
+    const unit = definition.unit ?? defaultMetricUnit(definition.type);
+    const baselineId = `preview_sample_${spec.metadata.id}_baseline`;
+    const observedId = `preview_sample_${spec.metadata.id}_observed`;
+    metricSamples.push(
+      metricSampleSchema.parse({
+        schemaVersion: "metric-sample/v1alpha1",
+        id: baselineId,
+        idempotencyKey: baselineId,
+        workspaceId: "hosted_preview",
+        companyId: session.companyId,
+        departmentId: spec.topology?.department,
+        loopId: spec.metadata.id,
+        metricDefinitionId: definition.id,
+        metricKey: definition.key,
+        value: baselineValue,
+        unit,
+        window: baselineWindow,
+        observedAt: baselineWindow.end,
+        recordedAt: baselineWindow.end,
+        truthStatus: "modeled",
+        source: { type: "modeled", sourceRef: `hosted-preview:${definition.id}:baseline` },
+        quality: { status: "estimated", reason: "Hosted preview sample data." },
+        evidenceRefs: []
+      }),
+      metricSampleSchema.parse({
+        schemaVersion: "metric-sample/v1alpha1",
+        id: observedId,
+        idempotencyKey: observedId,
+        workspaceId: "hosted_preview",
+        companyId: session.companyId,
+        departmentId: spec.topology?.department,
+        loopId: spec.metadata.id,
+        metricDefinitionId: definition.id,
+        metricKey: definition.key,
+        value: observedValue,
+        unit,
+        window: evaluationWindow,
+        observedAt: evaluationWindow.end,
+        recordedAt: evaluationWindow.end,
+        truthStatus: "modeled",
+        source: { type: "modeled", sourceRef: `hosted-preview:${definition.id}:observed` },
+        quality: { status: "estimated", reason: "Hosted preview sample data." },
+        evidenceRefs: []
+      })
+    );
+    const outcomeId = `preview_outcome_${spec.metadata.id}`;
+    observedOutcomes.push(observedOutcomeSchema.parse({
+      schemaVersion: "observed-outcome/v1alpha1",
+      id: outcomeId,
+      workspaceId: "hosted_preview",
+      companyId: session.companyId,
+      departmentId: spec.topology?.department,
+      loopId: spec.metadata.id,
+      metricDefinitionId: definition.id,
+      metricKey: definition.key,
+      unit,
+      desiredDirection,
+      evaluationWindow,
+      baseline: { value: baselineValue, sampleIds: [baselineId] },
+      observed: { value: observedValue, sampleIds: [observedId] },
+      target: definition.target,
+      absoluteDelta,
+      relativeDeltaPct,
+      status: outcomeStatus,
+      truthStatus: "modeled",
+      confidence: 0.72,
+      evidenceSufficiency: {
+        sufficient: true,
+        reasons: ["Hosted preview uses modeled evidence; connect a source to observe this outcome."]
+      },
+      guardrails: [],
+      runIds: [],
+      problemIds: [],
+      evidenceRefs: [],
+      evaluatedAt: evaluationWindow.end
+    }));
+    const grossSavedMinutes = 75 + index * 15;
+    const hiddenCostMinutes = {
+      review: 8,
+      rework: 4,
+      botsitting: 3,
+      escalation: 0,
+      governance: 2
+    };
+    const observedCostMinutes = Object.values(hiddenCostMinutes)
+      .reduce((total, value) => total + value, 0);
+    valueLedgerEntries.push(valueLedgerEntrySchema.parse({
+      schemaVersion: "value-ledger-entry/v1alpha1",
+      id: `preview_value_${spec.metadata.id}`,
+      workspaceId: "hosted_preview",
+      companyId: session.companyId,
+      departmentId: spec.topology?.department,
+      loopId: spec.metadata.id,
+      window: evaluationWindow,
+      grossSavedMinutes,
+      hiddenCostMinutes,
+      observedCostMinutes,
+      netSavedMinutes: grossSavedMinutes - observedCostMinutes,
+      truthStatus: "modeled",
+      calculationVersion: "loop-value/v1alpha1",
+      observedOutcomeIds: [outcomeId],
+      runIds: [],
+      reviewIds: [],
+      evidenceRefs: [],
+      recordedAt: evaluationWindow.end
+    }));
+  });
+
+  return { metricSamples, observedOutcomes, valueLedgerEntries };
+}
+
+function defaultMetricUnit(type: MetricDefinition["type"]) {
+  const units: Record<MetricDefinition["type"], string> = {
+    count: "count",
+    rate: "percent",
+    duration: "minutes",
+    currency: "USD",
+    score: "score",
+    boolean: "boolean",
+    composite: "index"
+  };
+  return units[type];
 }
 
 function attachPlansToRecommendations(

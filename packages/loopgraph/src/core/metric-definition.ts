@@ -13,7 +13,15 @@ export const MetricDefinitionSchema = z.object({
   source: z.enum(["integration", "trace", "human_review", "manual", "modeled", "undefined"]),
   formula: z.string().optional(),
   baselineRequired: z.boolean(),
+  unit: z.string().min(1).max(64).optional(),
+  desiredDirection: z.enum(["increase", "decrease", "target", "maintain"]).optional(),
+  baselineValue: z.number().finite().optional(),
   target: z.number().optional(),
+  evaluationWindowDays: z.number().int().min(0).max(3650).optional(),
+  staleAfterHours: z.number().int().min(1).max(87600).optional(),
+  valuePerUnitMinutes: z.number().min(0).optional(),
+  valuePerUnitAmount: z.number().min(0).optional(),
+  valueCurrency: z.string().length(3).optional(),
   ownerRole: z.string().optional(),
   displayInDailySummary: z.boolean()
 });
@@ -43,4 +51,3 @@ export const UndefinedMetricSchema = z.object({
 
 export type MetricDefinition = z.infer<typeof MetricDefinitionSchema>;
 export type UndefinedMetric = z.infer<typeof UndefinedMetricSchema>;
-

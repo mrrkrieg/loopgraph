@@ -24,6 +24,7 @@ export * from "./process-inventory";
 export * from "./loop-recommendation";
 export * from "./access-requirements";
 export * from "./metric-definition";
+export * from "./outcome";
 export * from "./daily-summary";
 export * from "./readiness";
 export * from "./routing";

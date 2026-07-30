@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
-import { generateDemoDailySummary, loadDailySummary } from "@/lib/loopgraph-runtime/discovery-engine";
+import {
+  generateDemoDailySummary,
+  generateProjectDailySummary
+} from "@/lib/loopgraph-runtime/discovery-engine";
+import { isHostedPreview } from "@/lib/hosted-preview";
+import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export async function GET() {
-  const today = new Date().toISOString().slice(0, 10);
-  const stored = await loadDailySummary(today);
-  return NextResponse.json(stored ?? (await generateDemoDailySummary()).summary);
+  const result = isHostedPreview()
+    ? await generateDemoDailySummary()
+    : await generateProjectDailySummary(getActiveLoopgraphProjectRoot());
+  return NextResponse.json(result.summary);
 }
-

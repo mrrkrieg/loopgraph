@@ -7,6 +7,9 @@ export const DailySummarySchema = z.object({
   companyId: z.string(),
   date: z.string(),
   companyHealth: z.number().min(0).max(100),
+  healthTruthStatus: z.enum(["observed", "modeled", "incomplete"]).default("incomplete"),
+  trackedLoopCount: z.number().int().min(0).default(0),
+  loopsRanCount: z.number().int().min(0).default(0),
   netSavedMinutes: z.number(),
   grossSavedMinutes: z.number(),
   reviewMinutes: z.number(),
@@ -14,6 +17,10 @@ export const DailySummarySchema = z.object({
   botsittingMinutes: z.number(),
   escalationMinutes: z.number(),
   governanceMinutes: z.number(),
+  valueTruthStatus: z.enum(["observed", "modeled", "incomplete"]).default("incomplete"),
+  metricSampleCount: z.number().int().min(0).default(0),
+  observedOutcomeCount: z.number().int().min(0).default(0),
+  valueLedgerEntryCount: z.number().int().min(0).default(0),
   departments: z.array(z.object({
     departmentId: z.string(),
     name: z.string(),
@@ -52,6 +59,8 @@ export const DailySummarySchema = z.object({
     undefinedMetricCount: z.number(),
     netSavedMinutes: z.number(),
     botsittingMinutes: z.number(),
+    valueTruthStatus: z.enum(["observed", "modeled", "incomplete"]).default("incomplete"),
+    outcomeStatus: z.enum(["improved", "unchanged", "regressed", "target_met", "incomplete"]).optional(),
     summary: z.string(),
     nextAction: z.string().optional()
   })),
@@ -70,4 +79,3 @@ export const DailySummarySchema = z.object({
 });
 
 export type DailySummary = z.infer<typeof DailySummarySchema>;
-
