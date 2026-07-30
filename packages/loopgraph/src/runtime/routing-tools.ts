@@ -38,6 +38,7 @@ import {
   FileRoutingStore,
   ingestRoutingEvent,
   submitRoutingDecision,
+  updateRouteJobStatus,
   type RoutingDecisionSubmissionResult,
   type RoutingStore
 } from "./routing-store";
@@ -818,14 +819,14 @@ async function updateRouteJobsAfterSimulation(input: {
   const updatedJobs: RouteJob[] = [];
 
   for (const job of jobs) {
-    const updated = {
-      ...job,
+    const updated = await updateRouteJobStatus({
+      store: input.store,
+      jobId: job.id,
       runId: input.runId,
       status: routeJobStatusForCommitStatus(input.commit.status),
-      lease: undefined,
-      updatedAt: input.nowIso
-    } satisfies RouteJob;
-    await input.store.saveRouteJob(updated);
+      clearLease: true,
+      now: new Date(input.nowIso)
+    });
     updatedJobs.push(updated);
   }
 

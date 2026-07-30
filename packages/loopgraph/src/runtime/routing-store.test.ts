@@ -163,6 +163,38 @@ describe("routing store", () => {
     expect(duplicate.eligibleRoutes).toEqual([]);
   });
 
+  it("uses a store-level atomic receipt boundary to suppress concurrent deliveries", async () => {
+    const fileStore = await tempStore();
+    let primaryReceipt: Awaited<ReturnType<typeof fileStore.getEventReceipt>> = null;
+    const store = Object.assign(fileStore, {
+      async createEventReceiptAtomically(receipt: NonNullable<typeof primaryReceipt>) {
+        if (primaryReceipt) return { receipt: primaryReceipt, created: false };
+        primaryReceipt = receipt;
+        await fileStore.saveEventReceipt(receipt);
+        return { receipt, created: true };
+      }
+    });
+    const event = adsEvent("delivery_atomic");
+
+    const [first, second] = await Promise.all([
+      ingestRoutingEvent({
+        store,
+        event,
+        routingCards: [adsRoutingCard()],
+        now: new Date("2026-07-21T12:00:02.000Z")
+      }),
+      ingestRoutingEvent({
+        store,
+        event,
+        routingCards: [adsRoutingCard()],
+        now: new Date("2026-07-21T12:00:03.000Z")
+      })
+    ]);
+
+    expect([first.duplicate, second.duplicate].sort()).toEqual([false, true]);
+    expect(first.eligibleRoutes.length + second.eligibleRoutes.length).toBe(1);
+  });
+
   it("returns matching open business problems as append-evidence candidates", async () => {
     const store = await tempStore();
     const event = adsEvent("delivery_3");

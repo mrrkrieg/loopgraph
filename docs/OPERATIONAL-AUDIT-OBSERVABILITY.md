@@ -75,11 +75,14 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 - `loopgraph_ready == 0` for two consecutive checks: page the service owner;
 - any sustained increase in `loopgraph_machine_denied_5m`: investigate credential drift or abuse;
 - any `loopgraph_machine_rate_limited_5m > 0`: inspect the caller and expected schedule;
+- any `loopgraph_route_jobs_dead_letter > 0`: stop promotion for the affected route and inspect
+  its last error;
+- sustained `loopgraph_route_job_expired_leases > 0` or increasing
+  `loopgraph_route_job_oldest_due_seconds`: inspect worker health and capacity;
 - an audit-chain verification response of `409`: stop promotion and preserve database evidence.
 
-The current snapshot covers the hosted authorization plane. Queue depth, dead letters, controller
-lag, measurement lag, and worker lease metrics require the file stores to be replaced by the
-database-backed runtime queue; they must not be inferred from per-replica memory.
+The snapshot now covers the hosted authorization plane and database-backed route queue. Controller
+lag and measurement lag remain file-backed and are not emitted as deployment metrics.
 
 ## Deployment check
 

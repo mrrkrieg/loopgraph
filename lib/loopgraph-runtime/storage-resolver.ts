@@ -1,14 +1,23 @@
 import path from "node:path";
 import type { StorageAdapter } from "loopgraph/sdk";
 import { FileStorageAdapter } from "loopgraph/sdk";
-import { getLoopgraphRoot as getPackageLoopgraphRoot } from "loopgraph/runtime";
+import {
+  FileRoutingStore,
+  getLoopgraphRoot as getPackageLoopgraphRoot,
+  type RoutingStore
+} from "loopgraph/runtime";
 import {
   createSupabaseStorageAdapter,
   isSupabaseStorageEnabled
 } from "@/lib/db/adapters/supabase-storage";
+import {
+  createSupabaseRoutingStore,
+  isSupabaseRoutingStoreEnabled
+} from "@/lib/db/adapters/supabase-routing-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
+const cachedRoutingStores = new Map<string, RoutingStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -71,8 +80,30 @@ export function getStorageAdapter(options?: { rootDir?: string; forceFile?: bool
   return adapter;
 }
 
+export function getRoutingStore(options?: {
+  rootDir?: string;
+  forceFile?: boolean;
+}): RoutingStore {
+  const rootDir = path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const cacheKey = isSupabaseRoutingStoreEnabled()
+    ? `supabase-routing:${organizationId}:${projectKey}`
+    : `file-routing:${rootDir}`;
+  if (!options?.forceFile && cachedRoutingStores.has(cacheKey)) {
+    return cachedRoutingStores.get(cacheKey)!;
+  }
+
+  const store = !options?.forceFile && isSupabaseRoutingStoreEnabled()
+    ? createSupabaseRoutingStore()
+    : new FileRoutingStore(rootDir);
+  if (!options?.forceFile) cachedRoutingStores.set(cacheKey, store);
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
+  cachedRoutingStores.clear();
 }
 
 const UUID_PATTERN =
