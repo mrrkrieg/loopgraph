@@ -6,11 +6,11 @@ Metric planning defines success metrics and keeps unmeasurable metrics explicit.
 
 ## Schema
 
-`MetricDefinitionSchema` and `UndefinedMetricSchema` live in `lib/loopgraph-core/metric-definition.ts`.
+`MetricDefinitionSchema` and `UndefinedMetricSchema` live in `packages/loopgraph/src/core/metric-definition.ts`. `MetricSample`, `ObservedOutcome`, and `ValueLedgerEntry` are documented in [Outcomes and value](./OUTCOMES-AND-VALUE.md).
 
 ## Example
 
-`cost_per_qualified_customer` remains undefined if CRM qualified lead status is missing. `net_saved_minutes` is modeled until an observed baseline exists.
+`cost_per_qualified_customer` remains undefined if CRM qualified lead status is missing. `net_saved_minutes` remains incomplete until value evidence exists; a forecast is shown only when explicitly stored as modeled evidence.
 
 ## CLI Usage
 
@@ -25,4 +25,3 @@ Metric plans are shown at `/discovery/metrics`. Undefined metrics are shown at `
 ## Testing Notes
 
 `lib/loopgraph-runtime/metric-planner.test.ts` verifies missing integration and missing baseline detection.
-

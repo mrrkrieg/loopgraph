@@ -43,12 +43,22 @@ describe("Hermes integration installer", () => {
       firstPrompt: "start Loopgraph",
       protocols: HERMES_LOOPGRAPH_PROTOCOL_VERSIONS,
       mcpServer: {
-        name: "loopgraph",
+        name: "loopgraph_admin",
+        exposure: "admin",
         command: process.execPath,
-        args: [cliEntryPath, "mcp", "serve", "--project", projectRoot],
+        args: [cliEntryPath, "mcp", "serve", "--project", projectRoot, "--exposure", "admin"],
         tools: HERMES_LOOPGRAPH_MCP_TOOL_NAMES
       }
     });
+    expect(result.mcpServers.map((server) => ({
+      name: server.name,
+      exposure: server.exposure,
+      args: server.args.slice(-2)
+    }))).toEqual([
+      { name: "loopgraph_admin", exposure: "admin", args: ["--exposure", "admin"] },
+      { name: "loopgraph_webhook_router", exposure: "webhook_router", args: ["--exposure", "webhook_router"] },
+      { name: "loopgraph_lifecycle_router", exposure: "lifecycle_router", args: ["--exposure", "lifecycle_router"] }
+    ]);
     expect(result.supportingFilePaths.map((item) => path.relative(result.skillsDir, item))).toEqual([
       path.join("loopgraph", "references", "discovery-flow.md"),
       path.join("loopgraph", "references", "proposal-schema.md"),
@@ -63,9 +73,9 @@ describe("Hermes integration installer", () => {
     const mcpConfig = YAML.parse(await readFile(result.mcpConfigPath, "utf8")) as Record<string, unknown>;
     expect(mcpConfig).toMatchObject({
       mcp_servers: {
-        loopgraph: {
+        loopgraph_admin: {
           command: process.execPath,
-          args: [cliEntryPath, "mcp", "serve", "--project", projectRoot],
+          args: [cliEntryPath, "mcp", "serve", "--project", projectRoot, "--exposure", "admin"],
           enabled: true,
           supports_parallel_tool_calls: false,
           tools: {
@@ -73,6 +83,14 @@ describe("Hermes integration installer", () => {
             prompts: false,
             resources: true
           }
+        },
+        loopgraph_webhook_router: {
+          command: process.execPath,
+          args: [cliEntryPath, "mcp", "serve", "--project", projectRoot, "--exposure", "webhook_router"]
+        },
+        loopgraph_lifecycle_router: {
+          command: process.execPath,
+          args: [cliEntryPath, "mcp", "serve", "--project", projectRoot, "--exposure", "lifecycle_router"]
         }
       },
       skills: {
@@ -88,10 +106,11 @@ describe("Hermes integration installer", () => {
       installedAt: "2026-07-21T12:00:00.000Z",
       protocols: HERMES_LOOPGRAPH_PROTOCOL_VERSIONS,
       mcpServer: {
-        name: "loopgraph",
+        name: "loopgraph_admin",
+        exposure: "admin",
         transport: "stdio",
         command: process.execPath,
-        args: [cliEntryPath, "mcp", "serve", "--project", projectRoot],
+        args: [cliEntryPath, "mcp", "serve", "--project", projectRoot, "--exposure", "admin"],
         tools: HERMES_LOOPGRAPH_MCP_TOOL_NAMES,
         configPath: result.mcpConfigPath
       },
@@ -130,6 +149,10 @@ describe("Hermes integration installer", () => {
         routingEvaluation: true,
         lifecycleEvents: true,
         graphProjection: true,
+        semanticGraphTransactions: true,
+        graphPromotion: true,
+        graphLifecycle: true,
+        graphRollback: true,
         hermesWebhookPlanning: true,
         hermesWebhookSync: true,
         hermesWebhookDoctor: true,
@@ -167,7 +190,8 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain(`skillProtocol: ${HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION}`);
     expect(designSkill).toContain(`mcpProtocol: ${HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION}`);
     expect(designSkill).toContain("loopDesignProposalSetSchema: loop-design-proposal-set/v1alpha1");
-    expect(designSkill).toContain("Loopgraph MCP server named `loopgraph`");
+    expect(designSkill).toContain("Loopgraph MCP server named `loopgraph_admin`");
+    expect(designSkill).toContain("Never use the webhook or lifecycle profiles");
     expect(designSkill).toContain("loopgraph://schemas/loop-design-context");
     expect(designSkill).toContain("loopgraph://graph/company");
     expect(designSkill).toContain("references/discovery-flow.md");
@@ -196,6 +220,27 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_routing_evaluation_run");
     expect(designSkill).toContain("loopgraph_routing_evaluations_get");
     expect(designSkill).toContain("loopgraph_lifecycle_events_get");
+    expect(designSkill).toContain("loopgraph_controller_run");
+    expect(designSkill).toContain("loopgraph_controller_runs_get");
+    expect(designSkill).toContain("loopgraph_controller_policy_get");
+    expect(designSkill).toContain("loopgraph_controller_policy_set");
+    expect(designSkill).toContain("loopgraph://schemas/loop-controller-policy");
+    expect(designSkill).toContain("loopgraph://schemas/loop-controller-run");
+    expect(designSkill).toContain("loopgraph://schemas/graph-snapshot");
+    expect(designSkill).toContain("loopgraph://schemas/graph-change-approval-receipt");
+    expect(designSkill).toContain("loopgraph://schemas/graph-transaction");
+    expect(designSkill).toContain("loopgraph://schemas/loop-promotion-receipt");
+    expect(designSkill).toContain("loopgraph_graph_change_decide");
+    expect(designSkill).toContain("loopgraph_graph_change_apply");
+    expect(designSkill).toContain("loopgraph_graph_history_get");
+    expect(designSkill).toContain("loopgraph_loop_promotion_approve");
+    expect(designSkill).toContain("loopgraph_loop_promote");
+    expect(designSkill).toContain("loopgraph_loop_lifecycle_approve");
+    expect(designSkill).toContain("loopgraph_loop_lifecycle_set");
+    expect(designSkill).toContain("loopgraph_graph_rollback_approve");
+    expect(designSkill).toContain("loopgraph_graph_rollback");
+    expect(designSkill).toContain("Never substitute direct materialization");
+    expect(designSkill).toContain("Never reinterpret a review, pause, retirement, or failed policy receipt as permission to act");
     expect(designSkill).toContain("loopgraph_review_submit");
     expect(designSkill).toContain("loopgraph_case_resolve");
     expect(designSkill).toContain("loopgraph_graph_get");
@@ -213,6 +258,8 @@ describe("Hermes integration installer", () => {
     expect(routerSkill).toContain("routingDecisionSchema: routing-decision/v1alpha1");
     expect(routerSkill).toContain("loopgraph://schemas/routing-decision");
     expect(routerSkill).toContain("--exposure webhook_router");
+    expect(routerSkill).toContain("server named `loopgraph_webhook_router`");
+    expect(routerSkill).toContain("Do not use `loopgraph_admin`");
     expect(routerSkill).not.toContain("loopgraph://loops/{loopId}");
     expect(routerSkill).toContain("references/routing-protocol.md");
     expect(routerSkill).toContain("examples/product-routing-events.md");
@@ -224,6 +271,8 @@ describe("Hermes integration installer", () => {
     expect(routerSkill).toContain("loopgraph_routing_decision_get");
     expect(routerSkill).not.toContain("loopgraph_route_jobs_get");
     expect(routerSkill).not.toContain("loopgraph_lifecycle_events_get");
+    expect(routerSkill).not.toContain("loopgraph_graph_change_apply");
+    expect(routerSkill).not.toContain("loopgraph_graph_rollback");
     expect(routerSkill).toContain("notification-only Loopgraph lifecycle events");
     expect(routerSkill).toContain("Do not call `loopgraph_route_commit_simulate` from an untrusted webhook turn");
     expect(routerSkill).toContain("Never bypass a rejected decision");
@@ -232,6 +281,8 @@ describe("Hermes integration installer", () => {
     expect(proposalReference).toContain("routing contract with problem types");
     expect(proposalReference).toContain("Proposal set schema: `loop-design-proposal-set/v1alpha1`");
     expect(safetyReference).toContain("Provider webhooks terminate at Hermes");
+    expect(safetyReference).toContain("content-bound approval receipts");
+    expect(safetyReference).toContain("Do not expose graph transaction tools");
     expect(productExample).toContain("Hermes Brain -> Product -> Feedback Clustering");
     expect(productExample).toContain("Release Learning");
     expect(marketingExample).toContain("Hermes Brain -> Marketing -> Ads");
@@ -340,9 +391,9 @@ describe("Hermes integration installer", () => {
       warnings: []
     });
     expect(result.install.mcpServer).toMatchObject({
-      name: "loopgraph",
+      name: "loopgraph_admin",
       command: process.execPath,
-      args: [cliEntryPath, "mcp", "serve", "--project", projectRoot]
+      args: [cliEntryPath, "mcp", "serve", "--project", projectRoot, "--exposure", "admin"]
     });
     expect(result.doctor.ok).toBe(true);
     expect(result.nextSteps).toContain("Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.");

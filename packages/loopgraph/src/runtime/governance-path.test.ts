@@ -25,6 +25,8 @@ describe("improvement loader", () => {
     await applyReviewDecision(storage, {
       runId: result.trace.id,
       status: "rejected",
+      reviewerId: "reviewer_reject",
+      role: "approver",
       comment: "Needs more evidence before public response."
     });
 
@@ -76,7 +78,9 @@ describe("governance path", () => {
     await applyReviewDecision(storage, {
       runId: result.trace.id,
       status: "approved",
-      approvedFingerprints: [internal!.fingerprint]
+      approvedFingerprints: [internal!.fingerprint],
+      reviewerId: "reviewer_internal",
+      role: "approver"
     });
 
     const trace = await storage.getRun(result.trace.id);
@@ -88,7 +92,9 @@ describe("governance path", () => {
     const completed = await applyReviewDecision(storage, {
       runId: result.trace.id,
       status: "approved",
-      approvedFingerprints: [customer!.fingerprint]
+      approvedFingerprints: [customer!.fingerprint],
+      reviewerId: "reviewer_customer",
+      role: "approver"
     });
 
     expect(completed.trace.status).toBe("COMPLETED");

@@ -23,6 +23,7 @@ export const humanReviewTraceSchema = z.object({
   id: z.string(),
   runId: z.string(),
   status: z.enum(["open", "approved", "rejected", "needs_changes", "expired", "request_evidence", "reassigned"]),
+  reviewerId: z.string().min(1).optional(),
   role: z.enum(["approver", "reviewer", "owner", "teacher", "executor", "accountability_holder"]),
   approvedFingerprints: z.array(z.string()).default([]),
   rejectedFingerprints: z.array(z.string()).default([]),

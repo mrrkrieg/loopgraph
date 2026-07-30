@@ -64,9 +64,11 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 1. **Choose a department.** Management, Marketing, Sales, Product, Customer Success, Engineering, Ops / Finance, HR / Talent, Legal / Compliance, or a custom workflow.
 2. **Answer five focused question bundles.** Current stack and sources, biggest recurring problem, useful automation and hard boundaries, ideal measurable outcome, and ownership/rollout.
 3. **Review the proposed loops.** A high-reasoning design pass returns triggers, inputs, actions, verification, metrics, assumptions, risks, connections, and required human decisions.
-4. **Accept only what you want.** Accepted proposals become versioned LoopSpecs, routing cards, graph nodes, readiness requirements, and local test fixtures in one materialization step.
+4. **Accept only what you want.** Direct designs materialize only accepted proposals. Opportunity-driven add, update, split, merge, or retirement proposals use a content-bound approval receipt and atomic graph transaction.
 5. **Rehearse locally.** Test positive, missing-context, and risk-escalation cases without API keys or external writes.
 6. **Connect and promote carefully.** New loops begin in shadow mode. Live work stays blocked until routing, capabilities, approvals, and exact prepared-action fingerprints are ready.
+7. **Keep the worker running.** Accepted Hermes routes become durable jobs. The worker claims them atomically, verifies the immutable LoopSpec binding, runs the configured shadow/recommend/approval/autonomous policy, and returns signed lifecycle evidence to Hermes.
+8. **Keep improving.** The continuous controller evaluates durable outcomes, detects missing or weak loops, asks Hermes for only the missing evidence, and applies only low-risk policy-approved additions in shadow mode.
 
 <p align="center">
   <img src="docs/images/hermes-brain-live-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
@@ -144,7 +146,39 @@ npm run loopgraph -- events test --project . \
 
 For the full walkthrough, see the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
 
-### 5. Check before live credentials
+### 5. Process accepted Hermes routes
+
+Run one safe local batch:
+
+```bash
+npm run loopgraph -- worker run --project .
+```
+
+Or keep the project-local worker polling:
+
+```bash
+npm run loopgraph -- worker run --project . --watch --interval 5
+```
+
+Shadow, recommend, and simulate jobs stay local. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
+
+### 6. Keep the Hermes Brain improvement cycle running
+
+Run one evidence-to-design cycle:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type manual
+```
+
+Or keep the trusted local controller processing idempotent triggers:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
+```
+
+Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Only strict low-risk additions can materialize automatically, and they remain in shadow mode. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md).
+
+### 7. Check before live credentials
 
 Before connecting live provider credentials or production webhook routes, run:
 
@@ -464,6 +498,12 @@ npm run loopgraph -- trace <runId> --review
 npm run loopgraph -- review packet <runId>
 npm run loopgraph -- case list
 npm run loopgraph -- case resolve <caseId> --summary "Resolved"
+
+# Semantic graph governance
+npm run loopgraph -- graph history --project .
+npm run loopgraph -- graph change decide <changeSetId> --help
+npm run loopgraph -- graph promotion approve <loopId> --help
+npm run loopgraph -- graph rollback approve <transactionId> --help
 ```
 
 From an installed package, use `loopgraph` in place of `npm run loopgraph --`.
@@ -480,14 +520,19 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → materialize → visualize → route rehearsal → simulate flow is implemented and covered by regression tests. Live execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
+Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → review/lifecycle-evidence flow is implemented and covered by regression tests. Project-bound metric evidence, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Semantic changes are content-bound, atomic, and reversible; live provider execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
 
-The safest supported path today is **design locally, materialize, rehearse routing, simulate with fixtures, and review the resulting trace**.
+The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
 ## Documentation
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md) — complete local setup and event rehearsal
 - [Hermes design bridge](docs/HERMES-DESIGN-BRIDGE.md) — durable design tasks, focused evidence gaps, secure proactive activation, and callbacks
+- [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
+- [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
+- [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
+- [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts
+- [Semantic graph transactions](docs/SEMANTIC-GRAPH-TRANSACTIONS.md) — exact approvals, atomic add/update/split/merge/retire changes, promotion, lifecycle, and rollback
 - [Hermes examples](docs/HERMES-EXAMPLES.md) — Marketing, Legal / Compliance, and custom flows
 - [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md) — implementation-to-test evidence map
 - [Event-brain integration plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md) — detailed architecture and product plan

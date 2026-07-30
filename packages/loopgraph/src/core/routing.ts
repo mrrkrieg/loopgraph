@@ -19,6 +19,8 @@ export const routingActivationModeSchema = z.enum([
   "autonomous_low_risk"
 ]);
 
+export type RoutingActivationMode = z.infer<typeof routingActivationModeSchema>;
+
 export const routingAmbiguityPolicySchema = z.enum(["ignore", "defer", "request_human", "route_to_triage"]);
 export const routingNoMatchPolicySchema = z.enum(["unhandled", "ignore", "request_human"]);
 export const routingFanoutModeSchema = z.enum(["none", "independent_only", "declared_ordered"]);
@@ -61,11 +63,11 @@ export const eventEnvelopeSchema = z.object({
   hopCount: z.number().int().min(0).default(0),
   normalizedPayload: jsonObjectSchema.default({}),
   rawPayloadRef: payloadReferenceSchema.optional(),
-  evidenceRefs: z.array(z.string().min(1)).default([]),
+  evidenceRefs: z.array(z.string().min(1).max(2048)).max(100).default([]),
   trust: z.object({
     signatureVerified: z.boolean().default(false),
     signer: z.string().optional(),
-    untrustedFields: z.array(z.string()).default([])
+    untrustedFields: z.array(z.string().max(512)).max(100).default([])
   }).default({ signatureVerified: false, untrustedFields: [] }),
   sensitivity: z.enum(["public", "internal", "confidential", "restricted"]).default("internal")
 });
@@ -297,8 +299,16 @@ export const routeJobSchema = z.object({
   nextRunAt: z.string().datetime(),
   lease: z.object({
     claimedBy: z.string().min(1),
+    leaseToken: z.string().min(1).optional(),
     claimedAt: z.string().datetime(),
-    expiresAt: z.string().datetime()
+    expiresAt: z.string().datetime(),
+    heartbeatAt: z.string().datetime().optional()
+  }).optional(),
+  result: z.object({
+    traceStatus: z.string().min(1),
+    completedAt: z.string().datetime().optional(),
+    lifecycleDeliveryIds: z.array(z.string().min(1)).default([]),
+    metricSampleIds: z.array(z.string().min(1)).default([])
   }).optional(),
   lastError: z.object({
     code: z.string().optional(),
@@ -458,7 +468,10 @@ export function compileRoutingCardFromLoopSpec(
     department: spec.topology?.department ? normalizeDepartmentType(spec.topology.department) ?? "custom" : undefined,
     goal: spec.metadata.description ?? spec.metadata.name,
     currentReadiness: options.currentReadiness ?? "unknown",
-    loopStatus: options.loopStatus ?? "active",
+    loopStatus: options.loopStatus ??
+      (spec.metadata.labels?.lifecycleStatus === "paused" || spec.metadata.labels?.lifecycleStatus === "retired"
+        ? "disabled"
+        : "active"),
     problemTypes: routing.problemTypes,
     explicitNonGoals: routing.excludes.map((rule) => rule.reason),
     accepts: routing.accepts,

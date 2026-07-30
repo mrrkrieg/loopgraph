@@ -1,9 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 
-function verifyGithubSignature(payload: string, signature: string | null) {
-  const secret = process.env.GITHUB_WEBHOOK_SECRET;
-  if (!secret) return true;
+function verifyGithubSignature(payload: string, signature: string | null, secret: string) {
   if (!signature?.startsWith("sha256=")) return false;
   const digest = createHmac("sha256", secret).update(payload).digest("hex");
   const expected = `sha256=${digest}`;
@@ -17,18 +15,25 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
   const deliveryId = request.headers.get("x-github-delivery") ?? randomUUID();
-
-  if (!verifyGithubSignature(rawBody, signature)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
   const hermesWebhookUrl = process.env.HERMES_WEBHOOK_URL;
+
   if (!hermesWebhookUrl) {
     return NextResponse.json({
       ok: false,
       error: "Direct Loopgraph provider webhooks are disabled. Configure this GitHub webhook to point at Hermes, or set HERMES_WEBHOOK_URL as a temporary compatibility forwarder.",
       deliveryId
     }, { status: 410 });
+  }
+  const secret = process.env.GITHUB_WEBHOOK_SECRET;
+  if (!secret) {
+    return NextResponse.json({
+      ok: false,
+      error: "GITHUB_WEBHOOK_SECRET is required before the GitHub compatibility forwarder can be enabled.",
+      deliveryId
+    }, { status: 503 });
+  }
+  if (!verifyGithubSignature(rawBody, signature, secret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   try {

@@ -17,6 +17,7 @@ import { formatReviewPacket } from "../runtime/review-packet";
 import { listEscalationCases, resolveCase } from "../runtime/case-service";
 import { getStorageAdapter, getLoopgraphRoot } from "../runtime/storage-resolver";
 import type { LoopRunTrace } from "../core/trace";
+import type { LoopControllerTriggerType } from "../core";
 import { normalizeLoopgraphMcpExposure, runLoopgraphMcpStdioServer } from "../mcp/server";
 import {
   doctorHermesIntegration,
@@ -43,6 +44,23 @@ import {
   loopgraph_route_commit_simulate,
   loopgraph_routing_human_choice_submit
 } from "../runtime/routing-tools";
+import {
+  listLoopOpportunities,
+  scanLoopOpportunities
+} from "../runtime/loop-opportunity-engine";
+import { runRouteJobWorker } from "../runtime/route-job-worker";
+import { FileLoopControllerStore } from "../runtime/loop-controller-store";
+import { enqueueLoopControllerTrigger } from "../runtime/loop-controller-triggers";
+import { runLoopControllerScheduler } from "../runtime/loop-controller-scheduler";
+import {
+  cancelRouteJob,
+  FileRoutingStore,
+  retryRouteJob
+} from "../runtime/routing-store";
+import {
+  callLoopgraphSemanticGraphTool,
+  type LoopgraphSemanticGraphToolName
+} from "../runtime/semantic-graph-tools";
 
 const HERO_TEMPLATES = [
   {
@@ -119,6 +137,261 @@ async function runHermesDoctor(options: { project: string }): Promise<void> {
 
 const workspace = program.command("workspace").description("Local Loopgraph workspace commands");
 const events = program.command("events").description("Hermes-normalized event utilities");
+const opportunities = program.command("opportunities").description("Detect missing or weak loops from durable operating evidence");
+const worker = program.command("worker").description("Run and operate the durable Hermes route-job worker");
+const controller = program.command("controller").description("Run the durable Hermes Brain continuous-improvement controller");
+const graph = program.command("graph").description("Review and apply semantic company graph transactions");
+const graphChange = graph.command("change").description("Approve and apply add, update, split, merge, or retire change sets");
+const graphPromotion = graph.command("promotion").description("Approve and apply ordered loop activation-mode promotions");
+const graphLifecycle = graph.command("lifecycle").description("Approve and apply loop pause or resume transactions");
+const graphRollback = graph.command("rollback").description("Approve and apply exact graph transaction rollback");
+
+graph
+  .command("history")
+  .description("Read semantic graph snapshots, approvals, transactions, promotions, and rollbacks")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--transaction <id>", "Read one transaction")
+  .option("--snapshot <id>", "Read one graph snapshot")
+  .option("--approval <id>", "Read one graph approval receipt")
+  .option("--promotion <id>", "Read one loop promotion receipt")
+  .option("--change-set <id>", "Filter approval receipts by graph change set")
+  .option("--loop <id>", "Filter promotion receipts by loop")
+  .action(async (options: {
+    project: string;
+    transaction?: string;
+    snapshot?: string;
+    approval?: string;
+    promotion?: string;
+    changeSet?: string;
+    loop?: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_history_get", {
+      transactionId: options.transaction,
+      snapshotId: options.snapshot,
+      approvalReceiptId: options.approval,
+      promotionReceiptId: options.promotion,
+      changeSetId: options.changeSet,
+      loopId: options.loop
+    }, options.project);
+  });
+
+graphChange
+  .command("decide")
+  .description("Record an accountable approval or rejection for an exact graph change set")
+  .argument("<changeSetId>", "Graph change set ID")
+  .requiredOption("--decision <decision>", "approved or rejected")
+  .option("--approved-changes <ids>", "Comma-separated approved change IDs; defaults to all operations")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Approval policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (changeSetId: string, options: {
+    decision: string;
+    approvedChanges?: string;
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_change_decide", {
+      changeSetId,
+      decision: options.decision,
+      approvedChangeIds: commaSeparated(options.approvedChanges),
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphChange
+  .command("apply")
+  .description("Atomically apply an approved semantic graph change set")
+  .argument("<changeSetId>", "Graph change set ID")
+  .requiredOption("--approval <id>", "Exact graph approval receipt ID")
+  .option("--design-run <id>", "Validated design run ID")
+  .option("--proposals <ids>", "Comma-separated accepted proposal IDs")
+  .option("--proposal-map <json>", "JSON object mapping change IDs to accepted proposal ID arrays")
+  .requiredOption("--by <id>", "Actor initiating the transaction")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (changeSetId: string, options: {
+    approval: string;
+    designRun?: string;
+    proposals?: string;
+    proposalMap?: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_change_apply", {
+      changeSetId,
+      approvalReceiptId: options.approval,
+      designRunId: options.designRun,
+      acceptedProposalIds: commaSeparated(options.proposals),
+      proposalIdsByChangeId: parseStringArrayRecord(options.proposalMap),
+      initiatedBy: options.by
+    }, options.project);
+  });
+
+graphPromotion
+  .command("approve")
+  .description("Approve the next ordered activation mode for one loop")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--to <mode>", "simulate, shadow, recommend, execute_with_approval, or autonomous_low_risk")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Promotion policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    to: string;
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_promotion_approve", {
+      loopId,
+      nextMode: options.to,
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphPromotion
+  .command("apply")
+  .description("Apply an approved promotion with durable gate evidence")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--to <mode>", "Approved next activation mode")
+  .requiredOption("--approval <id>", "Exact promotion approval receipt ID")
+  .requiredOption("--gate-evidence <refs>", "Comma-separated routing evaluation and readiness evidence references")
+  .requiredOption("--by <id>", "Actor initiating the transaction")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    to: string;
+    approval: string;
+    gateEvidence: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_promote", {
+      loopId,
+      nextMode: options.to,
+      approvalReceiptId: options.approval,
+      gateEvidenceRefs: commaSeparated(options.gateEvidence),
+      initiatedBy: options.by
+    }, options.project);
+  });
+
+graphLifecycle
+  .command("approve")
+  .description("Approve pausing or resuming one registered loop")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--status <status>", "active or paused")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Lifecycle policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    status: string;
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_lifecycle_approve", {
+      loopId,
+      nextStatus: options.status,
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphLifecycle
+  .command("apply")
+  .description("Apply an approved loop pause or resume transaction")
+  .argument("<loopId>", "Registered LoopSpec ID")
+  .requiredOption("--status <status>", "active or paused")
+  .requiredOption("--approval <id>", "Exact lifecycle approval receipt ID")
+  .requiredOption("--by <id>", "Actor initiating the transaction")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (loopId: string, options: {
+    status: string;
+    approval: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_loop_lifecycle_set", {
+      loopId,
+      nextStatus: options.status,
+      approvalReceiptId: options.approval,
+      initiatedBy: options.by
+    }, options.project);
+  });
+
+graphRollback
+  .command("approve")
+  .description("Approve restoring the exact base snapshot of a graph transaction")
+  .argument("<transactionId>", "Committed graph transaction ID")
+  .requiredOption("--actor <id>", "Accountable actor ID")
+  .requiredOption("--role <role>", "Accountable actor role")
+  .requiredOption("--policy <version>", "Rollback policy version")
+  .requiredOption("--reason <reason>", "Human-readable decision reason")
+  .option("--evidence <refs>", "Comma-separated evidence references")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (transactionId: string, options: {
+    actor: string;
+    role: string;
+    policy: string;
+    reason: string;
+    evidence?: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_rollback_approve", {
+      transactionId,
+      actorId: options.actor,
+      actorRole: options.role,
+      policyVersion: options.policy,
+      reason: options.reason,
+      evidenceRefs: commaSeparated(options.evidence)
+    }, options.project);
+  });
+
+graphRollback
+  .command("apply")
+  .description("Restore an exact pre-transaction graph snapshot")
+  .argument("<transactionId>", "Committed graph transaction ID")
+  .requiredOption("--approval <id>", "Exact rollback approval receipt ID")
+  .requiredOption("--by <id>", "Actor initiating the rollback")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (transactionId: string, options: {
+    approval: string;
+    by: string;
+    project: string;
+  }) => {
+    await printSemanticGraphTool("loopgraph_graph_rollback", {
+      transactionId,
+      approvalReceiptId: options.approval,
+      initiatedBy: options.by
+    }, options.project);
+  });
 
 workspace
   .command("init")
@@ -134,6 +407,243 @@ workspace
       createdBy: "cli"
     });
     console.log(JSON.stringify(registry, null, 2));
+  });
+
+opportunities
+  .command("scan")
+  .description("Scan once or continuously for explainable loop opportunities and governed Hermes design tasks")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--qualify-threshold <score>", "Minimum score to qualify an opportunity", "45")
+  .option("--auto-design-threshold <score>", "Minimum score to start a draft Hermes design task", "65")
+  .option("--no-auto-start-design", "Detect and score without starting Hermes design tasks")
+  .option("--watch", "Keep scanning the local workspace on an interval")
+  .option("--interval <seconds>", "Watch interval in seconds", "900")
+  .action(async (options: {
+    project: string;
+    qualifyThreshold: string;
+    autoDesignThreshold: string;
+    autoStartDesign: boolean;
+    watch?: boolean;
+    interval: string;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const qualifyThreshold = Number(options.qualifyThreshold);
+    const autoDesignThreshold = Number(options.autoDesignThreshold);
+    const intervalSeconds = Number(options.interval);
+    if (!Number.isFinite(qualifyThreshold) || !Number.isFinite(autoDesignThreshold)) {
+      throw new Error("Opportunity thresholds must be finite numbers from 0 to 100.");
+    }
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds < 30) {
+      throw new Error("Opportunity watch interval must be at least 30 seconds.");
+    }
+    const runScan = async () => {
+      const result = await scanLoopOpportunities({
+        projectRoot,
+        thresholds: {
+          qualify: qualifyThreshold,
+          autoDesign: autoDesignThreshold
+        },
+        autoStartDesign: options.autoStartDesign
+      });
+      console.log(JSON.stringify(result, null, 2));
+    };
+    await runScan();
+    if (!options.watch) return;
+    const intervalMs = intervalSeconds * 1000;
+    console.error(`Watching ${projectRoot} for loop opportunities every ${intervalMs / 1000} seconds.`);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setInterval(() => {
+        void runScan().catch((error) => {
+          clearInterval(timer);
+          reject(error);
+        });
+      }, intervalMs);
+      process.once("SIGINT", () => {
+        clearInterval(timer);
+        resolve();
+      });
+      process.once("SIGTERM", () => {
+        clearInterval(timer);
+        resolve();
+      });
+    });
+  });
+
+controller
+  .command("run")
+  .description("Evaluate durable evidence and take the next policy-bounded loop action")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--trigger-type <type>", "manual, schedule, routing_event, route_job, review, outcome_window, connector_health, or management_cycle", "manual")
+  .option("--trigger-id <id>", "Stable idempotency identity for this trigger")
+  .option("--source-ref <ref>", "Auditable source reference", "loopgraph-cli")
+  .option("--watch", "Keep running controller cycles on an interval")
+  .option("--interval <seconds>", "Watch interval in seconds", "900")
+  .action(async (options: {
+    project: string;
+    triggerType: string;
+    triggerId?: string;
+    sourceRef: string;
+    watch?: boolean;
+    interval: string;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const intervalSeconds = Number(options.interval);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds < 30) {
+      throw new Error("Controller watch interval must be at least 30 seconds.");
+    }
+    let sequence = 0;
+    const runOnce = async () => {
+      const triggerId = options.triggerId ?? `${options.triggerType}_${Date.now()}_${sequence++}`;
+      const enqueue = await enqueueLoopControllerTrigger({
+        projectRoot,
+        type: options.triggerType as LoopControllerTriggerType,
+        triggerId,
+        sourceRef: options.sourceRef,
+        requestedBy: "loopgraph-cli"
+      });
+      const scheduler = await runLoopControllerScheduler({ projectRoot, limit: 20 });
+      console.log(JSON.stringify({ enqueue, scheduler }, null, 2));
+    };
+    await runOnce();
+    if (!options.watch) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setInterval(() => {
+        void runOnce().catch((error) => {
+          clearInterval(timer);
+          reject(error);
+        });
+      }, intervalSeconds * 1000);
+      process.once("SIGINT", () => {
+        clearInterval(timer);
+        resolve();
+      });
+      process.once("SIGTERM", () => {
+        clearInterval(timer);
+        resolve();
+      });
+    });
+  });
+
+controller
+  .command("status")
+  .description("Show the current policy, checkpoint, and recent controller decisions")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--limit <count>", "Maximum recent runs to show", "10")
+  .action(async (options: { project: string; limit: string }) => {
+    const projectRoot = path.resolve(options.project);
+    const limit = parsePositiveInteger(options.limit, "Controller status limit");
+    const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
+    const [policy, checkpoint, runs, triggers] = await Promise.all([
+      store.readPolicy(),
+      store.readCheckpoint(),
+      store.listRuns(),
+      store.listTriggers()
+    ]);
+    console.log(JSON.stringify({
+      policy,
+      checkpoint,
+      runs: runs.slice(0, limit),
+      triggers: triggers.slice(-limit)
+    }, null, 2));
+  });
+
+opportunities
+  .command("list")
+  .description("List persisted loop opportunities and their score explanations")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--minimum-score <score>", "Only show opportunities at or above this score")
+  .action(async (options: { project: string; minimumScore?: string }) => {
+    const minimumScore = options.minimumScore === undefined ? undefined : Number(options.minimumScore);
+    const result = await listLoopOpportunities(path.resolve(options.project), {
+      minimumScore: minimumScore !== undefined && Number.isFinite(minimumScore) ? minimumScore : undefined
+    });
+    console.log(JSON.stringify({ opportunities: result }, null, 2));
+  });
+
+worker
+  .command("run")
+  .description("Claim due route jobs and execute each governed LoopSpec through its configured activation mode")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--worker-id <id>", "Stable worker identity", `worker_${process.pid}`)
+  .option("--limit <count>", "Maximum jobs per poll", "10")
+  .option("--lease-seconds <seconds>", "Lease duration for each claimed job", "300")
+  .option("--watch", "Keep polling until interrupted")
+  .option("--interval <seconds>", "Watch polling interval in seconds", "5")
+  .action(async (options: {
+    project: string;
+    workerId: string;
+    limit: string;
+    leaseSeconds: string;
+    watch?: boolean;
+    interval: string;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const limit = parsePositiveInteger(options.limit, "Worker limit");
+    const leaseSeconds = parsePositiveInteger(options.leaseSeconds, "Worker lease seconds");
+    const intervalSeconds = parsePositiveInteger(options.interval, "Worker interval seconds");
+    const runOnce = async () => {
+      const result = await runRouteJobWorker({
+        projectRoot,
+        workerId: options.workerId,
+        limit,
+        leaseSeconds
+      });
+      console.log(JSON.stringify(result, null, 2));
+    };
+    await runOnce();
+    if (!options.watch) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setInterval(() => {
+        void runOnce().catch((error) => {
+          clearInterval(timer);
+          reject(error);
+        });
+      }, intervalSeconds * 1000);
+      process.once("SIGINT", () => {
+        clearInterval(timer);
+        resolve();
+      });
+      process.once("SIGTERM", () => {
+        clearInterval(timer);
+        resolve();
+      });
+    });
+  });
+
+worker
+  .command("retry")
+  .description("Explicitly requeue one failed or dead-letter route job")
+  .requiredOption("--job <id>", "Route job ID")
+  .requiredOption("--reason <text>", "Auditable retry reason")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--by <name>", "Operator requesting the retry", "operator")
+  .action(async (options: { project: string; job: string; reason: string; by: string }) => {
+    const projectRoot = path.resolve(options.project);
+    const job = await retryRouteJob({
+      store: new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      jobId: options.job,
+      reason: options.reason,
+      requestedBy: options.by
+    });
+    console.log(JSON.stringify(job, null, 2));
+  });
+
+worker
+  .command("cancel")
+  .description("Cancel one non-completed route job")
+  .requiredOption("--job <id>", "Route job ID")
+  .requiredOption("--reason <text>", "Auditable cancellation reason")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--by <name>", "Operator cancelling the job", "operator")
+  .action(async (options: { project: string; job: string; reason: string; by: string }) => {
+    const projectRoot = path.resolve(options.project);
+    const job = await cancelRouteJob({
+      store: new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      jobId: options.job,
+      reason: options.reason,
+      cancelledBy: options.by
+    });
+    console.log(JSON.stringify(job, null, 2));
   });
 
 workspace
@@ -550,34 +1060,46 @@ review
   .command("approve")
   .argument("<runId>")
   .requiredOption("--actions <fingerprints>", "Comma-separated fingerprints")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { actions: string; comment?: string }) => {
-    await runReviewDecision(runId, "approved", options.actions.split(",").filter(Boolean), options.comment);
+  .action(async (runId, options: { actions: string; by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "approved", options.actions.split(",").filter(Boolean), options.by, options.role, options.project, options.comment);
   });
 
 review
   .command("reject")
   .argument("<runId>")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { comment?: string }) => {
-    await runReviewDecision(runId, "rejected", [], options.comment);
+  .action(async (runId, options: { by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "rejected", [], options.by, options.role, options.project, options.comment);
   });
 
 review
   .command("request-evidence")
   .argument("<runId>")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { comment?: string }) => {
-    await runReviewDecision(runId, "request_evidence", [], options.comment);
+  .action(async (runId, options: { by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "request_evidence", [], options.by, options.role, options.project, options.comment);
   });
 
 review
   .command("reassign")
   .argument("<runId>")
   .requiredOption("--to <role>", "Role or owner to reassign to")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { to: string; comment?: string }) => {
-    await runReviewDecision(runId, "reassigned", [], options.comment, options.to);
+  .action(async (runId, options: { to: string; by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "reassigned", [], options.by, options.role, options.project, options.comment, options.to);
   });
 
 review
@@ -692,16 +1214,29 @@ async function runReviewDecision(
   runId: string,
   status: "approved" | "rejected" | "request_evidence" | "reassigned",
   fingerprints: string[],
+  reviewerId: string,
+  roleValue: string,
+  projectRootValue: string,
   comment?: string,
   reassignedTo?: string
 ) {
   try {
-    const result = await applyReviewDecision(storage, {
+    const allowedRoles = ["approver", "reviewer", "owner", "teacher", "executor", "accountability_holder"] as const;
+    if (!allowedRoles.includes(roleValue as (typeof allowedRoles)[number])) {
+      throw new ReviewServiceError(`Unsupported reviewer role: ${roleValue}`);
+    }
+    const projectRoot = path.resolve(projectRootValue);
+    const reviewStorage = getStorageAdapter({ rootDir: getLoopgraphRoot(projectRoot) });
+    const result = await applyReviewDecision(reviewStorage, {
       runId,
       status,
       approvedFingerprints: fingerprints,
+      reviewerId,
+      role: roleValue as (typeof allowedRoles)[number],
       comment,
       reassignedTo
+    }, {
+      projectRoot
     });
     console.log(`Review ${status} recorded for ${runId} (trace status=${result.trace.status})`);
   } catch (error) {
@@ -774,6 +1309,44 @@ function splitCsv(value?: string): string[] {
     .filter(Boolean);
 }
 
+function commaSeparated(value?: string): string[] {
+  return splitCsv(value);
+}
+
+function parseStringArrayRecord(value?: string): Record<string, string[]> {
+  if (!value) return {};
+  const parsed = JSON.parse(value) as unknown;
+  if (!isRecord(parsed)) {
+    throw new Error("--proposal-map must be a JSON object mapping change IDs to proposal ID arrays.");
+  }
+  return Object.fromEntries(Object.entries(parsed).map(([changeId, proposalIds]) => {
+    if (!Array.isArray(proposalIds) || proposalIds.some((proposalId) => typeof proposalId !== "string" || !proposalId.trim())) {
+      throw new Error(`--proposal-map value for ${changeId} must be an array of non-empty proposal IDs.`);
+    }
+    return [changeId, proposalIds.map((proposalId) => proposalId.trim())];
+  }));
+}
+
+async function printSemanticGraphTool(
+  name: LoopgraphSemanticGraphToolName,
+  input: Record<string, unknown>,
+  projectRoot: string
+): Promise<void> {
+  const result = await callLoopgraphSemanticGraphTool(name, {
+    ...input,
+    projectRoot: path.resolve(projectRoot)
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function parsePositiveInteger(value: string, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return parsed;
+}
+
 async function readRoutingEvaluationFixtures(filePath: string): Promise<RoutingEvaluationFixtureInput[]> {
   const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
   if (Array.isArray(parsed)) return parsed as RoutingEvaluationFixtureInput[];
@@ -796,7 +1369,7 @@ function printHermesSetupResult(result: HermesSetupResult): void {
   console.log("");
   console.log("Connect Hermes");
   console.log(`1. Merge the snippet into ${result.hermesConfig.targetConfigPath}.`);
-  console.log("2. Confirm Hermes loads the Loopgraph MCP server named `loopgraph`.");
+  console.log("2. Confirm Hermes loads `loopgraph_admin`, `loopgraph_webhook_router`, and `loopgraph_lifecycle_router` with their generated exposure profiles.");
   console.log(`3. In Hermes, run: ${result.commandUsage.firstHermesPrompt}`);
   console.log("");
   console.log("Useful clone commands");

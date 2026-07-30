@@ -9,15 +9,15 @@ export class FileStorageAdapter implements StorageAdapter {
   constructor(private rootDir = path.join(process.cwd(), ".loopgraph")) {}
 
   private tracePath(runId: string) {
-    return path.join(this.rootDir, "traces", `${runId}.json`);
+    return path.join(this.rootDir, "traces", `${safeRecordFileName(runId)}.json`);
   }
 
   private reviewPath(reviewId: string) {
-    return path.join(this.rootDir, "reviews", `${reviewId}.json`);
+    return path.join(this.rootDir, "reviews", `${safeRecordFileName(reviewId)}.json`);
   }
 
   private casePath(caseId: string) {
-    return path.join(this.rootDir, "cases", `${caseId}.json`);
+    return path.join(this.rootDir, "cases", `${safeRecordFileName(caseId)}.json`);
   }
 
   private indexPath() {
@@ -91,10 +91,19 @@ export class FileStorageAdapter implements StorageAdapter {
   }
 }
 
+function safeRecordFileName(id: string): string {
+  if (!id || id.length > 512 || /[\u0000-\u001f\u007f]/u.test(id)) {
+    throw new Error("Storage record ID is invalid");
+  }
+  return encodeURIComponent(id);
+}
+
 export async function listTraceFiles(rootDir = path.join(process.cwd(), ".loopgraph")): Promise<string[]> {
   try {
     const files = await readdir(path.join(rootDir, "traces"));
-    return files.filter((file) => file.endsWith(".json")).map((file) => file.replace(/\.json$/, ""));
+    return files
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => decodeURIComponent(file.replace(/\.json$/, "")));
   } catch {
     return [];
   }

@@ -3,13 +3,24 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import {
   evidenceGapSetSchema,
   eventEnvelopeSchema,
+  graphChangeApprovalReceiptSchema,
+  graphChangeSetSchema,
+  graphSnapshotSchema,
+  graphTransactionSchema,
   hermesDesignTaskSchema,
   listDepartmentCatalog,
+  loopPromotionReceiptSchema,
+  metricSampleSchema,
+  observedOutcomeSchema,
+  loopOpportunitySchema,
+  loopControllerPolicySchema,
+  loopControllerRunSchema,
   loopDesignContextSchema,
   loopDesignProposalSetSchema,
   requireDepartmentType,
   routingCardSchema,
-  routingDecisionSchema
+  routingDecisionSchema,
+  valueLedgerEntrySchema
 } from "../core";
 import {
   callLoopgraphRoutingTool,
@@ -90,6 +101,43 @@ import {
   type LoopgraphHermesDesignToolName
 } from "../runtime/hermes-design-tools";
 import {
+  callLoopgraphOpportunityTool,
+  graphChangesGetInputSchema,
+  loopgraphOpportunityToolDefinitions,
+  opportunitiesGetInputSchema,
+  opportunitiesScanInputSchema,
+  opportunityDismissInputSchema,
+  type LoopgraphOpportunityToolName
+} from "../runtime/loop-opportunity-tools";
+import {
+  callLoopgraphRouteJobWorkerTool,
+  loopgraphRouteJobWorkerToolDefinitions,
+  routeJobCancelInputSchema,
+  routeJobRetryInputSchema,
+  routeWorkerRunInputSchema,
+  type LoopgraphRouteJobWorkerToolName
+} from "../runtime/route-job-worker-tools";
+import {
+  callLoopgraphOutcomeTool,
+  loopgraphOutcomeToolDefinitions,
+  metricSampleIngestInputSchema,
+  metricSamplesGetInputSchema,
+  outcomesEvaluateInputSchema,
+  outcomesGetInputSchema,
+  valueLedgerGetInputSchema,
+  valueLedgerRecordInputSchema,
+  type LoopgraphOutcomeToolName
+} from "../runtime/outcome-tools";
+import {
+  callLoopgraphControllerTool,
+  controllerPolicyGetInputSchema,
+  controllerPolicySetInputSchema,
+  controllerRunInputSchema,
+  controllerRunsGetInputSchema,
+  loopgraphControllerToolDefinitions,
+  type LoopgraphControllerToolName
+} from "../runtime/loop-controller-tools";
+import {
   callLoopgraphLoopTool,
   loopgraphLoopToolDefinitions,
   loopsListInputSchema,
@@ -115,9 +163,24 @@ import {
   loopgraphConnectionToolDefinitions,
   type LoopgraphConnectionToolName
 } from "../runtime/connection-tools";
+import {
+  callLoopgraphSemanticGraphTool,
+  graphChangeApplyInputSchema,
+  graphChangeDecideInputSchema,
+  graphHistoryGetInputSchema,
+  graphRollbackApproveInputSchema,
+  graphRollbackInputSchema,
+  loopgraphSemanticGraphToolDefinitions,
+  loopLifecycleApproveInputSchema,
+  loopLifecycleSetInputSchema,
+  loopPromoteInputSchema,
+  loopPromotionApproveInputSchema,
+  type LoopgraphSemanticGraphToolName
+} from "../runtime/semantic-graph-tools";
 import { loadLoopSpecFromPath } from "../runtime/loader";
 
 const LATEST_MCP_PROTOCOL_VERSION = "2025-11-25";
+export const DEFAULT_LOOPGRAPH_MCP_MAX_LINE_BYTES = 1024 * 1024;
 const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set([
   LATEST_MCP_PROTOCOL_VERSION,
   "2025-06-18",
@@ -169,6 +232,11 @@ type LoopgraphMcpToolName =
   | LoopgraphProjectToolName
   | LoopgraphDesignToolName
   | LoopgraphHermesDesignToolName
+  | LoopgraphOpportunityToolName
+  | LoopgraphRouteJobWorkerToolName
+  | LoopgraphOutcomeToolName
+  | LoopgraphControllerToolName
+  | LoopgraphSemanticGraphToolName
   | LoopgraphConnectionToolName
   | LoopgraphLoopToolName;
 
@@ -190,6 +258,32 @@ const toolInputSchemas = {
   loopgraph_hermes_design_tasks_get: hermesDesignTasksGetInputSchema,
   loopgraph_evidence_gaps_get: evidenceGapsGetInputSchema,
   loopgraph_evidence_gap_answer: evidenceGapAnswerInputSchema,
+  loopgraph_opportunities_scan: opportunitiesScanInputSchema,
+  loopgraph_opportunities_get: opportunitiesGetInputSchema,
+  loopgraph_opportunity_dismiss: opportunityDismissInputSchema,
+  loopgraph_graph_changes_get: graphChangesGetInputSchema,
+  loopgraph_route_worker_run: routeWorkerRunInputSchema,
+  loopgraph_route_job_retry: routeJobRetryInputSchema,
+  loopgraph_route_job_cancel: routeJobCancelInputSchema,
+  loopgraph_metric_samples_ingest: metricSampleIngestInputSchema,
+  loopgraph_metric_samples_get: metricSamplesGetInputSchema,
+  loopgraph_outcomes_evaluate: outcomesEvaluateInputSchema,
+  loopgraph_outcomes_get: outcomesGetInputSchema,
+  loopgraph_value_ledger_record: valueLedgerRecordInputSchema,
+  loopgraph_value_ledger_get: valueLedgerGetInputSchema,
+  loopgraph_controller_run: controllerRunInputSchema,
+  loopgraph_controller_runs_get: controllerRunsGetInputSchema,
+  loopgraph_controller_policy_get: controllerPolicyGetInputSchema,
+  loopgraph_controller_policy_set: controllerPolicySetInputSchema,
+  loopgraph_graph_change_decide: graphChangeDecideInputSchema,
+  loopgraph_graph_change_apply: graphChangeApplyInputSchema,
+  loopgraph_graph_history_get: graphHistoryGetInputSchema,
+  loopgraph_loop_promotion_approve: loopPromotionApproveInputSchema,
+  loopgraph_loop_promote: loopPromoteInputSchema,
+  loopgraph_loop_lifecycle_approve: loopLifecycleApproveInputSchema,
+  loopgraph_loop_lifecycle_set: loopLifecycleSetInputSchema,
+  loopgraph_graph_rollback_approve: graphRollbackApproveInputSchema,
+  loopgraph_graph_rollback: graphRollbackInputSchema,
   loopgraph_connections_plan: connectionsPlanInputSchema,
   loopgraph_connections_set_manual_fallback: connectionsSetManualFallbackInputSchema,
   loopgraph_loops_list: loopsListInputSchema,
@@ -225,6 +319,11 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphProjectToolDefinitions,
   ...loopgraphDesignToolDefinitions,
   ...loopgraphHermesDesignToolDefinitions,
+  ...loopgraphOpportunityToolDefinitions,
+  ...loopgraphRouteJobWorkerToolDefinitions,
+  ...loopgraphOutcomeToolDefinitions,
+  ...loopgraphControllerToolDefinitions,
+  ...loopgraphSemanticGraphToolDefinitions,
   ...loopgraphConnectionToolDefinitions,
   ...loopgraphLoopToolDefinitions,
   ...loopgraphRoutingToolDefinitions,
@@ -257,6 +356,17 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/routing-decision",
   "loopgraph://schemas/evidence-gap-set",
   "loopgraph://schemas/hermes-design-task",
+  "loopgraph://schemas/loop-opportunity",
+  "loopgraph://schemas/graph-change-set",
+  "loopgraph://schemas/metric-sample",
+  "loopgraph://schemas/observed-outcome",
+  "loopgraph://schemas/value-ledger-entry",
+  "loopgraph://schemas/loop-controller-policy",
+  "loopgraph://schemas/loop-controller-run",
+  "loopgraph://schemas/graph-snapshot",
+  "loopgraph://schemas/graph-change-approval-receipt",
+  "loopgraph://schemas/graph-transaction",
+  "loopgraph://schemas/loop-promotion-receipt",
   "loopgraph://graph/company"
 ] as const;
 
@@ -284,7 +394,7 @@ export function listLoopgraphMcpTools(options: Pick<LoopgraphMcpServerOptions, "
       annotations: {
         title: titleFromToolName(tool.name),
         readOnlyHint: isReadOnlyToolName(tool.name),
-        destructiveHint: false,
+        destructiveHint: isDestructiveToolName(tool.name),
         idempotentHint: isIdempotentToolName(tool.name),
         openWorldHint: false
       }
@@ -343,10 +453,76 @@ export async function listLoopgraphMcpResources(
       name: "HermesDesignTask schema",
       description: "Durable Loopgraph-initiated design task and delivery state exposed to trusted Hermes sessions.",
       mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
+      name: "LoopOpportunity schema",
+      description: "Explainable, scored opportunity to create, improve, split, merge, or retire a business loop.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[8],
+      name: "GraphChangeSet schema",
+      description: "Versioned proposed changes to the company loop graph derived from observed evidence.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[9],
+      name: "MetricSample schema",
+      description: "Source-qualified observed, modeled, or incomplete metric evidence.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[10],
+      name: "ObservedOutcome schema",
+      description: "Versioned comparison between baseline and post-loop business measurements.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[11],
+      name: "ValueLedgerEntry schema",
+      description: "Net loop value after review, rework, supervision, escalation, and governance cost.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[12],
+      name: "LoopControllerPolicy schema",
+      description: "Project-local policy boundaries for continuous evidence evaluation and automatic shadow changes.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[13],
+      name: "LoopControllerRun schema",
+      description: "Durable controller trigger, evidence, decision, policy receipt, and error record.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[14],
+      name: "GraphSnapshot schema",
+      description: "Content-bound registered LoopSpecs and generated assets captured before and after graph mutation.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[15],
+      name: "GraphChangeApprovalReceipt schema",
+      description: "Accountable approval bound to an exact graph, operation set, policy, actor, and evidence.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[16],
+      name: "GraphTransaction schema",
+      description: "Atomic semantic graph change, promotion, lifecycle, or rollback transaction record.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[17],
+      name: "LoopPromotionReceipt schema",
+      description: "Evidence-bound receipt for one ordered loop activation-mode promotion.",
+      mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
@@ -401,12 +577,15 @@ export async function runLoopgraphMcpStdioServer(
     input?: Readable;
     output?: Writable;
     errorOutput?: Writable;
+    maxLineBytes?: number;
   } = {}
 ): Promise<void> {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const errorOutput = options.errorOutput ?? process.stderr;
+  const maxLineBytes = options.maxLineBytes ?? DEFAULT_LOOPGRAPH_MCP_MAX_LINE_BYTES;
   let buffer = "";
+  let discardingOversizedLine = false;
 
   input.setEncoding("utf8");
 
@@ -415,20 +594,49 @@ export async function runLoopgraphMcpStdioServer(
     let newlineIndex = buffer.indexOf("\n");
 
     while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex).trim();
+      const rawLine = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-
-      if (line.length > 0) {
-        await handleLine(line, output, errorOutput, options);
+      if (discardingOversizedLine) {
+        discardingOversizedLine = false;
+      } else if (Buffer.byteLength(rawLine, "utf8") > maxLineBytes) {
+        writeJsonLine(output, errorResponse(
+          null,
+          -32600,
+          "Request too large",
+          `MCP JSON line exceeds ${maxLineBytes} bytes`
+        ));
+      } else {
+        const line = rawLine.trim();
+        if (line.length > 0) {
+          await handleLine(line, output, errorOutput, options);
+        }
       }
 
       newlineIndex = buffer.indexOf("\n");
     }
+
+    if (!discardingOversizedLine && Buffer.byteLength(buffer, "utf8") > maxLineBytes) {
+      writeJsonLine(output, errorResponse(
+        null,
+        -32600,
+        "Request too large",
+        `MCP JSON line exceeds ${maxLineBytes} bytes`
+      ));
+      buffer = "";
+      discardingOversizedLine = true;
+    }
   }
 
-  const remaining = buffer.trim();
-  if (remaining.length > 0) {
+  const remaining = discardingOversizedLine ? "" : buffer.trim();
+  if (remaining.length > 0 && Buffer.byteLength(remaining, "utf8") <= maxLineBytes) {
     await handleLine(remaining, output, errorOutput, options);
+  } else if (remaining.length > 0) {
+    writeJsonLine(output, errorResponse(
+      null,
+      -32600,
+      "Request too large",
+      `MCP JSON line exceeds ${maxLineBytes} bytes`
+    ));
   }
 }
 
@@ -706,6 +914,41 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphOpportunityToolName(name)) {
+    return callLoopgraphOpportunityTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
+  if (isLoopgraphRouteJobWorkerToolName(name)) {
+    return callLoopgraphRouteJobWorkerTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
+  if (isLoopgraphOutcomeToolName(name)) {
+    return callLoopgraphOutcomeTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
+  if (isLoopgraphControllerToolName(name)) {
+    return callLoopgraphControllerTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
+  if (isLoopgraphSemanticGraphToolName(name)) {
+    return callLoopgraphSemanticGraphTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
   if (isLoopgraphProjectToolName(name)) {
     return callLoopgraphProjectTool(name, boundInput, {
       projectRoot: options.projectRoot
@@ -811,6 +1054,83 @@ function schemaResource(id: string) {
       jsonSchema: zodToJsonSchema(hermesDesignTaskSchema, "HermesDesignTask")
     };
   }
+  if (id === "loop-opportunity") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(loopOpportunitySchema, "LoopOpportunity")
+    };
+  }
+  if (id === "graph-change-set") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(graphChangeSetSchema, "GraphChangeSet")
+    };
+  }
+  if (id === "metric-sample") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(metricSampleSchema, "MetricSample")
+    };
+  }
+  if (id === "observed-outcome") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(observedOutcomeSchema, "ObservedOutcome")
+    };
+  }
+  if (id === "value-ledger-entry") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(valueLedgerEntrySchema, "ValueLedgerEntry")
+    };
+  }
+  if (id === "loop-controller-policy") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(loopControllerPolicySchema, "LoopControllerPolicy")
+    };
+  }
+  if (id === "loop-controller-run") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(loopControllerRunSchema, "LoopControllerRun")
+    };
+  }
+  if (id === "graph-snapshot") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(graphSnapshotSchema, "GraphSnapshot")
+    };
+  }
+  if (id === "graph-change-approval-receipt") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(graphChangeApprovalReceiptSchema, "GraphChangeApprovalReceipt")
+    };
+  }
+  if (id === "graph-transaction") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(graphTransactionSchema, "GraphTransaction")
+    };
+  }
+  if (id === "loop-promotion-receipt") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(loopPromotionReceiptSchema, "LoopPromotionReceipt")
+    };
+  }
   throw new Error(`Schema resource not found: ${id}`);
 }
 
@@ -876,6 +1196,26 @@ function isLoopgraphHermesDesignToolName(value: unknown): value is LoopgraphHerm
   return typeof value === "string" && loopgraphHermesDesignToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphOpportunityToolName(value: unknown): value is LoopgraphOpportunityToolName {
+  return typeof value === "string" && loopgraphOpportunityToolDefinitions.some((tool) => tool.name === value);
+}
+
+function isLoopgraphRouteJobWorkerToolName(value: unknown): value is LoopgraphRouteJobWorkerToolName {
+  return typeof value === "string" && loopgraphRouteJobWorkerToolDefinitions.some((tool) => tool.name === value);
+}
+
+function isLoopgraphOutcomeToolName(value: unknown): value is LoopgraphOutcomeToolName {
+  return typeof value === "string" && loopgraphOutcomeToolDefinitions.some((tool) => tool.name === value);
+}
+
+function isLoopgraphControllerToolName(value: unknown): value is LoopgraphControllerToolName {
+  return typeof value === "string" && loopgraphControllerToolDefinitions.some((tool) => tool.name === value);
+}
+
+function isLoopgraphSemanticGraphToolName(value: unknown): value is LoopgraphSemanticGraphToolName {
+  return typeof value === "string" && loopgraphSemanticGraphToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphProjectToolName(value: unknown): value is LoopgraphProjectToolName {
   return typeof value === "string" && loopgraphProjectToolDefinitions.some((tool) => tool.name === value);
 }
@@ -898,6 +1238,11 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphProjectToolName(value) ||
     isLoopgraphDesignToolName(value) ||
     isLoopgraphHermesDesignToolName(value) ||
+    isLoopgraphOpportunityToolName(value) ||
+    isLoopgraphRouteJobWorkerToolName(value) ||
+    isLoopgraphOutcomeToolName(value) ||
+    isLoopgraphControllerToolName(value) ||
+    isLoopgraphSemanticGraphToolName(value) ||
     isLoopgraphConnectionToolName(value) ||
     isLoopgraphLoopToolName(value);
 }
@@ -920,10 +1265,14 @@ function mcpInstructionsForExposure(exposure: LoopgraphMcpExposure): string {
   if (exposure === "lifecycle_router") {
     return "Loopgraph exposes only lifecycle event receipt, lifecycle state read, and graph tools for notification-only Hermes lifecycle turns.";
   }
-  return "Loopgraph exposes project-bound workspace, department, discovery, design, local runtime, and routing administration tools for trusted Hermes/operator turns.";
+  return "Loopgraph exposes project-bound workspace, department, discovery, design, semantic graph transaction, local runtime, and routing administration tools for trusted Hermes/operator turns.";
 }
 
 function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphSemanticGraphToolName(name)) {
+    return loopgraphSemanticGraphToolDefinitions
+      .find((tool) => tool.name === name)?.readOnly ?? false;
+  }
   return name === "loopgraph_workspace_inspect" ||
     name === "loopgraph_departments_list" ||
     name === "loopgraph_discovery_get" ||
@@ -931,6 +1280,13 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
     name === "loopgraph_project_inspect" ||
     name === "loopgraph_design_context_get" ||
     name === "loopgraph_hermes_design_tasks_get" ||
+    name === "loopgraph_opportunities_get" ||
+    name === "loopgraph_graph_changes_get" ||
+    name === "loopgraph_metric_samples_get" ||
+    name === "loopgraph_outcomes_get" ||
+    name === "loopgraph_value_ledger_get" ||
+    name === "loopgraph_controller_runs_get" ||
+    name === "loopgraph_controller_policy_get" ||
     name === "loopgraph_connections_plan" ||
     name === "loopgraph_loops_list" ||
     name === "loopgraph_runs_get" ||
@@ -948,6 +1304,10 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
 }
 
 function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphSemanticGraphToolName(name)) {
+    return loopgraphSemanticGraphToolDefinitions
+      .find((tool) => tool.name === name)?.idempotent ?? false;
+  }
   return ![
     "loopgraph_discovery_start",
     "loopgraph_discovery_select_departments",
@@ -956,6 +1316,10 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
     "loopgraph_design_submit",
     "loopgraph_design_edit",
     "loopgraph_evidence_gap_answer",
+    "loopgraph_opportunity_dismiss",
+    "loopgraph_route_worker_run",
+    "loopgraph_route_job_retry",
+    "loopgraph_route_job_cancel",
     "loopgraph_connections_set_manual_fallback",
     "loopgraph_loops_materialize",
     "loopgraph_loops_simulate",
@@ -968,6 +1332,13 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
     "loopgraph_route_commit_simulate",
     "loopgraph_hermes_webhooks_test"
   ].includes(name);
+}
+
+function isDestructiveToolName(name: LoopgraphMcpToolName): boolean {
+  return name === "loopgraph_graph_change_apply" ||
+    name === "loopgraph_loop_promote" ||
+    name === "loopgraph_loop_lifecycle_set" ||
+    name === "loopgraph_graph_rollback";
 }
 
 function titleFromToolName(name: string): string {

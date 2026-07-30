@@ -192,6 +192,11 @@ describe("routing tool surface", () => {
     expect(result.duplicate).toBe(false);
     expect(result.eligibleRoutes.map((route) => route.card.loopId)).toEqual(["marketing_ads"]);
     expect(await store.getEventReceipt(event.id)).toBeTruthy();
+    expect(result.controllerTrigger).toMatchObject({
+      enqueued: true,
+      duplicate: false,
+      triggerRecordId: expect.stringMatching(/^controller_trigger_/)
+    });
   });
 
   it("ignores caller-supplied routing cards on Hermes-facing ingest calls", async () => {
@@ -462,7 +467,7 @@ describe("routing tool surface", () => {
       signature: {
         algorithm: "hmac-sha256",
         headerName: "x-loopgraph-signature",
-        keyRef: "local-development"
+        keyRef: "project:.loopgraph/hermes/lifecycle-signing.key"
       },
       target: {
         owner: "hermes",
@@ -490,7 +495,7 @@ describe("routing tool surface", () => {
       signature: {
         algorithm: "hmac-sha256",
         headerName: "x-loopgraph-signature",
-        keyRef: "local-development"
+        keyRef: "project:.loopgraph/hermes/lifecycle-signing.key"
       },
       target: {
         owner: "hermes",
@@ -517,7 +522,7 @@ describe("routing tool surface", () => {
       signature: {
         algorithm: "hmac-sha256",
         headerName: "x-loopgraph-signature",
-        keyRef: "local-development"
+        keyRef: "project:.loopgraph/hermes/lifecycle-signing.key"
       },
       target: {
         owner: "hermes",
@@ -705,7 +710,7 @@ describe("routing tool surface", () => {
       signature: {
         algorithm: "hmac-sha256",
         headerName: "x-loopgraph-signature",
-        keyRef: "local-development"
+        keyRef: "project:.loopgraph/hermes/lifecycle-signing.key"
       },
       target: {
         owner: "hermes",
@@ -933,5 +938,80 @@ describe("routing tool surface", () => {
     const result = await callLoopgraphRoutingTool("loopgraph_routing_catalog_get", { projectRoot });
 
     expect(result).toMatchObject({ count: 1 });
+  });
+
+  it("rejects oversized normalized event payloads before persistence", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = {
+      ...adsEvent("delivery_oversized"),
+      normalizedPayload: {
+        signal: "x".repeat(256 * 1024 + 1)
+      }
+    };
+
+    await expect(loopgraph_events_ingest({ projectRoot, event }, { store }))
+      .rejects.toThrow(/normalizedPayload exceeds|EventEnvelope exceeds|string is too large/);
+    await expect(store.listEventReceipts()).resolves.toHaveLength(0);
+  });
+
+  it("rejects nested secret-like fields before persistence", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = {
+      ...adsEvent("delivery_secret"),
+      normalizedPayload: {
+        campaign: {
+          credentials: {
+            accessToken: "must-not-be-stored"
+          }
+        }
+      }
+    };
+
+    await expect(loopgraph_events_ingest({ projectRoot, event }, { store }))
+      .rejects.toThrow(/forbidden secret-like field: campaign.credentials.accessToken/);
+    await expect(store.listEventReceipts()).resolves.toHaveLength(0);
+  });
+
+  it("rejects registered routing specs that escape the selected project root", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const outsidePath = path.join(path.dirname(projectRoot), `${path.basename(projectRoot)}-outside.json`);
+    await writeFile(outsidePath, `${JSON.stringify(marketingAdsSpec(), null, 2)}\n`);
+    await writeFile(path.join(projectRoot, ".loopgraph", "workspace.json"), `${JSON.stringify({
+      version: 1,
+      demoCatalogEnabled: false,
+      registeredSpecs: [{
+        id: "marketing_ads",
+        name: "Ads",
+        path: path.relative(projectRoot, outsidePath),
+        department: "marketing",
+        addedAt: "2026-07-21T12:00:00.000Z"
+      }]
+    }, null, 2)}\n`);
+
+    await expect(loopgraph_routing_catalog_get({ projectRoot }))
+      .rejects.toThrow(/routing catalog LoopSpec escapes the project root/);
+  });
+
+  it("rejects absolute registered routing specs outside the selected project root", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const outsideRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-routing-outside-"));
+    const outsidePath = path.join(outsideRoot, "outside.json");
+    await writeFile(outsidePath, `${JSON.stringify(marketingAdsSpec(), null, 2)}\n`);
+    await writeFile(path.join(projectRoot, ".loopgraph", "workspace.json"), `${JSON.stringify({
+      version: 1,
+      demoCatalogEnabled: false,
+      registeredSpecs: [{
+        id: "marketing_ads",
+        name: "Ads",
+        path: outsidePath,
+        department: "marketing",
+        addedAt: "2026-07-21T12:00:00.000Z"
+      }]
+    }, null, 2)}\n`);
+
+    await expect(loopgraph_routing_catalog_get({ projectRoot }))
+      .rejects.toThrow(/routing catalog LoopSpec escapes the project root/);
   });
 });

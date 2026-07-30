@@ -20,7 +20,9 @@ const workspaceDirectoryNames = [
   "reviews",
   "cases",
   "connections",
-  "routing"
+  "routing",
+  "opportunities",
+  "graph"
 ] as const;
 
 const rawRegisteredLoopSpecSchema = z.object({

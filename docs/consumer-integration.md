@@ -80,11 +80,15 @@ import { applyReviewDecision } from "loopgraph/runtime";
 await applyReviewDecision(storage, {
   runId: "run_abc",
   status: "approved",
+  reviewerId: "reviewer_alice",
+  role: "approver",
   approvedFingerprints: ["fp1", "fp2"]
+}, {
+  projectRoot: process.cwd()
 });
 ```
 
-CLI parity: `npx loopgraph review approve run_abc --actions fp1,fp2`
+CLI parity: `npx loopgraph review approve run_abc --actions fp1,fp2 --by reviewer_alice --role approver --project .`
 
 ## CI recipe
 

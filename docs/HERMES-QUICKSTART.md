@@ -189,6 +189,24 @@ The fixture test:
 
 It does not send a real provider webhook, apply a live Hermes route, or store provider credentials.
 
+## 9. Run the durable local worker
+
+Every accepted route—including shadow and recommendation routes—creates a durable route job. Process one batch:
+
+```bash
+npm run loopgraph -- worker run --project .
+```
+
+Keep it polling during local use:
+
+```bash
+npm run loopgraph -- worker run --project . --watch --interval 5
+```
+
+The worker does not trust the model decision by itself. It atomically claims the job, reloads the registered LoopSpec, verifies its immutable hash and all event/problem/commit bindings, enforces the activation and connector gates, records the trace, pauses for exact fingerprint approval when required, and prepares signed lifecycle evidence for Hermes.
+
+See [Durable Hermes Route-Job Worker](./ROUTE-JOB-WORKER.md) for retry, dead-letter, API authentication, and live-execution requirements.
+
 ## 9. Simulate the generated loop locally
 
 The same generated fixture can run the accepted LoopSpec in local simulation mode:
@@ -201,7 +219,41 @@ npm run loopgraph -- simulate \
 
 This creates a local trace/review packet only. It does not prove that Productboard, Linear, PostHog, Intercom, Notion, Slack, or any write connector is connected.
 
-## 10. Safe defaults
+## 10. Keep detecting missing and weak loops
+
+Run a one-time scan over the durable local routing, run, verification, and review evidence:
+
+```bash
+npm run loopgraph -- opportunities scan --project .
+```
+
+Keep a trusted local monitor running every 15 minutes:
+
+```bash
+npm run loopgraph -- opportunities scan --project . --watch
+```
+
+Qualified evidence may start a draft Hermes design task. It cannot materialize a loop or perform a business action. Use `--no-auto-start-design` when you want scoring and graph visualization only.
+
+See the [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md) for scoring, dismissal, versioned graph-change, and safety contracts.
+
+## 11. Keep the continuous controller active
+
+Run one project-local controller cycle:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type manual
+```
+
+Keep the trusted trigger queue draining:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
+```
+
+Hermes can inspect the same durable policy and decision receipts through `loopgraph_controller_policy_get`, `loopgraph_controller_runs_get`, and `loopgraph_controller_run`. Event-router and lifecycle-router turns never receive those tools.
+
+## 12. Safe defaults
 
 - All new materialized loops start in shadow routing.
 - Local simulation uses synthetic/redacted fixtures by default.
@@ -209,7 +261,7 @@ This creates a local trace/review packet only. It does not prove that Productboa
 - Provider webhooks should terminate at Hermes, not at Loopgraph workflow routes.
 - Webhook secrets, OAuth tokens, and API keys stay in Hermes or an approved credential store, never in chat or `.loopgraph`.
 
-## 11. Troubleshooting
+## 13. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
@@ -221,7 +273,7 @@ This creates a local trace/review packet only. It does not prove that Productboa
 | Hermes design webhook returns `401` | The route secret or V2 signature inputs do not match | Confirm the URL/secret pair returned by `hermes webhook subscribe` and verify the machines' clocks |
 | `hermes webhooks doctor` fails | The local route manifest is stale after loop changes | Rerun `npm run loopgraph -- hermes webhooks sync --project .` |
 
-## 12. Dependency and vulnerability checks
+## 14. Dependency and vulnerability checks
 
 Before connecting live provider credentials or webhook routes, run:
 

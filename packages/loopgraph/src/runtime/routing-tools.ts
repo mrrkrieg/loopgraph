@@ -13,6 +13,7 @@ import {
   routingDecisionSchema,
   type BusinessProblem,
   type ConnectionPlanItem,
+  type EventEnvelope,
   type EventReceipt,
   type RoutingDecision,
   type RouteCommit,
@@ -23,6 +24,7 @@ import type { AgentRunOutput } from "../core/evidence";
 import type { LoopSpec } from "../core/loop-spec";
 import { FileStorageAdapter } from "../sdk/storage";
 import { buildConnectionPlan } from "./connection-plan";
+import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import {
   emitEscalationCreatedLifecycleEvent,
   emitLoopRunLifecycleEvent,
@@ -31,6 +33,7 @@ import {
   type LoopgraphLifecycleEmitResult
 } from "./lifecycle-events";
 import { loadLoopSpecFromPath } from "./loader";
+import { resolveExistingProjectPath } from "./project-paths";
 import {
   FileRoutingStore,
   ingestRoutingEvent,
@@ -50,6 +53,11 @@ export const LOOPGRAPH_ROUTING_TOOL_NAMES = [
   "loopgraph_routing_human_choice_submit",
   "loopgraph_route_commit_simulate"
 ] as const;
+
+export const MAX_EVENT_ENVELOPE_BYTES = 512 * 1024;
+export const MAX_NORMALIZED_PAYLOAD_BYTES = 256 * 1024;
+export const MAX_NORMALIZED_PAYLOAD_DEPTH = 12;
+export const MAX_NORMALIZED_PAYLOAD_NODES = 5_000;
 
 export type LoopgraphRoutingToolName = (typeof LOOPGRAPH_ROUTING_TOOL_NAMES)[number];
 
@@ -150,6 +158,7 @@ type LifecycleDeliveryToolSummary =
 
 type RoutingDecisionSubmissionWithLifecycle = RoutingDecisionSubmissionResult & {
   lifecycleDeliveries: LifecycleDeliveryToolSummary[];
+  controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 };
 
 export const loopgraphRoutingToolDefinitions = [
@@ -208,6 +217,7 @@ export async function loopgraph_events_ingest(
   options: LoopgraphRoutingToolRuntimeOptions = {}
 ) {
   const parsed = eventsIngestInputSchema.parse(input);
+  assertSafeEventEnvelope(parsed.event);
   const projectRoot = resolveProjectRoot(parsed.projectRoot, options.projectRoot);
   const catalog = await loopgraph_routing_catalog_get({
     projectRoot
@@ -220,11 +230,112 @@ export async function loopgraph_events_ingest(
     replay: parsed.replay,
     now: options.now
   });
+  const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
+    projectRoot,
+    type: "routing_event",
+    triggerId: result.receipt.eventId,
+    sourceRef: `routing-event:${result.receipt.eventId}`,
+    occurredAt: result.receipt.event.receivedAt,
+    requestedBy: "loopgraph-event-ingest",
+    evidenceRefs: [result.receipt.id, result.receipt.eventId]
+  }, { now: options.now });
 
   return {
     ...result,
-    catalogVersion: catalog.catalogVersion
+    catalogVersion: catalog.catalogVersion,
+    controllerTrigger
   };
+}
+
+export function assertSafeEventEnvelope(event: EventEnvelope): void {
+  const eventBytes = byteLengthOfJson(event, "EventEnvelope");
+  if (eventBytes > MAX_EVENT_ENVELOPE_BYTES) {
+    throw new Error(
+      `EventEnvelope exceeds ${MAX_EVENT_ENVELOPE_BYTES} bytes (${eventBytes} received)`
+    );
+  }
+  const payloadBytes = byteLengthOfJson(event.normalizedPayload, "normalizedPayload");
+  if (payloadBytes > MAX_NORMALIZED_PAYLOAD_BYTES) {
+    throw new Error(
+      `normalizedPayload exceeds ${MAX_NORMALIZED_PAYLOAD_BYTES} bytes (${payloadBytes} received)`
+    );
+  }
+
+  let nodeCount = 0;
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown, depth: number, trail: string[]): void => {
+    nodeCount += 1;
+    if (nodeCount > MAX_NORMALIZED_PAYLOAD_NODES) {
+      throw new Error(`normalizedPayload exceeds ${MAX_NORMALIZED_PAYLOAD_NODES} values`);
+    }
+    if (depth > MAX_NORMALIZED_PAYLOAD_DEPTH) {
+      throw new Error(`normalizedPayload exceeds maximum depth ${MAX_NORMALIZED_PAYLOAD_DEPTH}`);
+    }
+    if (typeof value === "string" && Buffer.byteLength(value, "utf8") > 16 * 1024) {
+      throw new Error(`normalizedPayload string is too large at ${trail.join(".") || "<root>"}`);
+    }
+    if (!value || typeof value !== "object") return;
+    if (seen.has(value)) throw new Error("normalizedPayload must not contain cycles");
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      if (value.length > 1_000) {
+        throw new Error(`normalizedPayload array is too large at ${trail.join(".") || "<root>"}`);
+      }
+      value.forEach((item, index) => visit(item, depth + 1, [...trail, String(index)]));
+      return;
+    }
+
+    const entries = Object.entries(value);
+    if (entries.length > 500) {
+      throw new Error(`normalizedPayload object has too many fields at ${trail.join(".") || "<root>"}`);
+    }
+    for (const [key, child] of entries) {
+      if (key.length > 256) {
+        throw new Error(`normalizedPayload field name is too long at ${trail.join(".") || "<root>"}`);
+      }
+      if (isSecretLikePayloadKey(key)) {
+        throw new Error(`normalizedPayload contains forbidden secret-like field: ${[...trail, key].join(".")}`);
+      }
+      visit(child, depth + 1, [...trail, key]);
+    }
+  };
+  visit(event.normalizedPayload, 0, []);
+}
+
+function byteLengthOfJson(value: unknown, label: string): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), "utf8");
+  } catch {
+    throw new Error(`${label} must be JSON serializable`);
+  }
+}
+
+function isSecretLikePayloadKey(key: string): boolean {
+  const normalized = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .toLowerCase()
+    .replace(/^_+|_+$/g, "");
+  if ([
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "authorization",
+    "cookie",
+    "set_cookie",
+    "api_key",
+    "apikey",
+    "client_secret",
+    "access_token",
+    "refresh_token",
+    "private_key",
+    "signing_key",
+    "webhook_secret"
+  ].includes(normalized)) return true;
+  return /(^|_)(password|passwd|secret|private_key)$/.test(normalized) ||
+    /(^|_)(access|refresh|auth|bearer|github|slack|hubspot|api)_?token$/.test(normalized);
 }
 
 export async function loopgraph_routing_decision_submit(
@@ -410,10 +521,24 @@ async function submitRoutingDecisionWithAcceptedLifecycle(input: {
         })
       ))
     : [];
+  const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
+    projectRoot: input.projectRoot,
+    type: "routing_event",
+    triggerId: submission.attempt.id,
+    sourceRef: `routing-decision:${submission.attempt.id}`,
+    occurredAt: submission.attempt.createdAt,
+    requestedBy: "loopgraph-routing-decision",
+    evidenceRefs: [
+      submission.attempt.id,
+      ...(submission.problem ? [submission.problem.id] : []),
+      ...submission.routeJobs.map((job) => job.id)
+    ]
+  }, { now: input.now });
 
   return {
     ...submission,
-    lifecycleDeliveries: lifecycleDeliveries.map(summarizeLifecycleResult)
+    lifecycleDeliveries: lifecycleDeliveries.map(summarizeLifecycleResult),
+    controllerTrigger
   };
 }
 
@@ -473,7 +598,7 @@ export async function loopgraph_route_commit_simulate(
   const storage = new FileStorageAdapter(getLoopgraphRoot(projectRoot));
   const simulation = await simulateLoop({
     spec: loaded.spec,
-    fixture: routeCommitFixture({
+    fixture: buildRouteCommitSimulationFixture({
       spec: loaded.spec,
       receipt,
       commit,
@@ -613,7 +738,11 @@ export async function loadRoutingCardsFromProject(input: {
   const compiledCards: RoutingCard[] = [];
 
   for (const specPath of specPaths) {
-    const absolutePath = path.isAbsolute(specPath) ? specPath : path.resolve(input.projectRoot, specPath);
+    const absolutePath = await resolveExistingProjectPath(
+      input.projectRoot,
+      specPath,
+      "routing catalog LoopSpec"
+    );
     const loaded = await loadLoopSpecFromPath(absolutePath);
     if (!loaded.ok) continue;
     const card = compileRoutingCardFromLoopSpec(loaded.spec, {
@@ -621,8 +750,7 @@ export async function loadRoutingCardsFromProject(input: {
       currentReadiness: readinessForRequiredConnections(
         loaded.spec.routing?.requiredConnections ?? [],
         connectionReadinessByCapability
-      ),
-      loopStatus: "active"
+      )
     });
     if (card) compiledCards.push(card);
   }
@@ -727,7 +855,7 @@ async function loadRegisteredLoopSpec(projectRoot: string, loopId: string) {
   return loadLoopSpecFromPath(specPath);
 }
 
-function routeCommitFixture(input: {
+export function buildRouteCommitSimulationFixture(input: {
   spec: LoopSpec;
   receipt: EventReceipt;
   commit: RouteCommit;

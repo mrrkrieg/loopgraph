@@ -54,6 +54,19 @@ Provider webhooks should point at Hermes, not directly at Loopgraph workflow exe
 
 For proactive Loopgraph-initiated design work, configure the dedicated Hermes `loopgraph.design_requested` webhook described in the [Hermes design bridge](../../docs/HERMES-DESIGN-BRIDGE.md). Hermes reads the durable task and submits evidence/proposals through Loopgraph MCP; the webhook only wakes the agent.
 
+To detect missing or weak loops from accumulated local problems, routing corrections, failed verification, and review friction, use the [Loop opportunity engine](../../docs/LOOP-OPPORTUNITY-ENGINE.md). Qualified opportunities can start a draft Hermes design task but cannot materialize or execute a loop.
+
+To run the full evidence-to-design cycle, use `loopgraph controller run --project .`. The [continuous loop controller](../../docs/CONTINUOUS-LOOP-CONTROLLER.md) persists idempotent decisions, asks Hermes for missing design evidence, and materializes only strict low-risk additions in shadow mode.
+
+Accepted Hermes routes become durable jobs, including shadow and recommendation routes. Process them once or continuously:
+
+```bash
+npx loopgraph worker run --project .
+npx loopgraph worker run --project . --watch --interval 5
+```
+
+The worker atomically claims work, verifies the immutable LoopSpec hash and route binding, enforces activation/connector/approval gates, retries with backoff, dead-letters exhausted jobs, and prepares signed lifecycle evidence for Hermes. See the [route-job worker guide](../../docs/ROUTE-JOB-WORKER.md).
+
 See [Hermes examples](../../docs/HERMES-EXAMPLES.md) for the Marketing reference flow, strict Legal / Compliance sensitive-work example, and Custom field-ops example.
 
 ### Runtime API
@@ -99,6 +112,8 @@ Wire `StorageAdapter` (Postgres, files, etc.) and call `runLoop()` from a cron o
 | `case *` | List, show, resolve escalation cases |
 | `init <template>` | Scaffold hero templates |
 | `adapter test` | Mock adapter conformance |
+| `worker run` | Claim and process durable Hermes route jobs |
+| `worker retry` / `worker cancel` | Explicit operator recovery with actor and reason |
 
 `register` and the full Design Studio template catalog are app-only in the Loopgraph repo.
 

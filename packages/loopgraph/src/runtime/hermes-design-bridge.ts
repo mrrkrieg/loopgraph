@@ -48,6 +48,7 @@ export type HermesDesignRequest = {
     timestampHeader: "x-hermes-timestamp";
   };
   allowedLoopgraphTools: [
+    "loopgraph_opportunities_get",
     "loopgraph_evidence_gaps_get",
     "loopgraph_evidence_gap_answer",
     "loopgraph_design_context_get",
@@ -577,6 +578,7 @@ function buildHermesDesignRequest(input: {
       }
     } : {}),
     allowedLoopgraphTools: [
+      "loopgraph_opportunities_get",
       "loopgraph_evidence_gaps_get",
       "loopgraph_evidence_gap_answer",
       "loopgraph_design_context_get",
@@ -589,6 +591,9 @@ function buildHermesDesignRequest(input: {
           "Submit answers through Loopgraph, then wait for the refreshed evidence-gap result."
         ]
       : [
+          ...(input.task.originOpportunityId
+            ? [`Read loop opportunity ${input.task.originOpportunityId} through loopgraph_opportunities_get before proposing a graph change.`]
+            : []),
           "Use only the bounded design context and registered Loopgraph schemas.",
           "Return a LoopDesignProposalSet through the signed callback or loopgraph_design_submit.",
           "Do not materialize specs, connect providers, or perform business actions."

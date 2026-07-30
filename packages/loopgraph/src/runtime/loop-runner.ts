@@ -132,9 +132,15 @@ export async function runLoop(input: RunLoopInput): Promise<RunLoopResult> {
       toolKey: action.toolKey,
       input: action.payload,
       output: { mock: input.mode === "simulate" },
-      status: "completed" as const,
+      status: (
+        action.requiresApproval
+          ? "pending"
+          : input.mode === "simulate"
+            ? "mock_committed"
+            : "pending"
+      ) as "pending" | "mock_committed",
       startedAt,
-      completedAt: startedAt
+      ...(input.mode === "simulate" && !action.requiresApproval ? { completedAt: startedAt } : {})
     })),
     policyDecisions,
     verificationResults,
@@ -143,7 +149,18 @@ export async function runLoop(input: RunLoopInput): Promise<RunLoopResult> {
     outputs: [{ id: "output_1", type: "assessment", content: agentOutput }],
     metrics: [],
     errors: [],
-    ...(input.provenance ? { provenance: input.provenance } : {}),
+    provenance: input.provenance ?? {
+      invocation: {
+        actor: input.mode === "simulate" ? "local-simulator" : "loop-runner",
+        source: `loopgraph.${input.mode}`
+      },
+      approvalPolicy: {
+        requireFingerprintMatch: input.spec.approval.requireFingerprintMatch,
+        separateCustomerFacingApproval: input.spec.approval.separateCustomerFacingApproval,
+        allowedRoles: input.spec.approval.allowedRoles
+      },
+      connectorChecks: []
+    },
     startedAt,
     completedAt: startedAt,
     latencyMs: 0,
