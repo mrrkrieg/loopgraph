@@ -90,6 +90,8 @@ export const loopControllerDecisionSchema = z.object({
   designTaskId: z.string().min(1).optional(),
   designRunId: z.string().min(1).optional(),
   materializationId: z.string().min(1).optional(),
+  graphApprovalReceiptId: z.string().min(1).optional(),
+  graphTransactionId: z.string().min(1).optional(),
   department: DepartmentTypeSchema.optional(),
   targetLoopIds: z.array(z.string().min(1)).default([]),
   score: z.number().min(0).max(100).optional(),

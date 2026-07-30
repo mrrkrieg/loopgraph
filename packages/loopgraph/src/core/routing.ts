@@ -19,6 +19,8 @@ export const routingActivationModeSchema = z.enum([
   "autonomous_low_risk"
 ]);
 
+export type RoutingActivationMode = z.infer<typeof routingActivationModeSchema>;
+
 export const routingAmbiguityPolicySchema = z.enum(["ignore", "defer", "request_human", "route_to_triage"]);
 export const routingNoMatchPolicySchema = z.enum(["unhandled", "ignore", "request_human"]);
 export const routingFanoutModeSchema = z.enum(["none", "independent_only", "declared_ordered"]);
@@ -466,7 +468,10 @@ export function compileRoutingCardFromLoopSpec(
     department: spec.topology?.department ? normalizeDepartmentType(spec.topology.department) ?? "custom" : undefined,
     goal: spec.metadata.description ?? spec.metadata.name,
     currentReadiness: options.currentReadiness ?? "unknown",
-    loopStatus: options.loopStatus ?? "active",
+    loopStatus: options.loopStatus ??
+      (spec.metadata.labels?.lifecycleStatus === "paused" || spec.metadata.labels?.lifecycleStatus === "retired"
+        ? "disabled"
+        : "active"),
     problemTypes: routing.problemTypes,
     explicitNonGoals: routing.excludes.map((rule) => rule.reason),
     accepts: routing.accepts,

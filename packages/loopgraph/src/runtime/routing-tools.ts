@@ -750,8 +750,7 @@ export async function loadRoutingCardsFromProject(input: {
       currentReadiness: readinessForRequiredConnections(
         loaded.spec.routing?.requiredConnections ?? [],
         connectionReadinessByCapability
-      ),
-      loopStatus: "active"
+      )
     });
     if (card) compiledCards.push(card);
   }
