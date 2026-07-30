@@ -1,4 +1,5 @@
 import type { LoopSpec } from "../core/loop-spec";
+import type { RunProvenance } from "../core/trace";
 import type { SimulationFixture } from "./fixture-loader";
 import type { StorageAdapter } from "../sdk/adapters";
 import { runLoop, type RunLoopResult } from "./loop-runner";
@@ -9,6 +10,7 @@ export async function simulateLoop(input: {
   spec: LoopSpec;
   fixture: SimulationFixture | string;
   storage?: StorageAdapter;
+  provenance?: RunProvenance;
 }): Promise<SimulateResult> {
   const { loadFixture } = await import("./fixture-loader");
   const { FileStorageAdapter } = await import("../sdk/storage");
@@ -21,6 +23,7 @@ export async function simulateLoop(input: {
     fixture,
     eventId: fixture.eventId,
     startedAt: fixture.simulatedAt,
-    storage
+    storage,
+    provenance: input.provenance
   });
 }

@@ -7,7 +7,10 @@ import {
   mapUiDecisionToReviewStatus,
   ReviewServiceError
 } from "@/lib/loopgraph-runtime/review-service";
-import { getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getStorageAdapter
+} from "@/lib/loopgraph-runtime/storage-resolver";
 import type { ReviewRole } from "@/lib/loopgraph-core/constants";
 
 export async function submitHumanReviewAction(formData: FormData) {
@@ -16,6 +19,7 @@ export async function submitHumanReviewAction(formData: FormData) {
   const decision = String(formData.get("decision") ?? "approved");
   const reviewerNotes = String(formData.get("reviewer_notes") ?? "");
   const teacherFeedback = String(formData.get("teacher_feedback") ?? "");
+  const reviewerId = String(formData.get("reviewer_id") ?? "").trim();
   const role = String(formData.get("reviewer_role") ?? "approver") as ReviewRole;
   const approvedFingerprints = formData
     .getAll("approved_fingerprints")
@@ -24,6 +28,9 @@ export async function submitHumanReviewAction(formData: FormData) {
 
   if (!runId) {
     redirect(loopId ? `/loops/${loopId}/reviews?error=Missing+run+id` : "/loops");
+  }
+  if (!reviewerId) {
+    redirect(`/loops/${loopId}/reviews?runId=${runId}&error=Reviewer+identity+is+required`);
   }
 
   try {
@@ -39,6 +46,7 @@ export async function submitHumanReviewAction(formData: FormData) {
       runId,
       status: mapUiDecisionToReviewStatus(decision),
       approvedFingerprints: decision === "approved" ? approvedFingerprints : [],
+      reviewerId,
       role,
       comment: reviewerNotes,
       teacherFeedback,
@@ -47,6 +55,8 @@ export async function submitHumanReviewAction(formData: FormData) {
       botsittingMinutes: Number(formData.get("botsitting_minutes") ?? 0),
       escalationMinutes: Number(formData.get("escalation_minutes") ?? 0),
       governanceMinutes: Number(formData.get("governance_minutes") ?? 0)
+    }, {
+      projectRoot: getActiveLoopgraphProjectRoot()
     });
   } catch (error) {
     const message = encodeURIComponent(error instanceof ReviewServiceError ? error.message : "Review failed");

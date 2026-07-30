@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   businessProblemSchema,
@@ -148,6 +148,61 @@ export class FileRoutingStore implements RoutingStore {
       .filter((job) => !filters.status || job.status === filters.status);
   }
 
+  async claimDueRouteJobsAtomically(input: {
+    claimedBy: string;
+    now: Date;
+    leaseSeconds: number;
+    limit: number;
+  }): Promise<RouteJob[]> {
+    return this.withRouteJobsLock(async () => {
+      const jobs = await this.listRouteJobs();
+      return claimRouteJobCandidates({
+        jobs,
+        claimedBy: input.claimedBy,
+        now: input.now,
+        leaseSeconds: input.leaseSeconds,
+        limit: input.limit,
+        save: (job) => this.saveRouteJob(job)
+      });
+    });
+  }
+
+  async claimWaitingReviewRouteJobsAtomically(input: {
+    claimedBy: string;
+    now: Date;
+    leaseSeconds: number;
+    limit: number;
+  }): Promise<RouteJob[]> {
+    return this.withRouteJobsLock(async () => {
+      const jobs = await this.listRouteJobs({ status: "waiting_review" });
+      return claimWaitingReviewCandidates({
+        jobs,
+        claimedBy: input.claimedBy,
+        now: input.now,
+        leaseSeconds: input.leaseSeconds,
+        limit: input.limit,
+        save: (job) => this.saveRouteJob(job)
+      });
+    });
+  }
+
+  async updateRouteJobAtomically(input: {
+    jobId: string;
+    expectedLeaseToken?: string;
+    update: (job: RouteJob) => RouteJob;
+  }): Promise<RouteJob> {
+    return this.withRouteJobsLock(async () => {
+      const job = await this.getRouteJob(input.jobId);
+      if (!job) throw new Error(`Route job not found: ${input.jobId}`);
+      if (input.expectedLeaseToken && job.lease?.leaseToken !== input.expectedLeaseToken) {
+        throw new Error(`Route job lease lost: ${input.jobId}`);
+      }
+      const updated = routeJobSchema.parse(input.update(job));
+      await this.saveRouteJob(updated);
+      return updated;
+    });
+  }
+
   async saveRoutingCorrection(correction: RoutingCorrection): Promise<void> {
     const parsed = routingCorrectionSchema.parse(correction);
     await this.ensureDirs();
@@ -187,6 +242,37 @@ export class FileRoutingStore implements RoutingStore {
 
   private recordPath(collection: string, id: string): string {
     return path.join(this.collectionPath(collection), `${safeFileName(id)}.json`);
+  }
+
+  private async withRouteJobsLock<T>(operation: () => Promise<T>): Promise<T> {
+    await this.ensureDirs();
+    const lockPath = path.join(this.collectionPath("jobs"), ".queue.lock");
+    const startedAt = Date.now();
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+
+    while (!handle) {
+      try {
+        handle = await open(lockPath, "wx");
+        await handle.writeFile(JSON.stringify({ pid: process.pid, acquiredAt: new Date().toISOString() }));
+      } catch (error) {
+        if (!isFileExistsError(error)) throw error;
+        if (await isStaleLock(lockPath, 30_000)) {
+          await unlink(lockPath).catch(() => undefined);
+          continue;
+        }
+        if (Date.now() - startedAt >= 5_000) {
+          throw new Error("Timed out waiting for the route-job queue lock");
+        }
+        await wait(10);
+      }
+    }
+
+    try {
+      return await operation();
+    } finally {
+      await handle.close();
+      await unlink(lockPath).catch(() => undefined);
+    }
   }
 
   private async listRecords<T>(collection: string, schema: { parse(input: unknown): T }): Promise<T[]> {
@@ -402,15 +488,13 @@ export async function submitRoutingDecision(input: {
 
     await input.store.saveRouteCommit(commit);
     routeCommits.push(commit);
-    if (commit.status === "queued") {
-      routeJobs.push(await upsertRouteJobForCommit({
-        store: input.store,
-        event: receipt.event,
-        commit,
-        activationMode: card.activationMode,
-        nowIso
-      }));
-    }
+    routeJobs.push(await upsertRouteJobForCommit({
+      store: input.store,
+      event: receipt.event,
+      commit,
+      activationMode: card.activationMode,
+      nowIso
+    }));
   }
 
   const routeCommitIds = new Set([...problem.routeCommitIds, ...routeCommits.map((commit) => commit.id)]);
@@ -447,48 +531,67 @@ export async function claimDueRouteJobs(input: {
   limit?: number;
 }): Promise<RouteJob[]> {
   const now = input.now ?? new Date();
-  const nowIso = now.toISOString();
   const leaseSeconds = input.leaseSeconds ?? 300;
-  const leaseExpiresAt = new Date(now.getTime() + leaseSeconds * 1000).toISOString();
   const limit = input.limit ?? 10;
-  const candidates = (await input.store.listRouteJobs())
-    .filter((job) => ["queued", "failed"].includes(job.status))
-    .filter((job) => Date.parse(job.nextRunAt) <= now.getTime())
-    .filter((job) => !job.lease || Date.parse(job.lease.expiresAt) <= now.getTime())
-    .filter((job) => job.attemptCount < job.maxAttempts)
-    .sort((left, right) => left.nextRunAt.localeCompare(right.nextRunAt) || left.createdAt.localeCompare(right.createdAt))
-    .slice(0, limit);
-  const claimed: RouteJob[] = [];
-
-  for (const job of candidates) {
-    const updated = routeJobSchema.parse({
-      ...job,
-      status: "claimed",
-      attemptCount: job.attemptCount + 1,
-      lease: {
-        claimedBy: input.claimedBy,
-        claimedAt: nowIso,
-        expiresAt: leaseExpiresAt
-      },
-      updatedAt: nowIso
+  if (input.store instanceof FileRoutingStore) {
+    return input.store.claimDueRouteJobsAtomically({
+      claimedBy: input.claimedBy,
+      now,
+      leaseSeconds,
+      limit
     });
-    await input.store.saveRouteJob(updated);
-    claimed.push(updated);
   }
+  return claimRouteJobCandidates({
+    jobs: await input.store.listRouteJobs(),
+    claimedBy: input.claimedBy,
+    now,
+    leaseSeconds,
+    limit,
+    save: (job) => input.store.saveRouteJob(job)
+  });
+}
 
-  return claimed;
+export async function claimWaitingReviewRouteJobs(input: {
+  store: RoutingStore;
+  claimedBy: string;
+  now?: Date;
+  leaseSeconds?: number;
+  limit?: number;
+}): Promise<RouteJob[]> {
+  const now = input.now ?? new Date();
+  const leaseSeconds = input.leaseSeconds ?? 300;
+  const limit = input.limit ?? 10;
+  if (input.store instanceof FileRoutingStore) {
+    return input.store.claimWaitingReviewRouteJobsAtomically({
+      claimedBy: input.claimedBy,
+      now,
+      leaseSeconds,
+      limit
+    });
+  }
+  return claimWaitingReviewCandidates({
+    jobs: await input.store.listRouteJobs({ status: "waiting_review" }),
+    claimedBy: input.claimedBy,
+    now,
+    leaseSeconds,
+    limit,
+    save: (job) => input.store.saveRouteJob(job)
+  });
 }
 
 export async function markRouteJobRunning(input: {
   store: RoutingStore;
   jobId: string;
   now?: Date;
+  leaseToken?: string;
+  runId?: string;
 }): Promise<RouteJob> {
   return updateRouteJobStatus({
     store: input.store,
     jobId: input.jobId,
     status: "running",
-    now: input.now
+    now: input.now,
+    leaseToken: input.leaseToken
   });
 }
 
@@ -496,12 +599,16 @@ export async function markRouteJobWaitingReview(input: {
   store: RoutingStore;
   jobId: string;
   now?: Date;
+  leaseToken?: string;
+  runId?: string;
 }): Promise<RouteJob> {
   return updateRouteJobStatus({
     store: input.store,
     jobId: input.jobId,
     status: "waiting_review",
     now: input.now,
+    leaseToken: input.leaseToken,
+    runId: input.runId,
     clearLease: true
   });
 }
@@ -510,12 +617,18 @@ export async function markRouteJobCompleted(input: {
   store: RoutingStore;
   jobId: string;
   now?: Date;
+  leaseToken?: string;
+  result?: RouteJob["result"];
+  runId?: string;
 }): Promise<RouteJob> {
   return updateRouteJobStatus({
     store: input.store,
     jobId: input.jobId,
     status: "completed",
     now: input.now,
+    leaseToken: input.leaseToken,
+    result: input.result,
+    runId: input.runId,
     clearLease: true
   });
 }
@@ -525,30 +638,34 @@ export async function failRouteJob(input: {
   jobId: string;
   error: { code?: string; message: string };
   now?: Date;
+  leaseToken?: string;
 }): Promise<RouteJob> {
-  const job = await input.store.getRouteJob(input.jobId);
-  if (!job) throw new Error(`Route job not found: ${input.jobId}`);
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
-  const hasRetriesRemaining = job.attemptCount < job.maxAttempts;
-  const status: RouteJob["status"] = hasRetriesRemaining ? "failed" : "dead_letter";
-  const retryDelaySeconds = routeJobRetryDelaySeconds(job);
-  const updated = routeJobSchema.parse({
-    ...job,
-    status,
-    lease: undefined,
-    nextRunAt: hasRetriesRemaining
-      ? new Date(now.getTime() + retryDelaySeconds * 1000).toISOString()
-      : job.nextRunAt,
-    lastError: {
-      ...input.error,
-      at: nowIso
-    },
-    deadLetterReason: hasRetriesRemaining ? undefined : input.error.message,
-    updatedAt: nowIso
+  return mutateRouteJob({
+    store: input.store,
+    jobId: input.jobId,
+    expectedLeaseToken: input.leaseToken,
+    update: (job) => {
+      const hasRetriesRemaining = job.attemptCount < job.maxAttempts;
+      const status: RouteJob["status"] = hasRetriesRemaining ? "failed" : "dead_letter";
+      const retryDelaySeconds = routeJobRetryDelaySeconds(job);
+      return routeJobSchema.parse({
+        ...job,
+        status,
+        lease: undefined,
+        nextRunAt: hasRetriesRemaining
+          ? new Date(now.getTime() + retryDelaySeconds * 1000).toISOString()
+          : job.nextRunAt,
+        lastError: {
+          ...input.error,
+          at: nowIso
+        },
+        deadLetterReason: hasRetriesRemaining ? undefined : input.error.message,
+        updatedAt: nowIso
+      });
+    }
   });
-  await input.store.saveRouteJob(updated);
-  return updated;
 }
 
 export async function updateRouteJobStatus(input: {
@@ -557,17 +674,118 @@ export async function updateRouteJobStatus(input: {
   status: RouteJob["status"];
   now?: Date;
   clearLease?: boolean;
+  leaseToken?: string;
+  result?: RouteJob["result"];
+  runId?: string;
 }): Promise<RouteJob> {
-  const job = await input.store.getRouteJob(input.jobId);
-  if (!job) throw new Error(`Route job not found: ${input.jobId}`);
-  const updated = routeJobSchema.parse({
-    ...job,
-    status: input.status,
-    ...(input.clearLease ? { lease: undefined } : {}),
-    updatedAt: (input.now ?? new Date()).toISOString()
+  return mutateRouteJob({
+    store: input.store,
+    jobId: input.jobId,
+    expectedLeaseToken: input.leaseToken,
+    update: (job) => routeJobSchema.parse({
+      ...job,
+      status: input.status,
+      ...(input.runId ? { runId: input.runId } : {}),
+      ...(input.result ? { result: input.result } : {}),
+      ...(input.clearLease ? { lease: undefined } : {}),
+      updatedAt: (input.now ?? new Date()).toISOString()
+    })
   });
-  await input.store.saveRouteJob(updated);
-  return updated;
+}
+
+export async function renewRouteJobLease(input: {
+  store: RoutingStore;
+  jobId: string;
+  leaseToken: string;
+  leaseSeconds?: number;
+  now?: Date;
+}): Promise<RouteJob> {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  return mutateRouteJob({
+    store: input.store,
+    jobId: input.jobId,
+    expectedLeaseToken: input.leaseToken,
+    update: (job) => {
+      if (!job.lease) throw new Error(`Route job is not leased: ${job.id}`);
+      return routeJobSchema.parse({
+        ...job,
+        lease: {
+          ...job.lease,
+          heartbeatAt: nowIso,
+          expiresAt: new Date(now.getTime() + (input.leaseSeconds ?? 300) * 1000).toISOString()
+        },
+        updatedAt: nowIso
+      });
+    }
+  });
+}
+
+export async function retryRouteJob(input: {
+  store: RoutingStore;
+  jobId: string;
+  requestedBy: string;
+  reason: string;
+  now?: Date;
+}): Promise<RouteJob> {
+  const nowIso = (input.now ?? new Date()).toISOString();
+  return mutateRouteJob({
+    store: input.store,
+    jobId: input.jobId,
+    update: (job) => {
+      if (!["failed", "dead_letter"].includes(job.status)) {
+        throw new Error(`Route job ${job.id} cannot be retried from status ${job.status}`);
+      }
+      return routeJobSchema.parse({
+        ...job,
+        status: "queued",
+        attemptCount: 0,
+        lease: undefined,
+        nextRunAt: nowIso,
+        deadLetterReason: undefined,
+        lastError: {
+          code: "MANUAL_RETRY_REQUESTED",
+          message: `${input.reason} (requested by ${input.requestedBy})`,
+          at: nowIso
+        },
+        updatedAt: nowIso
+      });
+    }
+  });
+}
+
+export async function cancelRouteJob(input: {
+  store: RoutingStore;
+  jobId: string;
+  cancelledBy: string;
+  reason: string;
+  now?: Date;
+}): Promise<RouteJob> {
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  return mutateRouteJob({
+    store: input.store,
+    jobId: input.jobId,
+    update: (job) => {
+      if (job.status === "completed") {
+        throw new Error(`Completed route job ${job.id} cannot be cancelled`);
+      }
+      if (job.lease && Date.parse(job.lease.expiresAt) > now.getTime()) {
+        throw new Error(`Route job ${job.id} is actively leased by ${job.lease.claimedBy}; retry cancellation after the lease expires`);
+      }
+      return routeJobSchema.parse({
+        ...job,
+        status: "cancelled",
+        lease: undefined,
+        lastError: {
+          code: "CANCELLED_BY_OPERATOR",
+          message: `${input.reason} (cancelled by ${input.cancelledBy})`,
+          at: nowIso
+        },
+        updatedAt: nowIso
+      });
+    }
+  });
 }
 
 async function upsertRouteJobForCommit(input: {
@@ -626,12 +844,140 @@ function routeJobRetryDelaySeconds(job: RouteJob): number {
   return Math.min(job.retryPolicy.maxDelaySeconds, delay);
 }
 
+async function claimRouteJobCandidates(input: {
+  jobs: RouteJob[];
+  claimedBy: string;
+  now: Date;
+  leaseSeconds: number;
+  limit: number;
+  save: (job: RouteJob) => Promise<void>;
+}): Promise<RouteJob[]> {
+  const nowIso = input.now.toISOString();
+  const leaseExpiresAt = new Date(input.now.getTime() + input.leaseSeconds * 1000).toISOString();
+  const candidates = input.jobs
+    .filter((job) => ["queued", "failed", "claimed", "running"].includes(job.status))
+    .filter((job) => Date.parse(job.nextRunAt) <= input.now.getTime())
+    .filter((job) => !job.lease || Date.parse(job.lease.expiresAt) <= input.now.getTime())
+    .filter((job) => job.attemptCount < job.maxAttempts)
+    .sort((left, right) => left.nextRunAt.localeCompare(right.nextRunAt) || left.createdAt.localeCompare(right.createdAt))
+    .slice(0, input.limit);
+  const claimed: RouteJob[] = [];
+
+  for (const job of candidates) {
+    const leaseToken = contentHash({
+      jobId: job.id,
+      claimedBy: input.claimedBy,
+      claimedAt: nowIso,
+      attemptCount: job.attemptCount + 1
+    });
+    const updated = routeJobSchema.parse({
+      ...job,
+      status: "claimed",
+      attemptCount: job.attemptCount + 1,
+      lease: {
+        claimedBy: input.claimedBy,
+        leaseToken,
+        claimedAt: nowIso,
+        heartbeatAt: nowIso,
+        expiresAt: leaseExpiresAt
+      },
+      updatedAt: nowIso
+    });
+    await input.save(updated);
+    claimed.push(updated);
+  }
+
+  return claimed;
+}
+
+async function claimWaitingReviewCandidates(input: {
+  jobs: RouteJob[];
+  claimedBy: string;
+  now: Date;
+  leaseSeconds: number;
+  limit: number;
+  save: (job: RouteJob) => Promise<void>;
+}): Promise<RouteJob[]> {
+  const nowIso = input.now.toISOString();
+  const leaseExpiresAt = new Date(input.now.getTime() + input.leaseSeconds * 1000).toISOString();
+  const candidates = input.jobs
+    .filter((job) => job.status === "waiting_review")
+    .filter((job) => !job.lease || Date.parse(job.lease.expiresAt) <= input.now.getTime())
+    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+    .slice(0, input.limit);
+  const claimed: RouteJob[] = [];
+
+  for (const job of candidates) {
+    const leaseToken = contentHash({
+      purpose: "review_reconciliation",
+      jobId: job.id,
+      claimedBy: input.claimedBy,
+      claimedAt: nowIso,
+      previousLeaseToken: job.lease?.leaseToken,
+      previousUpdatedAt: job.updatedAt
+    });
+    const updated = routeJobSchema.parse({
+      ...job,
+      lease: {
+        claimedBy: input.claimedBy,
+        leaseToken,
+        claimedAt: nowIso,
+        heartbeatAt: nowIso,
+        expiresAt: leaseExpiresAt
+      },
+      updatedAt: nowIso
+    });
+    await input.save(updated);
+    claimed.push(updated);
+  }
+
+  return claimed;
+}
+
+async function mutateRouteJob(input: {
+  store: RoutingStore;
+  jobId: string;
+  expectedLeaseToken?: string;
+  update: (job: RouteJob) => RouteJob;
+}): Promise<RouteJob> {
+  if (input.store instanceof FileRoutingStore) {
+    return input.store.updateRouteJobAtomically(input);
+  }
+  const job = await input.store.getRouteJob(input.jobId);
+  if (!job) throw new Error(`Route job not found: ${input.jobId}`);
+  if (input.expectedLeaseToken && job.lease?.leaseToken !== input.expectedLeaseToken) {
+    throw new Error(`Route job lease lost: ${input.jobId}`);
+  }
+  const updated = routeJobSchema.parse(input.update(job));
+  await input.store.saveRouteJob(updated);
+  return updated;
+}
+
 function safeFileName(id: string): string {
   return encodeURIComponent(id);
 }
 
 async function writeJson(filePath: string, value: unknown): Promise<void> {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await rename(tempPath, filePath);
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
+}
+
+async function isStaleLock(lockPath: string, staleAfterMs: number): Promise<boolean> {
+  try {
+    const metadata = await stat(lockPath);
+    return Date.now() - metadata.mtimeMs > staleAfterMs;
+  } catch {
+    return false;
+  }
+}
+
+async function wait(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function readJson<T>(filePath: string, schema: { parse(input: unknown): T }): Promise<T | null> {

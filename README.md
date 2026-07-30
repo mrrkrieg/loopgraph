@@ -67,6 +67,7 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 4. **Accept only what you want.** Accepted proposals become versioned LoopSpecs, routing cards, graph nodes, readiness requirements, and local test fixtures in one materialization step.
 5. **Rehearse locally.** Test positive, missing-context, and risk-escalation cases without API keys or external writes.
 6. **Connect and promote carefully.** New loops begin in shadow mode. Live work stays blocked until routing, capabilities, approvals, and exact prepared-action fingerprints are ready.
+7. **Keep the worker running.** Accepted Hermes routes become durable jobs. The worker claims them atomically, verifies the immutable LoopSpec binding, runs the configured shadow/recommend/approval/autonomous policy, and returns signed lifecycle evidence to Hermes.
 
 <p align="center">
   <img src="docs/images/hermes-brain-live-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
@@ -144,7 +145,23 @@ npm run loopgraph -- events test --project . \
 
 For the full walkthrough, see the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
 
-### 5. Check before live credentials
+### 5. Process accepted Hermes routes
+
+Run one safe local batch:
+
+```bash
+npm run loopgraph -- worker run --project .
+```
+
+Or keep the project-local worker polling:
+
+```bash
+npm run loopgraph -- worker run --project . --watch --interval 5
+```
+
+Shadow, recommend, and simulate jobs stay local. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
+
+### 6. Check before live credentials
 
 Before connecting live provider credentials or production webhook routes, run:
 
@@ -480,15 +497,16 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → materialize → visualize → route rehearsal → simulate flow is implemented and covered by regression tests. Live execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
+Loopgraph is in active early development. The local Hermes discovery → design → materialize → visualize → route → durable worker → review/lifecycle-evidence flow is implemented and covered by regression tests. Live provider execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
 
-The safest supported path today is **design locally, materialize, rehearse routing, simulate with fixtures, and review the resulting trace**.
+The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
 ## Documentation
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md) — complete local setup and event rehearsal
 - [Hermes design bridge](docs/HERMES-DESIGN-BRIDGE.md) — durable design tasks, focused evidence gaps, secure proactive activation, and callbacks
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
+- [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
 - [Hermes examples](docs/HERMES-EXAMPLES.md) — Marketing, Legal / Compliance, and custom flows
 - [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md) — implementation-to-test evidence map
 - [Event-brain integration plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md) — detailed architecture and product plan

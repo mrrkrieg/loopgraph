@@ -61,11 +61,11 @@ export const eventEnvelopeSchema = z.object({
   hopCount: z.number().int().min(0).default(0),
   normalizedPayload: jsonObjectSchema.default({}),
   rawPayloadRef: payloadReferenceSchema.optional(),
-  evidenceRefs: z.array(z.string().min(1)).default([]),
+  evidenceRefs: z.array(z.string().min(1).max(2048)).max(100).default([]),
   trust: z.object({
     signatureVerified: z.boolean().default(false),
     signer: z.string().optional(),
-    untrustedFields: z.array(z.string()).default([])
+    untrustedFields: z.array(z.string().max(512)).max(100).default([])
   }).default({ signatureVerified: false, untrustedFields: [] }),
   sensitivity: z.enum(["public", "internal", "confidential", "restricted"]).default("internal")
 });
@@ -297,8 +297,15 @@ export const routeJobSchema = z.object({
   nextRunAt: z.string().datetime(),
   lease: z.object({
     claimedBy: z.string().min(1),
+    leaseToken: z.string().min(1).optional(),
     claimedAt: z.string().datetime(),
-    expiresAt: z.string().datetime()
+    expiresAt: z.string().datetime(),
+    heartbeatAt: z.string().datetime().optional()
+  }).optional(),
+  result: z.object({
+    traceStatus: z.string().min(1),
+    completedAt: z.string().datetime().optional(),
+    lifecycleDeliveryIds: z.array(z.string().min(1)).default([])
   }).optional(),
   lastError: z.object({
     code: z.string().optional(),

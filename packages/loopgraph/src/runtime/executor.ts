@@ -216,6 +216,13 @@ function evaluateActionPolicyGate(
   }
 
   for (const action of spec.policy.allowedActions.filter((policy) => policy.allowed)) {
+    if (activationMode === "execute_with_approval" && !action.requiresApproval) {
+      reasons.push({
+        code: "execute_with_approval_action_missing_approval",
+        message: `Allowed action "${action.toolKey}" is not approval-bound in execute_with_approval mode.`,
+        requiredAction: `Set policy.allowedActions for "${action.toolKey}" to requiresApproval=true or change the loop activation mode.`
+      });
+    }
     if (activationMode === "autonomous_low_risk" && action.riskLevel !== "low") {
       reasons.push({
         code: "autonomous_policy_risk_too_high",

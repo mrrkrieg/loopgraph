@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { Readable, Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { LOOPGRAPH_API_VERSION, LOOP_KIND, createEventEnvelopeId, eventEnvelopeSchema } from "../core";
 import {
@@ -9,7 +10,8 @@ import {
   listLoopgraphMcpResources,
   listLoopgraphMcpTools,
   LOOPGRAPH_WEBHOOK_ROUTER_MCP_TOOL_NAMES,
-  LOOPGRAPH_MCP_STATIC_RESOURCE_URIS
+  LOOPGRAPH_MCP_STATIC_RESOURCE_URIS,
+  runLoopgraphMcpStdioServer
 } from "./server";
 
 async function createRoutingProject(): Promise<{ projectRoot: string }> {
@@ -194,6 +196,42 @@ async function expectMcpToolDenied(input: {
 }
 
 describe("Loopgraph MCP server", () => {
+  it("rejects an oversized JSON line before parsing and continues with the next request", async () => {
+    const oversized = JSON.stringify({
+      jsonrpc: "2.0",
+      id: "oversized",
+      method: "ping",
+      padding: "x".repeat(2_000)
+    });
+    const ping = JSON.stringify({ jsonrpc: "2.0", id: "ping-after-limit", method: "ping" });
+    let outputText = "";
+    const output = new Writable({
+      write(chunk, _encoding, callback) {
+        outputText += chunk.toString();
+        callback();
+      }
+    });
+
+    await runLoopgraphMcpStdioServer({
+      input: Readable.from([`${oversized}\n${ping}\n`]),
+      output,
+      errorOutput: new Writable({ write(_chunk, _encoding, callback) { callback(); } }),
+      maxLineBytes: 512
+    });
+
+    const responses = outputText.trim().split("\n").map((line) => JSON.parse(line));
+    expect(responses[0]).toMatchObject({
+      error: {
+        code: -32600,
+        message: "Request too large"
+      }
+    });
+    expect(responses[1]).toMatchObject({
+      id: "ping-after-limit",
+      result: {}
+    });
+  });
+
   it("announces tools capability during initialize", async () => {
     const response = await handleLoopgraphMcpMessage({
       jsonrpc: "2.0",
@@ -259,6 +297,9 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_opportunities_get" }),
           expect.objectContaining({ name: "loopgraph_opportunity_dismiss" }),
           expect.objectContaining({ name: "loopgraph_graph_changes_get" }),
+          expect.objectContaining({ name: "loopgraph_route_worker_run" }),
+          expect.objectContaining({ name: "loopgraph_route_job_retry" }),
+          expect.objectContaining({ name: "loopgraph_route_job_cancel" }),
           expect.objectContaining({ name: "loopgraph_connections_plan" }),
           expect.objectContaining({ name: "loopgraph_connections_set_manual_fallback" }),
           expect.objectContaining({ name: "loopgraph_loops_list" }),
@@ -289,7 +330,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(48);
+    expect(listLoopgraphMcpTools()).toHaveLength(51);
   });
 
   it("supports a restricted webhook-router exposure for untrusted Hermes event turns", async () => {
@@ -313,6 +354,7 @@ describe("Loopgraph MCP server", () => {
     expect(toolNames).not.toContain("loopgraph_design_submit");
     expect(toolNames).not.toContain("loopgraph_loops_materialize");
     expect(toolNames).not.toContain("loopgraph_hermes_webhooks_sync");
+    expect(toolNames).not.toContain("loopgraph_route_worker_run");
     expect(listLoopgraphMcpTools({ exposure: "lifecycle_router" }).map((tool) => tool.name)).toEqual([
       ...LOOPGRAPH_LIFECYCLE_ROUTER_MCP_TOOL_NAMES
     ]);
@@ -328,6 +370,9 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_opportunities_get",
       "loopgraph_opportunity_dismiss",
       "loopgraph_graph_changes_get",
+      "loopgraph_route_worker_run",
+      "loopgraph_route_job_retry",
+      "loopgraph_route_job_cancel",
       "loopgraph_connections_set_manual_fallback",
       "loopgraph_loops_materialize",
       "loopgraph_loops_validate",

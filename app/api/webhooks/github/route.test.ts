@@ -20,11 +20,13 @@ describe("GitHub webhook compatibility route", () => {
 
   it("forwards verified GitHub payloads to Hermes without executing a LoopSpec directly", async () => {
     vi.stubEnv("HERMES_WEBHOOK_URL", "https://hermes.local/webhooks/github");
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "secret_1");
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
     const body = { action: "opened", issue: { number: 1, title: "Bug" } };
+    const signature = `sha256=${createHmac("sha256", "secret_1").update(JSON.stringify(body)).digest("hex")}`;
 
-    const response = await POST(githubRequest({ body, deliveryId: "delivery_1", event: "issues" }));
+    const response = await POST(githubRequest({ body, deliveryId: "delivery_1", event: "issues", signature }));
 
     expect(response.status).toBe(202);
     await expect(response.json()).resolves.toMatchObject({
@@ -43,6 +45,21 @@ describe("GitHub webhook compatibility route", () => {
         "x-github-event": "issues"
       })
     }));
+  });
+
+  it("fails closed when forwarding is configured without a GitHub signing secret", async () => {
+    vi.stubEnv("HERMES_WEBHOOK_URL", "https://hermes.local/webhooks/github");
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await POST(githubRequest({ body: { action: "opened" } }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("GITHUB_WEBHOOK_SECRET is required")
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("keeps GitHub signature validation on the compatibility forwarder", async () => {

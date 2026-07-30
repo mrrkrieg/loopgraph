@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -174,6 +174,32 @@ function escalationCase(): EscalationCase {
 }
 
 describe("Loopgraph lifecycle events for Hermes", () => {
+  it("creates a private per-project signing key instead of using a shared fallback secret", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-project-lifecycle-key-"));
+    const event = sourceEvent();
+    const input = {
+      projectRoot,
+      sourceEvent: event,
+      routeCommit: { ...routeCommit(), eventId: event.id },
+      problem: problem(event),
+      now: new Date("2026-07-21T12:00:04.000Z")
+    };
+
+    const first = await emitRouteAcceptedLifecycleEvent(input);
+    const second = await emitRouteAcceptedLifecycleEvent(input);
+    if (!first.emitted || !second.emitted) throw new Error("Expected lifecycle events");
+    const keyPath = path.join(projectRoot, ".loopgraph", "hermes", "lifecycle-signing.key");
+    const key = (await readFile(keyPath, "utf8")).trim();
+
+    expect(key).toHaveLength(43);
+    expect(key).not.toBe("loopgraph-local-development-lifecycle-secret");
+    expect(first.delivery.signature).toMatchObject({
+      keyRef: "project:.loopgraph/hermes/lifecycle-signing.key",
+      value: second.delivery.signature.value
+    });
+    expect((await stat(keyPath)).mode & 0o777).toBe(0o600);
+  });
+
   it("persists signed route-accepted callbacks when Loopgraph accepts a Hermes route decision", async () => {
     const projectRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-route-accepted-lifecycle-"));
     const event = sourceEvent();

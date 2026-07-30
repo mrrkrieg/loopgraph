@@ -101,6 +101,14 @@ import {
   type LoopgraphOpportunityToolName
 } from "../runtime/loop-opportunity-tools";
 import {
+  callLoopgraphRouteJobWorkerTool,
+  loopgraphRouteJobWorkerToolDefinitions,
+  routeJobCancelInputSchema,
+  routeJobRetryInputSchema,
+  routeWorkerRunInputSchema,
+  type LoopgraphRouteJobWorkerToolName
+} from "../runtime/route-job-worker-tools";
+import {
   callLoopgraphLoopTool,
   loopgraphLoopToolDefinitions,
   loopsListInputSchema,
@@ -129,6 +137,7 @@ import {
 import { loadLoopSpecFromPath } from "../runtime/loader";
 
 const LATEST_MCP_PROTOCOL_VERSION = "2025-11-25";
+export const DEFAULT_LOOPGRAPH_MCP_MAX_LINE_BYTES = 1024 * 1024;
 const SUPPORTED_MCP_PROTOCOL_VERSIONS = new Set([
   LATEST_MCP_PROTOCOL_VERSION,
   "2025-06-18",
@@ -181,6 +190,7 @@ type LoopgraphMcpToolName =
   | LoopgraphDesignToolName
   | LoopgraphHermesDesignToolName
   | LoopgraphOpportunityToolName
+  | LoopgraphRouteJobWorkerToolName
   | LoopgraphConnectionToolName
   | LoopgraphLoopToolName;
 
@@ -206,6 +216,9 @@ const toolInputSchemas = {
   loopgraph_opportunities_get: opportunitiesGetInputSchema,
   loopgraph_opportunity_dismiss: opportunityDismissInputSchema,
   loopgraph_graph_changes_get: graphChangesGetInputSchema,
+  loopgraph_route_worker_run: routeWorkerRunInputSchema,
+  loopgraph_route_job_retry: routeJobRetryInputSchema,
+  loopgraph_route_job_cancel: routeJobCancelInputSchema,
   loopgraph_connections_plan: connectionsPlanInputSchema,
   loopgraph_connections_set_manual_fallback: connectionsSetManualFallbackInputSchema,
   loopgraph_loops_list: loopsListInputSchema,
@@ -242,6 +255,7 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphDesignToolDefinitions,
   ...loopgraphHermesDesignToolDefinitions,
   ...loopgraphOpportunityToolDefinitions,
+  ...loopgraphRouteJobWorkerToolDefinitions,
   ...loopgraphConnectionToolDefinitions,
   ...loopgraphLoopToolDefinitions,
   ...loopgraphRoutingToolDefinitions,
@@ -432,12 +446,15 @@ export async function runLoopgraphMcpStdioServer(
     input?: Readable;
     output?: Writable;
     errorOutput?: Writable;
+    maxLineBytes?: number;
   } = {}
 ): Promise<void> {
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   const errorOutput = options.errorOutput ?? process.stderr;
+  const maxLineBytes = options.maxLineBytes ?? DEFAULT_LOOPGRAPH_MCP_MAX_LINE_BYTES;
   let buffer = "";
+  let discardingOversizedLine = false;
 
   input.setEncoding("utf8");
 
@@ -446,20 +463,49 @@ export async function runLoopgraphMcpStdioServer(
     let newlineIndex = buffer.indexOf("\n");
 
     while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex).trim();
+      const rawLine = buffer.slice(0, newlineIndex);
       buffer = buffer.slice(newlineIndex + 1);
-
-      if (line.length > 0) {
-        await handleLine(line, output, errorOutput, options);
+      if (discardingOversizedLine) {
+        discardingOversizedLine = false;
+      } else if (Buffer.byteLength(rawLine, "utf8") > maxLineBytes) {
+        writeJsonLine(output, errorResponse(
+          null,
+          -32600,
+          "Request too large",
+          `MCP JSON line exceeds ${maxLineBytes} bytes`
+        ));
+      } else {
+        const line = rawLine.trim();
+        if (line.length > 0) {
+          await handleLine(line, output, errorOutput, options);
+        }
       }
 
       newlineIndex = buffer.indexOf("\n");
     }
+
+    if (!discardingOversizedLine && Buffer.byteLength(buffer, "utf8") > maxLineBytes) {
+      writeJsonLine(output, errorResponse(
+        null,
+        -32600,
+        "Request too large",
+        `MCP JSON line exceeds ${maxLineBytes} bytes`
+      ));
+      buffer = "";
+      discardingOversizedLine = true;
+    }
   }
 
-  const remaining = buffer.trim();
-  if (remaining.length > 0) {
+  const remaining = discardingOversizedLine ? "" : buffer.trim();
+  if (remaining.length > 0 && Buffer.byteLength(remaining, "utf8") <= maxLineBytes) {
     await handleLine(remaining, output, errorOutput, options);
+  } else if (remaining.length > 0) {
+    writeJsonLine(output, errorResponse(
+      null,
+      -32600,
+      "Request too large",
+      `MCP JSON line exceeds ${maxLineBytes} bytes`
+    ));
   }
 }
 
@@ -744,6 +790,13 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphRouteJobWorkerToolName(name)) {
+    return callLoopgraphRouteJobWorkerTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
   if (isLoopgraphProjectToolName(name)) {
     return callLoopgraphProjectTool(name, boundInput, {
       projectRoot: options.projectRoot
@@ -932,6 +985,10 @@ function isLoopgraphOpportunityToolName(value: unknown): value is LoopgraphOppor
   return typeof value === "string" && loopgraphOpportunityToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphRouteJobWorkerToolName(value: unknown): value is LoopgraphRouteJobWorkerToolName {
+  return typeof value === "string" && loopgraphRouteJobWorkerToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphProjectToolName(value: unknown): value is LoopgraphProjectToolName {
   return typeof value === "string" && loopgraphProjectToolDefinitions.some((tool) => tool.name === value);
 }
@@ -955,6 +1012,7 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphDesignToolName(value) ||
     isLoopgraphHermesDesignToolName(value) ||
     isLoopgraphOpportunityToolName(value) ||
+    isLoopgraphRouteJobWorkerToolName(value) ||
     isLoopgraphConnectionToolName(value) ||
     isLoopgraphLoopToolName(value);
 }
@@ -1016,6 +1074,9 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
     "loopgraph_design_edit",
     "loopgraph_evidence_gap_answer",
     "loopgraph_opportunity_dismiss",
+    "loopgraph_route_worker_run",
+    "loopgraph_route_job_retry",
+    "loopgraph_route_job_cancel",
     "loopgraph_connections_set_manual_fallback",
     "loopgraph_loops_materialize",
     "loopgraph_loops_simulate",
