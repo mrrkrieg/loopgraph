@@ -35,8 +35,13 @@ LOOPGRAPH_HOSTED_ORGANIZATION_ID=YOUR_ORGANIZATION_UUID
 LOOPGRAPH_HOSTED_RUNTIME_ROOT=/var/lib/loopgraph
 LOOPGRAPH_HOSTED_PROJECT_KEY=main
 CRON_SECRET=LONG_RANDOM_SECRET
+LOOPGRAPH_CRON_CREDENTIAL_ID=cron_primary
 LOOPGRAPH_WORKER_API_TOKEN=SEPARATE_LONG_RANDOM_TOKEN
+LOOPGRAPH_WORKER_CREDENTIAL_ID=worker_primary
 LOOPGRAPH_HERMES_CALLBACK_SECRET=SEPARATE_LONG_RANDOM_SECRET
+LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID=hermes_callback
+GITHUB_WEBHOOK_SECRET=SEPARATE_LONG_RANDOM_SECRET
+LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID=github_forwarder
 ```
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable or copy provider OAuth
@@ -89,6 +94,9 @@ organization/project and one active writer per hosted runtime deployment. Do not
 customer organizations through one shared filesystem worker.
 
 See [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
+
+Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
+See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).
 
 The remaining hosted production work is tracked in
 [Current build state](./CURRENT-STATE.md#remaining-product-layers).

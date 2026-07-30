@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/controller",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/management-review",
       "schedule": "0 15 * * 1"
     },

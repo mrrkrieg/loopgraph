@@ -29,7 +29,7 @@ const connectionActions = {
 } as const satisfies Record<string, LoopgraphConnectionToolName>;
 
 export async function GET(request: Request) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "measurements.collect");
   if (unauthorized) return unauthorized;
   const url = new URL(request.url);
   const view = url.searchParams.get("view") ?? "jobs";
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "measurements.collect");
   if (unauthorized) return unauthorized;
   try {
     const body = await requiredJson(request);

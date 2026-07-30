@@ -1,5 +1,7 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
+import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
+import { authorizeVerifiedHostedMachineRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 function verifyGithubSignature(payload: string, signature: string | null, secret: string) {
   if (!signature?.startsWith("sha256=")) return false;
@@ -14,8 +16,11 @@ function verifyGithubSignature(payload: string, signature: string | null, secret
 export async function POST(request: Request) {
   const rawBody = await request.text();
   const signature = request.headers.get("x-hub-signature-256");
-  const deliveryId = request.headers.get("x-github-delivery") ?? randomUUID();
-  const hermesWebhookUrl = process.env.HERMES_WEBHOOK_URL;
+  const suppliedDeliveryId = request.headers.get("x-github-delivery");
+  const deliveryId = suppliedDeliveryId ?? randomUUID();
+  const hermesWebhookUrl =
+    process.env.LOOPGRAPH_HERMES_WEBHOOK_URL ??
+    process.env.HERMES_WEBHOOK_URL;
 
   if (!hermesWebhookUrl) {
     return NextResponse.json({
@@ -35,6 +40,24 @@ export async function POST(request: Request) {
   if (!verifyGithubSignature(rawBody, signature, secret)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
+  if (isHostedAuthRequired() && !suppliedDeliveryId) {
+    return NextResponse.json({ error: "x-github-delivery is required in hosted mode" }, {
+      status: 400,
+      headers: { "cache-control": "no-store" }
+    });
+  }
+  const guardResponse = await authorizeVerifiedHostedMachineRequest({
+    capability: "provider.github_forward",
+    credentialEnvironmentVariable: "LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID",
+    requestId: `github_${digest(deliveryId).slice(0, 32)}`,
+    requestHash: digest(rawBody),
+    requestedAt: new Date().toISOString(),
+    rateLimit: positiveInteger(
+      process.env.LOOPGRAPH_GITHUB_WEBHOOK_RATE_LIMIT_PER_MINUTE,
+      120
+    )
+  });
+  if (guardResponse) return guardResponse;
 
   try {
     const hermesResponse = await fetch(hermesWebhookUrl, {
@@ -63,4 +86,13 @@ export async function POST(request: Request) {
       deliveryId
     }, { status: 502 });
   }
+}
+
+function digest(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function positiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

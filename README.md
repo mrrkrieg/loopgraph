@@ -575,6 +575,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Current build state](docs/CURRENT-STATE.md) — what is implemented now
 - [Hosted security](docs/HOSTED-SECURITY.md) — Supabase Auth, organization roles, RLS, service-role boundaries, and production limitations
 - [Hosted runtime namespaces](docs/HOSTED-RUNTIME-NAMESPACES.md) — organization/project isolation for persistent runtime state and its current single-writer boundary
+- [Machine request guards](docs/MACHINE-REQUEST-GUARDS.md) — scoped worker identities, replay protection, durable rate windows, and schedule authentication
 
 ## Contributing
 

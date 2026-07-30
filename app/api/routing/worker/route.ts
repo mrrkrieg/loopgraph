@@ -6,7 +6,7 @@ import { authorizeWorkerApiRequest } from "../../../../lib/loopgraph-runtime/wor
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "routing.worker");
   if (unauthorized) return unauthorized;
 
   try {

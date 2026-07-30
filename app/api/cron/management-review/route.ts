@@ -11,7 +11,7 @@ import {
 } from "loopgraph/runtime";
 
 export async function GET(request: NextRequest) {
-  const unauthorized = authorizeCronApiRequest(request);
+  const unauthorized = await authorizeCronApiRequest(request, "schedule.management");
   if (unauthorized) return unauthorized;
 
   const storage = getStorageAdapter();

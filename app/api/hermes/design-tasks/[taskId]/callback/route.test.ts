@@ -98,6 +98,44 @@ describe("Hermes design task callback API", () => {
 
     expect(response.status).toBe(503);
   });
+
+  it("fails closed in hosted mode when the durable callback guard is unavailable", async () => {
+    const secret = "callback-secret";
+    const callback = {
+      schemaVersion: "hermes-design-callback/v1alpha1",
+      callbackId: "callback_hosted_1",
+      taskId: "task_hosted_1",
+      occurredAt: new Date().toISOString(),
+      type: "task.acknowledged"
+    };
+    const body = JSON.stringify(callback);
+    const timestamp = new Date().toISOString();
+    vi.stubEnv("LOOPGRAPH_HERMES_CALLBACK_SECRET", secret);
+    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
+    vi.stubEnv(
+      "LOOPGRAPH_HOSTED_ORGANIZATION_ID",
+      "123e4567-e89b-12d3-a456-426614174000"
+    );
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    vi.stubEnv("LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID", "hermes_callback");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+
+    const response = await POST(callbackRequest({
+      taskId: callback.taskId,
+      body,
+      timestamp,
+      signature: signLoopgraphTaskPayload(body, timestamp, secret)
+    }), {
+      params: Promise.resolve({ taskId: callback.taskId })
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Supabase service authorization is not configured."
+    });
+  });
 });
 
 function callbackRequest(input: {

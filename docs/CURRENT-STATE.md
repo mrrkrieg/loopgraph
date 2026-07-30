@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-07-29
+Last updated: 2026-07-30
 
 ## One-line summary
 
@@ -84,6 +84,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Hosted file runtime state resolves under a validated organization/project namespace on an
   explicit persistent root; the application checkout and generic project-root override are ignored.
 - File storage adapters are cached per resolved namespace instead of globally.
+- Hosted worker, cron, signed Hermes callback, and signed GitHub-forwarder calls carry a configured
+  machine identity, tenant/project scope, durable replay receipt, and database-enforced rate
+  window. Bearer routes additionally bind a fresh request identity to the bounded request body.
+- The controller schedule is registered every 15 minutes alongside hourly measurement
+  reconciliation and weekly management review.
 - Same-origin browser mutations, signed machine callbacks, worker bearer auth, cron auth, and
   baseline security headers are separated at the web boundary.
 - See [Hosted authentication and tenant security](./HOSTED-SECURITY.md).
@@ -100,8 +105,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 1. Replace the now tenant-bound filesystem stores with atomic database/queue claims so more than
    one replica can work safely.
-2. Add distributed rate limits and scoped service accounts for user APIs, Hermes callbacks,
-   connector collectors, controller workers, and cron invocations.
+2. Add scoped identities and durable request guards to remaining provider collectors, then add
+   user-facing API quotas.
 3. Export an append-only security audit stream, add production tracing/alerts/SLOs, and prove
    restore procedures with scheduled backups and migration rollback rehearsals.
 4. Implement provider API clients and apply provider subscriptions through Hermes-owned connector
@@ -122,3 +127,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md)
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)
 - [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md)
+- [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
