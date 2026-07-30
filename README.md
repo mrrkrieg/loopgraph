@@ -161,7 +161,7 @@ Or keep the project-local worker polling:
 npm run loopgraph -- worker run --project . --watch --interval 5
 ```
 
-Shadow, recommend, and simulate jobs stay local. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
+Shadow, recommend, and simulate jobs stay local in a local project. Authenticated hosted deployments use the tenant-scoped distributed routing store so independent workers can claim safely. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
 
 ### 6. Bind and collect outcome evidence
 
@@ -561,6 +561,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Hermes design bridge](docs/HERMES-DESIGN-BRIDGE.md) — durable design tasks, focused evidence gaps, secure proactive activation, and callbacks
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
 - [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
+- [Distributed Hermes routing store](docs/DISTRIBUTED-ROUTING-STORE.md) — shared routing evidence, PostgreSQL claims, lease fencing, and hosted queue metrics
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
 - [Hermes connector measurements](docs/CONNECTOR-MEASUREMENTS.md) — exact provider bindings, scheduled jobs, evidence collection, and reconciliation
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts

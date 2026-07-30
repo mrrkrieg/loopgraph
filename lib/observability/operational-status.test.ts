@@ -48,7 +48,14 @@ describe("operational status", () => {
         machine_rate_limited_5m: 2,
         machine_denied_5m: 3,
         audit_events_total: 90,
-        audit_head_sequence: 105
+        audit_head_sequence: 105,
+        route_jobs_queued: 7,
+        route_jobs_running: 2,
+        route_jobs_waiting_review: 1,
+        route_jobs_dead_letter: 4,
+        route_jobs_due: 3,
+        route_job_expired_leases: 1,
+        route_job_oldest_due_seconds: 75
       },
       error: null
     });
@@ -69,12 +76,22 @@ describe("operational status", () => {
         machineRateLimited5m: 2,
         machineDenied5m: 3,
         auditEventsTotal: 90,
-        auditHeadSequence: 105
+        auditHeadSequence: 105,
+        routeJobsQueued: 7,
+        routeJobsRunning: 2,
+        routeJobsWaitingReview: 1,
+        routeJobsDeadLetter: 4,
+        routeJobsDue: 3,
+        routeJobExpiredLeases: 1,
+        routeJobOldestDueSeconds: 75
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_machine_rate_limited_5m 2"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_route_jobs_dead_letter 4"
     );
   });
 

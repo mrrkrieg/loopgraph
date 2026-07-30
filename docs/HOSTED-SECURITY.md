@@ -89,14 +89,17 @@ deployment connected to customer or company data.
 
 ## Current production limitation
 
-The browser persistence boundary is tenant-aware, while the package runtime uses a
-deployment-bound `.loopgraph/` namespace and a deployment-level worker token. The namespace is
-isolated by organization/project and must live on a persistent volume, but its stores are not yet
-a distributed queue. Until database-backed claims and tenant-scoped service accounts ship, use one
-organization/project and one active writer per hosted runtime deployment. Do not operate multiple
-customer organizations through one shared filesystem worker.
+The browser persistence boundary and the hosted routing store are tenant-aware. Routing state and
+route-job claims are database-backed, service-role-only, and scoped by organization/project, so
+multiple worker replicas can safely claim this queue. The worker token is still a deployment
+credential bound to one configured organization/project.
 
-See [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
+Design, graph, controller, measurement, outcome, and generated-artifact stores are not all
+distributed yet. Keep those subsystems to one active writer until their database migrations ship,
+and never operate multiple customer organizations through one shared filesystem namespace.
+
+See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) and
+[Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
 
 Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
 See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).

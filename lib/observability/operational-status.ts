@@ -11,6 +11,13 @@ export type OperationalMetrics = {
   machineDenied5m: number;
   auditEventsTotal: number;
   auditHeadSequence: number;
+  routeJobsQueued: number;
+  routeJobsRunning: number;
+  routeJobsWaitingReview: number;
+  routeJobsDeadLetter: number;
+  routeJobsDue: number;
+  routeJobExpiredLeases: number;
+  routeJobOldestDueSeconds: number;
   lastMachineRequestAt?: string;
 };
 
@@ -60,7 +67,14 @@ const EMPTY_METRICS: OperationalMetrics = {
   machineRateLimited5m: 0,
   machineDenied5m: 0,
   auditEventsTotal: 0,
-  auditHeadSequence: 0
+  auditHeadSequence: 0,
+  routeJobsQueued: 0,
+  routeJobsRunning: 0,
+  routeJobsWaitingReview: 0,
+  routeJobsDeadLetter: 0,
+  routeJobsDue: 0,
+  routeJobExpiredLeases: 0,
+  routeJobOldestDueSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -237,6 +251,27 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_security_audit_head_sequence Current audit-chain sequence.",
     "# TYPE loopgraph_security_audit_head_sequence gauge",
     `loopgraph_security_audit_head_sequence ${metrics.auditHeadSequence}`,
+    "# HELP loopgraph_route_jobs_queued Route jobs queued or waiting for retry.",
+    "# TYPE loopgraph_route_jobs_queued gauge",
+    `loopgraph_route_jobs_queued ${metrics.routeJobsQueued}`,
+    "# HELP loopgraph_route_jobs_running Route jobs with claimed or running state.",
+    "# TYPE loopgraph_route_jobs_running gauge",
+    `loopgraph_route_jobs_running ${metrics.routeJobsRunning}`,
+    "# HELP loopgraph_route_jobs_waiting_review Route jobs waiting for human review.",
+    "# TYPE loopgraph_route_jobs_waiting_review gauge",
+    `loopgraph_route_jobs_waiting_review ${metrics.routeJobsWaitingReview}`,
+    "# HELP loopgraph_route_jobs_dead_letter Exhausted route jobs requiring intervention.",
+    "# TYPE loopgraph_route_jobs_dead_letter gauge",
+    `loopgraph_route_jobs_dead_letter ${metrics.routeJobsDeadLetter}`,
+    "# HELP loopgraph_route_jobs_due Claimable route jobs due now.",
+    "# TYPE loopgraph_route_jobs_due gauge",
+    `loopgraph_route_jobs_due ${metrics.routeJobsDue}`,
+    "# HELP loopgraph_route_job_expired_leases Route jobs with expired worker leases.",
+    "# TYPE loopgraph_route_job_expired_leases gauge",
+    `loopgraph_route_job_expired_leases ${metrics.routeJobExpiredLeases}`,
+    "# HELP loopgraph_route_job_oldest_due_seconds Age of the oldest claimable route job.",
+    "# TYPE loopgraph_route_job_oldest_due_seconds gauge",
+    `loopgraph_route_job_oldest_due_seconds ${metrics.routeJobOldestDueSeconds}`,
     ""
   ].join("\n");
 }
@@ -256,6 +291,13 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     machineDenied5m: nonnegative(data.machine_denied_5m),
     auditEventsTotal: nonnegative(data.audit_events_total),
     auditHeadSequence: nonnegative(data.audit_head_sequence),
+    routeJobsQueued: nonnegative(data.route_jobs_queued),
+    routeJobsRunning: nonnegative(data.route_jobs_running),
+    routeJobsWaitingReview: nonnegative(data.route_jobs_waiting_review),
+    routeJobsDeadLetter: nonnegative(data.route_jobs_dead_letter),
+    routeJobsDue: nonnegative(data.route_jobs_due),
+    routeJobExpiredLeases: nonnegative(data.route_job_expired_leases),
+    routeJobOldestDueSeconds: nonnegative(data.route_job_oldest_due_seconds),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})
