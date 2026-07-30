@@ -216,6 +216,13 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_routing_evaluation_run");
     expect(designSkill).toContain("loopgraph_routing_evaluations_get");
     expect(designSkill).toContain("loopgraph_lifecycle_events_get");
+    expect(designSkill).toContain("loopgraph_controller_run");
+    expect(designSkill).toContain("loopgraph_controller_runs_get");
+    expect(designSkill).toContain("loopgraph_controller_policy_get");
+    expect(designSkill).toContain("loopgraph_controller_policy_set");
+    expect(designSkill).toContain("loopgraph://schemas/loop-controller-policy");
+    expect(designSkill).toContain("loopgraph://schemas/loop-controller-run");
+    expect(designSkill).toContain("Never reinterpret a review, pause, retirement, or failed policy receipt as permission to act");
     expect(designSkill).toContain("loopgraph_review_submit");
     expect(designSkill).toContain("loopgraph_case_resolve");
     expect(designSkill).toContain("loopgraph_graph_get");

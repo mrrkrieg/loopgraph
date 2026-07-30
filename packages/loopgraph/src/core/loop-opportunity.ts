@@ -134,14 +134,19 @@ export const graphChangeSetSchema = z.object({
   companyId: z.string().min(1),
   baseGraphHash: z.string().min(1),
   opportunityId: z.string().min(1),
-  status: z.enum(["proposed", "approved", "applied", "rejected", "superseded"]).default("proposed"),
+  status: z.enum(["proposed", "approved", "applied", "rejected", "superseded", "rolled_back"]).default("proposed"),
   changes: z.array(graphChangeSchema).min(1),
   supersedesId: z.string().optional(),
   designTaskId: z.string().optional(),
   designRunId: z.string().optional(),
+  approvalReceiptIds: z.array(z.string().min(1)).default([]),
+  appliedTransactionId: z.string().min(1).optional(),
+  resultGraphHash: z.string().min(1).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  appliedAt: z.string().datetime().optional()
+  appliedAt: z.string().datetime().optional(),
+  rolledBackAt: z.string().datetime().optional(),
+  rolledBackBy: z.string().min(1).optional()
 });
 
 export type LoopOpportunitySignalType = z.infer<typeof loopOpportunitySignalTypeSchema>;

@@ -19,6 +19,7 @@ import {
   recordValueLedgerEntry
 } from "./outcome-service";
 import { FileOutcomeStore } from "./outcome-store";
+import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
 
@@ -218,7 +219,7 @@ export async function callLoopgraphOutcomeTool(
 
   if (name === "loopgraph_metric_samples_ingest") {
     const parsed = metricSampleIngestInputSchema.parse(input);
-    return recordMetricSample(store, {
+    const result = await recordMetricSample(store, {
       companyId: parsed.companyId,
       workspaceId: workspace.projectRootId,
       departmentId: parsed.departmentId,
@@ -234,6 +235,18 @@ export async function callLoopgraphOutcomeTool(
       truthStatus: parsed.truthStatus,
       evidenceRefs: parsed.evidenceRefs
     }, options.now);
+    return {
+      ...result,
+      controllerTrigger: await enqueueLoopControllerTriggerBestEffort({
+        projectRoot,
+        type: "outcome_window",
+        triggerId: result.record.id,
+        sourceRef: `metric-sample:${result.record.id}`,
+        occurredAt: result.record.recordedAt,
+        requestedBy: "loopgraph-outcomes",
+        evidenceRefs: [result.record.id]
+      }, { now: options.now })
+    };
   }
   if (name === "loopgraph_metric_samples_get") {
     const parsed = metricSamplesGetInputSchema.parse(input);
@@ -254,7 +267,7 @@ export async function callLoopgraphOutcomeTool(
   if (name === "loopgraph_outcomes_evaluate") {
     const parsed = outcomesEvaluateInputSchema.parse(input);
     const metricDefinition = await requireMetricDefinition(projectRoot, parsed.metricDefinitionId);
-    return evaluateObservedOutcome({
+    const result = await evaluateObservedOutcome({
       store,
       workspaceId: workspace.projectRootId,
       companyId: parsed.companyId,
@@ -271,6 +284,18 @@ export async function callLoopgraphOutcomeTool(
       problemIds: parsed.problemIds,
       now: options.now
     });
+    return {
+      ...result,
+      controllerTrigger: await enqueueLoopControllerTriggerBestEffort({
+        projectRoot,
+        type: "outcome_window",
+        triggerId: result.record.id,
+        sourceRef: `observed-outcome:${result.record.id}`,
+        occurredAt: result.record.evaluatedAt,
+        requestedBy: "loopgraph-outcomes",
+        evidenceRefs: [result.record.id, ...result.record.evidenceRefs]
+      }, { now: options.now })
+    };
   }
   if (name === "loopgraph_outcomes_get") {
     const parsed = outcomesGetInputSchema.parse(input);
@@ -290,7 +315,7 @@ export async function callLoopgraphOutcomeTool(
     const parsed = valueLedgerRecordInputSchema.parse(input);
     if (parsed.mode === "derive") {
       const metricDefinition = await requireMetricDefinition(projectRoot, parsed.metricDefinitionId!);
-      return deriveLoopValueLedgerEntry({
+      const result = await deriveLoopValueLedgerEntry({
         store,
         workspaceId: workspace.projectRootId,
         companyId: parsed.companyId,
@@ -302,8 +327,9 @@ export async function callLoopgraphOutcomeTool(
         window: parsed.window,
         now: options.now
       });
+      return withValueControllerTrigger(projectRoot, result, options.now);
     }
-    return recordValueLedgerEntry({
+    const result = await recordValueLedgerEntry({
       store,
       workspaceId: workspace.projectRootId,
       companyId: parsed.companyId,
@@ -320,6 +346,7 @@ export async function callLoopgraphOutcomeTool(
       monetaryValue: parsed.monetaryValue,
       now: options.now
     });
+    return withValueControllerTrigger(projectRoot, result, options.now);
   }
   if (name === "loopgraph_value_ledger_get") {
     const parsed = valueLedgerGetInputSchema.parse(input);
@@ -336,6 +363,25 @@ export async function callLoopgraphOutcomeTool(
     };
   }
   throw new Error(`Unknown Loopgraph outcome tool: ${String(name)}`);
+}
+
+async function withValueControllerTrigger(
+  projectRoot: string,
+  result: Awaited<ReturnType<typeof recordValueLedgerEntry>>,
+  now?: Date
+) {
+  return {
+    ...result,
+    controllerTrigger: await enqueueLoopControllerTriggerBestEffort({
+      projectRoot,
+      type: "outcome_window",
+      triggerId: result.record.id,
+      sourceRef: `value-ledger:${result.record.id}`,
+      occurredAt: result.record.recordedAt,
+      requestedBy: "loopgraph-value-ledger",
+      evidenceRefs: [result.record.id, ...result.record.evidenceRefs]
+    }, { now })
+  };
 }
 
 async function requireMetricDefinition(projectRoot: string, metricDefinitionId: string): Promise<MetricDefinition> {

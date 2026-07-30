@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  LOOPGRAPH_API_VERSION,
+  LOOP_KIND,
   businessProblemSchema,
-  routingCorrectionSchema
+  routingCorrectionSchema,
+  validateLoopSpec
 } from "../core";
 import {
   dismissLoopOpportunity,
@@ -178,6 +181,10 @@ describe("loop opportunity engine", () => {
       now: new Date("2026-07-29T15:00:00.000Z")
     });
     await mkdir(path.join(projectRoot, ".loopgraph", "generated", "support"), { recursive: true });
+    await writeFile(
+      path.join(projectRoot, ".loopgraph", "generated", "support", "loop.yaml"),
+      `${JSON.stringify(supportLoopSpec(), null, 2)}\n`
+    );
     await writeLoopgraphWorkspace({
       ...workspace,
       registeredSpecs: [{
@@ -281,6 +288,76 @@ describe("loop opportunity engine", () => {
     expect(await getGraphChangeSet(dismissed.graphChangeSetId!, projectRoot)).toBeTruthy();
   });
 });
+
+function supportLoopSpec() {
+  return validateLoopSpec({
+    apiVersion: LOOPGRAPH_API_VERSION,
+    kind: LOOP_KIND,
+    metadata: {
+      id: "support-triage",
+      name: "Support Triage",
+      version: "1.0.0",
+      description: "Route support tickets."
+    },
+    trigger: { type: "event", source: "hermes", event: "support.ticket" },
+    input: { schema: { type: "object" } },
+    output: {
+      schema: {
+        type: "object",
+        properties: { evidence: { type: "array" } }
+      }
+    },
+    context: { sources: [], precedence: [], redactionPolicy: "restricted_only" },
+    routine: {
+      steps: [{
+        id: "triage",
+        name: "Triage",
+        stepType: "assess",
+        actor: "agent",
+        description: "Assess the support ticket."
+      }]
+    },
+    tools: [],
+    policy: { allowedActions: [], forbiddenActions: [], escalationRules: [] },
+    verification: [],
+    approval: {
+      requireFingerprintMatch: true,
+      separateCustomerFacingApproval: true,
+      allowedRoles: ["approver"]
+    },
+    persistence: { idempotency: { enabled: true } },
+    trace: {
+      captureContextSnapshot: true,
+      captureToolInputOutput: true,
+      evidenceRequired: true
+    },
+    topology: { department: "customer_success", tags: ["support"] },
+    routing: {
+      schemaVersion: "routing-contract/v1alpha1",
+      problemTypes: ["support_ticket_misroute"],
+      accepts: [{
+        sourcePattern: "support*",
+        eventTypePattern: "ticket.*",
+        subjectTypes: ["ticket"],
+        requiredFields: [],
+        optionalConditions: []
+      }],
+      excludes: [],
+      inputMapping: {},
+      priority: 1,
+      minimumConfidence: 0.75,
+      ambiguityPolicy: "request_human",
+      noMatchPolicy: "unhandled",
+      fanoutPolicy: { mode: "none", maxRoutes: 1, requiresIndependentProblems: true },
+      cooldown: { seconds: 0, dedupeWindowSeconds: 0 },
+      concurrency: { maxActive: 1, strategy: "append_evidence" },
+      activationMode: "shadow",
+      lifecycleEvents: [],
+      requiredConnections: [],
+      examples: { shouldRoute: [], shouldNotRoute: [] }
+    }
+  });
+}
 
 function problem(input: {
   id: string;

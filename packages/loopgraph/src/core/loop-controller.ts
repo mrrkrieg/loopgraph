@@ -4,6 +4,7 @@ import { DepartmentTypeSchema } from "./department-skills";
 export const LOOP_CONTROLLER_POLICY_SCHEMA_VERSION = "loop-controller-policy/v1alpha1" as const;
 export const LOOP_CONTROLLER_RUN_SCHEMA_VERSION = "loop-controller-run/v1alpha1" as const;
 export const LOOP_CONTROLLER_CHECKPOINT_SCHEMA_VERSION = "loop-controller-checkpoint/v1alpha1" as const;
+export const LOOP_CONTROLLER_TRIGGER_RECORD_SCHEMA_VERSION = "loop-controller-trigger-record/v1alpha1" as const;
 
 export const loopControllerTriggerTypeSchema = z.enum([
   "manual",
@@ -89,6 +90,8 @@ export const loopControllerDecisionSchema = z.object({
   designTaskId: z.string().min(1).optional(),
   designRunId: z.string().min(1).optional(),
   materializationId: z.string().min(1).optional(),
+  graphApprovalReceiptId: z.string().min(1).optional(),
+  graphTransactionId: z.string().min(1).optional(),
   department: DepartmentTypeSchema.optional(),
   targetLoopIds: z.array(z.string().min(1)).default([]),
   score: z.number().min(0).max(100).optional(),
@@ -145,6 +148,21 @@ export const loopControllerCheckpointSchema = z.object({
   updatedAt: z.string().datetime()
 });
 
+export const loopControllerTriggerRecordSchema = z.object({
+  schemaVersion: z.literal(LOOP_CONTROLLER_TRIGGER_RECORD_SCHEMA_VERSION)
+    .default(LOOP_CONTROLLER_TRIGGER_RECORD_SCHEMA_VERSION),
+  id: z.string().min(1),
+  projectRootId: z.string().min(1),
+  trigger: loopControllerTriggerSchema,
+  status: z.enum(["pending", "processing", "completed", "failed"]),
+  attempts: z.number().int().min(0).default(0),
+  controllerRunId: z.string().min(1).optional(),
+  error: z.string().min(1).optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional()
+});
+
 export type LoopControllerTriggerType = z.infer<typeof loopControllerTriggerTypeSchema>;
 export type LoopControllerDecisionAction = z.infer<typeof loopControllerDecisionActionSchema>;
 export type LoopControllerPolicy = z.infer<typeof loopControllerPolicySchema>;
@@ -153,3 +171,4 @@ export type LoopControllerPolicyRule = z.infer<typeof loopControllerPolicyRuleSc
 export type LoopControllerDecision = z.infer<typeof loopControllerDecisionSchema>;
 export type LoopControllerRun = z.infer<typeof loopControllerRunSchema>;
 export type LoopControllerCheckpoint = z.infer<typeof loopControllerCheckpointSchema>;
+export type LoopControllerTriggerRecord = z.infer<typeof loopControllerTriggerRecordSchema>;

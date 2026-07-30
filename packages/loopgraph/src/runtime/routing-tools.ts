@@ -24,6 +24,7 @@ import type { AgentRunOutput } from "../core/evidence";
 import type { LoopSpec } from "../core/loop-spec";
 import { FileStorageAdapter } from "../sdk/storage";
 import { buildConnectionPlan } from "./connection-plan";
+import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import {
   emitEscalationCreatedLifecycleEvent,
   emitLoopRunLifecycleEvent,
@@ -157,6 +158,7 @@ type LifecycleDeliveryToolSummary =
 
 type RoutingDecisionSubmissionWithLifecycle = RoutingDecisionSubmissionResult & {
   lifecycleDeliveries: LifecycleDeliveryToolSummary[];
+  controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 };
 
 export const loopgraphRoutingToolDefinitions = [
@@ -228,10 +230,20 @@ export async function loopgraph_events_ingest(
     replay: parsed.replay,
     now: options.now
   });
+  const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
+    projectRoot,
+    type: "routing_event",
+    triggerId: result.receipt.eventId,
+    sourceRef: `routing-event:${result.receipt.eventId}`,
+    occurredAt: result.receipt.event.receivedAt,
+    requestedBy: "loopgraph-event-ingest",
+    evidenceRefs: [result.receipt.id, result.receipt.eventId]
+  }, { now: options.now });
 
   return {
     ...result,
-    catalogVersion: catalog.catalogVersion
+    catalogVersion: catalog.catalogVersion,
+    controllerTrigger
   };
 }
 
@@ -509,10 +521,24 @@ async function submitRoutingDecisionWithAcceptedLifecycle(input: {
         })
       ))
     : [];
+  const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
+    projectRoot: input.projectRoot,
+    type: "routing_event",
+    triggerId: submission.attempt.id,
+    sourceRef: `routing-decision:${submission.attempt.id}`,
+    occurredAt: submission.attempt.createdAt,
+    requestedBy: "loopgraph-routing-decision",
+    evidenceRefs: [
+      submission.attempt.id,
+      ...(submission.problem ? [submission.problem.id] : []),
+      ...submission.routeJobs.map((job) => job.id)
+    ]
+  }, { now: input.now });
 
   return {
     ...submission,
-    lifecycleDeliveries: lifecycleDeliveries.map(summarizeLifecycleResult)
+    lifecycleDeliveries: lifecycleDeliveries.map(summarizeLifecycleResult),
+    controllerTrigger
   };
 }
 
@@ -724,8 +750,7 @@ export async function loadRoutingCardsFromProject(input: {
       currentReadiness: readinessForRequiredConnections(
         loaded.spec.routing?.requiredConnections ?? [],
         connectionReadinessByCapability
-      ),
-      loopStatus: "active"
+      )
     });
     if (card) compiledCards.push(card);
   }

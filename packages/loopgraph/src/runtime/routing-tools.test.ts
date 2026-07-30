@@ -192,6 +192,11 @@ describe("routing tool surface", () => {
     expect(result.duplicate).toBe(false);
     expect(result.eligibleRoutes.map((route) => route.card.loopId)).toEqual(["marketing_ads"]);
     expect(await store.getEventReceipt(event.id)).toBeTruthy();
+    expect(result.controllerTrigger).toMatchObject({
+      enqueued: true,
+      duplicate: false,
+      triggerRecordId: expect.stringMatching(/^controller_trigger_/)
+    });
   });
 
   it("ignores caller-supplied routing cards on Hermes-facing ingest calls", async () => {

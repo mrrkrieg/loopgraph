@@ -162,7 +162,23 @@ npm run loopgraph -- worker run --project . --watch --interval 5
 
 Shadow, recommend, and simulate jobs stay local. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
 
-### 6. Check before live credentials
+### 6. Keep the Hermes Brain improvement cycle running
+
+Run one evidence-to-design cycle:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type manual
+```
+
+Or keep the trusted local controller processing idempotent triggers:
+
+```bash
+npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
+```
+
+Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Only strict low-risk additions can materialize automatically, and they remain in shadow mode. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md).
+
+### 7. Check before live credentials
 
 Before connecting live provider credentials or production webhook routes, run:
 

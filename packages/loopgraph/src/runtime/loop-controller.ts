@@ -30,7 +30,10 @@ import {
   scanLoopOpportunities,
   type ScanLoopOpportunitiesResult
 } from "./loop-opportunity-engine";
-import { materializeAcceptedLoopDesignProposals } from "./loop-materialization";
+import {
+  applyGraphChangeSet,
+  approveGraphChangeSet
+} from "./semantic-graph-transactions";
 import { evaluateObservedOutcome } from "./outcome-service";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { readProjectMetricDefinitions } from "./outcome-tools";
@@ -440,34 +443,71 @@ async function decideControllerActions(input: {
         }));
         continue;
       }
-      const materialization = await materializeAcceptedLoopDesignProposals({
-        projectRoot: input.projectRoot,
-        designRunId,
-        acceptedProposalIds: proposalSet.proposals.map((proposal) => proposal.proposalId),
-        acceptedBy: "loopgraph-controller-policy",
-        overwriteExisting: false,
-        now: input.now
-      });
+      const changeSetId = opportunity.graphChangeSetId;
+      if (!changeSetId) {
+        decisions.push(decision({
+          ...base,
+          designRunId,
+          action: "review_change",
+          summary: `${opportunity.title}: graph change set is missing`,
+          reason: "Automatic shadow materialization requires a versioned graph change set.",
+          policy: {
+            passed: false,
+            rules: [...gate.rules, rule("graph-change-set", false, "A graph change set is required.")]
+          }
+        }));
+        continue;
+      }
+      let applied;
+      let approval;
+      try {
+        approval = await approveGraphChangeSet({
+          projectRoot: input.projectRoot,
+          changeSetId,
+          decision: "approved",
+          actorId: "loopgraph-controller",
+          actorRole: "controller-policy",
+          policyVersion: `${input.policy.schemaVersion}:${contentHash(input.policy)}`,
+          reason: "Every strict automatic-shadow policy rule passed.",
+          evidenceRefs: opportunity.signals.flatMap((signal) => [signal.sourceRef, ...signal.evidenceRefs]),
+          now: input.now
+        });
+        applied = await applyGraphChangeSet({
+          projectRoot: input.projectRoot,
+          changeSetId,
+          approvalReceiptId: approval.receipt.id,
+          designRunId,
+          acceptedProposalIds: proposalSet.proposals.map((proposal) => proposal.proposalId),
+          initiatedBy: "loopgraph-controller",
+          now: input.now
+        });
+      } catch (error) {
+        decisions.push(decision({
+          ...base,
+          designRunId,
+          graphApprovalReceiptId: approval?.receipt.id,
+          action: "review_change",
+          summary: `${opportunity.title}: shadow graph transaction failed`,
+          reason: error instanceof Error ? error.message : String(error),
+          policy: {
+            passed: false,
+            rules: [
+              ...gate.rules,
+              rule("semantic-graph-transaction", false, error instanceof Error ? error.message : String(error))
+            ]
+          }
+        }));
+        continue;
+      }
       decisions.push(decision({
         ...base,
         designRunId,
-        materializationId: materialization.materializationId,
-        action: materialization.valid ? "shadow_materialize" : "review_change",
-        summary: materialization.valid
-          ? `${opportunity.title}: materialized in shadow mode`
-          : `${opportunity.title}: shadow materialization failed`,
-        reason: materialization.valid
-          ? "Every strict automatic-shadow policy rule passed; no live authority or new credentials were granted."
-          : materialization.errors.join("; "),
-        policy: materialization.valid
-          ? gate
-          : {
-              passed: false,
-              rules: [
-                ...gate.rules,
-                rule("materialization-valid", false, materialization.errors.join("; "))
-              ]
-            }
+        graphApprovalReceiptId: approval.receipt.id,
+        graphTransactionId: applied.transaction.id,
+        action: "shadow_materialize",
+        summary: `${opportunity.title}: materialized in shadow mode`,
+        reason: "Every strict automatic-shadow policy rule passed and the content-bound graph transaction committed.",
+        policy: gate
       }));
       continue;
     }

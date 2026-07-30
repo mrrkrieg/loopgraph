@@ -4,9 +4,11 @@ import {
   loopControllerCheckpointSchema,
   loopControllerPolicySchema,
   loopControllerRunSchema,
+  loopControllerTriggerRecordSchema,
   type LoopControllerCheckpoint,
   type LoopControllerPolicy,
-  type LoopControllerRun
+  type LoopControllerRun,
+  type LoopControllerTriggerRecord
 } from "../core";
 
 export type ControllerRunSaveResult = {
@@ -23,7 +25,11 @@ export interface LoopControllerStore {
   saveCheckpoint(checkpoint: LoopControllerCheckpoint): Promise<void>;
   readPolicy(): Promise<LoopControllerPolicy | undefined>;
   savePolicy(policy: LoopControllerPolicy): Promise<void>;
+  saveTrigger(record: LoopControllerTriggerRecord): Promise<void>;
+  getTrigger(triggerRecordId: string): Promise<LoopControllerTriggerRecord | undefined>;
+  listTriggers(status?: LoopControllerTriggerRecord["status"]): Promise<LoopControllerTriggerRecord[]>;
   withControllerLock<T>(operation: () => Promise<T>): Promise<T>;
+  withTriggerLock<T>(operation: () => Promise<T>): Promise<T>;
 }
 
 export class FileLoopControllerStore implements LoopControllerStore {
@@ -85,9 +91,44 @@ export class FileLoopControllerStore implements LoopControllerStore {
     await writeJsonAtomic(this.policyPath(), loopControllerPolicySchema.parse(policy));
   }
 
-  async withControllerLock<T>(operation: () => Promise<T>): Promise<T> {
+  async saveTrigger(record: LoopControllerTriggerRecord): Promise<void> {
     await this.ensureDirs();
-    const lockPath = path.join(this.controllerRoot(), ".controller.lock");
+    await writeJsonAtomic(
+      this.triggerPath(record.id),
+      loopControllerTriggerRecordSchema.parse(record)
+    );
+  }
+
+  async getTrigger(triggerRecordId: string): Promise<LoopControllerTriggerRecord | undefined> {
+    return readJson(this.triggerPath(triggerRecordId), loopControllerTriggerRecordSchema);
+  }
+
+  async listTriggers(status?: LoopControllerTriggerRecord["status"]): Promise<LoopControllerTriggerRecord[]> {
+    try {
+      const files = (await readdir(this.triggersRoot())).filter((file) => file.endsWith(".json")).sort();
+      const records = await Promise.all(files.map((file) =>
+        readJson(path.join(this.triggersRoot(), file), loopControllerTriggerRecordSchema)
+      ));
+      return records
+        .filter((record): record is LoopControllerTriggerRecord => Boolean(record))
+        .filter((record) => !status || record.status === status)
+        .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id));
+    } catch {
+      return [];
+    }
+  }
+
+  async withControllerLock<T>(operation: () => Promise<T>): Promise<T> {
+    return this.withLock(".controller.lock", operation);
+  }
+
+  async withTriggerLock<T>(operation: () => Promise<T>): Promise<T> {
+    return this.withLock(".triggers.lock", operation);
+  }
+
+  private async withLock<T>(lockFileName: string, operation: () => Promise<T>): Promise<T> {
+    await this.ensureDirs();
+    const lockPath = path.join(this.controllerRoot(), lockFileName);
     const startedAt = Date.now();
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     while (!handle) {
@@ -115,7 +156,10 @@ export class FileLoopControllerStore implements LoopControllerStore {
   }
 
   private async ensureDirs() {
-    await mkdir(this.runsRoot(), { recursive: true, mode: 0o700 });
+    await Promise.all([
+      mkdir(this.runsRoot(), { recursive: true, mode: 0o700 }),
+      mkdir(this.triggersRoot(), { recursive: true, mode: 0o700 })
+    ]);
   }
 
   private controllerRoot() {
@@ -128,6 +172,14 @@ export class FileLoopControllerStore implements LoopControllerStore {
 
   private runPath(runId: string) {
     return path.join(this.runsRoot(), `${safeFileName(runId)}.json`);
+  }
+
+  private triggersRoot() {
+    return path.join(this.controllerRoot(), "triggers");
+  }
+
+  private triggerPath(triggerRecordId: string) {
+    return path.join(this.triggersRoot(), `${safeFileName(triggerRecordId)}.json`);
   }
 
   private checkpointPath() {

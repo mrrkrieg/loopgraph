@@ -4,10 +4,22 @@ import { NextResponse } from "next/server";
 const WORKER_API_TOKEN_ENV = "LOOPGRAPH_WORKER_API_TOKEN";
 
 export function authorizeWorkerApiRequest(request: Request): NextResponse | null {
-  const configuredToken = process.env[WORKER_API_TOKEN_ENV];
+  return authorizeBearerApiRequest(request, WORKER_API_TOKEN_ENV, "route-job HTTP API");
+}
+
+export function authorizeCronApiRequest(request: Request): NextResponse | null {
+  return authorizeBearerApiRequest(request, "CRON_SECRET", "scheduled controller API");
+}
+
+export function authorizeBearerApiRequest(
+  request: Request,
+  environmentVariable: string,
+  capability: string
+): NextResponse | null {
+  const configuredToken = process.env[environmentVariable];
   if (!configuredToken) {
     return NextResponse.json({
-      error: `${WORKER_API_TOKEN_ENV} must be configured before the route-job HTTP API can be used.`
+      error: `${environmentVariable} must be configured before the ${capability} can be used.`
     }, {
       status: 503,
       headers: {
