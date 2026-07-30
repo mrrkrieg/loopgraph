@@ -6,6 +6,7 @@ import {
 } from "loopgraph/runtime";
 import { getActiveLoopgraphProjectRoot } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
+import { emitOperationalLog } from "../../../../../../lib/observability/operational-log";
 
 export async function POST(
   request: Request,
@@ -29,6 +30,14 @@ export async function POST(
     signature,
     secret
   })) {
+    emitOperationalLog({
+      level: "warn",
+      event: "hermes.callback.denied",
+      outcome: "denied",
+      organizationId: process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID,
+      projectKey: process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default",
+      reason: "invalid_signature"
+    });
     return NextResponse.json({ error: "Invalid Hermes callback signature" }, { status: 401 });
   }
 

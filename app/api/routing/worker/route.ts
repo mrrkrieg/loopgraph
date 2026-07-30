@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { runRouteJobWorker } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getRoutingStore,
+  getStorageAdapter
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -15,7 +19,9 @@ export async function POST(request: Request) {
       projectRoot: getActiveLoopgraphProjectRoot(),
       workerId: stringValue(body.workerId),
       limit: integerValue(body.limit, 10, 1, 100),
-      leaseSeconds: integerValue(body.leaseSeconds, 300, 30, 3600)
+      leaseSeconds: integerValue(body.leaseSeconds, 300, 30, 3600),
+      store: getRoutingStore(),
+      storage: getStorageAdapter()
     });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {

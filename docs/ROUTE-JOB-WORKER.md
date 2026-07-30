@@ -60,7 +60,9 @@ All accepted activation modes produce route jobs. This is intentional: shadow an
 
 ## Safety invariants
 
-- Claims are serialized with an atomic project-local file lock.
+- Local claims are serialized with an atomic project-local file lock.
+- Hosted claims use tenant-scoped PostgreSQL rows, `FOR UPDATE SKIP LOCKED`, revisions, and lease
+  fencing so independent replicas cannot claim the same job.
 - Every claim has a unique lease token; a stale worker cannot finish a job after another worker reclaims it.
 - Expired `claimed` or `running` jobs are reclaimable, while active leases suppress duplicate work.
 - The worker reloads the registered LoopSpec and compares its hash to both the route commit and job before every run.
@@ -88,3 +90,6 @@ LOOPGRAPH_HERMES_LIFECYCLE_SECRET=<shared-lifecycle-signing-secret>
 `LOOPGRAPH_HERMES_LIFECYCLE_SECRET` is optional for a local-only project. When it is absent, Loopgraph creates a project-local random signing key at `.loopgraph/hermes/lifecycle-signing.key` with owner-only permissions. Do not commit that generated key. Hosted or multi-process installations should provide the shared secret through their approved secret store.
 
 Do not store environment-provided secrets in `.loopgraph/` or commit them to Git.
+
+See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) for hosted persistence,
+atomic claim semantics, and the remaining horizontal-scaling boundary.

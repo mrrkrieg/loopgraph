@@ -13,6 +13,7 @@ export type HostedOrganizationRole = (typeof hostedOrganizationRoles)[number];
 
 export const hostedPermissions = [
   "workspace.read",
+  "audit.read",
   "loops.write",
   "runs.write",
   "reviews.write",
@@ -27,6 +28,7 @@ const ROLE_PERMISSIONS: Record<HostedOrganizationRole, ReadonlySet<HostedPermiss
   operator: new Set(["workspace.read", "loops.write", "runs.write", "reviews.write"]),
   admin: new Set([
     "workspace.read",
+    "audit.read",
     "loops.write",
     "runs.write",
     "reviews.write",

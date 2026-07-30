@@ -13,7 +13,12 @@ import {
   isHostedAuthRequired
 } from "@/lib/auth/hosted-config";
 
-const PUBLIC_PATHS = ["/sign-in", "/auth/callback"] as const;
+const PUBLIC_PATHS = [
+  "/sign-in",
+  "/auth/callback",
+  "/api/health/live",
+  "/api/health/ready"
+] as const;
 
 export async function middleware(request: NextRequest) {
   const machineRoute = isMachineAuthenticatedRoute(request.nextUrl.pathname);

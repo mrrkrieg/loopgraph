@@ -41,6 +41,7 @@ Requests are recorded under the narrow route capability:
 - `graph.transact`
 - `hermes.design_callback`
 - `measurements.collect`
+- `observability.read`
 - `provider.github_forward`
 - `schedule.controller`
 - `schedule.measurements`
@@ -63,6 +64,10 @@ LOOPGRAPH_HERMES_CALLBACK_RATE_LIMIT_PER_MINUTE=60
 
 LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID=github_forwarder
 LOOPGRAPH_GITHUB_WEBHOOK_RATE_LIMIT_PER_MINUTE=120
+
+LOOPGRAPH_OBSERVABILITY_API_TOKEN=<different read-only secret>
+LOOPGRAPH_OBSERVABILITY_CREDENTIAL_ID=metrics_primary
+LOOPGRAPH_OBSERVABILITY_RATE_LIMIT_PER_MINUTE=60
 ```
 
 Hermes callback and GitHub forwarder receipts are recorded only after their existing HMAC
@@ -93,4 +98,5 @@ The migration creates tenant-scoped replay receipts, rate windows, and the servi
 `authorize_machine_request` RPC. Both tables have RLS enabled and no browser role receives access.
 
 Receipts are an operational security control, not the final immutable audit export. Production
-audit export, retention policy, alerting, and backup verification remain separate release gates.
+audit decisions are hash chained by the subsequent operational-audit migration, but independent
+retention, deployed alerting, and backup verification remain separate release gates.

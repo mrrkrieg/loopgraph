@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { authorizeCronApiRequest, authorizeWorkerApiRequest } from "./worker-api-auth";
+import {
+  authorizeCronApiRequest,
+  authorizeObservabilityApiRequest,
+  authorizeWorkerApiRequest
+} from "./worker-api-auth";
 
 const originalToken = process.env.LOOPGRAPH_WORKER_API_TOKEN;
 const originalCronSecret = process.env.CRON_SECRET;
+const originalObservabilityToken = process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN;
 
 afterEach(() => {
   if (originalToken === undefined) {
@@ -14,6 +19,11 @@ afterEach(() => {
     delete process.env.CRON_SECRET;
   } else {
     process.env.CRON_SECRET = originalCronSecret;
+  }
+  if (originalObservabilityToken === undefined) {
+    delete process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN;
+  } else {
+    process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN = originalObservabilityToken;
   }
 });
 
@@ -70,6 +80,20 @@ describe("route-job HTTP API authorization", () => {
         headers: { authorization: "Bearer strong-worker-token" }
       })
     );
+    expect(rejected?.status).toBe(401);
+  });
+
+  it("keeps the read-only observability credential separate from worker credentials", async () => {
+    process.env.LOOPGRAPH_WORKER_API_TOKEN = "strong-worker-token";
+    process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN = "strong-observability-token";
+    expect(await authorizeObservabilityApiRequest(new Request(
+      "https://example.test/api/operations/metrics",
+      { headers: { authorization: "Bearer strong-observability-token" } }
+    ))).toBeNull();
+    const rejected = await authorizeObservabilityApiRequest(new Request(
+      "https://example.test/api/operations/metrics",
+      { headers: { authorization: "Bearer strong-worker-token" } }
+    ));
     expect(rejected?.status).toBe(401);
   });
 });

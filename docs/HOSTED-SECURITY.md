@@ -42,6 +42,8 @@ LOOPGRAPH_HERMES_CALLBACK_SECRET=SEPARATE_LONG_RANDOM_SECRET
 LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID=hermes_callback
 GITHUB_WEBHOOK_SECRET=SEPARATE_LONG_RANDOM_SECRET
 LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID=github_forwarder
+LOOPGRAPH_OBSERVABILITY_API_TOKEN=SEPARATE_READ_ONLY_LONG_RANDOM_TOKEN
+LOOPGRAPH_OBSERVABILITY_CREDENTIAL_ID=metrics_primary
 ```
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable or copy provider OAuth
@@ -72,6 +74,7 @@ Supabase's database linter and an integration test against the target project.
 | Read workspace | Yes | Yes | Yes | Yes |
 | Design/update loops | No | Yes | Yes | Yes |
 | Start runs and submit reviews | No | Yes | Yes | Yes |
+| Export security audit | No | No | Yes | Yes |
 | Rename organization | No | No | Yes | Yes |
 | Manage members | No | No | Yes | Yes |
 | Delete organization | No | No | No | Yes |
@@ -86,17 +89,24 @@ deployment connected to customer or company data.
 
 ## Current production limitation
 
-The browser persistence boundary is tenant-aware, while the package runtime uses a
-deployment-bound `.loopgraph/` namespace and a deployment-level worker token. The namespace is
-isolated by organization/project and must live on a persistent volume, but its stores are not yet
-a distributed queue. Until database-backed claims and tenant-scoped service accounts ship, use one
-organization/project and one active writer per hosted runtime deployment. Do not operate multiple
-customer organizations through one shared filesystem worker.
+The browser persistence boundary and the hosted routing store are tenant-aware. Routing state and
+route-job claims are database-backed, service-role-only, and scoped by organization/project, so
+multiple worker replicas can safely claim this queue. The worker token is still a deployment
+credential bound to one configured organization/project.
 
-See [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
+Design, graph, controller, measurement, outcome, and generated-artifact stores are not all
+distributed yet. Keep those subsystems to one active writer until their database migrations ship,
+and never operate multiple customer organizations through one shared filesystem namespace.
+
+See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) and
+[Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md).
 
 Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
 See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).
+
+Machine decisions also append to a tamper-evident security audit chain. Public health responses
+contain status only; detailed metrics and audit export remain separately authorized. See
+[Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md).
 
 The remaining hosted production work is tracked in
 [Current build state](./CURRENT-STATE.md#remaining-product-layers).

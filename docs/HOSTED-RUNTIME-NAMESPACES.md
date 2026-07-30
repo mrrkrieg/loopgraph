@@ -53,12 +53,15 @@ request for organization A can therefore never reuse organization B's file adapt
 
 ## Current scaling boundary
 
-This namespace closes accidental cross-tenant filesystem sharing, but the file stores themselves
-are not a distributed queue. The supported hosted topology remains one organization/project and
-one active writer per persistent runtime deployment.
+This namespace closes accidental cross-tenant filesystem sharing. Routing events, problems,
+Hermes decisions, route commits, corrections, evaluations, and route jobs now use the
+tenant/project-scoped Supabase routing store in authenticated hosted mode. Route-job claims are
+atomic across replicas and use leases plus revision fencing.
 
-Before horizontal worker scaling, route jobs, design tasks, graph transactions, controller
-triggers, measurement jobs, outcomes, and audit receipts must move to database-backed stores with:
+Design tasks, graph transactions, controller triggers, measurement jobs, outcomes, and generated
+LoopSpec artifacts still have file-backed paths. Until those move, only the routing queue/worker
+boundary may be scaled horizontally; do not treat the full control plane as multi-writer. The
+remaining stores need:
 
 - atomic claim/update operations;
 - leases and fencing tokens;
@@ -68,5 +71,5 @@ triggers, measurement jobs, outcomes, and audit receipts must move to database-b
 - append-only mutation receipts;
 - transactionally consistent graph snapshots.
 
-That database/queue migration is the next production layer; namespace isolation is the safe
-precondition, not a claim of distributed durability.
+See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) for the implemented queue
+protocol and exact remaining boundary.
