@@ -14,7 +14,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "routing.jobs");
   if (unauthorized) return unauthorized;
 
   try {

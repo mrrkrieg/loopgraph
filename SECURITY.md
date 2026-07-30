@@ -67,3 +67,7 @@ RLS, and server-only credential boundary described in
 safe only as one organization/project and one active writer per persistent runtime deployment; a
 shared multi-customer filesystem worker is not a supported production topology. See
 [Hosted runtime namespaces](docs/HOSTED-RUNTIME-NAMESPACES.md).
+
+Hosted worker, scheduler, signed Hermes callback, and signed provider-forwarding endpoints also
+require the scoped identity, replay, body, and durable rate controls in
+[Machine request guards](docs/MACHINE-REQUEST-GUARDS.md).

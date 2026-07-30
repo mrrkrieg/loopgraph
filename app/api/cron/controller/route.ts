@@ -9,7 +9,7 @@ import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worke
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const unauthorized = authorizeCronApiRequest(request);
+  const unauthorized = await authorizeCronApiRequest(request, "schedule.controller");
   if (unauthorized) return unauthorized;
   const now = new Date();
   const projectRoot = getActiveLoopgraphProjectRoot();

@@ -1,9 +1,11 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import {
   processHermesDesignCallback,
   verifyHermesCallbackSignature
 } from "loopgraph/runtime";
 import { getActiveLoopgraphProjectRoot } from "../../../../../../lib/loopgraph-runtime/storage-resolver";
+import { authorizeVerifiedHostedMachineRequest } from "../../../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export async function POST(
   request: Request,
@@ -36,6 +38,22 @@ export async function POST(
     if (callback.taskId !== taskId) {
       return NextResponse.json({ error: "Hermes callback taskId does not match route" }, { status: 400 });
     }
+    const callbackId = typeof callback.callbackId === "string" ? callback.callbackId : "";
+    if (!callbackId) {
+      return NextResponse.json({ error: "Hermes callbackId is required" }, { status: 400 });
+    }
+    const guardResponse = await authorizeVerifiedHostedMachineRequest({
+      capability: "hermes.design_callback",
+      credentialEnvironmentVariable: "LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID",
+      requestId: `hermes_${digest(callbackId).slice(0, 32)}`,
+      requestHash: digest(rawBody),
+      requestedAt: timestamp,
+      rateLimit: positiveInteger(
+        process.env.LOOPGRAPH_HERMES_CALLBACK_RATE_LIMIT_PER_MINUTE,
+        60
+      )
+    });
+    if (guardResponse) return guardResponse;
     const result = await processHermesDesignCallback({
       projectRoot: getActiveLoopgraphProjectRoot(),
       callback
@@ -46,4 +64,13 @@ export async function POST(
       error: error instanceof Error ? error.message : "Invalid Hermes callback"
     }, { status: 400 });
   }
+}
+
+function digest(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function positiveInteger(value: string | undefined, fallback: number) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

@@ -12,7 +12,7 @@ import { authorizeWorkerApiRequest } from "../../../lib/loopgraph-runtime/worker
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "controller.operate");
   if (unauthorized) return unauthorized;
   const projectRoot = getActiveLoopgraphProjectRoot();
   const store = new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "controller.operate");
   if (unauthorized) return unauthorized;
   try {
     const body = await optionalJson(request);

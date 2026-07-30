@@ -21,22 +21,24 @@ describe("route-job HTTP API authorization", () => {
   it("fails closed without a configured token even for a localhost URL", async () => {
     delete process.env.LOOPGRAPH_WORKER_API_TOKEN;
 
-    const response = authorizeWorkerApiRequest(new Request("http://localhost/api/routing/worker", {
+    const response = await authorizeWorkerApiRequest(new Request("http://localhost/api/routing/worker", {
       method: "POST"
     }));
 
     expect(response?.status).toBe(503);
     await expect(response?.json()).resolves.toEqual({
-      error: "LOOPGRAPH_WORKER_API_TOKEN must be configured before the route-job HTTP API can be used."
+      error:
+        "LOOPGRAPH_WORKER_API_TOKEN must be configured before the " +
+        "routing.worker machine API can be used."
     });
   });
 
-  it("rejects missing, malformed, and incorrect bearer credentials", () => {
+  it("rejects missing, malformed, and incorrect bearer credentials", async () => {
     process.env.LOOPGRAPH_WORKER_API_TOKEN = "strong-worker-token";
 
     for (const authorization of [undefined, "Basic abc", "Bearer wrong-worker-token"]) {
       const headers = authorization ? { authorization } : undefined;
-      const response = authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
+      const response = await authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
         method: "POST",
         headers
       }));
@@ -45,10 +47,10 @@ describe("route-job HTTP API authorization", () => {
     }
   });
 
-  it("accepts only the exact configured bearer credential", () => {
+  it("accepts only the exact configured bearer credential", async () => {
     process.env.LOOPGRAPH_WORKER_API_TOKEN = "strong-worker-token";
 
-    const response = authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
+    const response = await authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
       method: "POST",
       headers: {
         authorization: "Bearer strong-worker-token"
@@ -58,13 +60,16 @@ describe("route-job HTTP API authorization", () => {
     expect(response).toBeNull();
   });
 
-  it("requires an independently configured cron bearer secret", () => {
+  it("requires an independently configured cron bearer secret", async () => {
     process.env.CRON_SECRET = "strong-cron-secret";
-    expect(authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
+    expect(await authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
       headers: { authorization: "Bearer strong-cron-secret" }
     }))).toBeNull();
-    expect(authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
-      headers: { authorization: "Bearer strong-worker-token" }
-    }))?.status).toBe(401);
+    const rejected = await authorizeCronApiRequest(
+      new Request("https://example.test/api/cron/controller", {
+        headers: { authorization: "Bearer strong-worker-token" }
+      })
+    );
+    expect(rejected?.status).toBe(401);
   });
 });

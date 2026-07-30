@@ -23,7 +23,7 @@ const GRAPH_ACTION_TO_TOOL = {
 } as const satisfies Record<string, LoopgraphSemanticGraphToolName>;
 
 export async function GET(request: Request) {
-  const unauthorized = authorizeGraphTransactionRequest(request);
+  const unauthorized = await authorizeGraphTransactionRequest(request);
   if (unauthorized) return unauthorized;
   try {
     const url = new URL(request.url);
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = authorizeGraphTransactionRequest(request);
+  const unauthorized = await authorizeGraphTransactionRequest(request);
   if (unauthorized) return unauthorized;
   try {
     const body = await requiredJson(request);
@@ -74,8 +74,12 @@ export async function POST(request: Request) {
 function authorizeGraphTransactionRequest(request: Request) {
   return authorizeBearerApiRequest(
     request,
-    "LOOPGRAPH_WORKER_API_TOKEN",
-    "semantic graph transaction HTTP API"
+    {
+      environmentVariable: "LOOPGRAPH_WORKER_API_TOKEN",
+      credentialEnvironmentVariable: "LOOPGRAPH_WORKER_CREDENTIAL_ID",
+      capability: "graph.transact",
+      rateLimit: 60
+    }
   );
 }
 
