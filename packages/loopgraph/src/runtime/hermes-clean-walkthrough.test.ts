@@ -446,7 +446,10 @@ describe("clean local Hermes walkthrough", () => {
               status: "shadow"
             })
           ],
-          routeJobs: []
+          routeJobs: [expect.objectContaining({
+            activationMode: "shadow",
+            status: "queued"
+          })]
         })
       }
     });

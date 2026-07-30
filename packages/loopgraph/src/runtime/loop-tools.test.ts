@@ -239,6 +239,8 @@ describe("Loopgraph Hermes loop tools", () => {
       runId: simulation.runId,
       status: "approved",
       approvedFingerprints: simulation.traceSummary.preparedFingerprints,
+      reviewerId: "marketing_owner",
+      role: "owner",
       comment: "Synthetic marketing review approved."
     });
 
@@ -249,6 +251,7 @@ describe("Loopgraph Hermes loop tools", () => {
       status: "COMPLETED",
       review: {
         status: "approved",
+        reviewerId: "marketing_owner",
         comment: "Synthetic marketing review approved."
       }
     });

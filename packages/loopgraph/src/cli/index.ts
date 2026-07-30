@@ -47,6 +47,12 @@ import {
   listLoopOpportunities,
   scanLoopOpportunities
 } from "../runtime/loop-opportunity-engine";
+import { runRouteJobWorker } from "../runtime/route-job-worker";
+import {
+  cancelRouteJob,
+  FileRoutingStore,
+  retryRouteJob
+} from "../runtime/routing-store";
 
 const HERO_TEMPLATES = [
   {
@@ -124,6 +130,7 @@ async function runHermesDoctor(options: { project: string }): Promise<void> {
 const workspace = program.command("workspace").description("Local Loopgraph workspace commands");
 const events = program.command("events").description("Hermes-normalized event utilities");
 const opportunities = program.command("opportunities").description("Detect missing or weak loops from durable operating evidence");
+const worker = program.command("worker").description("Run and operate the durable Hermes route-job worker");
 
 workspace
   .command("init")
@@ -212,6 +219,92 @@ opportunities
       minimumScore: minimumScore !== undefined && Number.isFinite(minimumScore) ? minimumScore : undefined
     });
     console.log(JSON.stringify({ opportunities: result }, null, 2));
+  });
+
+worker
+  .command("run")
+  .description("Claim due route jobs and execute each governed LoopSpec through its configured activation mode")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--worker-id <id>", "Stable worker identity", `worker_${process.pid}`)
+  .option("--limit <count>", "Maximum jobs per poll", "10")
+  .option("--lease-seconds <seconds>", "Lease duration for each claimed job", "300")
+  .option("--watch", "Keep polling until interrupted")
+  .option("--interval <seconds>", "Watch polling interval in seconds", "5")
+  .action(async (options: {
+    project: string;
+    workerId: string;
+    limit: string;
+    leaseSeconds: string;
+    watch?: boolean;
+    interval: string;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const limit = parsePositiveInteger(options.limit, "Worker limit");
+    const leaseSeconds = parsePositiveInteger(options.leaseSeconds, "Worker lease seconds");
+    const intervalSeconds = parsePositiveInteger(options.interval, "Worker interval seconds");
+    const runOnce = async () => {
+      const result = await runRouteJobWorker({
+        projectRoot,
+        workerId: options.workerId,
+        limit,
+        leaseSeconds
+      });
+      console.log(JSON.stringify(result, null, 2));
+    };
+    await runOnce();
+    if (!options.watch) return;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setInterval(() => {
+        void runOnce().catch((error) => {
+          clearInterval(timer);
+          reject(error);
+        });
+      }, intervalSeconds * 1000);
+      process.once("SIGINT", () => {
+        clearInterval(timer);
+        resolve();
+      });
+      process.once("SIGTERM", () => {
+        clearInterval(timer);
+        resolve();
+      });
+    });
+  });
+
+worker
+  .command("retry")
+  .description("Explicitly requeue one failed or dead-letter route job")
+  .requiredOption("--job <id>", "Route job ID")
+  .requiredOption("--reason <text>", "Auditable retry reason")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--by <name>", "Operator requesting the retry", "operator")
+  .action(async (options: { project: string; job: string; reason: string; by: string }) => {
+    const projectRoot = path.resolve(options.project);
+    const job = await retryRouteJob({
+      store: new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      jobId: options.job,
+      reason: options.reason,
+      requestedBy: options.by
+    });
+    console.log(JSON.stringify(job, null, 2));
+  });
+
+worker
+  .command("cancel")
+  .description("Cancel one non-completed route job")
+  .requiredOption("--job <id>", "Route job ID")
+  .requiredOption("--reason <text>", "Auditable cancellation reason")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--by <name>", "Operator cancelling the job", "operator")
+  .action(async (options: { project: string; job: string; reason: string; by: string }) => {
+    const projectRoot = path.resolve(options.project);
+    const job = await cancelRouteJob({
+      store: new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      jobId: options.job,
+      reason: options.reason,
+      cancelledBy: options.by
+    });
+    console.log(JSON.stringify(job, null, 2));
   });
 
 workspace
@@ -628,34 +721,46 @@ review
   .command("approve")
   .argument("<runId>")
   .requiredOption("--actions <fingerprints>", "Comma-separated fingerprints")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { actions: string; comment?: string }) => {
-    await runReviewDecision(runId, "approved", options.actions.split(",").filter(Boolean), options.comment);
+  .action(async (runId, options: { actions: string; by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "approved", options.actions.split(",").filter(Boolean), options.by, options.role, options.project, options.comment);
   });
 
 review
   .command("reject")
   .argument("<runId>")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { comment?: string }) => {
-    await runReviewDecision(runId, "rejected", [], options.comment);
+  .action(async (runId, options: { by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "rejected", [], options.by, options.role, options.project, options.comment);
   });
 
 review
   .command("request-evidence")
   .argument("<runId>")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { comment?: string }) => {
-    await runReviewDecision(runId, "request_evidence", [], options.comment);
+  .action(async (runId, options: { by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "request_evidence", [], options.by, options.role, options.project, options.comment);
   });
 
 review
   .command("reassign")
   .argument("<runId>")
   .requiredOption("--to <role>", "Role or owner to reassign to")
+  .requiredOption("--by <reviewerId>", "Auditable reviewer identity")
+  .requiredOption("--role <role>", "Reviewer role allowed by the LoopSpec")
+  .option("--project <root>", "Explicit project root", process.cwd())
   .option("--comment <text>")
-  .action(async (runId, options: { to: string; comment?: string }) => {
-    await runReviewDecision(runId, "reassigned", [], options.comment, options.to);
+  .action(async (runId, options: { to: string; by: string; role: string; project: string; comment?: string }) => {
+    await runReviewDecision(runId, "reassigned", [], options.by, options.role, options.project, options.comment, options.to);
   });
 
 review
@@ -770,16 +875,29 @@ async function runReviewDecision(
   runId: string,
   status: "approved" | "rejected" | "request_evidence" | "reassigned",
   fingerprints: string[],
+  reviewerId: string,
+  roleValue: string,
+  projectRootValue: string,
   comment?: string,
   reassignedTo?: string
 ) {
   try {
-    const result = await applyReviewDecision(storage, {
+    const allowedRoles = ["approver", "reviewer", "owner", "teacher", "executor", "accountability_holder"] as const;
+    if (!allowedRoles.includes(roleValue as (typeof allowedRoles)[number])) {
+      throw new ReviewServiceError(`Unsupported reviewer role: ${roleValue}`);
+    }
+    const projectRoot = path.resolve(projectRootValue);
+    const reviewStorage = getStorageAdapter({ rootDir: getLoopgraphRoot(projectRoot) });
+    const result = await applyReviewDecision(reviewStorage, {
       runId,
       status,
       approvedFingerprints: fingerprints,
+      reviewerId,
+      role: roleValue as (typeof allowedRoles)[number],
       comment,
       reassignedTo
+    }, {
+      projectRoot
     });
     console.log(`Review ${status} recorded for ${runId} (trace status=${result.trace.status})`);
   } catch (error) {
@@ -852,6 +970,14 @@ function splitCsv(value?: string): string[] {
     .filter(Boolean);
 }
 
+function parsePositiveInteger(value: string, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return parsed;
+}
+
 async function readRoutingEvaluationFixtures(filePath: string): Promise<RoutingEvaluationFixtureInput[]> {
   const parsed = JSON.parse(await readFile(filePath, "utf8")) as unknown;
   if (Array.isArray(parsed)) return parsed as RoutingEvaluationFixtureInput[];
@@ -874,7 +1000,7 @@ function printHermesSetupResult(result: HermesSetupResult): void {
   console.log("");
   console.log("Connect Hermes");
   console.log(`1. Merge the snippet into ${result.hermesConfig.targetConfigPath}.`);
-  console.log("2. Confirm Hermes loads the Loopgraph MCP server named `loopgraph`.");
+  console.log("2. Confirm Hermes loads `loopgraph_admin`, `loopgraph_webhook_router`, and `loopgraph_lifecycle_router` with their generated exposure profiles.");
   console.log(`3. In Hermes, run: ${result.commandUsage.firstHermesPrompt}`);
   console.log("");
   console.log("Useful clone commands");

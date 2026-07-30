@@ -1,10 +1,19 @@
+import path from "node:path";
 import type { ReviewRole } from "../core/constants";
+import { loopSpecHash } from "../core/hash";
 import type { HumanReviewTrace } from "../core/review";
 import { validateApprovalBinding } from "../core/review";
 import type { LoopRunTrace } from "../core/trace";
+import type { LoopSpec } from "../core/loop-spec";
 import type { StorageAdapter } from "../sdk/adapters";
 import { getAdapterById } from "../sdk/adapters/index";
+import { evaluateLiveExecutionGate, formatLiveExecutionGateError } from "./executor";
 import { buildImprovementItemFromReview } from "./improvement-service";
+import { loadLoopSpecFromPath } from "./loader";
+import { resolveExistingProjectPath } from "./project-paths";
+import { FileRoutingStore, type RoutingStore } from "./routing-store";
+import { getLoopgraphRoot } from "./storage-resolver";
+import { readLoopgraphWorkspace } from "./workspace";
 
 export type ReviewDecisionStatus =
   | "approved"
@@ -17,7 +26,8 @@ export type ApplyReviewDecisionInput = {
   runId: string;
   status: ReviewDecisionStatus;
   approvedFingerprints?: string[];
-  role?: ReviewRole;
+  reviewerId: string;
+  role: ReviewRole;
   comment?: string;
   teacherFeedback?: string;
   reassignedTo?: string;
@@ -26,6 +36,11 @@ export type ApplyReviewDecisionInput = {
   botsittingMinutes?: number;
   escalationMinutes?: number;
   governanceMinutes?: number;
+};
+
+export type ApplyReviewDecisionOptions = {
+  projectRoot?: string;
+  routingStore?: RoutingStore;
 };
 
 export class ReviewServiceError extends Error {
@@ -37,8 +52,12 @@ export class ReviewServiceError extends Error {
 
 export async function applyReviewDecision(
   storage: StorageAdapter,
-  input: ApplyReviewDecisionInput
+  input: ApplyReviewDecisionInput,
+  options: ApplyReviewDecisionOptions = {}
 ): Promise<{ trace: LoopRunTrace; review: HumanReviewTrace }> {
+  if (!input.reviewerId.trim()) {
+    throw new ReviewServiceError("reviewerId is required for an auditable review decision");
+  }
   const trace = await storage.getRun(input.runId);
   if (!trace) {
     throw new ReviewServiceError(`Trace not found: ${input.runId}`);
@@ -49,6 +68,14 @@ export async function applyReviewDecision(
   }
 
   const approvedFingerprints = input.approvedFingerprints ?? [];
+  assertReviewerRoleAllowed(trace, input.role);
+  if (input.status === "approved") {
+    assertValidFingerprintSelection(trace, approvedFingerprints);
+    assertSeparatedApprovalDecision(trace, approvedFingerprints, input.reviewerId);
+  }
+  const currentSpec = input.status === "approved"
+    ? await validateCurrentRoutedReviewContext(trace, options)
+    : undefined;
   const reviewStatus = mapReviewStatus(input.status);
 
   const decidedAt = new Date().toISOString();
@@ -56,7 +83,8 @@ export async function applyReviewDecision(
     id: `review_${input.runId}_${trace.humanReviews.length + 1}`,
     runId: input.runId,
     status: reviewStatus,
-    role: input.role ?? "approver",
+    reviewerId: input.reviewerId,
+    role: input.role,
     approvedFingerprints,
     rejectedFingerprints:
       input.status === "rejected"
@@ -77,7 +105,6 @@ export async function applyReviewDecision(
   trace.humanReviews = [...trace.humanReviews, reviewRecord];
 
   if (input.status === "approved") {
-    assertValidFingerprintSelection(trace, approvedFingerprints);
     const cumulativeApprovedFingerprints = getCumulativeApprovedFingerprints(trace);
     const pendingCustomerFacing = trace.preparedActions.some(
       (action) =>
@@ -100,7 +127,7 @@ export async function applyReviewDecision(
       throw new ReviewServiceError("Select at least one prepared action fingerprint to approve");
     }
 
-    await commitApprovedActions(trace, cumulativeApprovedFingerprints);
+    await commitPreparedActions(trace, cumulativeApprovedFingerprints, currentSpec);
 
     if (pendingCustomerFacing || pendingInternal) {
       trace.status = "WAITING_FOR_REVIEW";
@@ -168,7 +195,167 @@ function assertValidFingerprintSelection(trace: LoopRunTrace, approvedFingerprin
   }
 }
 
-async function commitApprovedActions(trace: LoopRunTrace, approvedFingerprints: string[]) {
+function assertReviewerRoleAllowed(trace: LoopRunTrace, role: ReviewRole): void {
+  const allowedRoles = trace.provenance?.approvalPolicy?.allowedRoles ?? [];
+  if (allowedRoles.length === 0) {
+    throw new ReviewServiceError("Run does not contain a durable approval-role policy");
+  }
+  if (!allowedRoles.includes(role)) {
+    throw new ReviewServiceError(
+      `Role ${role} is not allowed by this run's approval policy (${allowedRoles.join(", ")})`
+    );
+  }
+}
+
+function assertSeparatedApprovalDecision(
+  trace: LoopRunTrace,
+  approvedFingerprints: string[],
+  reviewerId: string
+): void {
+  if (!trace.provenance?.approvalPolicy?.separateCustomerFacingApproval) return;
+  const selected = trace.preparedActions.filter((action) =>
+    approvedFingerprints.includes(action.fingerprint)
+  );
+  const includesCustomerFacing = selected.some((action) => action.customerFacing);
+  const includesInternal = selected.some((action) => !action.customerFacing);
+  if (includesCustomerFacing && includesInternal) {
+    throw new ReviewServiceError(
+      "Customer-facing and internal actions require separate durable review decisions"
+    );
+  }
+  if (!includesCustomerFacing) return;
+
+  const previouslyApproved = new Set(
+    trace.humanReviews
+      .filter((review) => review.status === "approved")
+      .flatMap((review) => review.approvedFingerprints)
+  );
+  const pendingInternal = trace.preparedActions.some((action) =>
+    action.requiresApproval &&
+    !action.customerFacing &&
+    !previouslyApproved.has(action.fingerprint)
+  );
+  if (pendingInternal) {
+    throw new ReviewServiceError(
+      "Approve all required internal actions before the separate customer-facing approval"
+    );
+  }
+  const internalReviewers = new Set(
+    trace.humanReviews
+      .filter((review) =>
+        review.status === "approved" &&
+        review.approvedFingerprints.some((fingerprint) =>
+          trace.preparedActions.some((action) =>
+            action.fingerprint === fingerprint && !action.customerFacing
+          )
+        )
+      )
+      .map((review) => review.reviewerId)
+      .filter((value): value is string => Boolean(value))
+  );
+  if (internalReviewers.has(reviewerId)) {
+    throw new ReviewServiceError(
+      "Customer-facing approval must be completed by a different reviewer identity"
+    );
+  }
+}
+
+async function validateCurrentRoutedReviewContext(
+  trace: LoopRunTrace,
+  options: ApplyReviewDecisionOptions
+): Promise<LoopSpec | undefined> {
+  const routeCommitId = trace.provenance?.invocation.routeCommitId;
+  if (!routeCommitId) return undefined;
+  if (!options.projectRoot) {
+    throw new ReviewServiceError(
+      "projectRoot is required to revalidate a Hermes-routed approval"
+    );
+  }
+
+  const projectRoot = path.resolve(options.projectRoot);
+  const store = options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
+  const commits = await store.listRouteCommits();
+  const commit = commits.find((candidate) => candidate.id === routeCommitId);
+  if (!commit) throw new ReviewServiceError(`Route commit not found: ${routeCommitId}`);
+  if (commit.status === "cancelled") {
+    throw new ReviewServiceError(`Route commit is cancelled: ${routeCommitId}`);
+  }
+  if (commit.status !== "waiting_review") {
+    throw new ReviewServiceError(
+      `Route commit ${routeCommitId} is not waiting for review (status=${commit.status})`
+    );
+  }
+  if (
+    trace.provenance?.invocation.routeAttemptId &&
+    trace.provenance.invocation.routeAttemptId !== commit.routeAttemptId
+  ) {
+    throw new ReviewServiceError(`Route attempt binding changed for ${routeCommitId}`);
+  }
+  if (trace.loopId !== commit.loopId || trace.loopSpecHash !== commit.loopSpecHash) {
+    throw new ReviewServiceError(`Run binding does not match route commit ${routeCommitId}`);
+  }
+
+  const jobs = await store.listRouteJobs({ routeCommitId });
+  const job = jobs.find((candidate) => candidate.runId === trace.id);
+  if (!job) throw new ReviewServiceError(`Route job not found for run ${trace.id}`);
+  if (job.status === "cancelled") {
+    throw new ReviewServiceError(`Route job is cancelled: ${job.id}`);
+  }
+  if (job.status !== "waiting_review") {
+    throw new ReviewServiceError(
+      `Route job ${job.id} is not waiting for review (status=${job.status})`
+    );
+  }
+  if (
+    job.eventId !== commit.eventId ||
+    job.problemId !== commit.problemId ||
+    job.routeAttemptId !== commit.routeAttemptId ||
+    job.loopId !== commit.loopId ||
+    job.loopSpecHash !== commit.loopSpecHash
+  ) {
+    throw new ReviewServiceError(`Route job binding changed for ${job.id}`);
+  }
+
+  const workspace = await readLoopgraphWorkspace(projectRoot);
+  const registered = workspace.registeredSpecs.find((entry) => entry.id === job.loopId);
+  if (!registered) throw new ReviewServiceError(`Registered LoopSpec not found: ${job.loopId}`);
+  let specPath: string;
+  try {
+    specPath = await resolveExistingProjectPath(projectRoot, registered.path, "registered LoopSpec");
+  } catch (error) {
+    throw new ReviewServiceError(error instanceof Error ? error.message : "Registered LoopSpec path is invalid");
+  }
+  const loaded = await loadLoopSpecFromPath(specPath);
+  if (!loaded.ok) throw new ReviewServiceError(loaded.errors.join("; "));
+  const currentHash = loopSpecHash(loaded.spec);
+  if (currentHash !== job.loopSpecHash || currentHash !== commit.loopSpecHash) {
+    throw new ReviewServiceError(
+      `Registered LoopSpec changed after routing commit ${routeCommitId}`
+    );
+  }
+  if (loaded.spec.routing?.activationMode !== job.activationMode) {
+    throw new ReviewServiceError(
+      `Loop activation mode changed after routing commit ${routeCommitId}`
+    );
+  }
+
+  if (trace.mode === "execute") {
+    const gate = await evaluateLiveExecutionGate({
+      spec: loaded.spec,
+      projectRoot
+    });
+    if (!gate.allowed) {
+      throw new ReviewServiceError(formatLiveExecutionGateError(gate));
+    }
+  }
+  return loaded.spec;
+}
+
+export async function commitPreparedActions(
+  trace: LoopRunTrace,
+  approvedFingerprints: string[],
+  spec?: LoopSpec
+) {
   trace.status = "APPROVED";
   trace.status = "COMMITTED";
 
@@ -190,12 +377,15 @@ async function commitApprovedActions(trace: LoopRunTrace, approvedFingerprints: 
       continue;
     }
 
+    const declaredAdapterId = spec?.tools.find((tool) => tool.key === prepared.toolKey)?.adapterId;
     const adapter = getAdapterById(
-      prepared.toolKey.includes("github") || prepared.toolKey === "propose_labels" || prepared.toolKey === "draft_response"
-        ? trace.mode === "execute"
-          ? "github"
+      declaredAdapterId ?? (
+        prepared.toolKey.includes("github") || prepared.toolKey === "propose_labels" || prepared.toolKey === "draft_response"
+          ? trace.mode === "execute"
+            ? "github"
+            : "mock-github"
           : "mock-github"
-        : "mock-github"
+      )
     );
 
     if (adapter) {
@@ -217,6 +407,9 @@ async function commitApprovedActions(trace: LoopRunTrace, approvedFingerprints: 
   }
 
   trace.toolCalls = updatedCalls;
+  const failed = updatedCalls.some((call) => call.status === "failed");
+  trace.status = failed ? "FAILED_VERIFICATION" : "COMPLETED";
+  trace.completedAt = new Date().toISOString();
 }
 
 export function mapUiDecisionToReviewStatus(decision: string): ReviewDecisionStatus {

@@ -114,7 +114,12 @@ describe("Hermes threat and privacy regressions", () => {
         runId: undefined
       })
     ]);
-    expect(accepted.routeJobs).toEqual([]);
+    expect(accepted.routeJobs).toEqual([
+      expect.objectContaining({
+        activationMode: "shadow",
+        status: "queued"
+      })
+    ]);
 
     const readModel = await loadEventRoutingOperations({
       projectRoot,
@@ -129,7 +134,7 @@ describe("Hermes threat and privacy regressions", () => {
     expect(readModel.rows).toContainEqual(expect.objectContaining({
       eventId: event.id,
       selectedLoopIds: ["marketing_ads"],
-      queueStatus: "shadow",
+      queueStatus: "queued",
       decisionDetail: expect.objectContaining({
         selectedRoutes: [expect.objectContaining({
           loopId: "marketing_ads",

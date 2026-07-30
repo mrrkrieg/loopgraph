@@ -78,11 +78,12 @@
     "vitest": "^3.2.6"
   },
   "overrides": {
+    "brace-expansion": "5.0.8",
     "esbuild": "^0.28.1",
     "postcss": "^8.5.23",
     "sharp": "^0.35.3",
     "tsup": {
-      "esbuild": "^0.28.1"
+      "esbuild": "0.27.2"
     }
   }
 }

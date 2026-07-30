@@ -161,6 +161,17 @@ export default async function LoopReviewsPage({
           )}
 
           <label className="mt-4 block text-sm font-medium">
+            Reviewer identity
+            <input
+              name="reviewer_id"
+              required
+              autoComplete="username"
+              className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2"
+              placeholder="Your name or operator ID"
+            />
+          </label>
+
+          <label className="mt-4 block text-sm font-medium">
             Reviewer role
             <select name="reviewer_role" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" defaultValue="approver">
               {["approver", "reviewer", "owner", "teacher", "executor", "accountability_holder"].map((role) => (

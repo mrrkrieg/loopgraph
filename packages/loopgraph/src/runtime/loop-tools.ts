@@ -102,7 +102,8 @@ export const reviewSubmitInputSchema = z.object({
   runId: z.string().min(1),
   status: z.enum(["approved", "rejected", "needs_changes", "request_evidence", "reassigned"]),
   approvedFingerprints: z.array(z.string().min(1)).default([]),
-  role: z.enum(["approver", "reviewer", "owner", "teacher", "executor", "accountability_holder"]).optional(),
+  reviewerId: z.string().min(1),
+  role: z.enum(["approver", "reviewer", "owner", "teacher", "executor", "accountability_holder"]),
   comment: z.string().optional(),
   teacherFeedback: z.string().optional(),
   reassignedTo: z.string().optional(),
@@ -334,6 +335,7 @@ export async function callLoopgraphLoopTool(
       runId: parsed.runId,
       status: parsed.status,
       approvedFingerprints: parsed.approvedFingerprints,
+      reviewerId: parsed.reviewerId,
       role: parsed.role,
       comment: parsed.comment,
       teacherFeedback: parsed.teacherFeedback,
@@ -495,7 +497,8 @@ export async function submitLoopReviewForHermes(input: ReviewSubmitInput) {
     runId: input.runId,
     status: input.status,
     approvedFingerprints: input.approvedFingerprints ?? [],
-    role: input.role as ReviewRole | undefined,
+    reviewerId: input.reviewerId,
+    role: input.role as ReviewRole,
     comment: input.comment,
     teacherFeedback: input.teacherFeedback,
     reassignedTo: input.reassignedTo,
@@ -504,6 +507,8 @@ export async function submitLoopReviewForHermes(input: ReviewSubmitInput) {
     botsittingMinutes: input.botsittingMinutes,
     escalationMinutes: input.escalationMinutes,
     governanceMinutes: input.governanceMinutes
+  }, {
+    projectRoot
   });
 
   return {

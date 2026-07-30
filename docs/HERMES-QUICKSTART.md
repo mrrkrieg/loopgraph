@@ -189,6 +189,24 @@ The fixture test:
 
 It does not send a real provider webhook, apply a live Hermes route, or store provider credentials.
 
+## 9. Run the durable local worker
+
+Every accepted route—including shadow and recommendation routes—creates a durable route job. Process one batch:
+
+```bash
+npm run loopgraph -- worker run --project .
+```
+
+Keep it polling during local use:
+
+```bash
+npm run loopgraph -- worker run --project . --watch --interval 5
+```
+
+The worker does not trust the model decision by itself. It atomically claims the job, reloads the registered LoopSpec, verifies its immutable hash and all event/problem/commit bindings, enforces the activation and connector gates, records the trace, pauses for exact fingerprint approval when required, and prepares signed lifecycle evidence for Hermes.
+
+See [Durable Hermes Route-Job Worker](./ROUTE-JOB-WORKER.md) for retry, dead-letter, API authentication, and live-execution requirements.
+
 ## 9. Simulate the generated loop locally
 
 The same generated fixture can run the accepted LoopSpec in local simulation mode:

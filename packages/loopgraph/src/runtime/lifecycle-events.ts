@@ -1,5 +1,5 @@
-import { createHmac } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { createHmac, randomBytes } from "node:crypto";
+import { mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
@@ -151,7 +151,7 @@ export async function emitLoopRunLifecycleEvent(input: {
     },
     sensitivity: input.sourceEvent.sensitivity
   });
-  const signing = resolveLifecycleSigning(input.signingSecret, input.keyRef);
+  const signing = await resolveLifecycleSigning(input.projectRoot, input.signingSecret, input.keyRef);
   const eventHash = contentHash(event);
   const delivery = loopgraphLifecycleDeliverySchema.parse({
     schemaVersion: LOOPGRAPH_LIFECYCLE_SCHEMA_VERSION,
@@ -262,7 +262,7 @@ export async function emitLoopRunStartedLifecycleEvent(input: {
     },
     sensitivity: input.sourceEvent.sensitivity
   });
-  const signing = resolveLifecycleSigning(input.signingSecret, input.keyRef);
+  const signing = await resolveLifecycleSigning(input.projectRoot, input.signingSecret, input.keyRef);
   const eventHash = contentHash(event);
   const delivery = loopgraphLifecycleDeliverySchema.parse({
     schemaVersion: LOOPGRAPH_LIFECYCLE_SCHEMA_VERSION,
@@ -373,7 +373,7 @@ export async function emitRouteAcceptedLifecycleEvent(input: {
     },
     sensitivity: input.sourceEvent.sensitivity
   });
-  const signing = resolveLifecycleSigning(input.signingSecret, input.keyRef);
+  const signing = await resolveLifecycleSigning(input.projectRoot, input.signingSecret, input.keyRef);
   const eventHash = contentHash(event);
   const delivery = loopgraphLifecycleDeliverySchema.parse({
     schemaVersion: LOOPGRAPH_LIFECYCLE_SCHEMA_VERSION,
@@ -501,7 +501,7 @@ export async function emitEscalationCreatedLifecycleEvent(input: {
     },
     sensitivity: input.sourceEvent.sensitivity
   });
-  const signing = resolveLifecycleSigning(input.signingSecret, input.keyRef);
+  const signing = await resolveLifecycleSigning(input.projectRoot, input.signingSecret, input.keyRef);
   const eventHash = contentHash(event);
   const delivery = loopgraphLifecycleDeliverySchema.parse({
     schemaVersion: LOOPGRAPH_LIFECYCLE_SCHEMA_VERSION,
@@ -630,7 +630,7 @@ export async function emitOutcomeRecordedLifecycleEvent(input: {
     },
     sensitivity: input.sourceEvent.sensitivity
   });
-  const signing = resolveLifecycleSigning(input.signingSecret, input.keyRef);
+  const signing = await resolveLifecycleSigning(input.projectRoot, input.signingSecret, input.keyRef);
   const eventHash = contentHash(event);
   const delivery = loopgraphLifecycleDeliverySchema.parse({
     schemaVersion: LOOPGRAPH_LIFECYCLE_SCHEMA_VERSION,
@@ -730,11 +730,11 @@ function lifecycleEventTypeForTrace(
   return "loop.run.failed";
 }
 
-function resolveLifecycleSigning(signingSecret?: string, keyRef?: string): {
+async function resolveLifecycleSigning(projectRoot: string, signingSecret?: string, keyRef?: string): Promise<{
   secret: string;
   keyRef: string;
   warning?: string;
-} {
+}> {
   if (signingSecret && signingSecret.length > 0) {
     return {
       secret: signingSecret,
@@ -750,11 +750,37 @@ function resolveLifecycleSigning(signingSecret?: string, keyRef?: string): {
     };
   }
 
+  const keyPath = path.join(getLoopgraphRoot(projectRoot), "hermes", "lifecycle-signing.key");
+  let localSecret: string;
+  try {
+    localSecret = (await readFile(keyPath, "utf8")).trim();
+    if (!localSecret) throw new Error("empty project-local lifecycle key");
+  } catch {
+    await mkdir(path.dirname(keyPath), { recursive: true });
+    const generated = randomBytes(32).toString("base64url");
+    try {
+      const handle = await open(keyPath, "wx", 0o600);
+      try {
+        await handle.writeFile(`${generated}\n`);
+      } finally {
+        await handle.close();
+      }
+      localSecret = generated;
+    } catch (error) {
+      if (!isFileExistsError(error)) throw error;
+      localSecret = (await readFile(keyPath, "utf8")).trim();
+      if (!localSecret) throw new Error("Project-local lifecycle signing key is empty");
+    }
+  }
   return {
-    secret: "loopgraph-local-development-lifecycle-secret",
-    keyRef: keyRef ?? "local-development",
-    warning: "Using a local development lifecycle signing key; configure LOOPGRAPH_HERMES_LIFECYCLE_SECRET in Hermes before production delivery."
+    secret: localSecret,
+    keyRef: keyRef ?? "project:.loopgraph/hermes/lifecycle-signing.key",
+    warning: "Using a project-local lifecycle signing key; configure LOOPGRAPH_HERMES_LIFECYCLE_SECRET for a shared Hermes delivery environment."
   };
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
 }
 
 function signLifecycleEvent(event: EventEnvelope, secret: string): string {

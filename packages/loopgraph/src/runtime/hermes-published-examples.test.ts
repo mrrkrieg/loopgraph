@@ -417,7 +417,10 @@ async function assertPublishedExampleRoutesThroughHermes(input: {
             status: "shadow"
           })
         ],
-        routeJobs: []
+        routeJobs: [expect.objectContaining({
+          activationMode: expect.stringMatching(/^(shadow|recommend)$/),
+          status: "queued"
+        })]
       })
     }
   });

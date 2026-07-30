@@ -12,6 +12,7 @@ import {
   type RoutingCard
 } from "../core";
 import {
+  cancelRouteJob,
   FileRoutingStore,
   claimDueRouteJobs,
   failRouteJob,
@@ -390,11 +391,11 @@ describe("routing store", () => {
         id: jobId,
         status: "claimed",
         attemptCount: 1,
-        lease: {
+        lease: expect.objectContaining({
           claimedBy: "worker_1",
           claimedAt: "2026-07-21T12:00:04.000Z",
           expiresAt: "2026-07-21T12:01:04.000Z"
-        }
+        })
       })
     ]);
     await expect(claimDueRouteJobs({
@@ -402,6 +403,13 @@ describe("routing store", () => {
       claimedBy: "worker_2",
       now: new Date("2026-07-21T12:00:30.000Z")
     })).resolves.toEqual([]);
+    await expect(cancelRouteJob({
+      store,
+      jobId,
+      cancelledBy: "operator_1",
+      reason: "Stop the job while another worker owns it",
+      now: new Date("2026-07-21T12:00:30.000Z")
+    })).rejects.toThrow(/actively leased by worker_1/);
 
     const running = await markRouteJobRunning({
       store,
