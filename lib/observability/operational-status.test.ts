@@ -97,6 +97,21 @@ describe("operational status", () => {
           error: null
         };
       }
+      if (name === "get_semantic_graph_snapshot") {
+        return {
+          data: {
+            graph_snapshots_total: 12,
+            graph_approvals_total: 6,
+            graph_transactions_total: 5,
+            graph_transactions_failed: 1,
+            graph_promotions_total: 2,
+            graph_rehearsals_total: 3,
+            graph_commits_total: 4,
+            latest_graph_sequence: 11
+          },
+          error: null
+        };
+      }
       return {
           data: {
             database_ready: true,
@@ -205,6 +220,9 @@ describe("operational status", () => {
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_controller_active_leases 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_graph_commits_total 4"
     );
   });
 

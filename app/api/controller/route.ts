@@ -6,10 +6,13 @@ import {
 import { loopControllerTriggerTypeSchema } from "loopgraph/core";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
-  getRoutingStore
+  getLoopSpecRegistryStore,
+  getRoutingStore,
+  getSemanticGraphStore
 } from "../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../lib/loopgraph-runtime/worker-api-auth";
 
@@ -64,6 +67,8 @@ export async function POST(request: Request) {
     if (mode === "enqueue") {
       return NextResponse.json({ enqueue: enqueueResult }, { status: 202 });
     }
+    const loopSpecStore = getLoopSpecRegistryStore({ projectRoot });
+    const semanticGraphStore = getSemanticGraphStore({ projectRoot });
     const scheduler = await runLoopControllerScheduler({
       projectRoot,
       limit: integerValue(body.limit, 20, 1, 100),
@@ -73,8 +78,17 @@ export async function POST(request: Request) {
       store,
       routingStore: getRoutingStore(),
       designStore: getHermesDesignStore(),
+      discoveryDesignStore: getDiscoveryDesignStore(),
       opportunityStore: getLoopOpportunityStore({ projectRoot }),
-      allowAutoShadowMaterialization: store.persistence === "file"
+      loopSpecStore,
+      semanticGraphStore,
+      allowAutoShadowMaterialization:
+        (store.persistence === "file" &&
+          loopSpecStore.persistence === "file" &&
+          semanticGraphStore.persistence === "file") ||
+        (store.persistence === "distributed" &&
+          loopSpecStore.persistence === "distributed" &&
+          semanticGraphStore.persistence === "distributed")
     });
     return NextResponse.json({
       enqueue: enqueueResult,

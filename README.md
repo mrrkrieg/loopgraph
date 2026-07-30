@@ -190,7 +190,7 @@ Or keep the trusted local controller processing idempotent triggers:
 npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
 ```
 
-Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Local projects may materialize strict low-risk additions in shadow mode. Authenticated hosted deployments persist opportunities, proposed graph changes, policies, checkpoints, runs, and leased triggers across replicas, but return graph changes for review until the distributed semantic graph transaction store is active. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) and [distributed opportunity/controller runtime](docs/DISTRIBUTED-OPPORTUNITY-CONTROLLER.md).
+Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Local projects may materialize strict low-risk additions in shadow mode. Authenticated hosted deployments now persist opportunities, proposed graph changes, approvals, snapshots, graph transactions, promotions, rehearsals, active LoopSpecs, policies, checkpoints, runs, and leased triggers across replicas. Hosted automatic shadow materialization is enabled only when the controller, discovery, active LoopSpec registry, and semantic graph all resolve to their tenant-scoped distributed stores; a partial configuration fails closed. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md), [distributed opportunity/controller runtime](docs/DISTRIBUTED-OPPORTUNITY-CONTROLLER.md), and [semantic graph transaction authority](docs/SEMANTIC-GRAPH-TRANSACTIONS.md).
 
 ### 8. Operate the improvement cycle
 

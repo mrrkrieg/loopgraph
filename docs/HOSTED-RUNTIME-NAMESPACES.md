@@ -65,10 +65,13 @@ workspace registry use that same tenant/project boundary, and materialization co
 discovery transition in the registry transaction. Opportunities, proposed graph changes,
 controller policies/checkpoints/runs, and controller triggers also use tenant/project-scoped
 Supabase stores; queue claims use row locks and UUID lease fencing, and the controller holds a
-renewable database lease. Graph snapshots, approvals, transactions, promotions, measurement jobs,
-outcomes, and value records still have file-backed paths. Hosted automatic graph mutation remains
-disabled until the semantic graph boundary moves. Until all remaining records move, do not treat
-the full control plane as multi-writer. The remaining stores need:
+renewable database lease. Graph snapshots, approvals, transactions, promotions, rehearsals,
+rollback state, immutable versions, and the active graph now share one tenant-scoped atomic
+PostgreSQL commit. Hosted automatic shadow mutation is allowed only when all required controller,
+design, registry, opportunity, and graph stores are distributed.
+
+Measurement jobs, outcomes, and value records still have file-backed paths. Until those remaining
+records move, do not treat the learning/value plane as multi-writer. The remaining stores need:
 
 - atomic claim/update operations;
 - leases and fencing tokens;
@@ -76,7 +79,7 @@ the full control plane as multi-writer. The remaining stores need:
 - idempotency constraints scoped to the tenant;
 - retry/dead-letter state;
 - append-only mutation receipts;
-- transactionally consistent graph snapshots.
+- transactionally consistent outcome and value receipts.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md),

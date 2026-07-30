@@ -50,6 +50,14 @@ export type OperationalMetrics = {
   controllerTriggerExpiredLeases: number;
   controllerOldestPendingSeconds: number;
   controllerActiveLeases: number;
+  graphSnapshotsTotal: number;
+  graphApprovalsTotal: number;
+  graphTransactionsTotal: number;
+  graphTransactionsFailed: number;
+  graphPromotionsTotal: number;
+  graphRehearsalsTotal: number;
+  graphCommitsTotal: number;
+  latestGraphSequence: number;
   lastMachineRequestAt?: string;
 };
 
@@ -138,7 +146,15 @@ const EMPTY_METRICS: OperationalMetrics = {
   controllerTriggersFailed: 0,
   controllerTriggerExpiredLeases: 0,
   controllerOldestPendingSeconds: 0,
-  controllerActiveLeases: 0
+  controllerActiveLeases: 0,
+  graphSnapshotsTotal: 0,
+  graphApprovalsTotal: 0,
+  graphTransactionsTotal: 0,
+  graphTransactionsFailed: 0,
+  graphPromotionsTotal: 0,
+  graphRehearsalsTotal: 0,
+  graphCommitsTotal: 0,
+  latestGraphSequence: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -197,7 +213,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     callbacks,
     discoveryDesign,
     loopSpecRegistry,
-    opportunityController
+    opportunityController,
+    semanticGraph
   ] =
     await Promise.all([
       supabase.rpc("get_loopgraph_operational_snapshot", {
@@ -219,6 +236,10 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       supabase.rpc("get_opportunity_controller_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      supabase.rpc("get_semantic_graph_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey
       })
     ]);
   if (
@@ -227,11 +248,13 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     discoveryDesign.error ||
     loopSpecRegistry.error ||
     opportunityController.error ||
+    semanticGraph.error ||
     !isRecord(operational.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
     !isRecord(loopSpecRegistry.data) ||
     !isRecord(opportunityController.data) ||
+    !isRecord(semanticGraph.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -271,7 +294,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       ...callbacks.data,
       ...discoveryDesign.data,
       ...loopSpecRegistry.data,
-      ...opportunityController.data
+      ...opportunityController.data,
+      ...semanticGraph.data
     })
   };
 }
@@ -475,6 +499,30 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_controller_active_leases Active controller and maintenance leases.",
     "# TYPE loopgraph_controller_active_leases gauge",
     `loopgraph_controller_active_leases ${metrics.controllerActiveLeases}`,
+    "# HELP loopgraph_graph_snapshots_total Durable semantic graph snapshots.",
+    "# TYPE loopgraph_graph_snapshots_total gauge",
+    `loopgraph_graph_snapshots_total ${metrics.graphSnapshotsTotal}`,
+    "# HELP loopgraph_graph_approvals_total Content-bound graph approval receipts.",
+    "# TYPE loopgraph_graph_approvals_total gauge",
+    `loopgraph_graph_approvals_total ${metrics.graphApprovalsTotal}`,
+    "# HELP loopgraph_graph_transactions_total Durable semantic graph transactions.",
+    "# TYPE loopgraph_graph_transactions_total gauge",
+    `loopgraph_graph_transactions_total ${metrics.graphTransactionsTotal}`,
+    "# HELP loopgraph_graph_transactions_failed Failed semantic graph transactions.",
+    "# TYPE loopgraph_graph_transactions_failed gauge",
+    `loopgraph_graph_transactions_failed ${metrics.graphTransactionsFailed}`,
+    "# HELP loopgraph_graph_promotions_total Governed loop promotions.",
+    "# TYPE loopgraph_graph_promotions_total gauge",
+    `loopgraph_graph_promotions_total ${metrics.graphPromotionsTotal}`,
+    "# HELP loopgraph_graph_rehearsals_total Durable promotion rehearsals.",
+    "# TYPE loopgraph_graph_rehearsals_total gauge",
+    `loopgraph_graph_rehearsals_total ${metrics.graphRehearsalsTotal}`,
+    "# HELP loopgraph_graph_commits_total Atomic semantic graph commits.",
+    "# TYPE loopgraph_graph_commits_total gauge",
+    `loopgraph_graph_commits_total ${metrics.graphCommitsTotal}`,
+    "# HELP loopgraph_latest_graph_sequence Latest semantic graph snapshot sequence.",
+    "# TYPE loopgraph_latest_graph_sequence gauge",
+    `loopgraph_latest_graph_sequence ${metrics.latestGraphSequence}`,
     ""
   ].join("\n");
 }
@@ -551,6 +599,14 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
       data.controller_oldest_pending_seconds
     ),
     controllerActiveLeases: nonnegative(data.controller_active_leases),
+    graphSnapshotsTotal: nonnegative(data.graph_snapshots_total),
+    graphApprovalsTotal: nonnegative(data.graph_approvals_total),
+    graphTransactionsTotal: nonnegative(data.graph_transactions_total),
+    graphTransactionsFailed: nonnegative(data.graph_transactions_failed),
+    graphPromotionsTotal: nonnegative(data.graph_promotions_total),
+    graphRehearsalsTotal: nonnegative(data.graph_rehearsals_total),
+    graphCommitsTotal: nonnegative(data.graph_commits_total),
+    latestGraphSequence: nonnegative(data.latest_graph_sequence),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})

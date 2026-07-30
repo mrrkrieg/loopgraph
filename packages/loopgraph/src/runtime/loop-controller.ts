@@ -20,6 +20,7 @@ import {
 } from "../core";
 import { readConnectionInstances } from "./connector-registry";
 import { readLoopDesignProposalSet } from "./design-service";
+import type { DiscoveryDesignStore } from "./discovery-design-store";
 import { getHermesDesignTask } from "./hermes-design-bridge";
 import type { HermesDesignStore } from "./hermes-design-store";
 import {
@@ -32,10 +33,12 @@ import {
   type ScanLoopOpportunitiesResult
 } from "./loop-opportunity-engine";
 import type { LoopOpportunityStore } from "./loop-opportunity-store";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import {
   applyGraphChangeSet,
   approveGraphChangeSet
 } from "./semantic-graph-transactions";
+import type { SemanticGraphStore } from "./semantic-graph-store";
 import { evaluateObservedOutcome } from "./outcome-service";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import type { RoutingStore } from "./routing-store";
@@ -60,7 +63,10 @@ export type LoopControllerRuntimeOptions = {
   outcomeStore?: OutcomeStore;
   routingStore?: RoutingStore;
   designStore?: HermesDesignStore;
+  discoveryDesignStore?: DiscoveryDesignStore;
   opportunityStore?: LoopOpportunityStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  semanticGraphStore?: SemanticGraphStore;
   allowAutoShadowMaterialization?: boolean;
 };
 
@@ -82,7 +88,9 @@ export async function runLoopController(
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
-  const workspace = await readLoopgraphWorkspace(projectRoot);
+  const workspace = options.loopSpecStore
+    ? (await options.loopSpecStore.getWorkspace(projectRoot)).workspace
+    : await readLoopgraphWorkspace(projectRoot);
   const store = options.store ?? new FileLoopControllerStore(getLoopgraphRoot(projectRoot));
   const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
   const savedPolicy = await store.readPolicy();
@@ -181,7 +189,10 @@ export async function runLoopController(
             policy,
             scan,
             designStore: options.designStore,
+            discoveryDesignStore: options.discoveryDesignStore,
             opportunityStore: options.opportunityStore,
+            loopSpecStore: options.loopSpecStore,
+            semanticGraphStore: options.semanticGraphStore,
             allowAutoShadowMaterialization:
               options.allowAutoShadowMaterialization !== false
           });
@@ -349,7 +360,10 @@ async function decideControllerActions(input: {
   policy: LoopControllerPolicy;
   scan: ScanLoopOpportunitiesResult;
   designStore?: HermesDesignStore;
+  discoveryDesignStore?: DiscoveryDesignStore;
   opportunityStore?: LoopOpportunityStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  semanticGraphStore?: SemanticGraphStore;
   allowAutoShadowMaterialization: boolean;
 }): Promise<LoopControllerDecision[]> {
   if (input.scan.opportunities.length === 0) {
@@ -440,7 +454,11 @@ async function decideControllerActions(input: {
     if (task?.status === "completed") {
       const designRunId = task.designRunIds.at(-1);
       const proposalSet = designRunId
-        ? await readLoopDesignProposalSet(input.projectRoot, designRunId)
+        ? await readLoopDesignProposalSet(
+            input.projectRoot,
+            designRunId,
+            input.discoveryDesignStore
+          )
         : undefined;
       if (!designRunId || !proposalSet?.validationSummary.valid) {
         decisions.push(decision({
@@ -520,6 +538,12 @@ async function decideControllerActions(input: {
           reason: "Every strict automatic-shadow policy rule passed.",
           evidenceRefs: opportunity.signals.flatMap((signal) => [signal.sourceRef, ...signal.evidenceRefs]),
           now: input.now
+        }, {
+          store: input.semanticGraphStore,
+          opportunityStore: input.opportunityStore,
+          designStore: input.discoveryDesignStore,
+          hermesDesignStore: input.designStore,
+          loopSpecStore: input.loopSpecStore
         });
         applied = await applyGraphChangeSet({
           projectRoot: input.projectRoot,
@@ -529,6 +553,12 @@ async function decideControllerActions(input: {
           acceptedProposalIds: proposalSet.proposals.map((proposal) => proposal.proposalId),
           initiatedBy: "loopgraph-controller",
           now: input.now
+        }, {
+          store: input.semanticGraphStore,
+          opportunityStore: input.opportunityStore,
+          designStore: input.discoveryDesignStore,
+          hermesDesignStore: input.designStore,
+          loopSpecStore: input.loopSpecStore
         });
       } catch (error) {
         decisions.push(decision({

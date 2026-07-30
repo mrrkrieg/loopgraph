@@ -5,10 +5,13 @@ import {
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
-  getRoutingStore
+  getLoopSpecRegistryStore,
+  getRoutingStore,
+  getSemanticGraphStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
@@ -29,6 +32,8 @@ export async function GET(request: Request) {
     occurredAt: now.toISOString(),
     requestedBy: "loopgraph-cron"
   }, { now, store });
+  const loopSpecStore = getLoopSpecRegistryStore({ projectRoot });
+  const semanticGraphStore = getSemanticGraphStore({ projectRoot });
   const scheduler = await runLoopControllerScheduler({
     projectRoot,
     limit: 20,
@@ -37,8 +42,17 @@ export async function GET(request: Request) {
     store,
     routingStore: getRoutingStore(),
     designStore: getHermesDesignStore(),
+    discoveryDesignStore: getDiscoveryDesignStore(),
     opportunityStore: getLoopOpportunityStore({ projectRoot }),
-    allowAutoShadowMaterialization: store.persistence === "file"
+    loopSpecStore,
+    semanticGraphStore,
+    allowAutoShadowMaterialization:
+      (store.persistence === "file" &&
+        loopSpecStore.persistence === "file" &&
+        semanticGraphStore.persistence === "file") ||
+      (store.persistence === "distributed" &&
+        loopSpecStore.persistence === "distributed" &&
+        semanticGraphStore.persistence === "distributed")
   });
   return NextResponse.json({ enqueue, scheduler }, {
     status: 202,
