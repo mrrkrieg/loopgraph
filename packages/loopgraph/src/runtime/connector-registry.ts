@@ -1,7 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   CONNECTION_INSTANCE_SCHEMA_VERSION,
+  connectionInstanceSchema,
   connectionInstancesFileSchema,
   connectorManifestSchema,
   type ConnectionInstance,
@@ -259,13 +261,143 @@ export async function readConnectionInstances(projectRoot: string): Promise<Conn
   try {
     const parsed = connectionInstancesFileSchema.parse(JSON.parse(await readFile(filePath, "utf8")));
     return parsed.instances;
-  } catch {
-    return [];
+  } catch (error) {
+    if (isFileNotFoundError(error)) return [];
+    throw error;
   }
+}
+
+export async function upsertConnectionInstance(
+  projectRoot: string,
+  input: Omit<ConnectionInstance, "schemaVersion">
+): Promise<ConnectionInstance> {
+  const manifest = defaultConnectorManifests().find((candidate) => candidate.id === input.manifestId);
+  if (!manifest) throw new Error(`Unknown connector manifest: ${input.manifestId}`);
+  const knownCapabilities = new Set(manifest.capabilities.map((capability) => capability.key));
+  const unknownCapabilities = input.capabilityKeys.filter((capability) => !knownCapabilities.has(capability));
+  if (unknownCapabilities.length > 0) {
+    throw new Error(`Connection declares capabilities not supported by ${manifest.id}: ${unknownCapabilities.join(", ")}`);
+  }
+  const instance = connectionInstanceSchema.parse({
+    ...input,
+    schemaVersion: CONNECTION_INSTANCE_SCHEMA_VERSION
+  });
+  return withConnectionInstancesLock(projectRoot, async () => {
+    const instances = await readConnectionInstances(projectRoot);
+    const next = [
+      ...instances.filter((candidate) => candidate.id !== instance.id),
+      instance
+    ].sort((left, right) => left.id.localeCompare(right.id));
+    await writeConnectionInstances(projectRoot, next);
+    return instance;
+  });
+}
+
+export async function reportConnectionInstanceHealth(input: {
+  projectRoot: string;
+  instanceId: string;
+  status: "connected" | "degraded" | "missing";
+  checkedAt: string;
+  checkedBy: string;
+  latencyMs?: number;
+  errorCode?: string;
+  evidenceRefs?: string[];
+}): Promise<ConnectionInstance> {
+  return withConnectionInstancesLock(input.projectRoot, async () => {
+    const instances = await readConnectionInstances(input.projectRoot);
+    const current = instances.find((candidate) => candidate.id === input.instanceId);
+    if (!current) throw new Error(`Connection instance not found: ${input.instanceId}`);
+    const next = connectionInstanceSchema.parse({
+      ...current,
+      status: input.status,
+      statusReason: input.errorCode,
+      lastHealthCheckAt: input.checkedAt,
+      health: {
+        status: input.status,
+        checkedAt: input.checkedAt,
+        checkedBy: input.checkedBy,
+        latencyMs: input.latencyMs,
+        errorCode: input.errorCode,
+        evidenceRefs: [...new Set(input.evidenceRefs ?? [])]
+      }
+    });
+    await writeConnectionInstances(input.projectRoot, [
+      ...instances.filter((candidate) => candidate.id !== next.id),
+      next
+    ].sort((left, right) => left.id.localeCompare(right.id)));
+    return next;
+  });
+}
+
+export async function writeConnectionInstances(
+  projectRoot: string,
+  instances: ConnectionInstance[]
+): Promise<void> {
+  const filePath = connectionInstancesFilePath(projectRoot);
+  const value = connectionInstancesFileSchema.parse({
+    schemaVersion: CONNECTION_INSTANCE_SCHEMA_VERSION,
+    instances
+  });
+  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporaryPath, filePath);
 }
 
 export function connectionInstancesFilePath(projectRoot: string): string {
   return path.join(getLoopgraphRoot(projectRoot), "connections", "instances.json");
+}
+
+async function withConnectionInstancesLock<T>(
+  projectRoot: string,
+  operation: () => Promise<T>
+): Promise<T> {
+  const directory = path.dirname(connectionInstancesFilePath(projectRoot));
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  const lockPath = path.join(directory, ".instances.lock");
+  const startedAt = Date.now();
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  while (!handle) {
+    try {
+      handle = await open(lockPath, "wx", 0o600);
+      await handle.writeFile(JSON.stringify({
+        pid: process.pid,
+        acquiredAt: new Date().toISOString()
+      }));
+    } catch (error) {
+      if (!isFileExistsError(error)) throw error;
+      if (await isStaleLock(lockPath, 60_000)) {
+        await unlink(lockPath).catch(() => undefined);
+        continue;
+      }
+      if (Date.now() - startedAt >= 5_000) {
+        throw new Error("Timed out waiting for connection instance lock");
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  try {
+    return await operation();
+  } finally {
+    await handle.close();
+    await unlink(lockPath).catch(() => undefined);
+  }
+}
+
+function isFileExistsError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
+}
+
+async function isStaleLock(lockPath: string, staleAfterMs: number): Promise<boolean> {
+  try {
+    return Date.now() - (await stat(lockPath)).mtimeMs > staleAfterMs;
+  } catch {
+    return false;
+  }
 }
 
 function manifest(input: Omit<ConnectorManifest, "schemaVersion" | "healthCheck"> & {

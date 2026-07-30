@@ -68,7 +68,8 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 5. **Rehearse locally.** Test positive, missing-context, and risk-escalation cases without API keys or external writes.
 6. **Connect and promote carefully.** New loops begin in shadow mode. Live work stays blocked until routing, capabilities, approvals, and exact prepared-action fingerprints are ready.
 7. **Keep the worker running.** Accepted Hermes routes become durable jobs. The worker claims them atomically, verifies the immutable LoopSpec binding, runs the configured shadow/recommend/approval/autonomous policy, and returns signed lifecycle evidence to Hermes.
-8. **Keep improving.** The continuous controller evaluates durable outcomes, detects missing or weak loops, asks Hermes for only the missing evidence, and applies only low-risk policy-approved additions in shadow mode.
+8. **Measure the outcome.** Exact metric bindings schedule provider reads through trusted Hermes connectors, record evidence-qualified samples, evaluate primary outcomes and guardrails, and reconcile missing scopes, stale health, route drift, and overdue work.
+9. **Keep improving.** The continuous controller evaluates durable outcomes, detects missing or weak loops, asks Hermes for only the missing evidence, and applies only low-risk policy-approved additions in shadow mode.
 
 <p align="center">
   <img src="docs/images/hermes-brain-live-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
@@ -162,7 +163,20 @@ npm run loopgraph -- worker run --project . --watch --interval 5
 
 Shadow, recommend, and simulate jobs stay local. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
 
-### 6. Keep the Hermes Brain improvement cycle running
+### 6. Bind and collect outcome evidence
+
+After Hermes connects a provider, register only its non-secret metadata and opaque credential reference, then bind each LoopSpec metric to an exact provider field and schedule:
+
+```bash
+npm run loopgraph -- connections register --project . --file connection.json
+npm run loopgraph -- measurements bindings set --project . --file metric-binding.json
+npm run loopgraph -- measurements schedule --project . --backfill 2
+npm run loopgraph -- connections reconcile --project .
+```
+
+Hermes retains every credential. A trusted collector claims the structured measurement jobs, executes them through the referenced connector, and returns values with durable provider evidence. Loopgraph evaluates complete primary/baseline windows and guardrails automatically; missing data stays incomplete. See [Hermes connector measurements](docs/CONNECTOR-MEASUREMENTS.md).
+
+### 7. Keep the Hermes Brain improvement cycle running
 
 Run one evidence-to-design cycle:
 
@@ -178,7 +192,7 @@ npm run loopgraph -- controller run --project . --trigger-type schedule --watch 
 
 Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Only strict low-risk additions can materialize automatically, and they remain in shadow mode. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md).
 
-### 7. Check before live credentials
+### 8. Check before live credentials
 
 Before connecting live provider credentials or production webhook routes, run:
 
@@ -521,7 +535,7 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → review/lifecycle-evidence flow is implemented and covered by regression tests. Project-bound metric evidence, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Semantic changes are content-bound, atomic, and reversible; live provider execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
+Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
 
 The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
@@ -532,6 +546,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
 - [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
+- [Hermes connector measurements](docs/CONNECTOR-MEASUREMENTS.md) — exact provider bindings, scheduled jobs, evidence collection, and reconciliation
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts
 - [Semantic graph transactions](docs/SEMANTIC-GRAPH-TRANSACTIONS.md) — exact approvals, atomic add/update/split/merge/retire changes, promotion, lifecycle, and rollback
 - [Promotion rehearsal](docs/PROMOTION-REHEARSAL.md) — automatic simulation, routing, ambiguity, regression, policy, and evidence gates before promotion

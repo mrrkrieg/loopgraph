@@ -80,9 +80,13 @@ The older builder and the core discovery model use different identifiers:
 
 A discovery-materialized Ops/Finance, HR, or Legal loop can be downgraded to `custom` when it passes through the builder registry. This must be fixed before Hermes-driven materialization.
 
-### 3.6 Connector planning exists, but connector operation does not
+### 3.6 Connector planning and measurement operation
 
-`AccessRequirement` can say that a loop needs CRM, ads, analytics, email, or another integration, but it cannot identify a provider instance, perform OAuth, store a credential reference, verify scopes, or reliably report connector health. The runtime resolves only mock adapters and the GitHub adapter.
+The original gap was that an `AccessRequirement` could name CRM, ads, analytics, email, or another integration without identifying a provider instance, credential reference, granted scopes, health, or exact metric fields.
+
+Current implementation status: Loopgraph now registers non-secret connection instances, constrained opaque Hermes/keychain/vault/environment references, granted capabilities and scopes, and health receipts. Exact `MetricBinding` records connect primary, leading, and guardrail definitions to structured provider queries and aligned schedules. Durable `MeasurementJob` records support idempotent creation, atomic claims, hashed leases, retries/dead letter, evidence-qualified completion, automatic baseline/current outcome evaluation, and guardrail receipts. Reconciliation checks connection health, scopes, capabilities, Hermes route-manifest drift, and overdue work, then triggers the continuous controller.
+
+Provider OAuth, credential values, provider-specific API execution, and live subscription application intentionally remain Hermes-owned. Loopgraph provides the contract and receipt boundary, not a second credential store.
 
 ### 3.7 Graph hierarchy does not match the simple authoring story
 
@@ -1997,6 +2001,8 @@ Acceptance:
 - Access requirements resolve to compatible instances rather than raw enum labels.
 
 Current implementation status: the package core now includes connector manifest, connection instance, webhook metadata, connector suggestion, route hint, and authority schemas. The runtime exposes a default connector manifest catalog for the Marketing MVP path and the existing Engineering/GitHub path, including Google Ads, Meta Ads, product analytics, HubSpot, Notion, GitHub, local Markdown, Webflow CMS drafts, Slack notifications, and manual file import. Manifests describe read/event/draft/approved-write capabilities, minimum scopes, manual fallback text, webhook source/event patterns, signature expectations, transform versions, stable delivery IDs, and subject mapping without storing credentials. GitHub is modeled as Hermes-routed repository/issue-tracker capabilities rather than a special direct webhook execution path.
+
+Connection instances can now be registered and health-checked through trusted Hermes admin MCP tools, the CLI, or the bearer-authenticated measurement API. Metric definitions can be bound to exact read capabilities and provider fields; the hourly authenticated scheduler creates due jobs and reconciliation reports. These operations are absent from webhook-router and lifecycle-router profiles.
 
 #### Subgoal 7.2: Add connection planning UI and MCP tools
 
