@@ -17,7 +17,6 @@ import {
   type RoutingCard
 } from "../core";
 import { loadLoopSpecFromPath } from "./loader";
-import { markLoopOpportunityImplemented } from "./loop-opportunity-engine";
 import { readDesignRun, readLoopDesignProposalSet } from "./design-service";
 import { getDiscoverySession, saveDiscoverySession, type DiscoveryActor } from "./discovery-session";
 import { getLoopgraphRoot } from "./storage-resolver";
@@ -37,6 +36,7 @@ export type MaterializeLoopDesignInput = {
   acceptedProposalIds: string[];
   acceptedBy?: string;
   overwriteExisting?: boolean;
+  allowedExistingLoopIds?: string[];
   now?: Date;
 };
 
@@ -176,7 +176,8 @@ export async function materializeAcceptedLoopDesignProposals(
     designRunId: input.designRunId,
     acceptedProposalIds,
     proposalSet,
-    designRunValidationErrors: designRun?.validationErrors
+    designRunValidationErrors: designRun?.validationErrors,
+    allowedExistingLoopIds: input.allowedExistingLoopIds
   });
 
   if (fatalErrors.length > 0 || !proposalSet || !designRun) {
@@ -281,17 +282,6 @@ export async function materializeAcceptedLoopDesignProposals(
       });
     }
     await cleanupMaterializationTransaction(transaction);
-    try {
-      await markLoopOpportunityImplemented({
-        projectRoot,
-        designRunId: input.designRunId,
-        now: input.now
-      });
-    } catch {
-      result.nextActions.push(
-        "Run a Loopgraph opportunity scan to reconcile the materialized design with its opportunity record."
-      );
-    }
     return result;
   } catch (error) {
     if (transaction) await rollbackMaterializationTransaction(transaction);
@@ -407,6 +397,7 @@ function validateMaterializationRequest(input: {
   acceptedProposalIds: string[];
   proposalSet?: LoopDesignProposalSet;
   designRunValidationErrors?: string[];
+  allowedExistingLoopIds?: string[];
 }): string[] {
   const errors: string[] = [];
   if (input.acceptedProposalIds.length === 0) {
@@ -416,11 +407,25 @@ function validateMaterializationRequest(input: {
     errors.push(`Proposal set not found for design run: ${input.designRunId}`);
     return errors;
   }
-  if (input.designRunValidationErrors && input.designRunValidationErrors.length > 0) {
-    errors.push(`Design run has validation errors:\n- ${input.designRunValidationErrors.join("\n- ")}`);
+  const selectedLoopIds = new Set(input.proposalSet.proposals
+    .filter((proposal) => input.acceptedProposalIds.includes(proposal.proposalId))
+    .map((proposal) => proposal.loopSpecId));
+  const allowedExistingLoopIds = new Set(input.allowedExistingLoopIds ?? []);
+  const remainingDesignErrors = filterMaterializationValidationErrors(
+    input.designRunValidationErrors ?? [],
+    selectedLoopIds,
+    allowedExistingLoopIds
+  );
+  if (remainingDesignErrors.length > 0) {
+    errors.push(`Design run has validation errors:\n- ${remainingDesignErrors.join("\n- ")}`);
   }
-  if (!input.proposalSet.validationSummary.valid) {
-    errors.push(`Proposal set is not valid:\n- ${input.proposalSet.validationSummary.errors.join("\n- ")}`);
+  const remainingProposalErrors = filterMaterializationValidationErrors(
+    input.proposalSet.validationSummary.errors,
+    selectedLoopIds,
+    allowedExistingLoopIds
+  );
+  if (remainingProposalErrors.length > 0) {
+    errors.push(`Proposal set is not valid:\n- ${remainingProposalErrors.join("\n- ")}`);
   }
   const proposalIds = new Set(input.proposalSet.proposals.map((proposal) => proposal.proposalId));
   for (const proposalId of input.acceptedProposalIds) {
@@ -429,6 +434,20 @@ function validateMaterializationRequest(input: {
     }
   }
   return errors;
+}
+
+function filterMaterializationValidationErrors(
+  errors: string[],
+  selectedLoopIds: Set<string>,
+  allowedExistingLoopIds: Set<string>
+) {
+  return errors.filter((error) => {
+    const duplicate = /^Proposal duplicates an existing loop: (.+)$/.exec(error);
+    if (!duplicate) return true;
+    const loopId = duplicate[1]!;
+    if (!selectedLoopIds.has(loopId)) return false;
+    return !allowedExistingLoopIds.has(loopId);
+  });
 }
 
 async function prepareMaterializations(input: {

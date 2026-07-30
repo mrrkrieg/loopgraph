@@ -30,6 +30,7 @@ import {
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
+import { readWorkspaceGraphState } from "./semantic-graph-state";
 import {
   readLoopgraphWorkspace,
   type LoopgraphWorkspaceRegistry
@@ -732,11 +733,7 @@ async function proposeGraphChangeSet(input: {
     ? await getGraphChangeSet(input.existingId, input.projectRoot)
     : undefined;
   const operation = graphOperation(input.opportunity.kind);
-  const baseGraphHash = contentHash(input.workspace.registeredSpecs.map((spec) => ({
-    id: spec.id,
-    department: spec.department,
-    path: spec.path
-  })));
+  const baseGraphHash = (await readWorkspaceGraphState(input.projectRoot)).graphHash;
   const changes = [{
     id: `change_${contentHash({ opportunityId: input.opportunity.id, operation })}`,
     operation,
@@ -849,7 +846,7 @@ async function saveLoopOpportunity(opportunity: LoopOpportunity, projectRoot: st
   await writeFile(filePath, `${JSON.stringify(loopOpportunitySchema.parse(opportunity), null, 2)}\n`);
 }
 
-async function saveGraphChangeSet(changeSet: GraphChangeSet, projectRoot: string): Promise<void> {
+export async function saveGraphChangeSet(changeSet: GraphChangeSet, projectRoot: string): Promise<void> {
   const filePath = graphChangeSetPath(projectRoot, changeSet.id);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(graphChangeSetSchema.parse(changeSet), null, 2)}\n`);
