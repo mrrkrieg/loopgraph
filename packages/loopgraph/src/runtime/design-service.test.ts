@@ -9,12 +9,14 @@ import {
   editLoopDesignProposal,
   generateDeterministicLoopDesign,
   generateLoopDesignWithProvider,
+  readLoopDesignContext,
   readLoopDesignProposalSet,
   submitLoopDesignProposalSet,
   type LoopDesignProvider,
   validateLoopDesignProposalSet
 } from "./design-service";
 import {
+  getDiscoverySession,
   selectDiscoveryDepartments,
   startHermesDiscoverySession,
   submitDiscoveryAnswers
@@ -101,6 +103,12 @@ describe("Loop design service", () => {
     }));
     await access(result.designRunPath);
     await access(result.proposalSetPath);
+    await expect(
+      readLoopDesignContext(projectRoot, result.designRun.id)
+    ).resolves.toMatchObject({
+      sessionId: "session_design",
+      contextHash: result.designRun.inputHash
+    });
   });
 
   it("runs an embedded loop design provider through the shared validation and persistence path", async () => {
@@ -227,6 +235,39 @@ describe("Loop design service", () => {
     expect(submitted.proposalSet).toBeUndefined();
     await access(submitted.designRunPath);
     await access(submitted.proposalSetPath);
+  });
+
+  it("uses a stable design run for a retried Hermes callback submission", async () => {
+    const projectRoot = await createCompletedMarketingDiscoverySession();
+    const generated = await generateDeterministicLoopDesign({
+      projectRoot,
+      sessionId: "session_design",
+      now: new Date("2026-07-21T12:10:00.000Z")
+    });
+
+    const first = await submitLoopDesignProposalSet({
+      projectRoot,
+      sessionId: "session_design",
+      proposalSet: generated.proposalSet!,
+      providerName: "hermes",
+      submissionIdempotencyKey: "hermes-callback:callback_123",
+      now: new Date("2026-07-21T12:11:00.000Z")
+    });
+    const replay = await submitLoopDesignProposalSet({
+      projectRoot,
+      sessionId: "session_design",
+      proposalSet: generated.proposalSet!,
+      providerName: "hermes",
+      submissionIdempotencyKey: "hermes-callback:callback_123",
+      now: new Date("2026-07-21T12:12:00.000Z")
+    });
+
+    expect(replay.designRun.id).toBe(first.designRun.id);
+    expect(replay.designRun.metadata).toMatchObject({
+      submissionIdempotencyKey: "hermes-callback:callback_123"
+    });
+    const session = await getDiscoverySession("session_design", projectRoot);
+    expect(session?.designRunIds.filter((id) => id === first.designRun.id)).toHaveLength(1);
   });
 
   it("edits a proposal as a new validated design run with preserved history", async () => {

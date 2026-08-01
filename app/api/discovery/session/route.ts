@@ -3,17 +3,26 @@ import {
   listHermesDiscoverySessions,
   startHermesDiscoverySession
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 import type { DiscoveryActor } from "loopgraph/runtime";
 
 export async function GET() {
-  return NextResponse.json(await listHermesDiscoverySessions(getActiveLoopgraphProjectRoot()));
+  return NextResponse.json(
+    await listHermesDiscoverySessions(
+      getActiveLoopgraphProjectRoot(),
+      getDiscoveryDesignStore()
+    )
+  );
 }
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const session = await startHermesDiscoverySession({
     projectRoot: getActiveLoopgraphProjectRoot(),
+    store: getDiscoveryDesignStore(),
     sessionId: stringValue(body, "sessionId") ?? stringValue(body, "id"),
     companyId: stringValue(body, "companyId"),
     companyName: stringValue(body, "companyName") ?? nestedStringValue(body, "companyProfile", "name"),

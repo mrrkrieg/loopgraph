@@ -140,6 +140,10 @@ export function TemplateLibrary({ departments }: { departments: DepartmentTempla
               <Detail label="Metric" value={selectedTemplate.primaryMetric ?? selectedTemplate.defaultMetrics?.[0] ?? "Quality-adjusted output"} />
               <Detail label="Owners" value={(selectedTemplate.defaultOwners ?? ["Loop owner"]).slice(0, 2).join(", ")} />
               <Detail label="Data" value={(selectedTemplate.requiredDataSources ?? []).slice(0, 4).join(", ") || "Template defaults"} />
+              <Detail label="Hermes claims" value={selectedTemplate.routingDefinition?.problemTypes.join(", ") ?? "Custom claim required"} />
+              <Detail label="Events" value={selectedTemplate.routingDefinition?.eventTypes.slice(0, 3).join(", ") ?? "Define during design"} />
+              <Detail label="Required context" value={selectedTemplate.routingDefinition?.requiredContext.slice(0, 4).join(", ") ?? "Define during design"} />
+              <Detail label="Fan-out" value={selectedTemplate.routingDefinition ? `${selectedTemplate.routingDefinition.fanoutPolicy.mode} · max ${selectedTemplate.routingDefinition.fanoutPolicy.maxRoutes}` : "Not enabled"} />
             </div>
             <div className="mt-4 grid gap-2">
               <Link

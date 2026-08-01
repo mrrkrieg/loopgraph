@@ -3,7 +3,14 @@ import {
   callLoopgraphSemanticGraphTool,
   type LoopgraphSemanticGraphToolName
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopOpportunityStore,
+  getLoopSpecRegistryStore,
+  getSemanticGraphStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeBearerApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -12,6 +19,8 @@ const GRAPH_ACTION_TO_TOOL = {
   decide: "loopgraph_graph_change_decide",
   apply: "loopgraph_graph_change_apply",
   history: "loopgraph_graph_history_get",
+  promotion_rehearse: "loopgraph_promotion_rehearsal_run",
+  promotion_rehearsals_get: "loopgraph_promotion_rehearsals_get",
   promotion_approve: "loopgraph_loop_promotion_approve",
   promote: "loopgraph_loop_promote",
   lifecycle_approve: "loopgraph_loop_lifecycle_approve",
@@ -21,19 +30,21 @@ const GRAPH_ACTION_TO_TOOL = {
 } as const satisfies Record<string, LoopgraphSemanticGraphToolName>;
 
 export async function GET(request: Request) {
-  const unauthorized = authorizeGraphTransactionRequest(request);
+  const unauthorized = await authorizeGraphTransactionRequest(request);
   if (unauthorized) return unauthorized;
   try {
     const url = new URL(request.url);
+    const projectRoot = getActiveLoopgraphProjectRoot();
     const result = await callLoopgraphSemanticGraphTool("loopgraph_graph_history_get", {
-      projectRoot: getActiveLoopgraphProjectRoot(),
+      projectRoot,
       transactionId: queryValue(url, "transactionId"),
       snapshotId: queryValue(url, "snapshotId"),
       approvalReceiptId: queryValue(url, "approvalReceiptId"),
       promotionReceiptId: queryValue(url, "promotionReceiptId"),
+      rehearsalReportId: queryValue(url, "rehearsalReportId"),
       changeSetId: queryValue(url, "changeSetId"),
       loopId: queryValue(url, "loopId")
-    });
+    }, graphRuntime(projectRoot));
     return NextResponse.json(result, {
       headers: { "cache-control": "no-store" }
     });
@@ -43,7 +54,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = authorizeGraphTransactionRequest(request);
+  const unauthorized = await authorizeGraphTransactionRequest(request);
   if (unauthorized) return unauthorized;
   try {
     const body = await requiredJson(request);
@@ -55,12 +66,13 @@ export async function POST(request: Request) {
     delete argumentsWithoutBinding.action;
     delete argumentsWithoutBinding.projectRoot;
     const toolName = GRAPH_ACTION_TO_TOOL[action as keyof typeof GRAPH_ACTION_TO_TOOL];
+    const projectRoot = getActiveLoopgraphProjectRoot();
     const result = await callLoopgraphSemanticGraphTool(toolName, {
       ...argumentsWithoutBinding,
-      projectRoot: getActiveLoopgraphProjectRoot()
-    });
+      projectRoot
+    }, graphRuntime(projectRoot));
     return NextResponse.json(result, {
-      status: action === "history" ? 200 : 202,
+      status: action === "history" || action === "promotion_rehearsals_get" ? 200 : 202,
       headers: { "cache-control": "no-store" }
     });
   } catch (error) {
@@ -68,11 +80,26 @@ export async function POST(request: Request) {
   }
 }
 
+function graphRuntime(projectRoot: string) {
+  return {
+    projectRoot,
+    store: getSemanticGraphStore({ projectRoot }),
+    opportunityStore: getLoopOpportunityStore({ projectRoot }),
+    designStore: getDiscoveryDesignStore(),
+    hermesDesignStore: getHermesDesignStore(),
+    loopSpecStore: getLoopSpecRegistryStore({ projectRoot })
+  };
+}
+
 function authorizeGraphTransactionRequest(request: Request) {
   return authorizeBearerApiRequest(
     request,
-    "LOOPGRAPH_WORKER_API_TOKEN",
-    "semantic graph transaction HTTP API"
+    {
+      environmentVariable: "LOOPGRAPH_WORKER_API_TOKEN",
+      credentialEnvironmentVariable: "LOOPGRAPH_WORKER_CREDENTIAL_ID",
+      capability: "graph.transact",
+      rateLimit: 60
+    }
   );
 }
 

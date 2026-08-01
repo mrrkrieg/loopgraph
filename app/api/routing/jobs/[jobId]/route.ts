@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import {
   cancelRouteJob,
-  FileRoutingStore,
-  getLoopgraphRoot,
   retryRouteJob
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../../lib/loopgraph-runtime/storage-resolver";
+import { getRoutingStore } from "../../../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -14,7 +12,7 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ jobId: string }> }
 ) {
-  const unauthorized = authorizeWorkerApiRequest(request);
+  const unauthorized = await authorizeWorkerApiRequest(request, "routing.jobs");
   if (unauthorized) return unauthorized;
 
   try {
@@ -23,7 +21,7 @@ export async function POST(
     const action = body.action;
     const reason = requiredString(body.reason, "reason");
     const actor = requiredString(body.actor, "actor");
-    const store = new FileRoutingStore(getLoopgraphRoot(getActiveLoopgraphProjectRoot()));
+    const store = getRoutingStore();
     const job = action === "retry"
       ? await retryRouteJob({
           store,

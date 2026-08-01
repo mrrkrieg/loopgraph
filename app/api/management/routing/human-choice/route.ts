@@ -1,7 +1,10 @@
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { loopgraph_routing_human_choice_submit } from "loopgraph/runtime";
+import {
+  getActiveLoopgraphProjectRoot,
+  getRoutingStore
+} from "../../../../../lib/loopgraph-runtime/storage-resolver";
 
 const humanChoiceRequestSchema = z.object({
   eventId: z.string().min(1),
@@ -55,6 +58,8 @@ export async function POST(request: Request) {
       hermesMetadata: {
         source: "browser-management-routing-ops"
       }
+    }, {
+      store: getRoutingStore()
     });
 
     if (isFormRequest(request)) {
@@ -107,5 +112,5 @@ function optionalFormString(value: FormDataEntryValue | null): string | undefine
 }
 
 function getBrowserProjectRoot(): string {
-  return path.resolve(process.env.LOOPGRAPH_PROJECT_ROOT ?? process.cwd());
+  return getActiveLoopgraphProjectRoot();
 }

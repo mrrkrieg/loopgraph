@@ -55,6 +55,7 @@
     "openai": "^5.8.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "server-only": "0.0.1",
     "yaml": "^2.9.0",
     "zod": "^3.25.67",
     "zod-to-json-schema": "^3.25.2"

@@ -84,8 +84,8 @@ export class FileOutcomeStore implements OutcomeStore {
       .filter((sample) => !filters.loopId || sample.loopId === filters.loopId)
       .filter((sample) => !filters.metricDefinitionId || sample.metricDefinitionId === filters.metricDefinitionId)
       .filter((sample) => !filters.metricKey || sample.metricKey === filters.metricKey)
-      .filter((sample) => !filters.windowStart || sample.window.end >= filters.windowStart)
-      .filter((sample) => !filters.windowEnd || sample.window.start <= filters.windowEnd)
+      .filter((sample) => !filters.windowStart || sample.window.end > filters.windowStart)
+      .filter((sample) => !filters.windowEnd || sample.window.start < filters.windowEnd)
       .sort((left, right) => right.observedAt.localeCompare(left.observedAt) || left.id.localeCompare(right.id));
   }
 

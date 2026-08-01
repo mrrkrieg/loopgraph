@@ -1,12 +1,18 @@
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { loadEventRoutingOperations, routingOperationsQueryFromUrl } from "loopgraph/runtime";
+import {
+  getActiveLoopgraphProjectRoot,
+  getLoopSpecRegistryStore,
+  getRoutingStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(request: Request) {
   try {
     const query = routingOperationsQueryFromUrl(new URL(request.url));
     const model = await loadEventRoutingOperations({
       projectRoot: getBrowserProjectRoot(),
+      store: getRoutingStore(),
+      loopSpecStore: getLoopSpecRegistryStore(),
       ...query
     });
 
@@ -23,5 +29,5 @@ export async function GET(request: Request) {
 }
 
 function getBrowserProjectRoot(): string {
-  return path.resolve(process.env.LOOPGRAPH_PROJECT_ROOT ?? process.cwd());
+  return getActiveLoopgraphProjectRoot();
 }

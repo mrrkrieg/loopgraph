@@ -1,4 +1,5 @@
-import { createSupabaseAdminClient } from "../db/supabase";
+import { createSupabaseAdminClient } from "../db/supabase-admin";
+import { getWorkspaceDatabase } from "../db/workspace-database";
 import { createDefaultAnswers, generateQuestions, type AnswerMap } from "./question-engine";
 import {
   buildGraphFromRegisteredSpecs,
@@ -22,15 +23,22 @@ import { generateImplementationArtifacts } from "./implementation-generator";
 import {
   createLocalDesignStudioSpec,
   getRegisteredLoopSpecs,
+  getRegisteredLoopSpecsFromStore,
   getStudioAnswers,
   getStudioGeneratedSpec,
   unregisterLoopSpec,
-  updateLocalLoopLogic
+  updateLocalLoopLogic,
+  type LoadedRegisteredLoopSpec
 } from "./local-workspace";
 import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateById } from "./templates";
 import { v1alpha1ToFlat } from "loopgraph/core";
-import { getStorageAdapter } from "../loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getLoopSpecRegistryStore,
+  getStorageAdapter
+} from "../loopgraph-runtime/storage-resolver";
+import { isHostedAuthRequired } from "../auth/hosted-config";
 import { loadImprovementsFromStorage, loadLatestManagementRollup } from "loopgraph/runtime";
 import {
   buildSemanticTopology,
@@ -79,15 +87,18 @@ type LoopRow = {
 };
 
 export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceData> {
-  const supabase = createSupabaseAdminClient();
+  const database = await getWorkspaceDatabase("workspace.read");
+  const supabase = database.client;
 
   if (!supabase) {
     return selectLocalWorkspace(selectedLoopId);
   }
 
-  const organization = await getOrFallbackOrganization(supabase);
+  const organization = await getOrFallbackOrganization(supabase, database.organizationId);
   if (!organization) {
-    return selectLocalWorkspace(selectedLoopId);
+    return database.hosted
+      ? selectEmptyLocalWorkspace()
+      : selectLocalWorkspace(selectedLoopId);
   }
 
   const { data: loopRows } = await supabase
@@ -97,7 +108,27 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
     .order("created_at", { ascending: true });
 
   if (!loopRows || loopRows.length === 0) {
-    return selectLocalWorkspace(selectedLoopId);
+    if (!database.hosted) return selectLocalWorkspace(selectedLoopId);
+    const profile = {
+      id: database.userId ?? "hosted_user",
+      email: database.email ?? "",
+      fullName:
+        database.email?.split("@")[0] ?? "Loopgraph operator",
+      role: database.role ?? "viewer"
+    };
+    const registeredSpecs = await getRegisteredLoopSpecsFromStore(
+      getLoopSpecRegistryStore(),
+      getActiveLoopgraphProjectRoot()
+    );
+    return registeredSpecs.length > 0
+      ? selectRegisteredWorkspace({
+          selectedLoopId,
+          registeredSpecs,
+          organization,
+          profile,
+          sourceLabel: "Hosted LoopSpec registry"
+        })
+      : selectEmptyLocalWorkspace(organization, profile);
   }
 
   const loops = await Promise.all(loopRows.map((row) => mapLoopRecord(supabase, row as LoopRow)));
@@ -129,10 +160,10 @@ export async function getWorkspace(selectedLoopId?: string): Promise<WorkspaceDa
   return {
     organization,
     profile: {
-      id: "profile_local",
-      email: "operator@example.com",
-      fullName: "Loop Operator",
-      role: "owner"
+      id: database.userId ?? "profile_local",
+      email: database.email ?? "operator@example.com",
+      fullName: database.email?.split("@")[0] ?? "Loop Operator",
+      role: database.role ?? "owner"
     },
     templates: getDepartmentTemplates(),
     loops,
@@ -162,7 +193,8 @@ export async function createLoop(input: {
   name: string;
   goal: string;
 }) {
-  const supabase = createSupabaseAdminClient();
+  const database = await getWorkspaceDatabase("loops.write");
+  const supabase = database.client;
   const questions = generateQuestions(input.department, input.templateId, input.goal);
   const answers = createDefaultAnswers(input.department, input.templateId, input.goal);
 
@@ -178,7 +210,10 @@ export async function createLoop(input: {
   }
 
   const template = getTemplateById(input.templateId);
-  const existingOrg = await getOrFallbackOrganization(supabase);
+  const existingOrg = await getOrFallbackOrganization(supabase, database.organizationId);
+  if (database.hosted && !existingOrg) {
+    throw new Error("The active organization is unavailable.");
+  }
   const organization = existingOrg
     ? existingOrg
     : (
@@ -225,7 +260,7 @@ export async function createLoop(input: {
 }
 
 export async function saveLoopAnswers(loopId: string, answers: AnswerMap) {
-  const supabase = createSupabaseAdminClient();
+  const { client: supabase } = await getWorkspaceDatabase("loops.write");
 
   if (!supabase) {
     const loop = await getLoop(loopId);
@@ -260,7 +295,7 @@ export async function saveLoopAnswers(loopId: string, answers: AnswerMap) {
 }
 
 export async function generateAndPersistLoopSpec(loopId: string) {
-  const supabase = createSupabaseAdminClient();
+  const { client: supabase } = await getWorkspaceDatabase("loops.write");
   const workspace = await getWorkspace(loopId);
   const spec = generateLoopSpec(workspace.loop, workspace.answers);
   const artifacts = [
@@ -318,7 +353,7 @@ export async function generateAndPersistLoopSpec(loopId: string) {
 }
 
 export async function deleteLoop(loopId: string) {
-  const supabase = createSupabaseAdminClient();
+  const { client: supabase } = await getWorkspaceDatabase("organization.manage");
 
   if (!supabase) {
     return unregisterLoopSpec(loopId);
@@ -345,7 +380,10 @@ export async function getSemanticTopology(
   loopId?: string,
   options: SemanticTopologyWorkspaceOptions = {}
 ): Promise<SemanticTopology> {
-  if (process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY !== "true") {
+  if (
+    !isHostedAuthRequired() &&
+    process.env.LOOPGRAPH_DISABLE_LOCAL_REGISTRY !== "true"
+  ) {
     const registeredSpecs = await getRegisteredLoopSpecs();
     if (registeredSpecs.length > 0) {
       const registeredLoopSpecs = registeredSpecs.map((item) => withSourcePathLabel(item.spec, item.sourcePath));
@@ -409,7 +447,7 @@ export async function getSemanticTopology(
 }
 
 export async function startLoopRun(loopId: string) {
-  const supabase = createSupabaseAdminClient();
+  const { client: supabase } = await getWorkspaceDatabase("runs.write");
   const workspace = await getWorkspace(loopId);
   const heroSimulation = await simulateHeroLoop(loopId);
   const simulated = heroSimulation ?? simulateLoopRun(workspace.loop);
@@ -490,7 +528,7 @@ export async function submitHumanReview(input: {
   reviewerNotes?: string;
   hiddenLabor?: Record<string, number | string>;
 }) {
-  const supabase = createSupabaseAdminClient();
+  const { client: supabase } = await getWorkspaceDatabase("reviews.write");
 
   if (!supabase) {
     return;
@@ -528,13 +566,19 @@ export async function submitHumanReview(input: {
   }
 }
 
-async function getOrFallbackOrganization(supabase: SupabaseClient) {
-  const { data } = await supabase
+async function getOrFallbackOrganization(
+  supabase: SupabaseClient,
+  organizationId?: string
+) {
+  let query = supabase
     .from("organizations")
-    .select("id, name")
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .select("id, name");
+  if (organizationId) {
+    query = query.eq("id", organizationId);
+  } else {
+    query = query.order("created_at", { ascending: true }).limit(1);
+  }
+  const { data } = await query.maybeSingle();
 
   return data as { id: string; name: string } | null;
 }
@@ -744,12 +788,34 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
     return selectEmptyLocalWorkspace();
   }
 
-  const organization = {
-    id: "local_workspace",
-    name: "Local Loopgraph workspace"
-  };
+  return selectRegisteredWorkspace({
+    selectedLoopId,
+    registeredSpecs,
+    organization: {
+      id: "local_workspace",
+      name: "Local Loopgraph workspace"
+    },
+    profile: {
+      id: "profile_local",
+      email: "operator@example.com",
+      fullName: "Loop Operator",
+      role: "owner"
+    },
+    sourceLabel: "Local LoopSpec"
+  });
+}
+
+async function selectRegisteredWorkspace(input: {
+  selectedLoopId?: string;
+  registeredSpecs: LoadedRegisteredLoopSpec[];
+  organization: WorkspaceData["organization"];
+  profile: WorkspaceData["profile"];
+  sourceLabel: string;
+}) {
+  const { registeredSpecs, organization } = input;
   const loops = registeredSpecs.map((item) => loopRecordFromRegisteredSpec(item, organization.id));
-  const selectedLoop = loops.find((item) => item.id === selectedLoopId) ?? loops[0];
+  const selectedLoop =
+    loops.find((item) => item.id === input.selectedLoopId) ?? loops[0];
   const selectedSpec = registeredSpecs.find((item) => item.spec.metadata.id === selectedLoop.id) ?? registeredSpecs[0];
   const storedAnswers = getStudioAnswers(selectedSpec.spec);
   const answers = {
@@ -763,7 +829,8 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   const graph = buildGraphFromRegisteredSpecs({
     organization,
     specs: registeredSpecs,
-    selectedNodeId: `loop:${selectedLoop.id}`
+    selectedNodeId: `loop:${selectedLoop.id}`,
+    sourceLabel: input.sourceLabel
   });
   const storage = getStorageAdapter();
   const improvements = await loadImprovementsFromStorage(storage, selectedLoop.id);
@@ -771,12 +838,7 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
 
   return {
     organization,
-    profile: {
-      id: "profile_local",
-      email: "operator@example.com",
-      fullName: "Loop Operator",
-      role: "owner"
-    },
+    profile: input.profile,
     templates: getDepartmentTemplates(),
     loops,
     loop: selectedLoop,
@@ -793,8 +855,11 @@ async function selectLocalWorkspace(selectedLoopId?: string) {
   };
 }
 
-function selectEmptyLocalWorkspace(): WorkspaceData {
-  const organization = {
+function selectEmptyLocalWorkspace(
+  organizationInput?: { id: string; name: string },
+  profileInput?: WorkspaceData["profile"]
+): WorkspaceData {
+  const organization = organizationInput ?? {
     id: "local_workspace",
     name: "Local Loopgraph workspace"
   };
@@ -826,7 +891,7 @@ function selectEmptyLocalWorkspace(): WorkspaceData {
 
   return {
     organization,
-    profile: {
+    profile: profileInput ?? {
       id: "profile_local",
       email: "operator@example.com",
       fullName: "Loop Operator",

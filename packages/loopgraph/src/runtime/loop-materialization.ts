@@ -17,7 +17,13 @@ import {
   type RoutingCard
 } from "../core";
 import { loadLoopSpecFromPath } from "./loader";
+import {
+  createStoredLoopSpecArtifact,
+  type LoopSpecRegistryStore,
+  type StoredLoopSpecArtifact
+} from "./loop-spec-store";
 import { readDesignRun, readLoopDesignProposalSet } from "./design-service";
+import type { DiscoveryDesignStore } from "./discovery-design-store";
 import { getDiscoverySession, saveDiscoverySession, type DiscoveryActor } from "./discovery-session";
 import { getLoopgraphRoot } from "./storage-resolver";
 import {
@@ -25,6 +31,7 @@ import {
   inspectLoopgraphWorkspace,
   readLoopgraphWorkspace,
   writeLoopgraphWorkspace,
+  type LoopgraphWorkspaceRegistry,
   type RegisteredLoopSpec
 } from "./workspace";
 
@@ -32,6 +39,8 @@ export const LOOP_MATERIALIZATION_SCHEMA_VERSION = "loop-materialization/v1alpha
 
 export type MaterializeLoopDesignInput = {
   projectRoot?: string;
+  store?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   designRunId: string;
   acceptedProposalIds: string[];
   acceptedBy?: string;
@@ -169,9 +178,23 @@ export async function materializeAcceptedLoopDesignProposals(
     at: materializedAt
   })}`;
 
-  await initLoopgraphWorkspace({ projectRoot, createdBy: "hermes", now: input.now });
-  const designRun = await readDesignRun(projectRoot, input.designRunId);
-  const proposalSet = await readLoopDesignProposalSet(projectRoot, input.designRunId);
+  if (!input.loopSpecStore || input.loopSpecStore.persistence === "file") {
+    await initLoopgraphWorkspace({
+      projectRoot,
+      createdBy: "hermes",
+      now: input.now
+    });
+  }
+  const designRun = await readDesignRun(
+    projectRoot,
+    input.designRunId,
+    input.store
+  );
+  const proposalSet = await readLoopDesignProposalSet(
+    projectRoot,
+    input.designRunId,
+    input.store
+  );
   const fatalErrors = validateMaterializationRequest({
     designRunId: input.designRunId,
     acceptedProposalIds,
@@ -181,7 +204,10 @@ export async function materializeAcceptedLoopDesignProposals(
   });
 
   if (fatalErrors.length > 0 || !proposalSet || !designRun) {
-    const workspace = await inspectLoopgraphWorkspace({ projectRoot });
+    const workspace = await readMaterializationWorkspace(
+      projectRoot,
+      input.loopSpecStore
+    );
     return {
       schemaVersion: LOOP_MATERIALIZATION_SCHEMA_VERSION,
       valid: false,
@@ -194,7 +220,7 @@ export async function materializeAcceptedLoopDesignProposals(
       acceptedProposalIds,
       materializedLoops: [],
       graphProjection: { nodes: [], edges: [] },
-      workspace: workspaceSummary(workspace),
+      workspace,
       nextActions: ["Generate or submit a valid Hermes loop design before materializing proposals."]
     };
   }
@@ -206,11 +232,15 @@ export async function materializeAcceptedLoopDesignProposals(
     proposalSet,
     selectedProposals,
     materializedAt,
-    overwriteExisting: input.overwriteExisting ?? false
+    overwriteExisting: input.overwriteExisting ?? false,
+    loopSpecStore: input.loopSpecStore
   });
 
   if (preflight.errors.length > 0) {
-    const workspace = await inspectLoopgraphWorkspace({ projectRoot });
+    const workspace = await readMaterializationWorkspace(
+      projectRoot,
+      input.loopSpecStore
+    );
     return {
       schemaVersion: LOOP_MATERIALIZATION_SCHEMA_VERSION,
       valid: false,
@@ -223,7 +253,7 @@ export async function materializeAcceptedLoopDesignProposals(
       acceptedProposalIds,
       materializedLoops: [],
       graphProjection: graphProjectionFromProposals(selectedProposals),
-      workspace: workspaceSummary(workspace),
+      workspace,
       nextActions: [
         "Resolve materialization errors, then call loopgraph_loops_materialize again with the accepted proposal IDs."
       ]
@@ -231,9 +261,23 @@ export async function materializeAcceptedLoopDesignProposals(
   }
 
   const materializedLoops = preflight.prepared.map((prepared) => materializedLoopFromPrepared(prepared));
+  if (input.loopSpecStore?.persistence === "distributed") {
+    return commitDistributedMaterialization({
+      ...input,
+      projectRoot,
+      loopSpecStore: input.loopSpecStore,
+      acceptedProposalIds,
+      materializedAt,
+      materializationId,
+      designRun,
+      selectedProposals,
+      prepared: preflight.prepared,
+      materializedLoops
+    });
+  }
   const registryBeforeTransaction = await readLoopgraphWorkspace(projectRoot);
   const sessionBeforeTransaction = designRun.sessionId
-    ? await getDiscoverySession(designRun.sessionId, projectRoot)
+    ? await getDiscoverySession(designRun.sessionId, projectRoot, input.store)
     : undefined;
   let transaction: MaterializationTransaction | undefined;
 
@@ -275,6 +319,7 @@ export async function materializeAcceptedLoopDesignProposals(
     if (designRun.sessionId) {
       await appendMaterializedLoopsToDiscoverySession({
         projectRoot,
+        store: input.store,
         sessionId: designRun.sessionId,
         loopIds: materializedLoops.map((loop) => loop.loopId),
         actor: normalizeDiscoveryActor(input.acceptedBy),
@@ -286,7 +331,30 @@ export async function materializeAcceptedLoopDesignProposals(
   } catch (error) {
     if (transaction) await rollbackMaterializationTransaction(transaction);
     await writeLoopgraphWorkspace(registryBeforeTransaction, projectRoot);
-    if (sessionBeforeTransaction) await saveDiscoverySession(sessionBeforeTransaction, projectRoot);
+    if (sessionBeforeTransaction) {
+      const current = await getDiscoverySession(
+        sessionBeforeTransaction.id,
+        projectRoot,
+        input.store
+      );
+      if (
+        current &&
+        current.revision === sessionBeforeTransaction.revision + 1
+      ) {
+        await saveDiscoverySession(
+          BusinessDiscoverySessionSchema.parse({
+            ...sessionBeforeTransaction,
+            revision: current.revision + 1,
+            updatedAt: new Date().toISOString()
+          }),
+          projectRoot,
+          {
+            store: input.store,
+            expectedRevision: current.revision
+          }
+        );
+      }
+    }
     await rm(materializationFilePath(projectRoot, materializationId), { force: true });
     const workspace = await inspectLoopgraphWorkspace({ projectRoot });
     return {
@@ -307,6 +375,182 @@ export async function materializeAcceptedLoopDesignProposals(
       ]
     };
   }
+}
+
+async function commitDistributedMaterialization(input: {
+  projectRoot: string;
+  store?: DiscoveryDesignStore;
+  loopSpecStore: LoopSpecRegistryStore;
+  designRunId: string;
+  acceptedProposalIds: string[];
+  acceptedBy?: string;
+  materializedAt: string;
+  materializationId: string;
+  designRun: NonNullable<Awaited<ReturnType<typeof readDesignRun>>>;
+  selectedProposals: LoopDesignProposal[];
+  prepared: PreparedMaterialization[];
+  materializedLoops: MaterializedLoop[];
+}): Promise<LoopMaterializationResult> {
+  const workspaceBefore = await input.loopSpecStore.getWorkspace(
+    input.projectRoot
+  );
+  const existingEntries = new Map(
+    workspaceBefore.workspace.registeredSpecs.map((entry) => [entry.id, entry])
+  );
+  const artifacts = input.prepared.map((prepared) => {
+    const entry: RegisteredLoopSpec = {
+      id: prepared.spec.metadata.id,
+      name: prepared.spec.metadata.name,
+      path: prepared.relativeSpecPath,
+      templateId: "hermes-design",
+      department: prepared.proposal.department,
+      addedAt:
+        existingEntries.get(prepared.spec.metadata.id)?.addedAt ??
+        input.materializedAt
+    };
+    return createStoredLoopSpecArtifact({
+      spec: prepared.spec,
+      entry,
+      fixtures: Object.fromEntries(
+        STARTER_FIXTURE_DEFINITIONS.map((fixture) => [
+          `fixtures/${fixture.id}.json`,
+          createStarterFixture({
+            proposal: prepared.proposal,
+            spec: prepared.spec,
+            fixtureId: fixture.id,
+            label: fixture.label,
+            materializedAt: input.materializedAt
+          })
+        ])
+      ),
+      source: "hermes_design",
+      createdAt: input.materializedAt
+    });
+  });
+  try {
+    const discoverySessionTransition =
+      await buildDistributedDiscoveryTransition(input);
+    const committed = await input.loopSpecStore.commitMaterializationAtomically({
+      commitId: input.materializationId,
+      idempotencyKey: input.materializationId,
+      expectedRevision: workspaceBefore.revision,
+      projectRoot: input.projectRoot,
+      committedAt: input.materializedAt,
+      artifacts,
+      ...(discoverySessionTransition
+        ? { discoverySessionTransition }
+        : {})
+    });
+    const committedById = new Map(
+      committed.artifacts.map((artifact) => [artifact.loopId, artifact])
+    );
+    const loops = input.materializedLoops.map((loop) => {
+      const artifact = committedById.get(loop.loopId);
+      if (!artifact) {
+        throw new Error(
+          `Atomic LoopSpec commit omitted materialized loop: ${loop.loopId}`
+        );
+      }
+      const sourceRef = artifact.sourceRef ?? artifact.entry.path;
+      return {
+        ...loop,
+        specPath: sourceRef,
+        relativeSpecPath: sourceRef,
+        simulation: {
+          ...loop.simulation,
+          command: `Route a synthetic shadow event through Hermes for ${loop.loopId}`,
+          starterFixtures: STARTER_FIXTURE_DEFINITIONS.map((fixture) => ({
+            ...fixture,
+            path: `${sourceRef}#fixtures/${fixture.id}.json`,
+            relativePath: `fixtures/${fixture.id}.json`
+          }))
+        }
+      };
+    });
+    return {
+      schemaVersion: LOOP_MATERIALIZATION_SCHEMA_VERSION,
+      valid: true,
+      errors: [],
+      projectRoot: input.projectRoot,
+      sessionId: input.designRun.sessionId,
+      designRunId: input.designRunId,
+      materializationId: input.materializationId,
+      materializedAt: input.materializedAt,
+      acceptedProposalIds: input.acceptedProposalIds,
+      materializedLoops: loops,
+      graphProjection: graphProjectionFromProposals(input.selectedProposals),
+      workspace: workspaceSummaryFromArtifacts(
+        committed.workspace,
+        committed.artifacts
+      ),
+      nextActions: [
+        ...nextActionsForMaterializedLoops(loops),
+        "Hermes now reads these active versions from the tenant registry; no hosted runtime file is required."
+      ],
+      materializationPath: committed.commitRef
+    };
+  } catch (error) {
+    return {
+      schemaVersion: LOOP_MATERIALIZATION_SCHEMA_VERSION,
+      valid: false,
+      errors: [
+        `Atomic distributed materialization failed before commit: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      ],
+      projectRoot: input.projectRoot,
+      sessionId: input.designRun.sessionId,
+      designRunId: input.designRunId,
+      materializationId: input.materializationId,
+      materializedAt: input.materializedAt,
+      acceptedProposalIds: input.acceptedProposalIds,
+      materializedLoops: [],
+      graphProjection: graphProjectionFromProposals(input.selectedProposals),
+      workspace: await readMaterializationWorkspace(
+        input.projectRoot,
+        input.loopSpecStore
+      ),
+      nextActions: [
+        "No LoopSpec registry version or discovery transition was committed. Resolve the conflict and retry the accepted proposal set."
+      ]
+    };
+  }
+}
+
+async function buildDistributedDiscoveryTransition(input: {
+  projectRoot: string;
+  store?: DiscoveryDesignStore;
+  designRun: NonNullable<Awaited<ReturnType<typeof readDesignRun>>>;
+  materializedLoops: MaterializedLoop[];
+  acceptedBy?: string;
+  materializedAt: string;
+}) {
+  if (!input.designRun.sessionId) return undefined;
+  const session = await getDiscoverySession(
+    input.designRun.sessionId,
+    input.projectRoot,
+    input.store
+  );
+  if (!session) {
+    throw new Error(
+      `Discovery session not found: ${input.designRun.sessionId}`
+    );
+  }
+  const loopIds = input.materializedLoops.map((loop) => loop.loopId);
+  const next = BusinessDiscoverySessionSchema.parse({
+    ...session,
+    status: "completed",
+    activeStage: "materialization",
+    createdLoopIds: uniqueStrings([...session.createdLoopIds, ...loopIds]),
+    revision: session.revision + 1,
+    lastActor: normalizeDiscoveryActor(input.acceptedBy),
+    lastTransitionAt: input.materializedAt,
+    updatedAt: input.materializedAt
+  });
+  return {
+    expectedRevision: session.revision,
+    session: next
+  };
 }
 
 export async function readLoopMaterializationResult(
@@ -457,11 +701,20 @@ async function prepareMaterializations(input: {
   selectedProposals: LoopDesignProposal[];
   materializedAt: string;
   overwriteExisting: boolean;
+  loopSpecStore?: LoopSpecRegistryStore;
 }): Promise<{ prepared: PreparedMaterialization[]; errors: string[] }> {
-  const registry = await readLoopgraphWorkspace(input.projectRoot);
+  const registry = input.loopSpecStore
+    ? (await input.loopSpecStore.getWorkspace(input.projectRoot)).workspace
+    : await readLoopgraphWorkspace(input.projectRoot);
+  const activeArtifacts = input.loopSpecStore
+    ? await input.loopSpecStore.listActiveLoopSpecs(input.projectRoot)
+    : [];
   const errors: string[] = [];
   const prepared: PreparedMaterialization[] = [];
   const existingById = new Map(registry.registeredSpecs.map((entry) => [entry.id, entry]));
+  const artifactById = new Map(
+    activeArtifacts.map((artifact) => [artifact.loopId, artifact])
+  );
 
   for (const proposal of input.selectedProposals) {
     const specPath = materializedSpecPath(input.projectRoot, proposal);
@@ -478,7 +731,8 @@ async function prepareMaterializations(input: {
       existing,
       proposal,
       designRunId: input.designRunId,
-      expectedSpecPath: specPath
+      expectedSpecPath: specPath,
+      activeArtifact: artifactById.get(spec.metadata.id)
     });
 
     if (existing && existingStatus === "conflict" && !input.overwriteExisting) {
@@ -771,11 +1025,20 @@ function contextSourcesForProposal(proposal: LoopDesignProposal): LoopSpec["cont
 async function existingMaterializationStatus(input: {
   projectRoot: string;
   existing?: RegisteredLoopSpec;
+  activeArtifact?: StoredLoopSpecArtifact;
   proposal: LoopDesignProposal;
   designRunId: string;
   expectedSpecPath: string;
 }): Promise<"none" | "same" | "conflict"> {
   if (!input.existing) return "none";
+  if (input.activeArtifact) {
+    const labels = input.activeArtifact.spec.metadata.labels ?? {};
+    return labels.source === "hermes-design" &&
+      labels.proposalId === input.proposal.proposalId &&
+      labels.designRunId === input.designRunId
+      ? "same"
+      : "conflict";
+  }
   const existingPath = path.isAbsolute(input.existing.path)
     ? input.existing.path
     : path.resolve(input.projectRoot, input.existing.path);
@@ -1285,14 +1548,54 @@ function workspaceSummary(workspace: Awaited<ReturnType<typeof inspectLoopgraphW
   };
 }
 
+async function readMaterializationWorkspace(
+  projectRoot: string,
+  store?: LoopSpecRegistryStore
+): Promise<LoopMaterializationResult["workspace"]> {
+  if (!store) {
+    return workspaceSummary(
+      await inspectLoopgraphWorkspace({ projectRoot })
+    );
+  }
+  const [workspace, artifacts] = await Promise.all([
+    store.getWorkspace(projectRoot),
+    store.listActiveLoopSpecs(projectRoot)
+  ]);
+  return workspaceSummaryFromArtifacts(workspace.workspace, artifacts);
+}
+
+function workspaceSummaryFromArtifacts(
+  workspace: LoopgraphWorkspaceRegistry,
+  artifacts: StoredLoopSpecArtifact[]
+): LoopMaterializationResult["workspace"] {
+  return {
+    registeredSpecCount: workspace.registeredSpecs.length,
+    registeredDepartments: uniqueStrings(
+      workspace.registeredSpecs.map((entry) => entry.department)
+    ),
+    routingReadySpecCount: artifacts.filter((artifact) =>
+      Boolean(
+        compileRoutingCardFromLoopSpec(artifact.spec, {
+          catalogVersion: "workspace"
+        })
+      )
+    ).length
+  };
+}
+
 async function appendMaterializedLoopsToDiscoverySession(input: {
   projectRoot: string;
+  store?: DiscoveryDesignStore;
   sessionId: string;
   loopIds: string[];
   actor: DiscoveryActor;
   materializedAt: string;
 }): Promise<void> {
-  const session = await getDiscoverySession(input.sessionId, input.projectRoot);
+  const session = await getDiscoverySession(
+    input.sessionId,
+    input.projectRoot,
+    input.store
+  );
   if (!session) return;
   const next = BusinessDiscoverySessionSchema.parse({
     ...session,
@@ -1304,7 +1607,10 @@ async function appendMaterializedLoopsToDiscoverySession(input: {
     lastTransitionAt: input.materializedAt,
     updatedAt: input.materializedAt
   });
-  await saveDiscoverySession(next, input.projectRoot);
+  await saveDiscoverySession(next, input.projectRoot, {
+    store: input.store,
+    expectedRevision: session.revision
+  });
 }
 
 function normalizeDiscoveryActor(value?: string): DiscoveryActor {

@@ -31,9 +31,12 @@ Loopgraph gives Hermes a governed map of the company:
 - **Validate** Hermes's decision against registered loops, event contracts, readiness, policy, and deduplication rules.
 - **Visualize** the company as `Hermes Brain → Department → Loop`.
 - **Simulate locally** with generated fixtures before connecting credentials or allowing external writes.
+- **Operate** live work in Hermes while Loopgraph records the event, problem, route, tasks, tool calls, approvals, outputs, and observed outcome.
 - **Trace and approve** what the loop observed, proposed, verified, escalated, and changed.
 
 > **One brain, many loops.** Every provider webhook terminates at Hermes—not at an individual workflow. Hermes understands the incoming business problem and proposes a route; Loopgraph decides whether that route is valid and safe to run.
+
+Loopgraph includes a [prebuilt company loop library](docs/COMPANY-LOOP-LIBRARY.md) with routing-ready defaults and Hermes operating skills for Product, Marketing, Sales, Customer Success, Engineering, Operations / Finance, HR / Talent, Legal / Compliance, and Management. A new local workspace still starts empty: Hermes proposes the relevant defaults, and only loops you accept are created.
 
 ## How it works
 
@@ -41,10 +44,12 @@ Loopgraph gives Hermes a governed map of the company:
 flowchart LR
     A["Business events<br/>Ads · CRM · Support · GitHub · Notion"] --> B["Hermes Brain<br/>sole webhook ingress"]
     B -->|"bounded routing decision"| C{"Loopgraph validates"}
-    C -->|"eligible + ready"| D["Department"]
-    D --> E["Selected loop"]
-    E --> F["Trace · review · outcome"]
-    F -. "signed lifecycle callback" .-> B
+    C -->|"eligible + ready"| D["Department-owned loop"]
+    D -->|"signed assignment"| E["Hermes runtime executes tasks"]
+    E --> F["Tools · approvals · outputs"]
+    F --> G["Observed outcome"]
+    E -. "ordered execution events" .-> C
+    G -. "evidence returned" .-> B
     C -->|"ambiguous or unsafe"| G["Ask a human or abstain"]
 ```
 
@@ -54,7 +59,7 @@ Hermes and Loopgraph deliberately do different jobs:
 |---|---|---|
 | **Receives** | Provider webhooks and business signals | Normalized events and bounded routing decisions |
 | **Decides** | What business problem the event represents and which loop may fit | Whether that loop exists, accepts the event, has enough evidence, is ready, and is allowed to run |
-| **Owns** | Webhook routes, provider secrets, event normalization, semantic routing | LoopSpecs, routing contracts, deduplication, policy, simulation, approvals, traces, and outcomes |
+| **Owns** | Webhook routes, provider secrets, event normalization, semantic routing, and live task/tool execution | LoopSpecs, routing contracts, deduplication, policy, local simulation, approval records, traces, and outcomes |
 | **When uncertain** | Proposes human/context review instead of guessing | Rejects invalid, stale, forged, duplicate, incompatible, or unsafe routes |
 
 This separation lets Hermes reason broadly without giving an unvalidated model decision direct authority over business systems.
@@ -67,8 +72,9 @@ This separation lets Hermes reason broadly without giving an unvalidated model d
 4. **Accept only what you want.** Direct designs materialize only accepted proposals. Opportunity-driven add, update, split, merge, or retirement proposals use a content-bound approval receipt and atomic graph transaction.
 5. **Rehearse locally.** Test positive, missing-context, and risk-escalation cases without API keys or external writes.
 6. **Connect and promote carefully.** New loops begin in shadow mode. Live work stays blocked until routing, capabilities, approvals, and exact prepared-action fingerprints are ready.
-7. **Keep the worker running.** Accepted Hermes routes become durable jobs. The worker claims them atomically, verifies the immutable LoopSpec binding, runs the configured shadow/recommend/approval/autonomous policy, and returns signed lifecycle evidence to Hermes.
-8. **Keep improving.** The continuous controller evaluates durable outcomes, detects missing or weak loops, asks Hermes for only the missing evidence, and applies only low-risk policy-approved additions in shadow mode.
+7. **Keep the worker running.** Accepted Hermes routes become durable jobs. The worker claims them atomically and verifies the immutable LoopSpec binding. Shadow/recommend/simulate jobs run locally; live approval/autonomous jobs are assigned to a healthy capability-matching Hermes runtime and Loopgraph waits for signed execution events.
+8. **Measure the outcome.** Exact metric bindings schedule provider reads through trusted Hermes connectors, record evidence-qualified samples, evaluate primary outcomes and guardrails, and reconcile missing scopes, stale health, route drift, and overdue work.
+9. **Keep improving.** The continuous controller evaluates durable outcomes, detects missing or weak loops, asks Hermes for only the missing evidence, and applies only low-risk policy-approved additions in shadow mode.
 
 <p align="center">
   <img src="docs/images/hermes-brain-live-preview.png" alt="Loopgraph hosted Hermes Brain preview showing incoming data points, department loops, workflow loops, and the selected-node inspector" width="100%" />
@@ -160,9 +166,34 @@ Or keep the project-local worker polling:
 npm run loopgraph -- worker run --project . --watch --interval 5
 ```
 
-Shadow, recommend, and simulate jobs stay local. Approval-bound jobs pause on exact prepared-action fingerprints. Autonomous work still fails closed unless the live execution gate, connector readiness, and low-risk policy all pass. See the [route-job worker](docs/ROUTE-JOB-WORKER.md).
+Shadow, recommend, and simulate jobs stay local. Live jobs do **not** call providers from Loopgraph: the worker dispatches an immutable assignment to a healthy registered Hermes runtime, then waits in `dispatched` until Hermes reports the run, tasks, tools, approvals, outputs, and outcomes. Authenticated hosted deployments use tenant-scoped distributed stores for both routing and Hermes operations. See [Hermes execution runtime](docs/HERMES-EXECUTION-RUNTIME.md) and the [route-job worker](docs/ROUTE-JOB-WORKER.md).
 
-### 6. Keep the Hermes Brain improvement cycle running
+For HTTP dispatch, configure strong secrets outside the repository:
+
+```bash
+LOOPGRAPH_PUBLIC_URL=https://loopgraph.example.com
+LOOPGRAPH_HERMES_EXECUTION_URL=https://hermes.example.com/loopgraph/assignments
+LOOPGRAPH_HERMES_EXECUTION_SECRET=<at-least-32-random-characters>
+LOOPGRAPH_HERMES_EXECUTION_CALLBACK_SECRET=<separate-at-least-32-random-characters>
+LOOPGRAPH_HERMES_EXECUTION_ENVIRONMENT=production
+```
+
+For the local MCP path, Hermes registers itself with `loopgraph_hermes_agent_register`, refreshes `loopgraph_hermes_agent_heartbeat`, and reports ordered facts with `loopgraph_hermes_execution_event_ingest`. Loopgraph stores no provider token or raw authorization header.
+
+### 6. Bind and collect outcome evidence
+
+After Hermes connects a provider, register only its non-secret metadata and opaque credential reference, then bind each LoopSpec metric to an exact provider field and schedule:
+
+```bash
+npm run loopgraph -- connections register --project . --file connection.json
+npm run loopgraph -- measurements bindings set --project . --file metric-binding.json
+npm run loopgraph -- measurements schedule --project . --backfill 2
+npm run loopgraph -- connections reconcile --project .
+```
+
+Hermes retains every credential. A trusted collector claims the structured measurement jobs, executes them through the referenced connector, and returns values with durable provider evidence. Loopgraph evaluates complete primary/baseline windows and guardrails automatically; missing data stays incomplete. See [Hermes connector measurements](docs/CONNECTOR-MEASUREMENTS.md).
+
+### 7. Keep the Hermes Brain improvement cycle running
 
 Run one evidence-to-design cycle:
 
@@ -176,9 +207,26 @@ Or keep the trusted local controller processing idempotent triggers:
 npm run loopgraph -- controller run --project . --trigger-type schedule --watch --interval 900
 ```
 
-Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Only strict low-risk additions can materialize automatically, and they remain in shadow mode. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md).
+Event intake, routing decisions, worker results, reviews, outcomes, and management schedules enqueue controller triggers automatically. Local projects may materialize strict low-risk additions in shadow mode. Authenticated hosted deployments now persist opportunities, proposed graph changes, approvals, snapshots, graph transactions, promotions, rehearsals, active LoopSpecs, policies, checkpoints, runs, and leased triggers across replicas. Hosted automatic shadow materialization is enabled only when the controller, discovery, active LoopSpec registry, and semantic graph all resolve to their tenant-scoped distributed stores; a partial configuration fails closed. See the [continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md), [distributed opportunity/controller runtime](docs/DISTRIBUTED-OPPORTUNITY-CONTROLLER.md), and [semantic graph transaction authority](docs/SEMANTIC-GRAPH-TRANSACTIONS.md).
 
-### 7. Check before live credentials
+### 8. Operate the improvement cycle
+
+Open Studio and choose **Operate**:
+
+```bash
+npm run loopgraph -- studio --project . --start
+```
+
+- **Opportunities** explains which recurring problem Hermes detected and why it was scored.
+- **Agent activity** shows each incoming signal, Hermes routing decision, business problem, department loop, assigned Hermes runtime, tasks, tool calls, approvals, outputs, and observed outcome.
+- **Change review** shows the exact add, update, split, merge, or retire operation plus its approval and transaction receipts.
+- **Controller** shows what triggered Hermes, what it decided, and which policy rule allowed or stopped the action.
+- **Learning** traces a connector binding through scheduled measurement jobs to samples, guardrails, and an observed outcome.
+- **Value** subtracts review, rework, botsitting, escalation, and governance cost while keeping observed, modeled, and incomplete claims separate.
+
+The hosted preview uses clearly labeled illustrative records. A fresh local install shows only evidence from the active project and stays empty until Hermes creates or observes something.
+
+### 9. Check before live credentials
 
 Before connecting live provider credentials or production webhook routes, run:
 
@@ -503,6 +551,7 @@ npm run loopgraph -- case resolve <caseId> --summary "Resolved"
 npm run loopgraph -- graph history --project .
 npm run loopgraph -- graph change decide <changeSetId> --help
 npm run loopgraph -- graph promotion approve <loopId> --help
+npm run loopgraph -- graph promotion rehearse <loopId> --to recommend --by <actor>
 npm run loopgraph -- graph rollback approve <transactionId> --help
 ```
 
@@ -520,7 +569,7 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → review/lifecycle-evidence flow is implemented and covered by regression tests. Project-bound metric evidence, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Semantic changes are content-bound, atomic, and reversible; live provider execution remains experimental, and applying real provider webhook subscriptions remains a Hermes-owned setup step.
+Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. The Operate workspace exposes opportunities, graph change review, controller decisions, learning evidence, and net value as project-local views. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Hosted Hermes delivery uses durable outbound dispatch and inbound callback queues with atomic acceptance, leased workers, retry, and dead-letter handling. Discovery sessions, evidence gaps, bounded contexts, design runs, proposals, immutable active LoopSpec versions, opportunities, proposed graph changes, and controller triggers/runs are tenant-scoped and replica-safe. Semantic graph snapshots/approvals/transactions/promotions, measurements, outcomes, and value records remain the next distributed persistence boundary; hosted automatic graph mutation is disabled until that graph boundary is complete. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
 
 The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
@@ -528,18 +577,31 @@ The safest supported path today is **design locally, materialize, rehearse routi
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md) — complete local setup and event rehearsal
 - [Hermes design bridge](docs/HERMES-DESIGN-BRIDGE.md) — durable design tasks, focused evidence gaps, secure proactive activation, and callbacks
+- [Distributed Hermes design store](docs/DISTRIBUTED-HERMES-DESIGN-STORE.md) — tenant-scoped task idempotency, callback transactions, and hosted replica safety
+- [Hermes design callback inbox](docs/HERMES-DESIGN-CALLBACK-INBOX.md) — atomic signed-callback acceptance, leased compilation, retry, and dead-letter recovery
+- [Distributed discovery and design artifacts](docs/DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) — revisioned discovery, monotonic evidence gaps, and atomic immutable Hermes design submissions
 - [Loop opportunity engine](docs/LOOP-OPPORTUNITY-ENGINE.md) — detect missing or weak loops from operating evidence and start governed Hermes design
+- [Distributed opportunity and controller runtime](docs/DISTRIBUTED-OPPORTUNITY-CONTROLLER.md) — tenant-scoped opportunities, proposed graph changes, leased triggers, policies, checkpoints, and runs
 - [Durable route-job worker](docs/ROUTE-JOB-WORKER.md) — atomic claims, activation gates, approval reconciliation, retries, and lifecycle evidence
+- [Distributed Hermes routing store](docs/DISTRIBUTED-ROUTING-STORE.md) — shared routing evidence, PostgreSQL claims, lease fencing, and hosted queue metrics
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
+- [Hermes connector measurements](docs/CONNECTOR-MEASUREMENTS.md) — exact provider bindings, scheduled jobs, evidence collection, and reconciliation
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts
 - [Semantic graph transactions](docs/SEMANTIC-GRAPH-TRANSACTIONS.md) — exact approvals, atomic add/update/split/merge/retire changes, promotion, lifecycle, and rollback
+- [Promotion rehearsal](docs/PROMOTION-REHEARSAL.md) — automatic simulation, routing, ambiguity, regression, policy, and evidence gates before promotion
 - [Hermes examples](docs/HERMES-EXAMPLES.md) — Marketing, Legal / Compliance, and custom flows
+- [Company loop library](docs/COMPANY-LOOP-LIBRARY.md) — prebuilt loops by department, Hermes decision logic, operating skills, and shared-learning topology
 - [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md) — implementation-to-test evidence map
 - [Event-brain integration plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md) — detailed architecture and product plan
 - [LoopSpec reference](docs/loop-spec.md) — the loop contract
 - [Approval model](docs/approval-model.md) — exact-action review and fingerprint binding
 - [Topology guide](docs/topology-guide.md) — understanding the operating map
 - [Current build state](docs/CURRENT-STATE.md) — what is implemented now
+- [Hosted security](docs/HOSTED-SECURITY.md) — Supabase Auth, organization roles, RLS, service-role boundaries, and production limitations
+- [Hosted runtime namespaces](docs/HOSTED-RUNTIME-NAMESPACES.md) — organization/project isolation for persistent runtime state and its current single-writer boundary
+- [Versioned LoopSpec registry](docs/VERSIONED-LOOPSPEC-REGISTRY.md) — atomic Hermes materialization, immutable versions, active routing state, and hosted readers
+- [Machine request guards](docs/MACHINE-REQUEST-GUARDS.md) — scoped worker identities, replay protection, durable rate windows, and schedule authentication
+- [Operational audit and observability](docs/OPERATIONAL-AUDIT-OBSERVABILITY.md) — tamper-evident machine decisions, readiness, protected metrics, and administrator export
 
 ## Contributing
 

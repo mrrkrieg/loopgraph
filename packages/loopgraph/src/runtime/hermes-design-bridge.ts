@@ -1,14 +1,18 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
+  HERMES_DESIGN_DISPATCH_JOB_SCHEMA_VERSION,
+  HERMES_DESIGN_REQUEST_SCHEMA_VERSION,
   HERMES_DESIGN_TASK_SCHEMA_VERSION,
   contentHash,
+  hermesDesignDispatchJobSchema,
   hermesDesignCallbackSchema,
+  hermesDesignRequestSchema,
   hermesDesignTaskSchema,
   normalizeDepartmentType,
   type EvidenceGap,
-  type HermesDesignCallback,
+  type HermesDesignDispatchJob,
+  type HermesDesignRequest,
   type HermesDesignTask,
   type LoopDesignContext
 } from "../core";
@@ -19,9 +23,24 @@ import {
   mergeHermesEvidenceGaps
 } from "./evidence-gap-engine";
 import { getDiscoverySession } from "./discovery-session";
+import {
+  FileDiscoveryDesignStore,
+  type DiscoveryDesignStore
+} from "./discovery-design-store";
+import {
+  FileHermesDesignStore,
+  type HermesDesignStore,
+  type HermesDesignTaskFilters
+} from "./hermes-design-store";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
-export const HERMES_DESIGN_REQUEST_SCHEMA_VERSION = "hermes-design-request/v1alpha1" as const;
+export {
+  HERMES_DESIGN_REQUEST_SCHEMA_VERSION
+} from "../core";
+export type {
+  HermesDesignRequest
+} from "../core";
 
 export type StartHermesDesignTaskInput = {
   projectRoot?: string;
@@ -33,28 +52,6 @@ export type StartHermesDesignTaskInput = {
   requestedBy?: string;
   callbackUrl?: string;
   now?: Date;
-};
-
-export type HermesDesignRequest = {
-  schemaVersion: typeof HERMES_DESIGN_REQUEST_SCHEMA_VERSION;
-  event_type: "loopgraph.design_requested";
-  task: HermesDesignTask;
-  context?: LoopDesignContext;
-  gaps: EvidenceGap[];
-  nextQuestions: Awaited<ReturnType<typeof getNextEvidenceGapQuestions>>["questions"];
-  callback?: {
-    url: string;
-    signatureHeader: "x-hermes-signature";
-    timestampHeader: "x-hermes-timestamp";
-  };
-  allowedLoopgraphTools: [
-    "loopgraph_opportunities_get",
-    "loopgraph_evidence_gaps_get",
-    "loopgraph_evidence_gap_answer",
-    "loopgraph_design_context_get",
-    "loopgraph_design_submit"
-  ];
-  instructions: string[];
 };
 
 export type HermesDesignDispatchResult = {
@@ -125,10 +122,22 @@ export async function startHermesDesignTask(
     transport?: HermesTaskTransport;
     taskUrl?: string;
     taskSecret?: string;
+    store?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
   } = {}
 ): Promise<HermesDesignDispatchResult> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const session = await getDiscoverySession(input.sessionId, projectRoot);
+  const store = designStoreFor(projectRoot, options.store);
+  const discoveryStore = discoveryStoreFor(
+    projectRoot,
+    options.discoveryStore
+  );
+  const session = await getDiscoverySession(
+    input.sessionId,
+    projectRoot,
+    discoveryStore
+  );
   if (!session) throw new Error(`Discovery session not found: ${input.sessionId}`);
   const departmentCandidate = input.department ?? session.activeDepartmentId;
   const department = departmentCandidate ? normalizeDepartmentType(departmentCandidate) : undefined;
@@ -141,11 +150,13 @@ export async function startHermesDesignTask(
   const nowIso = now.toISOString();
   const gapSet = await compileEvidenceGaps({
     projectRoot,
+    store: discoveryStore,
     sessionId: session.id,
     now
   });
   const nextQuestions = await getNextEvidenceGapQuestions({
     projectRoot,
+    store: discoveryStore,
     sessionId: session.id,
     limit: 3
   });
@@ -157,6 +168,8 @@ export async function startHermesDesignTask(
   const context = blockingGaps.length === 0
     ? await buildLoopDesignContext({
         projectRoot,
+        store: discoveryStore,
+        loopSpecStore: options.loopSpecStore,
         sessionId: session.id,
         department
       })
@@ -169,23 +182,34 @@ export async function startHermesDesignTask(
     originProblemIds: [...(input.originProblemIds ?? [])].sort(),
     originOpportunityId: input.originOpportunityId
   })}`;
-  const existing = await findTaskByIdempotencyKey(projectRoot, idempotencyKey);
+  const transport = options.transport ?? resolveHermesTaskTransport(options);
+  const queueDispatch = Boolean(options.store && transport);
+  const matchingTasks = (await store.listTasks())
+    .filter((candidate) => candidate.idempotencyKey === idempotencyKey);
+  const existing = matchingTasks
+    .find((candidate) => !["failed", "cancelled"].includes(candidate.status));
   if (existing && !["failed", "cancelled"].includes(existing.status)) {
-    return {
+    const request = buildHermesDesignRequest({
       task: existing,
-      request: buildHermesDesignRequest({
-        task: existing,
-        context,
-        gaps: gapSet.gaps,
-        nextQuestions: nextQuestions.questions,
-        callbackUrl: input.callbackUrl ?? defaultCallbackUrl(existing.id)
-      })
-    };
+      context,
+      gaps: gapSet.gaps,
+      nextQuestions: nextQuestions.questions,
+      callbackUrl: input.callbackUrl ?? defaultCallbackUrl(existing.id)
+    });
+    if (queueDispatch && existing.delivery.status !== "sent") {
+      await store.enqueueDispatchJobAtomically(
+        createHermesDesignDispatchJob(request, now)
+      );
+    }
+    return { task: existing, request };
   }
 
   let task = hermesDesignTaskSchema.parse({
     schemaVersion: HERMES_DESIGN_TASK_SCHEMA_VERSION,
-    id: `hermes_task_${contentHash({ idempotencyKey, at: nowIso })}`,
+    id: `hermes_task_${contentHash({
+      idempotencyKey,
+      attempt: matchingTasks.length
+    })}`,
     idempotencyKey,
     sessionId: session.id,
     companyId: session.companyId,
@@ -205,46 +229,86 @@ export async function startHermesDesignTask(
     createdAt: nowIso,
     updatedAt: nowIso
   });
-  await saveHermesDesignTask(projectRoot, task);
-
-  const request = buildHermesDesignRequest({
+  let request = buildHermesDesignRequest({
     task,
     context,
     gaps: gapSet.gaps,
     nextQuestions: nextQuestions.questions,
     callbackUrl: input.callbackUrl ?? defaultCallbackUrl(task.id)
   });
-  const transport = options.transport ?? transportFromEnvironment(options);
-  if (!transport) {
-    task = hermesDesignTaskSchema.parse({
-      ...task,
-      delivery: {
-        status: "not_configured",
-        attemptCount: 0,
-        error: "No Hermes task endpoint is configured. Hermes can claim the durable task through the Loopgraph MCP tools."
-      },
-      updatedAt: nowIso
+  const candidateDispatchJob = queueDispatch
+    ? createHermesDesignDispatchJob(request, now)
+    : undefined;
+  const created = await store.createTaskAtomically(task, {
+    ...(candidateDispatchJob ? { dispatchJob: candidateDispatchJob } : {})
+  });
+  if (!created.created) {
+    request = buildHermesDesignRequest({
+      task: created.task,
+      context,
+      gaps: gapSet.gaps,
+      nextQuestions: nextQuestions.questions,
+      callbackUrl: input.callbackUrl ?? defaultCallbackUrl(created.task.id)
     });
-    await saveHermesDesignTask(projectRoot, task);
+    if (
+      queueDispatch &&
+      created.task.delivery.status !== "sent" &&
+      !created.dispatchJob
+    ) {
+      await store.enqueueDispatchJobAtomically(
+        createHermesDesignDispatchJob(request, now)
+      );
+    }
+    return { task: created.task, request };
+  }
+  task = created.task;
+
+  request = buildHermesDesignRequest({
+    task,
+    context,
+    gaps: gapSet.gaps,
+    nextQuestions: nextQuestions.questions,
+    callbackUrl: input.callbackUrl ?? defaultCallbackUrl(task.id)
+  });
+  if (queueDispatch) {
+    return { task, request };
+  }
+  if (!transport) {
+    task = await store.updateTaskAtomically({
+      taskId: task.id,
+      update: (current) => hermesDesignTaskSchema.parse({
+        ...current,
+        delivery: {
+          status: "not_configured",
+          attemptCount: current.delivery.attemptCount,
+          error: "No Hermes task endpoint is configured. Hermes can claim the durable task through the Loopgraph MCP tools."
+        },
+        updatedAt: nowIso
+      })
+    });
     return { task, request };
   }
 
   const result = await transport.dispatch(request);
-  task = hermesDesignTaskSchema.parse({
-    ...task,
-    status: result.sent && task.status === "queued" ? "awaiting_hermes" : task.status,
-    hermesTaskId: result.hermesTaskId ?? task.hermesTaskId,
-    delivery: {
-      status: result.sent ? "sent" : "failed",
-      destination: result.destination,
-      attemptCount: task.delivery.attemptCount + 1,
-      lastAttemptAt: nowIso,
-      responseStatus: result.responseStatus,
-      error: result.error
-    },
-    updatedAt: nowIso
+  task = await store.updateTaskAtomically({
+    taskId: task.id,
+    update: (current) => hermesDesignTaskSchema.parse({
+      ...current,
+      status: result.sent && current.status === "queued"
+        ? "awaiting_hermes"
+        : current.status,
+      hermesTaskId: result.hermesTaskId ?? current.hermesTaskId,
+      delivery: {
+        status: result.sent ? "sent" : "failed",
+        destination: result.destination,
+        attemptCount: current.delivery.attemptCount + 1,
+        lastAttemptAt: nowIso,
+        responseStatus: result.responseStatus,
+        error: result.error
+      },
+      updatedAt: nowIso
+    })
   });
-  await saveHermesDesignTask(projectRoot, task);
   return { task, request };
 }
 
@@ -252,21 +316,35 @@ export async function processHermesDesignCallback(input: {
   projectRoot?: string;
   callback: unknown;
   now?: Date;
-}): Promise<{
+}, options: {
+  store?: HermesDesignStore;
+  discoveryStore?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+} = {}): Promise<{
   task: HermesDesignTask;
   duplicate: boolean;
   designRunId?: string;
   validationErrors: string[];
 }> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const store = designStoreFor(projectRoot, options.store);
+  const discoveryStore = discoveryStoreFor(
+    projectRoot,
+    options.discoveryStore
+  );
   const callback = hermesDesignCallbackSchema.parse(input.callback);
-  let task = await requireHermesDesignTask(projectRoot, callback.taskId);
+  const task = await requireHermesDesignTask(store, callback.taskId);
   if (task.callbackIds.includes(callback.callbackId)) {
+    const repaired = await store.applyCallbackAtomically({
+      taskId: callback.taskId,
+      callback,
+      update: (current) => current
+    });
     return {
-      task,
+      task: repaired.task,
       duplicate: true,
-      designRunId: task.designRunIds.at(-1),
-      validationErrors: task.compilerErrors
+      designRunId: repaired.task.designRunIds.at(-1),
+      validationErrors: repaired.task.compilerErrors
     };
   }
   if (callback.hermesTaskId && task.hermesTaskId && callback.hermesTaskId !== task.hermesTaskId) {
@@ -276,37 +354,48 @@ export async function processHermesDesignCallback(input: {
   const nowIso = (input.now ?? new Date()).toISOString();
   let designRunId: string | undefined;
   let validationErrors: string[] = [];
+  let applyEffect: (current: HermesDesignTask) => HermesDesignTask = (current) => current;
   if (callback.type === "task.acknowledged") {
-    task = hermesDesignTaskSchema.parse({
-      ...task,
-      status: task.status === "needs_input" ? "needs_input" : "designing",
-      hermesTaskId: callback.hermesTaskId ?? task.hermesTaskId,
+    applyEffect = (current) => hermesDesignTaskSchema.parse({
+      ...current,
+      status: current.status === "needs_input"
+        ? "needs_input"
+        : isTerminalDesignTaskStatus(current.status)
+          ? current.status
+          : "designing",
       delivery: {
-        ...task.delivery,
+        ...current.delivery,
         acknowledgedAt: callback.occurredAt
       }
     });
   } else if (callback.type === "task.questions_requested") {
     const gapSet = await mergeHermesEvidenceGaps({
       projectRoot,
+      store: discoveryStore,
       sessionId: task.sessionId,
       gaps: callback.gaps,
       now: input.now
     });
     const nextQuestions = await getNextEvidenceGapQuestions({
       projectRoot,
+      store: discoveryStore,
       sessionId: task.sessionId,
       limit: 3
     });
-    task = hermesDesignTaskSchema.parse({
-      ...task,
+    const blockingGapIds = gapSet.gaps
+      .filter((gap) => gap.blocking && ["open", "asked"].includes(gap.status))
+      .map((gap) => gap.id);
+    const nextQuestionGapIds = nextQuestions.questions.map((question) => question.gapId);
+    applyEffect = (current) => hermesDesignTaskSchema.parse({
+      ...current,
       status: "needs_input",
-      blockingGapIds: gapSet.gaps.filter((gap) => gap.blocking && ["open", "asked"].includes(gap.status)).map((gap) => gap.id),
-      nextQuestionGapIds: nextQuestions.questions.map((question) => question.gapId)
+      blockingGapIds,
+      nextQuestionGapIds
     });
   } else if (callback.type === "task.proposal_submitted") {
     const currentGaps = await compileEvidenceGaps({
       projectRoot,
+      store: discoveryStore,
       sessionId: task.sessionId,
       now: input.now
     });
@@ -317,8 +406,8 @@ export async function processHermesDesignCallback(input: {
     );
     if (blocking.length > 0) {
       validationErrors = blocking.map((gap) => `Unresolved evidence gap: ${gap.field}`);
-      task = hermesDesignTaskSchema.parse({
-        ...task,
+      applyEffect = (current) => hermesDesignTaskSchema.parse({
+        ...current,
         status: "needs_input",
         blockingGapIds: blocking.map((gap) => gap.id),
         compilerErrors: validationErrors
@@ -326,6 +415,8 @@ export async function processHermesDesignCallback(input: {
     } else {
       const result = await submitLoopDesignProposalSet({
         projectRoot,
+        store: discoveryStore,
+        loopSpecStore: options.loopSpecStore,
         sessionId: task.sessionId,
         department: task.department,
         proposalSet: callback.proposalSet,
@@ -338,40 +429,59 @@ export async function processHermesDesignCallback(input: {
           hermesDesignTaskId: task.id,
           callbackId: callback.callbackId
         },
+        submissionIdempotencyKey: `hermes-callback:${callback.callbackId}`,
         now: input.now
       });
       designRunId = result.designRun.id;
       validationErrors = result.errors;
-      task = hermesDesignTaskSchema.parse({
-        ...task,
+      applyEffect = (current) => hermesDesignTaskSchema.parse({
+        ...current,
         status: result.valid ? "completed" : "needs_repair",
-        designRunIds: Array.from(new Set([...task.designRunIds, result.designRun.id])),
+        designRunIds: Array.from(new Set([...current.designRunIds, result.designRun.id])),
         compilerErrors: result.errors,
         ...(result.valid ? { completedAt: nowIso } : {})
       });
     }
   } else if (callback.type === "task.failed") {
-    task = hermesDesignTaskSchema.parse({
-      ...task,
-      status: "failed",
-      compilerErrors: [callback.error]
-    });
     validationErrors = [callback.error];
+    applyEffect = (current) => hermesDesignTaskSchema.parse({
+      ...current,
+      status: isTerminalDesignTaskStatus(current.status) ? current.status : "failed",
+      compilerErrors: Array.from(new Set([...current.compilerErrors, callback.error]))
+    });
   }
 
-  task = hermesDesignTaskSchema.parse({
-    ...task,
-    hermesTaskId: callback.hermesTaskId ?? task.hermesTaskId,
-    callbackIds: [...task.callbackIds, callback.callbackId],
-    updatedAt: nowIso
+  const applied = await store.applyCallbackAtomically({
+    taskId: callback.taskId,
+    callback,
+    update: (current) => {
+      if (
+        callback.hermesTaskId &&
+        current.hermesTaskId &&
+        callback.hermesTaskId !== current.hermesTaskId
+      ) {
+        throw new Error(`Hermes task identity mismatch for ${current.id}.`);
+      }
+      const effected = applyEffect(current);
+      return hermesDesignTaskSchema.parse({
+        ...effected,
+        hermesTaskId: callback.hermesTaskId ?? effected.hermesTaskId,
+        callbackIds: Array.from(new Set([...effected.callbackIds, callback.callbackId])),
+        updatedAt: nowIso
+      });
+    }
   });
-  await saveHermesDesignTask(projectRoot, task);
-  await saveHermesDesignCallback(projectRoot, callback);
   return {
-    task,
-    duplicate: false,
-    ...(designRunId ? { designRunId } : {}),
-    validationErrors
+    task: applied.task,
+    duplicate: applied.duplicate,
+    ...(applied.duplicate
+      ? { designRunId: applied.task.designRunIds.at(-1) }
+      : designRunId
+        ? { designRunId }
+        : {}),
+    validationErrors: applied.duplicate
+      ? applied.task.compilerErrors
+      : validationErrors
   };
 }
 
@@ -383,9 +493,13 @@ export async function resumeHermesDesignTasksForSession(input: {
   transport?: HermesTaskTransport;
   taskUrl?: string;
   taskSecret?: string;
+  store?: HermesDesignStore;
+  discoveryStore?: DiscoveryDesignStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 } = {}): Promise<HermesDesignDispatchResult[]> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const tasks = (await listHermesDesignTasks(projectRoot, { sessionId: input.sessionId }))
+  const store = designStoreFor(projectRoot, options.store);
+  const tasks = (await store.listTasks({ sessionId: input.sessionId }))
     .filter((task) => ["needs_input", "queued", "awaiting_hermes", "needs_repair"].includes(task.status))
     .slice(0, 1);
   const results: HermesDesignDispatchResult[] = [];
@@ -401,14 +515,10 @@ export async function resumeHermesDesignTasksForSession(input: {
 
 export async function getHermesDesignTask(
   taskId: string,
-  projectRoot = process.cwd()
+  projectRoot = process.cwd(),
+  store?: HermesDesignStore
 ): Promise<HermesDesignTask | undefined> {
-  try {
-    const raw = await readFile(hermesDesignTaskPath(path.resolve(projectRoot), taskId), "utf8");
-    return hermesDesignTaskSchema.parse(JSON.parse(raw));
-  } catch {
-    return undefined;
-  }
+  return designStoreFor(path.resolve(projectRoot), store).getTask(taskId);
 }
 
 async function resumeHermesDesignTask(
@@ -421,15 +531,25 @@ async function resumeHermesDesignTask(
     transport?: HermesTaskTransport;
     taskUrl?: string;
     taskSecret?: string;
+    store?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
   }
 ): Promise<HermesDesignDispatchResult> {
+  const store = designStoreFor(input.projectRoot, options.store);
+  const discoveryStore = discoveryStoreFor(
+    input.projectRoot,
+    options.discoveryStore
+  );
   const gapSet = await compileEvidenceGaps({
     projectRoot: input.projectRoot,
+    store: discoveryStore,
     sessionId: input.task.sessionId,
     now: input.now
   });
   const nextQuestions = await getNextEvidenceGapQuestions({
     projectRoot: input.projectRoot,
+    store: discoveryStore,
     sessionId: input.task.sessionId,
     limit: 3
   });
@@ -441,26 +561,56 @@ async function resumeHermesDesignTask(
   const context = blocking.length === 0
     ? await buildLoopDesignContext({
         projectRoot: input.projectRoot,
+        store: discoveryStore,
+        loopSpecStore: options.loopSpecStore,
         sessionId: input.task.sessionId,
         department: input.task.department
       })
     : undefined;
-  const nowIso = (input.now ?? new Date()).toISOString();
-  let task = hermesDesignTaskSchema.parse({
-    ...input.task,
-    status: blocking.length > 0 ? "needs_input" : "queued",
-    contextHash: context?.contextHash ?? input.task.contextHash,
-    blockingGapIds: blocking.map((gap) => gap.id),
-    nextQuestionGapIds: nextQuestions.questions.map((question) => question.gapId),
-    compilerErrors: blocking.length > 0 ? input.task.compilerErrors : [],
-    delivery: {
-      ...input.task.delivery,
-      status: "pending",
-      error: undefined
-    },
-    updatedAt: nowIso
+  const now = input.now ?? new Date();
+  const nowIso = now.toISOString();
+  const refreshTask = (current: HermesDesignTask) => hermesDesignTaskSchema.parse({
+      ...current,
+      status: blocking.length > 0 ? "needs_input" : "queued",
+      contextHash: context?.contextHash ?? current.contextHash,
+      blockingGapIds: blocking.map((gap) => gap.id),
+      nextQuestionGapIds: nextQuestions.questions.map((question) => question.gapId),
+      compilerErrors: blocking.length > 0 ? current.compilerErrors : [],
+      delivery: {
+        ...current.delivery,
+        status: "pending",
+        error: undefined
+      },
+      updatedAt: nowIso
+    });
+  const transport = options.transport ?? resolveHermesTaskTransport(options);
+  if (options.store && transport) {
+    const updated = await store.updateTaskAndEnqueueDispatchAtomically({
+      taskId: input.task.id,
+      update: (current) => {
+        const task = refreshTask(current);
+        const request = buildHermesDesignRequest({
+          task,
+          context,
+          gaps: gapSet.gaps,
+          nextQuestions: nextQuestions.questions,
+          callbackUrl: defaultCallbackUrl(task.id)
+        });
+        return {
+          task,
+          dispatchJob: createHermesDesignDispatchJob(request, now)
+        };
+      }
+    });
+    return {
+      task: updated.task,
+      request: updated.dispatchJob.request
+    };
+  }
+  let task = await store.updateTaskAtomically({
+    taskId: input.task.id,
+    update: refreshTask
   });
-  await saveHermesDesignTask(input.projectRoot, task);
   const request = buildHermesDesignRequest({
     task,
     context,
@@ -468,66 +618,50 @@ async function resumeHermesDesignTask(
     nextQuestions: nextQuestions.questions,
     callbackUrl: defaultCallbackUrl(task.id)
   });
-  const transport = options.transport ?? transportFromEnvironment(options);
   if (!transport) {
-    task = hermesDesignTaskSchema.parse({
-      ...task,
-      delivery: {
-        status: "not_configured",
-        attemptCount: task.delivery.attemptCount,
-        error: "No Hermes task endpoint is configured. Hermes can claim the durable task through the Loopgraph MCP tools."
-      },
-      updatedAt: nowIso
+    task = await store.updateTaskAtomically({
+      taskId: task.id,
+      update: (current) => hermesDesignTaskSchema.parse({
+        ...current,
+        delivery: {
+          status: "not_configured",
+          attemptCount: current.delivery.attemptCount,
+          error: "No Hermes task endpoint is configured. Hermes can claim the durable task through the Loopgraph MCP tools."
+        },
+        updatedAt: nowIso
+      })
     });
-    await saveHermesDesignTask(input.projectRoot, task);
     return { task, request };
   }
   const delivery = await transport.dispatch(request);
-  task = hermesDesignTaskSchema.parse({
-    ...task,
-    status: delivery.sent && task.status === "queued" ? "awaiting_hermes" : task.status,
-    hermesTaskId: delivery.hermesTaskId ?? task.hermesTaskId,
-    delivery: {
-      status: delivery.sent ? "sent" : "failed",
-      destination: delivery.destination,
-      attemptCount: task.delivery.attemptCount + 1,
-      lastAttemptAt: nowIso,
-      responseStatus: delivery.responseStatus,
-      error: delivery.error
-    },
-    updatedAt: nowIso
+  task = await store.updateTaskAtomically({
+    taskId: task.id,
+    update: (current) => hermesDesignTaskSchema.parse({
+      ...current,
+      status: delivery.sent && current.status === "queued"
+        ? "awaiting_hermes"
+        : current.status,
+      hermesTaskId: delivery.hermesTaskId ?? current.hermesTaskId,
+      delivery: {
+        status: delivery.sent ? "sent" : "failed",
+        destination: delivery.destination,
+        attemptCount: current.delivery.attemptCount + 1,
+        lastAttemptAt: nowIso,
+        responseStatus: delivery.responseStatus,
+        error: delivery.error
+      },
+      updatedAt: nowIso
+    })
   });
-  await saveHermesDesignTask(input.projectRoot, task);
   return { task, request };
 }
 
 export async function listHermesDesignTasks(
   projectRoot = process.cwd(),
-  filters: {
-    sessionId?: string;
-    status?: HermesDesignTask["status"];
-  } = {}
+  filters: HermesDesignTaskFilters = {},
+  store?: HermesDesignStore
 ): Promise<HermesDesignTask[]> {
-  try {
-    const root = hermesDesignTasksRoot(path.resolve(projectRoot));
-    const files = await readdir(root);
-    const tasks = await Promise.all(files
-      .filter((file) => file.endsWith(".json"))
-      .map(async (file) => {
-        try {
-          return hermesDesignTaskSchema.parse(JSON.parse(await readFile(path.join(root, file), "utf8")));
-        } catch {
-          return undefined;
-        }
-      }));
-    return tasks
-      .filter((task): task is HermesDesignTask => Boolean(task))
-      .filter((task) => !filters.sessionId || task.sessionId === filters.sessionId)
-      .filter((task) => !filters.status || task.status === filters.status)
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  } catch {
-    return [];
-  }
+  return designStoreFor(path.resolve(projectRoot), store).listTasks(filters);
 }
 
 export function signLoopgraphTaskPayload(body: string, timestamp: string, secret: string): string {
@@ -556,14 +690,14 @@ export function verifyHermesCallbackSignature(input: {
   return expectedBuffer.length === actualBuffer.length && timingSafeEqual(expectedBuffer, actualBuffer);
 }
 
-function buildHermesDesignRequest(input: {
+export function buildHermesDesignRequest(input: {
   task: HermesDesignTask;
   context?: LoopDesignContext;
   gaps: EvidenceGap[];
   nextQuestions: HermesDesignRequest["nextQuestions"];
   callbackUrl?: string;
 }): HermesDesignRequest {
-  return {
+  return hermesDesignRequestSchema.parse({
     schemaVersion: HERMES_DESIGN_REQUEST_SCHEMA_VERSION,
     event_type: "loopgraph.design_requested",
     task: input.task,
@@ -598,13 +732,40 @@ function buildHermesDesignRequest(input: {
           "Return a LoopDesignProposalSet through the signed callback or loopgraph_design_submit.",
           "Do not materialize specs, connect providers, or perform business actions."
         ]
-  };
+  });
 }
 
-function transportFromEnvironment(options: {
+export function createHermesDesignDispatchJob(
+  request: HermesDesignRequest,
+  now = new Date()
+): HermesDesignDispatchJob {
+  const parsedRequest = hermesDesignRequestSchema.parse(request);
+  const nowIso = now.toISOString();
+  const idempotencyKey = `hermes_dispatch_${contentHash({
+    taskId: parsedRequest.task.id,
+    request: parsedRequest
+  })}`;
+  return hermesDesignDispatchJobSchema.parse({
+    schemaVersion: HERMES_DESIGN_DISPATCH_JOB_SCHEMA_VERSION,
+    id: `hermes_dispatch_job_${contentHash({ idempotencyKey })}`,
+    idempotencyKey,
+    taskId: parsedRequest.task.id,
+    request: parsedRequest,
+    status: "queued",
+    attemptCount: 0,
+    maxAttempts: 5,
+    nextRunAt: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  });
+}
+
+export function resolveHermesTaskTransport(options: {
+  transport?: HermesTaskTransport;
   taskUrl?: string;
   taskSecret?: string;
 }): HermesTaskTransport | undefined {
+  if (options.transport) return options.transport;
   const url =
     options.taskUrl ??
     process.env.LOOPGRAPH_HERMES_WEBHOOK_URL ??
@@ -627,42 +788,31 @@ function defaultCallbackUrl(taskId: string): string | undefined {
   return origin ? `${origin}/api/hermes/design-tasks/${encodeURIComponent(taskId)}/callback` : undefined;
 }
 
-async function saveHermesDesignTask(projectRoot: string, task: HermesDesignTask): Promise<void> {
-  const filePath = hermesDesignTaskPath(projectRoot, task.id);
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(task, null, 2)}\n`);
-}
-
-async function saveHermesDesignCallback(projectRoot: string, callback: HermesDesignCallback): Promise<void> {
-  const filePath = path.join(
-    getLoopgraphRoot(projectRoot),
-    "hermes",
-    "design-callbacks",
-    `${encodeURIComponent(callback.callbackId)}.json`
-  );
-  await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, `${JSON.stringify(callback, null, 2)}\n`);
-}
-
-async function requireHermesDesignTask(projectRoot: string, taskId: string): Promise<HermesDesignTask> {
-  const task = await getHermesDesignTask(taskId, projectRoot);
+async function requireHermesDesignTask(
+  store: HermesDesignStore,
+  taskId: string
+): Promise<HermesDesignTask> {
+  const task = await store.getTask(taskId);
   if (!task) throw new Error(`Hermes design task not found: ${taskId}`);
   return task;
 }
 
-async function findTaskByIdempotencyKey(
+function designStoreFor(
   projectRoot: string,
-  idempotencyKey: string
-): Promise<HermesDesignTask | undefined> {
-  return (await listHermesDesignTasks(projectRoot)).find((task) => task.idempotencyKey === idempotencyKey);
+  supplied?: HermesDesignStore
+): HermesDesignStore {
+  return supplied ?? new FileHermesDesignStore(getLoopgraphRoot(projectRoot));
 }
 
-function hermesDesignTasksRoot(projectRoot: string): string {
-  return path.join(getLoopgraphRoot(projectRoot), "hermes", "design-tasks");
+function discoveryStoreFor(
+  projectRoot: string,
+  supplied?: DiscoveryDesignStore
+): DiscoveryDesignStore {
+  return supplied ?? new FileDiscoveryDesignStore(getLoopgraphRoot(projectRoot));
 }
 
-function hermesDesignTaskPath(projectRoot: string, taskId: string): string {
-  return path.join(hermesDesignTasksRoot(projectRoot), `${encodeURIComponent(taskId)}.json`);
+function isTerminalDesignTaskStatus(status: HermesDesignTask["status"]): boolean {
+  return ["completed", "cancelled"].includes(status);
 }
 
 async function readResponseJson(response: Response): Promise<unknown> {

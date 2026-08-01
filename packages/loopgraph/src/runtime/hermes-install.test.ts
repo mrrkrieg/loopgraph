@@ -4,6 +4,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { describe, expect, it } from "vitest";
 import { LOOPGRAPH_MCP_STATIC_RESOURCE_URIS } from "../mcp/server";
+import { DEPARTMENT_OPERATING_SKILLS, DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION } from "../core";
 import {
   doctorHermesIntegration,
   HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
@@ -128,7 +129,13 @@ describe("Hermes integration installer", () => {
           protocol: HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION,
           path: result.skillPaths[1],
           assets: result.supportingFilePaths.slice(5)
-        }
+        },
+        ...DEPARTMENT_OPERATING_SKILLS.map((skill, index) => ({
+          name: `loopgraph-department-${skill.departmentType.replace(/_/g, "-")}`,
+          version: HERMES_LOOPGRAPH_SKILL_VERSION,
+          protocol: DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION,
+          path: result.skillPaths[index + 2]
+        }))
       ],
       capabilities: {
         routingCatalog: true,
@@ -157,7 +164,9 @@ describe("Hermes integration installer", () => {
         hermesWebhookSync: true,
         hermesWebhookDoctor: true,
         hermesWebhookTest: true,
-        liveExecution: false
+        departmentOperatingSkills: true,
+        sharedLearningPlaybooks: true,
+        liveExecution: true
       },
       lastDoctor: null
     });
@@ -174,6 +183,7 @@ describe("Hermes integration installer", () => {
 
     const designSkill = await readFile(result.skillPaths[0], "utf8");
     const routerSkill = await readFile(result.skillPaths[1], "utf8");
+    const productSkill = await readFile(result.skillPaths[2], "utf8");
     const discoveryReference = await readFile(result.supportingFilePaths[0]!, "utf8");
     const proposalReference = await readFile(result.supportingFilePaths[1]!, "utf8");
     const safetyReference = await readFile(result.supportingFilePaths[2]!, "utf8");
@@ -183,6 +193,9 @@ describe("Hermes integration installer", () => {
     const productRoutingExample = await readFile(result.supportingFilePaths[6]!, "utf8");
     const routingExample = await readFile(result.supportingFilePaths[7]!, "utf8");
     expect(designSkill).toContain("name: loopgraph");
+    expect(productSkill).toContain("name: loopgraph-department-product");
+    expect(productSkill).toContain("## How Hermes approaches work");
+    expect(productSkill).toContain("## Shared-learning playbooks");
     expect(designSkill).toContain("start Loopgraph");
     expect(designSkill).toContain("Do not ask an open-ended question first");
     expect(designSkill).toContain("Recommend Product as the easiest first example");
@@ -211,6 +224,21 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph://schemas/hermes-design-task");
     expect(designSkill).toContain("loopgraph_connections_plan");
     expect(designSkill).toContain("loopgraph_connections_set_manual_fallback");
+    expect(designSkill).toContain("loopgraph_connections_register");
+    expect(designSkill).toContain("loopgraph_connections_health_report");
+    expect(designSkill).toContain("loopgraph_connections_get");
+    expect(designSkill).toContain("loopgraph_metric_bindings_set");
+    expect(designSkill).toContain("loopgraph_metric_bindings_get");
+    expect(designSkill).toContain("loopgraph_measurements_schedule");
+    expect(designSkill).toContain("loopgraph_measurement_jobs_claim");
+    expect(designSkill).toContain("loopgraph_measurement_jobs_complete");
+    expect(designSkill).toContain("loopgraph_measurement_jobs_fail");
+    expect(designSkill).toContain("loopgraph_connections_reconcile");
+    expect(designSkill).toContain("loopgraph_connections_reconciliations_get");
+    expect(designSkill).toContain("Keep provider credentials in Hermes");
+    expect(designSkill).toContain("loopgraph://schemas/metric-binding");
+    expect(designSkill).toContain("loopgraph://schemas/measurement-job");
+    expect(designSkill).toContain("loopgraph://schemas/connection-reconciliation");
     expect(designSkill).toContain("loopgraph_loops_materialize");
     expect(designSkill).toContain("loopgraph_runs_get");
     expect(designSkill).toContain("loopgraph_loops_validate");
@@ -230,9 +258,12 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph://schemas/graph-change-approval-receipt");
     expect(designSkill).toContain("loopgraph://schemas/graph-transaction");
     expect(designSkill).toContain("loopgraph://schemas/loop-promotion-receipt");
+    expect(designSkill).toContain("loopgraph://schemas/promotion-rehearsal");
     expect(designSkill).toContain("loopgraph_graph_change_decide");
     expect(designSkill).toContain("loopgraph_graph_change_apply");
     expect(designSkill).toContain("loopgraph_graph_history_get");
+    expect(designSkill).toContain("loopgraph_promotion_rehearsal_run");
+    expect(designSkill).toContain("loopgraph_promotion_rehearsals_get");
     expect(designSkill).toContain("loopgraph_loop_promotion_approve");
     expect(designSkill).toContain("loopgraph_loop_promote");
     expect(designSkill).toContain("loopgraph_loop_lifecycle_approve");
@@ -488,7 +519,7 @@ describe("Hermes integration installer", () => {
       expected: HERMES_LOOPGRAPH_INTEGRATION_VERSION,
       ok: false
     });
-    expect(result.artifacts.length).toBe(12);
+    expect(result.artifacts.length).toBe(12 + DEPARTMENT_OPERATING_SKILLS.length);
     expect(result.mcp.workspaceOk).toBe(true);
     expect(result.mcp.workspaceExists).toBe(false);
     expect(result.mcp.catalogOk).toBe(true);

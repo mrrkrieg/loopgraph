@@ -8,7 +8,7 @@ export default async function SkillsPage() {
   const packs = await loadDepartmentSkillPacks();
   return (
     <>
-      <PageHeader eyebrow="Skill library" title="Department Skills" description="Skill packs define department questions, common goals, loop blueprints, integrations, metrics, human gates, and daily summary fields." />
+      <PageHeader eyebrow="Hermes operating library" title="Department Skills" description="Each installed skill tells Hermes how to understand department work, assemble context, choose prebuilt loops, govern risky action, and learn from outcomes across the company." />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {packs.map((pack) => {
           const errors = validateDepartmentSkillPackReferences(pack);
@@ -29,4 +29,3 @@ export default async function SkillsPage() {
     </>
   );
 }
-

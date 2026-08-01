@@ -3,14 +3,22 @@ import {
   dismissLoopOpportunity,
   getLoopOpportunity
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getLoopOpportunityStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ opportunityId: string }> }
 ) {
   const { opportunityId } = await context.params;
-  const opportunity = await getLoopOpportunity(opportunityId, getActiveLoopgraphProjectRoot());
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const opportunity = await getLoopOpportunity(
+    opportunityId,
+    projectRoot,
+    getLoopOpportunityStore({ projectRoot })
+  );
   if (!opportunity) {
     return NextResponse.json({ error: "Loop opportunity not found" }, { status: 404 });
   }
@@ -24,6 +32,7 @@ export async function POST(
   try {
     const body = await request.json();
     const { opportunityId } = await context.params;
+    const projectRoot = getActiveLoopgraphProjectRoot();
     if (
       !body ||
       typeof body !== "object" ||
@@ -37,9 +46,11 @@ export async function POST(
       }, { status: 400 });
     }
     const opportunity = await dismissLoopOpportunity({
-      projectRoot: getActiveLoopgraphProjectRoot(),
+      projectRoot,
       opportunityId,
       reason: String((body as Record<string, unknown>).reason).trim()
+    }, {
+      store: getLoopOpportunityStore({ projectRoot })
     });
     return NextResponse.json({ opportunity });
   } catch (error) {

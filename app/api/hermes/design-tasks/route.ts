@@ -3,7 +3,12 @@ import {
   listHermesDesignTasks,
   startHermesDesignTask
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
+  getHermesDesignStore,
+  getLoopSpecRegistryStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -12,7 +17,7 @@ export async function GET(request: Request) {
   const tasks = await listHermesDesignTasks(getActiveLoopgraphProjectRoot(), {
     sessionId,
     status: isTaskStatus(status) ? status : undefined
-  });
+  }, getHermesDesignStore());
   return NextResponse.json({ tasks });
 }
 
@@ -31,6 +36,10 @@ export async function POST(request: Request) {
       originOpportunityId: stringValue(body.originOpportunityId),
       requestedBy: stringValue(body.requestedBy) ?? "api",
       callbackUrl: stringValue(body.callbackUrl)
+    }, {
+      store: getHermesDesignStore(),
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore()
     });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   LOOPGRAPH_API_VERSION,
   LOOP_KIND,
@@ -15,6 +15,7 @@ import {
 } from "../core";
 import { FileStorageAdapter } from "../sdk/storage";
 import { FileOutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore } from "./hermes-operations-store";
 import { applyReviewDecision } from "./review-service";
 import { runRouteJobWorker } from "./route-job-worker";
 import {
@@ -30,6 +31,47 @@ import { simulateLoop } from "./simulator";
 import { initLoopgraphWorkspace, writeLoopgraphWorkspace } from "./workspace";
 
 describe("route job worker", () => {
+  it("dispatches live work to a healthy Hermes agent without executing it inside Loopgraph", async () => {
+    const fixture = await createWorkerFixture({ activationMode: "execute_with_approval" });
+    const now = new Date("2026-07-29T12:00:10.000Z");
+    const operationsStore = new FileHermesOperationsStore(path.join(fixture.projectRoot, ".loopgraph"));
+    await operationsStore.saveAgentInstance({
+      schemaVersion: "hermes-agent-instance/v1alpha1",
+      id: "hermes_worker",
+      workspaceId: "workspace_worker",
+      name: "Hermes Worker",
+      environment: "local",
+      status: "online",
+      runtimeVersion: "2.4.0",
+      capabilities: [],
+      assignedLoopIds: [],
+      defaultRouter: true,
+      labels: {},
+      lastHeartbeatAt: now.toISOString(),
+      registeredAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    });
+    const dispatch = vi.fn().mockResolvedValue({ accepted: true, assignmentRef: "hermes_assignment_1" });
+    const execute = vi.fn();
+    const result = await runRouteJobWorker({
+      projectRoot: fixture.projectRoot,
+      workerId: "worker_dispatch",
+      now,
+      operationsStore,
+      hermesTransport: { dispatch },
+      execute
+    });
+    expect(result).toMatchObject({ claimed: 1, dispatched: 1, completed: 0 });
+    expect(result.items[0]).toMatchObject({ status: "dispatched", traceStatus: "DISPATCHED" });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      agentInstanceId: "hermes_worker",
+      routeJobId: fixture.jobId,
+      activationMode: "execute_with_approval"
+    }));
+    expect(execute).not.toHaveBeenCalled();
+    await expect(new FileStorageAdapter(path.join(fixture.projectRoot, ".loopgraph")).getRun(result.items[0].runId!)).resolves.toBeNull();
+  });
+
   it("claims a Hermes route, verifies its immutable binding, simulates it, and records lifecycle evidence", async () => {
     const fixture = await createWorkerFixture();
 
@@ -387,9 +429,10 @@ describe("route job worker", () => {
 
 async function createWorkerFixture(input: {
   requiresApproval?: boolean;
+  activationMode?: "simulate" | "execute_with_approval";
 } = {}) {
   const projectRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-worker-"));
-  const spec = validateLoopSpec(loopSpec(input.requiresApproval ?? false));
+  const spec = validateLoopSpec(loopSpec(input.requiresApproval ?? false, input.activationMode ?? "simulate"));
   const specPath = path.join(projectRoot, ".loopgraph", "generated", "worker-loop.json");
   await mkdir(path.dirname(specPath), { recursive: true });
   await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
@@ -509,7 +552,7 @@ function routeDecision(event: EventEnvelope): RoutingDecision {
   };
 }
 
-function loopSpec(requiresApproval: boolean): LoopSpec {
+function loopSpec(requiresApproval: boolean, activationMode: "simulate" | "execute_with_approval" = "simulate"): LoopSpec {
   return {
     apiVersion: LOOPGRAPH_API_VERSION,
     kind: LOOP_KIND,
@@ -599,7 +642,7 @@ function loopSpec(requiresApproval: boolean): LoopSpec {
         optionalConditions: []
       }],
       excludes: [],
-      activationMode: "simulate",
+      activationMode,
       minimumConfidence: 0.8,
       priority: 10,
       ambiguityPolicy: "request_human",

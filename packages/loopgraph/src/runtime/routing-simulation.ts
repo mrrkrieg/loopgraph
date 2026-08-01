@@ -74,6 +74,7 @@ export type HermesLocalRouteTestInput = {
   specPaths?: string[];
   routingCards?: RoutingCard[];
   catalogVersion?: string;
+  routingStore?: FileRoutingStore;
   fixtureId?: string;
   replay?: boolean;
   now?: Date;
@@ -106,6 +107,9 @@ export type RoutingEvaluationFixtureInput = z.input<typeof routingEvaluationFixt
 export type RoutingEvaluationThresholds = z.infer<typeof routingEvaluationThresholdsSchema>;
 export type RoutingEvaluationRunInput = z.input<typeof routingEvaluationRunInputSchema> & {
   now?: Date;
+  routingCards?: RoutingCard[];
+  catalogVersion?: string;
+  routingStore?: FileRoutingStore;
 };
 
 export type RoutingEvaluationRunResult = {
@@ -158,7 +162,7 @@ export async function runHermesLocalRouteTest(
     trustedRoutingCards: input.routingCards,
     trustedCatalogVersion: input.catalogVersion
   };
-  const store = new FileRoutingStore(getLoopgraphRoot(projectRoot));
+  const store = input.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
   const startedAt = Date.now();
   const ingest = await loopgraph_events_ingest({
     projectRoot,
@@ -325,6 +329,9 @@ export async function runHermesRoutingEvaluation(
       expectedLoopIds: fixture.expectedLoopIds,
       fixtureId: fixture.fixtureId,
       replay: fixture.replay,
+      routingCards: input.routingCards,
+      catalogVersion: input.catalogVersion,
+      routingStore: input.routingStore,
       now: addMilliseconds(input.now ?? new Date(), index)
     });
     results.push(result);

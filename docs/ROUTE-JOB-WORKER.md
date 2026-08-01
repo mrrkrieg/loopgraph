@@ -7,9 +7,10 @@ provider event
   -> Hermes Brain
   -> validated RoutingDecision
   -> immutable RouteCommit + RouteJob
-  -> Loopgraph worker
-  -> trace / review / outcome
-  -> signed lifecycle evidence back to Hermes
+  -> Loopgraph worker validates immutable bindings
+  -> local simulation OR signed live assignment to Hermes
+  -> Hermes task / tool / approval / output / outcome events
+  -> Loopgraph trace and operational read model
 ```
 
 ## Run it
@@ -53,14 +54,16 @@ npm run loopgraph -- worker cancel --project . \
 | `shadow` | Runs a deterministic local simulation and records evidence; no provider write is committed. |
 | `recommend` | Prepares the governed recommendation and review evidence; no provider write is committed. |
 | `simulate` | Runs locally with the normalized event and immutable route binding. |
-| `execute_with_approval` | Requires the global live flag, a passing live gate, ready connectors, approval policy, and exact fingerprint-bound human approval. |
-| `autonomous_low_risk` | Requires the global live flag, ready connectors, and policy-proven low-risk, non-customer-facing actions. |
+| `execute_with_approval` | Dispatches to a healthy capability-matching Hermes runtime. Hermes reports any exact approval request and does not continue a rejected action. |
+| `autonomous_low_risk` | Dispatches to Hermes only after the routing and promotion policy has bounded the loop to low-risk execution. |
 
 All accepted activation modes produce route jobs. This is intentional: shadow and recommendation traffic must also produce traces and outcomes so Loopgraph can evaluate routing quality and identify missing or weak loops.
 
 ## Safety invariants
 
-- Claims are serialized with an atomic project-local file lock.
+- Local claims are serialized with an atomic project-local file lock.
+- Hosted claims use tenant-scoped PostgreSQL rows, `FOR UPDATE SKIP LOCKED`, revisions, and lease
+  fencing so independent replicas cannot claim the same job.
 - Every claim has a unique lease token; a stale worker cannot finish a job after another worker reclaims it.
 - Expired `claimed` or `running` jobs are reclaimable, while active leases suppress duplicate work.
 - The worker reloads the registered LoopSpec and compares its hash to both the route commit and job before every run.
@@ -68,6 +71,10 @@ All accepted activation modes produce route jobs. This is intentional: shadow an
 - Loopgraph notification-only lifecycle events are blocked from re-entering business execution.
 - Provider webhook text is never used as a direct execution instruction.
 - Simulation, shadow, and recommendation modes cannot perform live writes.
+- Loopgraph never executes provider tools for a route job whose `executionTarget.runtime` is `hermes`.
+- A live job remains `dispatched` until its assigned Hermes runtime reports `run.started`.
+- Every Hermes execution event is bound to workspace, company, agent, route job, route commit, route attempt, source event, problem, loop, LoopSpec hash, run, correlation, and monotonic sequence.
+- Duplicate event deliveries are idempotent; reused sequence numbers or changed idempotency payloads fail closed.
 - `execute_with_approval` rejects allowed actions that are not explicitly approval-bound.
 - Retry uses bounded exponential backoff; exhausted work moves to `dead_letter`.
 - Manual retry and cancellation require an actor and reason.
@@ -77,14 +84,20 @@ All accepted activation modes produce route jobs. This is intentional: shadow an
 
 The Studio exposes `POST /api/routing/worker` and `POST /api/routing/jobs/:jobId`. These HTTP endpoints always require `LOOPGRAPH_WORKER_API_TOKEN`, including on localhost. Local CLI and project-scoped MCP operations do not use the HTTP endpoint and remain available to the trusted local operator.
 
-Live execution additionally requires:
+HTTP-based Hermes execution additionally requires:
 
 ```bash
-LOOPGRAPH_EXECUTE_ENABLED=true
 LOOPGRAPH_WORKER_API_TOKEN=<strong-random-token>
-LOOPGRAPH_HERMES_LIFECYCLE_SECRET=<shared-lifecycle-signing-secret>
+LOOPGRAPH_PUBLIC_URL=https://loopgraph.example.com
+LOOPGRAPH_HERMES_EXECUTION_URL=https://hermes.example.com/loopgraph/assignments
+LOOPGRAPH_HERMES_EXECUTION_SECRET=<outbound-shared-secret-at-least-32-characters>
+LOOPGRAPH_HERMES_EXECUTION_CALLBACK_SECRET=<inbound-shared-secret-at-least-32-characters>
+LOOPGRAPH_HERMES_EXECUTION_ENVIRONMENT=production
 ```
 
 `LOOPGRAPH_HERMES_LIFECYCLE_SECRET` is optional for a local-only project. When it is absent, Loopgraph creates a project-local random signing key at `.loopgraph/hermes/lifecycle-signing.key` with owner-only permissions. Do not commit that generated key. Hosted or multi-process installations should provide the shared secret through their approved secret store.
 
 Do not store environment-provided secrets in `.loopgraph/` or commit them to Git.
+
+See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) for hosted persistence,
+atomic claim semantics, and the remaining horizontal-scaling boundary.

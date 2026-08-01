@@ -5,14 +5,95 @@ import {
   graphSnapshotSchema,
   graphTransactionSchema,
   loopPromotionReceiptSchema,
+  promotionRehearsalReportSchema,
+  type GraphChangeSet,
   type GraphChangeApprovalReceipt,
   type GraphSnapshot,
   type GraphTransaction,
-  type LoopPromotionReceipt
+  type LoopPromotionReceipt,
+  type PromotionRehearsalReport
 } from "../core";
+import type {
+  StoredLoopSpecArtifact
+} from "./loop-spec-store";
+import type { LoopgraphWorkspaceRegistry } from "./workspace";
 
-export class FileSemanticGraphStore {
+export type SemanticGraphMutationCommitInput = {
+  commitId: string;
+  idempotencyKey: string;
+  projectRoot: string;
+  expectedWorkspaceRevision: number;
+  expectedArtifacts: Array<{ loopId: string; versionHash: string }>;
+  committedAt: string;
+  workspace: LoopgraphWorkspaceRegistry;
+  artifacts: StoredLoopSpecArtifact[];
+  baseSnapshot: GraphSnapshot;
+  resultSnapshot: GraphSnapshot;
+  transaction: GraphTransaction;
+  changeSet?: GraphChangeSet;
+  promotion?: LoopPromotionReceipt;
+  transactionUpdates?: GraphTransaction[];
+  promotionUpdates?: LoopPromotionReceipt[];
+};
+
+export type SemanticGraphMutationCommitResult = {
+  workspaceRevision: number;
+  transaction: GraphTransaction;
+  promotion?: LoopPromotionReceipt;
+  created: boolean;
+};
+
+export interface SemanticGraphStore {
+  readonly persistence: "file" | "distributed";
+  normalizeArtifacts(
+    artifacts: StoredLoopSpecArtifact[]
+  ): StoredLoopSpecArtifact[];
+  saveSnapshot(snapshot: GraphSnapshot): Promise<void>;
+  getSnapshot(snapshotId: string): Promise<GraphSnapshot | undefined>;
+  listSnapshots(): Promise<GraphSnapshot[]>;
+  saveApproval(receipt: GraphChangeApprovalReceipt): Promise<void>;
+  getApproval(
+    receiptId: string
+  ): Promise<GraphChangeApprovalReceipt | undefined>;
+  listApprovals(
+    changeSetId?: string
+  ): Promise<GraphChangeApprovalReceipt[]>;
+  saveTransaction(transaction: GraphTransaction): Promise<void>;
+  getTransaction(
+    transactionId: string
+  ): Promise<GraphTransaction | undefined>;
+  listTransactions(): Promise<GraphTransaction[]>;
+  savePromotion(receipt: LoopPromotionReceipt): Promise<void>;
+  getPromotion(
+    receiptId: string
+  ): Promise<LoopPromotionReceipt | undefined>;
+  listPromotions(loopId?: string): Promise<LoopPromotionReceipt[]>;
+  savePromotionRehearsal(
+    report: PromotionRehearsalReport
+  ): Promise<void>;
+  getPromotionRehearsal(
+    reportId: string
+  ): Promise<PromotionRehearsalReport | undefined>;
+  listPromotionRehearsals(
+    loopId?: string
+  ): Promise<PromotionRehearsalReport[]>;
+  withTransactionLock<T>(operation: () => Promise<T>): Promise<T>;
+  commitGraphMutationAtomically?(
+    input: SemanticGraphMutationCommitInput
+  ): Promise<SemanticGraphMutationCommitResult>;
+  snapshotAssetsRoot?(snapshotId: string): string;
+}
+
+export class FileSemanticGraphStore implements SemanticGraphStore {
+  readonly persistence = "file" as const;
+
   constructor(private readonly loopgraphRoot = path.join(process.cwd(), ".loopgraph")) {}
+
+  normalizeArtifacts(
+    artifacts: StoredLoopSpecArtifact[]
+  ): StoredLoopSpecArtifact[] {
+    return artifacts;
+  }
 
   async saveSnapshot(snapshot: GraphSnapshot): Promise<void> {
     await writeJsonAtomic(this.snapshotPath(snapshot.id), graphSnapshotSchema.parse(snapshot));
@@ -76,6 +157,26 @@ export class FileSemanticGraphStore {
     return receipts.filter((receipt) => !loopId || receipt.loopId === loopId);
   }
 
+  async savePromotionRehearsal(report: PromotionRehearsalReport): Promise<void> {
+    await writeJsonAtomic(
+      this.promotionRehearsalPath(report.id),
+      promotionRehearsalReportSchema.parse(report)
+    );
+  }
+
+  async getPromotionRehearsal(reportId: string): Promise<PromotionRehearsalReport | undefined> {
+    return readJson(this.promotionRehearsalPath(reportId), promotionRehearsalReportSchema);
+  }
+
+  async listPromotionRehearsals(loopId?: string): Promise<PromotionRehearsalReport[]> {
+    const reports = await listJson(
+      this.promotionRehearsalsRoot(),
+      promotionRehearsalReportSchema,
+      (left, right) => right.createdAt.localeCompare(left.createdAt)
+    );
+    return reports.filter((report) => !loopId || report.loopId === loopId);
+  }
+
   async withTransactionLock<T>(operation: () => Promise<T>): Promise<T> {
     await this.ensureDirs();
     const lockPath = path.join(this.graphRoot(), ".transactions.lock");
@@ -114,7 +215,8 @@ export class FileSemanticGraphStore {
       mkdir(this.snapshotsRoot(), { recursive: true, mode: 0o700 }),
       mkdir(this.approvalsRoot(), { recursive: true, mode: 0o700 }),
       mkdir(this.transactionsRoot(), { recursive: true, mode: 0o700 }),
-      mkdir(this.promotionsRoot(), { recursive: true, mode: 0o700 })
+      mkdir(this.promotionsRoot(), { recursive: true, mode: 0o700 }),
+      mkdir(this.promotionRehearsalsRoot(), { recursive: true, mode: 0o700 })
     ]);
   }
 
@@ -138,6 +240,10 @@ export class FileSemanticGraphStore {
     return path.join(this.graphRoot(), "promotions");
   }
 
+  private promotionRehearsalsRoot() {
+    return path.join(this.graphRoot(), "rehearsals");
+  }
+
   private snapshotPath(id: string) {
     return path.join(this.snapshotsRoot(), `${safeFileName(id)}.json`);
   }
@@ -152,6 +258,10 @@ export class FileSemanticGraphStore {
 
   private promotionPath(id: string) {
     return path.join(this.promotionsRoot(), `${safeFileName(id)}.json`);
+  }
+
+  private promotionRehearsalPath(id: string) {
+    return path.join(this.promotionRehearsalsRoot(), `${safeFileName(id)}.json`);
   }
 }
 

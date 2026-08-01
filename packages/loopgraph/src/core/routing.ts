@@ -267,6 +267,7 @@ export const routeCommitSchema = z.object({
 export const routeJobStatusSchema = z.enum([
   "queued",
   "claimed",
+  "dispatched",
   "running",
   "waiting_review",
   "completed",
@@ -274,6 +275,13 @@ export const routeJobStatusSchema = z.enum([
   "dead_letter",
   "cancelled"
 ]);
+
+export const routeExecutionTargetSchema = z.object({
+  runtime: z.enum(["loopgraph_local", "hermes"]),
+  environment: z.enum(["local", "sandbox", "staging", "production"]),
+  requiredCapabilities: z.array(z.string().min(1).max(160)).max(250).default([]),
+  preferredAgentInstanceId: z.string().min(1).max(160).optional()
+});
 
 export const routeJobSchema = z.object({
   schemaVersion: z.literal(ROUTE_JOB_SCHEMA_VERSION).default(ROUTE_JOB_SCHEMA_VERSION),
@@ -287,6 +295,11 @@ export const routeJobSchema = z.object({
   loopSpecHash: z.string().min(1),
   runId: z.string().min(1),
   activationMode: routingActivationModeSchema,
+  executionTarget: routeExecutionTargetSchema.default({
+    runtime: "loopgraph_local",
+    environment: "local",
+    requiredCapabilities: []
+  }),
   status: routeJobStatusSchema,
   correlationId: z.string().min(1),
   attemptCount: z.number().int().min(0).default(0),
@@ -361,6 +374,7 @@ export type RoutingAttempt = z.infer<typeof routingAttemptSchema>;
 export type RouteCommit = z.infer<typeof routeCommitSchema>;
 export type RouteJob = z.infer<typeof routeJobSchema>;
 export type RouteJobStatus = z.infer<typeof routeJobStatusSchema>;
+export type RouteExecutionTarget = z.infer<typeof routeExecutionTargetSchema>;
 export type RoutingCorrection = z.infer<typeof routingCorrectionSchema>;
 export type RouterEvaluation = z.infer<typeof routerEvaluationSchema>;
 export type UnhandledBusinessProblem = z.infer<typeof unhandledBusinessProblemSchema>;
@@ -682,7 +696,11 @@ function subjectIdentityMatches(left: EventSubject, right: EventSubject): boolea
 
 function eventPathHasValue(event: EventEnvelope, path: string): boolean {
   const value = eventPathValue(event, path);
-  return value !== undefined && value !== null;
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
 }
 
 function eventPathValue(event: EventEnvelope, path: string): unknown {

@@ -25,6 +25,8 @@ import {
   type HermesDesignRequest,
   type HermesTaskTransport
 } from "./hermes-design-bridge";
+import { FileHermesDesignStore } from "./hermes-design-store";
+import { getLoopgraphRoot } from "./storage-resolver";
 
 describe("Hermes design bridge", () => {
   it("starts a durable task and sends a signed request to Hermes", async () => {
@@ -59,6 +61,33 @@ describe("Hermes design bridge", () => {
     expect(result.request.nextQuestions.length).toBeLessThanOrEqual(3);
     expect(requests).toHaveLength(1);
     expect(await getHermesDesignTask(result.task.id, projectRoot)).toEqual(result.task);
+  });
+
+  it("queues hosted Hermes delivery without making the HTTP call inline", async () => {
+    const projectRoot = await tempProject();
+    const session = await completeSession(projectRoot);
+    const store = new FileHermesDesignStore(getLoopgraphRoot(projectRoot));
+    const transport: HermesTaskTransport = {
+      async dispatch() {
+        throw new Error("hosted task creation must not dispatch inline");
+      }
+    };
+
+    const result = await startHermesDesignTask({
+      projectRoot,
+      sessionId: session.id,
+      now: new Date("2026-07-29T11:00:00.000Z")
+    }, { transport, store });
+
+    expect(result.task.status).toBe("queued");
+    expect(result.task.delivery.status).toBe("pending");
+    expect(await store.listDispatchJobs({ taskId: result.task.id })).toEqual([
+      expect.objectContaining({
+        taskId: result.task.id,
+        status: "queued",
+        attemptCount: 0
+      })
+    ]);
   });
 
   it("accepts an idempotent signed Hermes proposal callback through the existing compiler", async () => {

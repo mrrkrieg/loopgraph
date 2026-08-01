@@ -88,6 +88,38 @@ describe("GitHub webhook compatibility route", () => {
     expect(response.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("fails closed in hosted mode when the durable provider guard is unavailable", async () => {
+    vi.stubEnv("LOOPGRAPH_HERMES_WEBHOOK_URL", "https://hermes.local/webhooks/github");
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "secret_1");
+    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
+    vi.stubEnv(
+      "LOOPGRAPH_HOSTED_ORGANIZATION_ID",
+      "123e4567-e89b-12d3-a456-426614174000"
+    );
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    vi.stubEnv("LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID", "github_forwarder");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const body = { action: "opened" };
+    const signature =
+      `sha256=${createHmac("sha256", "secret_1").update(JSON.stringify(body)).digest("hex")}`;
+
+    const response = await POST(githubRequest({
+      body,
+      deliveryId: "delivery_hosted_1",
+      signature
+    }));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "Supabase service authorization is not configured."
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 function githubRequest(input: {

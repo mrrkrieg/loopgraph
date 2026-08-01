@@ -54,6 +54,24 @@ export type RouteJobListFilters = {
   status?: RouteJob["status"];
 };
 
+export type RouteJobClaimInput = {
+  claimedBy: string;
+  now: Date;
+  leaseSeconds: number;
+  limit: number;
+};
+
+export type RouteJobAtomicUpdateInput = {
+  jobId: string;
+  expectedLeaseToken?: string;
+  update: (job: RouteJob) => RouteJob;
+};
+
+export type AtomicEventReceiptResult = {
+  receipt: EventReceipt;
+  created: boolean;
+};
+
 export interface RoutingStore {
   saveEventReceipt(receipt: EventReceipt): Promise<void>;
   getEventReceipt(eventId: string): Promise<EventReceipt | null>;
@@ -72,6 +90,17 @@ export interface RoutingStore {
   listRoutingCorrections(eventId?: string): Promise<RoutingCorrection[]>;
   saveRouterEvaluation(evaluation: RouterEvaluation): Promise<void>;
   listRouterEvaluations(): Promise<RouterEvaluation[]>;
+  createEventReceiptAtomically?(
+    receipt: EventReceipt
+  ): Promise<AtomicEventReceiptResult>;
+  /**
+   * Durable stores should implement these operations with a database
+   * transaction. The runtime falls back to the basic CRUD contract only for
+   * compatibility with older, single-process adapters.
+   */
+  claimDueRouteJobsAtomically?(input: RouteJobClaimInput): Promise<RouteJob[]>;
+  claimWaitingReviewRouteJobsAtomically?(input: RouteJobClaimInput): Promise<RouteJob[]>;
+  updateRouteJobAtomically?(input: RouteJobAtomicUpdateInput): Promise<RouteJob>;
 }
 
 export class FileRoutingStore implements RoutingStore {
@@ -148,12 +177,7 @@ export class FileRoutingStore implements RoutingStore {
       .filter((job) => !filters.status || job.status === filters.status);
   }
 
-  async claimDueRouteJobsAtomically(input: {
-    claimedBy: string;
-    now: Date;
-    leaseSeconds: number;
-    limit: number;
-  }): Promise<RouteJob[]> {
+  async claimDueRouteJobsAtomically(input: RouteJobClaimInput): Promise<RouteJob[]> {
     return this.withRouteJobsLock(async () => {
       const jobs = await this.listRouteJobs();
       return claimRouteJobCandidates({
@@ -167,12 +191,7 @@ export class FileRoutingStore implements RoutingStore {
     });
   }
 
-  async claimWaitingReviewRouteJobsAtomically(input: {
-    claimedBy: string;
-    now: Date;
-    leaseSeconds: number;
-    limit: number;
-  }): Promise<RouteJob[]> {
+  async claimWaitingReviewRouteJobsAtomically(input: RouteJobClaimInput): Promise<RouteJob[]> {
     return this.withRouteJobsLock(async () => {
       const jobs = await this.listRouteJobs({ status: "waiting_review" });
       return claimWaitingReviewCandidates({
@@ -186,11 +205,7 @@ export class FileRoutingStore implements RoutingStore {
     });
   }
 
-  async updateRouteJobAtomically(input: {
-    jobId: string;
-    expectedLeaseToken?: string;
-    update: (job: RouteJob) => RouteJob;
-  }): Promise<RouteJob> {
+  async updateRouteJobAtomically(input: RouteJobAtomicUpdateInput): Promise<RouteJob> {
     return this.withRouteJobsLock(async () => {
       const job = await this.getRouteJob(input.jobId);
       if (!job) throw new Error(`Route job not found: ${input.jobId}`);
@@ -299,7 +314,25 @@ export async function ingestRoutingEvent(input: {
   now?: Date;
 }): Promise<EventIngestResult> {
   const nowIso = (input.now ?? new Date()).toISOString();
-  const existing = input.replay ? null : await input.store.getEventReceipt(input.event.id);
+  const receipt = eventReceiptSchema.parse({
+    id: input.replay
+      ? `receipt_replay_${contentHash({ eventId: input.event.id, at: nowIso })}`
+      : `receipt_${input.event.id}`,
+    eventId: input.event.id,
+    event: input.event,
+    eventHash: contentHash(input.event),
+    status: input.replay ? "replayed" : "received",
+    firstSeenAt: nowIso,
+    lastSeenAt: nowIso
+  });
+  const atomicReceipt = !input.replay && input.store.createEventReceiptAtomically
+    ? await input.store.createEventReceiptAtomically(receipt)
+    : undefined;
+  const existing = input.replay
+    ? null
+    : atomicReceipt
+      ? atomicReceipt.created ? null : atomicReceipt.receipt
+      : await input.store.getEventReceipt(input.event.id);
 
   if (existing) {
     const duplicateReceipt = eventReceiptSchema.parse({
@@ -321,19 +354,7 @@ export async function ingestRoutingEvent(input: {
     };
   }
 
-  const receipt = eventReceiptSchema.parse({
-    id: input.replay
-      ? `receipt_replay_${contentHash({ eventId: input.event.id, at: nowIso })}`
-      : `receipt_${input.event.id}`,
-    eventId: input.event.id,
-    event: input.event,
-    eventHash: contentHash(input.event),
-    status: input.replay ? "replayed" : "received",
-    firstSeenAt: nowIso,
-    lastSeenAt: nowIso
-  });
-
-  await input.store.saveEventReceipt(receipt);
+  if (!atomicReceipt?.created) await input.store.saveEventReceipt(receipt);
 
   const eligibleRoutes = input.routingCards
     .map((card) => evaluateRoutingEligibility(input.event, card))
@@ -493,6 +514,7 @@ export async function submitRoutingDecision(input: {
       event: receipt.event,
       commit,
       activationMode: card.activationMode,
+      requiredCapabilities: card.requiredConnections,
       nowIso
     }));
   }
@@ -533,7 +555,7 @@ export async function claimDueRouteJobs(input: {
   const now = input.now ?? new Date();
   const leaseSeconds = input.leaseSeconds ?? 300;
   const limit = input.limit ?? 10;
-  if (input.store instanceof FileRoutingStore) {
+  if (input.store.claimDueRouteJobsAtomically) {
     return input.store.claimDueRouteJobsAtomically({
       claimedBy: input.claimedBy,
       now,
@@ -561,7 +583,7 @@ export async function claimWaitingReviewRouteJobs(input: {
   const now = input.now ?? new Date();
   const leaseSeconds = input.leaseSeconds ?? 300;
   const limit = input.limit ?? 10;
-  if (input.store instanceof FileRoutingStore) {
+  if (input.store.claimWaitingReviewRouteJobsAtomically) {
     return input.store.claimWaitingReviewRouteJobsAtomically({
       claimedBy: input.claimedBy,
       now,
@@ -793,6 +815,7 @@ async function upsertRouteJobForCommit(input: {
   event: EventEnvelope;
   commit: RouteCommit;
   activationMode: RoutingCard["activationMode"];
+  requiredCapabilities: string[];
   nowIso: string;
 }): Promise<RouteJob> {
   const jobId = createRouteJobId({
@@ -819,6 +842,7 @@ async function upsertRouteJobForCommit(input: {
     loopSpecHash: input.commit.loopSpecHash,
     runId: input.commit.runId ?? `run_${contentHash({ commitId: input.commit.id })}`,
     activationMode: input.activationMode,
+    executionTarget: routeExecutionTargetForActivation(input.activationMode, input.requiredCapabilities),
     status: "queued",
     correlationId: input.event.correlationId,
     attemptCount: 0,
@@ -835,6 +859,28 @@ async function upsertRouteJobForCommit(input: {
 
   await input.store.saveRouteJob(job);
   return job;
+}
+
+function routeExecutionTargetForActivation(
+  activationMode: RoutingCard["activationMode"],
+  requiredCapabilities: string[]
+): RouteJob["executionTarget"] {
+  if (["execute_with_approval", "autonomous_low_risk"].includes(activationMode)) {
+    const configuredEnvironment = process.env.LOOPGRAPH_HERMES_EXECUTION_ENVIRONMENT;
+    const environment = ["local", "sandbox", "staging", "production"].includes(configuredEnvironment ?? "")
+      ? configuredEnvironment as RouteJob["executionTarget"]["environment"]
+      : process.env.NODE_ENV === "production" ? "production" : "local";
+    return {
+      runtime: "hermes",
+      environment,
+      requiredCapabilities
+    };
+  }
+  return {
+    runtime: "loopgraph_local",
+    environment: "local",
+    requiredCapabilities
+  };
 }
 
 function routeJobRetryDelaySeconds(job: RouteJob): number {
@@ -940,7 +986,7 @@ async function mutateRouteJob(input: {
   expectedLeaseToken?: string;
   update: (job: RouteJob) => RouteJob;
 }): Promise<RouteJob> {
-  if (input.store instanceof FileRoutingStore) {
+  if (input.store.updateRouteJobAtomically) {
     return input.store.updateRouteJobAtomically(input);
   }
   const job = await input.store.getRouteJob(input.jobId);

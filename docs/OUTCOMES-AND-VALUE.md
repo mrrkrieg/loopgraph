@@ -16,6 +16,8 @@ A source-qualified measurement with:
 
 Completed route-job traces automatically contribute samples when a trace metric matches a project metric definition. Hermes can also record verified integration, human-review, or manual samples through the trusted administration surface.
 
+For automatic provider collection, an exact `MetricBinding` creates leased `MeasurementJob` records. A trusted Hermes collector executes only the structured query stored in the job and must return durable provider evidence. See [Hermes connector measurements](./CONNECTOR-MEASUREMENTS.md).
+
 ### `ObservedOutcome`
 
 A versioned comparison between a baseline window and an evaluation window. Loopgraph records:
@@ -55,6 +57,14 @@ The project-bound administration MCP exposure includes:
 - `loopgraph_outcomes_get`
 - `loopgraph_value_ledger_record`
 - `loopgraph_value_ledger_get`
+- `loopgraph_metric_bindings_set`
+- `loopgraph_metric_bindings_get`
+- `loopgraph_measurements_schedule`
+- `loopgraph_measurement_jobs_claim`
+- `loopgraph_measurement_jobs_complete`
+- `loopgraph_measurement_jobs_fail`
+- `loopgraph_measurement_jobs_get`
+- `loopgraph_connections_reconcile`
 
 These tools are not available to isolated webhook-router or lifecycle-router turns. The MCP server ignores caller attempts to redirect them to a different project root.
 
@@ -63,6 +73,9 @@ Schema resources are available at:
 - `loopgraph://schemas/metric-sample`
 - `loopgraph://schemas/observed-outcome`
 - `loopgraph://schemas/value-ledger-entry`
+- `loopgraph://schemas/metric-binding`
+- `loopgraph://schemas/measurement-job`
+- `loopgraph://schemas/connection-reconciliation`
 
 ## Project-bound HTTP API
 
@@ -102,4 +115,4 @@ Records are idempotent by their evidence identity, and retention is enforced by 
 
 ## Continuous improvement
 
-The [continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md) can base create, improve, pause, and retire proposals on durable evidence instead of run counts or invented value. Approved changes, promotion, pause/resume, and rollback now cross the content-bound [semantic graph transaction](./SEMANTIC-GRAPH-TRANSACTIONS.md) boundary. Automatic connector-backed measurement and automatic promotion rehearsal remain follow-on layers.
+The [continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md) can base create, improve, pause, and retire proposals on durable evidence instead of run counts or invented value. Approved changes, promotion, pause/resume, and rollback cross the content-bound [semantic graph transaction](./SEMANTIC-GRAPH-TRANSACTIONS.md) boundary. Automatic connector-backed measurement and promotion rehearsal now feed the same evidence/controller boundary. Provider OAuth, provider-specific API execution, and subscription application remain Hermes-owned integration layers.

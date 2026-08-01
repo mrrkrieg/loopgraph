@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildGraphFromCatalog } from "./graph";
 import { createSpecFromTemplate } from "./template-spec";
 import { getDepartmentTemplates, getTemplateCatalog } from "./templates";
-import { validateLoopSpec } from "loopgraph/core";
+import {
+  PREBUILT_COMPANY_LOOPS,
+  compileRoutingCardFromLoopSpec,
+  validateCompanyLoopLibraryReferences,
+  validateLoopSpec
+} from "loopgraph/core";
 
 describe("Loopgraph template catalog", () => {
   it("defines a broad department catalog with maturity labels", () => {
@@ -57,6 +62,20 @@ describe("Loopgraph template catalog", () => {
     expect(spec.trace.evidenceRequired).toBe(true);
   });
 
+  it("materializes every prebuilt company loop as a Hermes routing card", () => {
+    const templates = getTemplateCatalog();
+    expect(validateCompanyLoopLibraryReferences(templates.map((template) => template.id))).toEqual([]);
+
+    for (const definition of PREBUILT_COMPANY_LOOPS) {
+      const spec = createSpecFromTemplate(definition.templateId);
+      const card = compileRoutingCardFromLoopSpec(spec, { currentReadiness: "ready" });
+      expect(card?.problemTypes).toEqual(definition.problemTypes);
+      expect(card?.requiredConnections).toEqual(definition.requiredConnections);
+      expect(card?.fanoutPolicy).toEqual(definition.fanoutPolicy);
+      expect(card?.activationMode).toBe("shadow");
+    }
+  });
+
   it("derives a dense catalog graph with loop, department, owner, metric, review, and improvement context", () => {
     const graph = buildGraphFromCatalog();
     const kinds = new Set(graph.nodes.map((node) => node.kind));
@@ -69,5 +88,7 @@ describe("Loopgraph template catalog", () => {
     expect(kinds.has("metric")).toBe(true);
     expect(kinds.has("improvement")).toBe(true);
     expect(graph.edges.some((edge) => edge.kind === "measured_by")).toBe(true);
+    expect(graph.edges.some((edge) => edge.metadata?.relationship === "supporting_sequence")).toBe(true);
+    expect(graph.edges.some((edge) => edge.metadata?.relationship === "shared_learning")).toBe(true);
   });
 });

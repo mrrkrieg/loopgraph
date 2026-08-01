@@ -58,10 +58,35 @@ describe("Hermes design task callback API", () => {
     });
     expect(accepted.status).toBe(202);
     await expect(accepted.json()).resolves.toMatchObject({
+      accepted: true,
       duplicate: false,
-      task: {
-        id: started.task.id,
-        status: "needs_input"
+      callbackJob: {
+        taskId: started.task.id,
+        callbackId: callback.callbackId,
+        status: "completed"
+      },
+      processing: {
+        status: "completed",
+        duplicate: false
+      }
+    });
+
+    const duplicate = await POST(callbackRequest({
+      taskId: started.task.id,
+      body,
+      timestamp,
+      signature: signLoopgraphTaskPayload(body, timestamp, secret)
+    }), {
+      params: Promise.resolve({ taskId: started.task.id })
+    });
+    expect(duplicate.status).toBe(200);
+    await expect(duplicate.json()).resolves.toMatchObject({
+      accepted: true,
+      duplicate: true,
+      callbackJob: {
+        taskId: started.task.id,
+        callbackId: callback.callbackId,
+        status: "completed"
       }
     });
 
@@ -97,6 +122,64 @@ describe("Hermes design task callback API", () => {
     });
 
     expect(response.status).toBe(503);
+  });
+
+  it("rejects oversized callback bodies before persistence", async () => {
+    vi.stubEnv("LOOPGRAPH_HERMES_CALLBACK_SECRET", "callback-secret");
+    const response = await POST(new Request(
+      "https://loopgraph.local/api/hermes/design-tasks/task_1/callback",
+      {
+        method: "POST",
+        body: "x".repeat(1024 * 1024 + 1)
+      }
+    ), {
+      params: Promise.resolve({ taskId: "task_1" })
+    });
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      error: "Hermes callback body exceeds 1 MiB."
+    });
+  });
+
+  it("fails closed in hosted mode when the durable callback guard is unavailable", async () => {
+    const secret = "callback-secret";
+    const callback = {
+      schemaVersion: "hermes-design-callback/v1alpha1",
+      callbackId: "callback_hosted_1",
+      taskId: "task_hosted_1",
+      occurredAt: new Date().toISOString(),
+      type: "task.acknowledged"
+    };
+    const body = JSON.stringify(callback);
+    const timestamp = new Date().toISOString();
+    vi.stubEnv("LOOPGRAPH_HERMES_CALLBACK_SECRET", secret);
+    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
+    vi.stubEnv(
+      "LOOPGRAPH_HOSTED_ORGANIZATION_ID",
+      "123e4567-e89b-12d3-a456-426614174000"
+    );
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    vi.stubEnv("LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID", "hermes_callback");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+
+    const response = await POST(callbackRequest({
+      taskId: callback.taskId,
+      body,
+      timestamp,
+      signature: signLoopgraphTaskPayload(body, timestamp, secret)
+    }), {
+      params: Promise.resolve({ taskId: callback.taskId })
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        "Supabase Hermes design storage requires NEXT_PUBLIC_SUPABASE_URL, " +
+        "SUPABASE_SERVICE_ROLE_KEY, and LOOPGRAPH_HOSTED_ORGANIZATION_ID"
+    });
   });
 });
 

@@ -40,8 +40,10 @@ The project-bound `loopgraph_admin` MCP profile exposes:
 | `loopgraph_graph_change_decide` | Approve or reject the exact proposed graph operations |
 | `loopgraph_graph_change_apply` | Atomically apply an approved add/update/split/merge/retire change set |
 | `loopgraph_graph_history_get` | Inspect snapshots, approvals, transactions, promotions, and rollbacks |
+| `loopgraph_promotion_rehearsal_run` | Run and persist the complete content-bound promotion gate |
+| `loopgraph_promotion_rehearsals_get` | Inspect rehearsal reports by report or loop |
 | `loopgraph_loop_promotion_approve` | Approve one ordered activation-mode transition |
-| `loopgraph_loop_promote` | Apply the promotion with durable gate-evidence references |
+| `loopgraph_loop_promote` | Apply the promotion only with the same passing rehearsal used for approval |
 | `loopgraph_loop_lifecycle_approve` | Approve pausing or resuming one loop |
 | `loopgraph_loop_lifecycle_set` | Apply the approved lifecycle transaction |
 | `loopgraph_graph_rollback_approve` | Approve rollback of a specific committed transaction |
@@ -86,8 +88,14 @@ npm run loopgraph -- graph history --transaction TRANSACTION_ID --project .
 Promotion, lifecycle, and rollback each use two commands so the approval and mutation cannot be collapsed into one unreviewed action:
 
 ```bash
+npm run loopgraph -- graph promotion rehearse LOOP_ID \
+  --to recommend \
+  --by operator@example.com \
+  --project .
+
 npm run loopgraph -- graph promotion approve LOOP_ID \
   --to recommend \
+  --rehearsal PROMOTION_REHEARSAL_ID \
   --actor operator@example.com \
   --role owner \
   --policy promotion-policy/v1 \
@@ -97,8 +105,8 @@ npm run loopgraph -- graph promotion approve LOOP_ID \
 
 npm run loopgraph -- graph promotion apply LOOP_ID \
   --to recommend \
+  --rehearsal PROMOTION_REHEARSAL_ID \
   --approval APPROVAL_RECEIPT_ID \
-  --gate-evidence routing-evaluation:EVALUATION_ID \
   --by operator@example.com \
   --project .
 ```
@@ -118,7 +126,7 @@ Both methods require:
 Authorization: Bearer $LOOPGRAPH_WORKER_API_TOKEN
 ```
 
-GET accepts `transactionId`, `snapshotId`, `approvalReceiptId`, `promotionReceiptId`, `changeSetId`, or `loopId` filters.
+GET accepts `transactionId`, `snapshotId`, `approvalReceiptId`, `promotionReceiptId`, `rehearsalReportId`, `changeSetId`, or `loopId` filters.
 
 POST accepts one of:
 
@@ -127,6 +135,8 @@ decide
 apply
 history
 promotion_approve
+promotion_rehearse
+promotion_rehearsals_get
 promote
 lifecycle_approve
 lifecycle_set
@@ -138,10 +148,13 @@ The API always binds the operation to `LOOPGRAPH_PROJECT_ROOT`; a caller-supplie
 
 ## Durable storage
 
+Local installations keep portable graph history beside the project:
+
 ```text
 .loopgraph/graph/
   approvals/
   promotions/
+  rehearsals/
   snapshots/
   transactions/
   assets/
@@ -150,6 +163,24 @@ The API always binds the operation to `LOOPGRAPH_PROJECT_ROOT`; a caller-supplie
 
 Writes are atomic, transaction application is lock-protected, and generated asset restoration is confined to project-local Loopgraph paths.
 
-## Current promotion boundary
+Authenticated hosted deployments use tenant/project-scoped PostgreSQL tables for snapshots, approval receipts, transactions, promotions, rehearsals, and idempotent graph commit receipts. One `commit_semantic_graph_transaction` database transaction:
 
-Promotion already requires approval and at least one durable gate-evidence reference. The next product layer automatically runs the complete positive, missing-context, risk, ambiguity, duplicate, and regression fixture suite and verifies its persisted evaluation report before Loopgraph will issue a promotion-ready receipt.
+1. locks the active LoopSpec workspace revision;
+2. fences the mutation against the exact active `{loopId, versionHash}` set;
+3. verifies the approved receipt is present and bound to the transaction kind and base graph;
+4. inserts immutable LoopSpec versions and replaces the active registry;
+5. advances the workspace revision;
+6. stores base/result snapshots, the transaction, optional promotion, rollback updates, and the applied change set;
+7. returns the original receipt on an identical retry.
+
+Browser roles receive no direct table writes or function execution. The service runtime receives read access and execute access only to the tenant-scoped RPCs. Hosted mutation fails closed if the semantic store or active LoopSpec registry is not distributed.
+
+Graph snapshots include the validated spec and fixture payloads, so rollback can restore a retired version without depending on whatever files or active rows happen to exist later.
+
+## Promotion boundary
+
+Promotion requires a passing, unexpired rehearsal report bound to the exact graph hash, LoopSpec hash, loop ID, and requested next activation mode. Loopgraph verifies the report both when approval is issued and when the transaction is applied. Arbitrary evidence labels cannot satisfy the gate. See [Promotion rehearsal](./PROMOTION-REHEARSAL.md).
+
+## Remaining boundary
+
+The semantic graph and active LoopSpec registry are now multi-replica authorities. Measurement jobs, outcome samples/evaluations, and value-ledger records remain the next distributed data boundary. Provider OAuth, API execution, and subscription application remain Hermes-owned integration work.

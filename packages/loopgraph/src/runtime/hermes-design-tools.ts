@@ -11,6 +11,7 @@ import {
   resumeHermesDesignTasksForSession,
   startHermesDesignTask
 } from "./hermes-design-bridge";
+import type { HermesDesignStore } from "./hermes-design-store";
 
 export const LOOPGRAPH_HERMES_DESIGN_TOOL_NAMES = [
   "loopgraph_hermes_design_start",
@@ -24,6 +25,7 @@ export type LoopgraphHermesDesignToolName = (typeof LOOPGRAPH_HERMES_DESIGN_TOOL
 export type LoopgraphHermesDesignToolRuntimeOptions = {
   projectRoot?: string;
   now?: Date;
+  designStore?: HermesDesignStore;
 };
 
 export const hermesDesignStartInputSchema = z.object({
@@ -108,21 +110,21 @@ export async function callLoopgraphHermesDesignTool(
       originOpportunityId: parsed.originOpportunityId,
       requestedBy: parsed.requestedBy,
       now: options.now
-    });
+    }, { store: options.designStore });
   }
   if (name === "loopgraph_hermes_design_tasks_get") {
     const parsed = hermesDesignTasksGetInputSchema.parse(input);
     const projectRoot = parsed.projectRoot ?? options.projectRoot ?? process.cwd();
     if (parsed.taskId) {
       return {
-        task: await getHermesDesignTask(parsed.taskId, projectRoot)
+        task: await getHermesDesignTask(parsed.taskId, projectRoot, options.designStore)
       };
     }
     return {
       tasks: await listHermesDesignTasks(projectRoot, {
         sessionId: parsed.sessionId,
         status: parsed.status
-      })
+      }, options.designStore)
     };
   }
   if (name === "loopgraph_evidence_gaps_get") {
@@ -157,7 +159,7 @@ export async function callLoopgraphHermesDesignTool(
         projectRoot: parsed.projectRoot ?? options.projectRoot,
         sessionId: parsed.sessionId,
         now: options.now
-      })
+      }, { store: options.designStore })
     };
   }
   throw new Error(`Unknown Loopgraph Hermes design tool: ${String(name)}`);

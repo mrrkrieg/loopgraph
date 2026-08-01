@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { authorizeCronApiRequest, authorizeWorkerApiRequest } from "./worker-api-auth";
+import {
+  authorizeCronApiRequest,
+  authorizeObservabilityApiRequest,
+  authorizeWorkerApiRequest
+} from "./worker-api-auth";
 
 const originalToken = process.env.LOOPGRAPH_WORKER_API_TOKEN;
 const originalCronSecret = process.env.CRON_SECRET;
+const originalObservabilityToken = process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN;
 
 afterEach(() => {
   if (originalToken === undefined) {
@@ -15,28 +20,35 @@ afterEach(() => {
   } else {
     process.env.CRON_SECRET = originalCronSecret;
   }
+  if (originalObservabilityToken === undefined) {
+    delete process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN;
+  } else {
+    process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN = originalObservabilityToken;
+  }
 });
 
 describe("route-job HTTP API authorization", () => {
   it("fails closed without a configured token even for a localhost URL", async () => {
     delete process.env.LOOPGRAPH_WORKER_API_TOKEN;
 
-    const response = authorizeWorkerApiRequest(new Request("http://localhost/api/routing/worker", {
+    const response = await authorizeWorkerApiRequest(new Request("http://localhost/api/routing/worker", {
       method: "POST"
     }));
 
     expect(response?.status).toBe(503);
     await expect(response?.json()).resolves.toEqual({
-      error: "LOOPGRAPH_WORKER_API_TOKEN must be configured before the route-job HTTP API can be used."
+      error:
+        "LOOPGRAPH_WORKER_API_TOKEN must be configured before the " +
+        "routing.worker machine API can be used."
     });
   });
 
-  it("rejects missing, malformed, and incorrect bearer credentials", () => {
+  it("rejects missing, malformed, and incorrect bearer credentials", async () => {
     process.env.LOOPGRAPH_WORKER_API_TOKEN = "strong-worker-token";
 
     for (const authorization of [undefined, "Basic abc", "Bearer wrong-worker-token"]) {
       const headers = authorization ? { authorization } : undefined;
-      const response = authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
+      const response = await authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
         method: "POST",
         headers
       }));
@@ -45,10 +57,10 @@ describe("route-job HTTP API authorization", () => {
     }
   });
 
-  it("accepts only the exact configured bearer credential", () => {
+  it("accepts only the exact configured bearer credential", async () => {
     process.env.LOOPGRAPH_WORKER_API_TOKEN = "strong-worker-token";
 
-    const response = authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
+    const response = await authorizeWorkerApiRequest(new Request("https://example.test/api/routing/worker", {
       method: "POST",
       headers: {
         authorization: "Bearer strong-worker-token"
@@ -58,13 +70,30 @@ describe("route-job HTTP API authorization", () => {
     expect(response).toBeNull();
   });
 
-  it("requires an independently configured cron bearer secret", () => {
+  it("requires an independently configured cron bearer secret", async () => {
     process.env.CRON_SECRET = "strong-cron-secret";
-    expect(authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
+    expect(await authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
       headers: { authorization: "Bearer strong-cron-secret" }
     }))).toBeNull();
-    expect(authorizeCronApiRequest(new Request("https://example.test/api/cron/controller", {
-      headers: { authorization: "Bearer strong-worker-token" }
-    }))?.status).toBe(401);
+    const rejected = await authorizeCronApiRequest(
+      new Request("https://example.test/api/cron/controller", {
+        headers: { authorization: "Bearer strong-worker-token" }
+      })
+    );
+    expect(rejected?.status).toBe(401);
+  });
+
+  it("keeps the read-only observability credential separate from worker credentials", async () => {
+    process.env.LOOPGRAPH_WORKER_API_TOKEN = "strong-worker-token";
+    process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN = "strong-observability-token";
+    expect(await authorizeObservabilityApiRequest(new Request(
+      "https://example.test/api/operations/metrics",
+      { headers: { authorization: "Bearer strong-observability-token" } }
+    ))).toBeNull();
+    const rejected = await authorizeObservabilityApiRequest(new Request(
+      "https://example.test/api/operations/metrics",
+      { headers: { authorization: "Bearer strong-worker-token" } }
+    ));
+    expect(rejected?.status).toBe(401);
   });
 });

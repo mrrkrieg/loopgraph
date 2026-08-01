@@ -1,6 +1,7 @@
 import path from "node:path";
 import {
   contentHash,
+  hermesExecutionAssignmentSchema,
   loopSpecHash,
   type BusinessProblem,
   type EventReceipt,
@@ -19,7 +20,9 @@ import {
   type LoopgraphLifecycleEmitResult
 } from "./lifecycle-events";
 import { loadLoopSpecFromPath } from "./loader";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
+import type { LoopControllerStore } from "./loop-controller-store";
 import { recordTraceMetricSamples } from "./outcome-service";
 import { FileOutcomeStore } from "./outcome-store";
 import { readProjectMetricDefinitions } from "./outcome-tools";
@@ -41,6 +44,15 @@ import { buildRouteCommitSimulationFixture } from "./routing-tools";
 import { simulateLoop, type SimulateResult } from "./simulator";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
+import {
+  FileHermesOperationsStore,
+  selectHermesAgentForExecution,
+  type HermesOperationsStore
+} from "./hermes-operations-store";
+import {
+  resolveHermesExecutionTransport,
+  type HermesExecutionTransport
+} from "./hermes-execution-transport";
 
 export const ROUTE_JOB_WORKER_SCHEMA_VERSION = "route-job-worker/v1alpha1" as const;
 
@@ -62,6 +74,7 @@ export type RouteJobWorkerRunResult = {
   claimed: number;
   processed: number;
   completed: number;
+  dispatched: number;
   waitingReview: number;
   failed: number;
   deadLetter: number;
@@ -77,9 +90,13 @@ export type RouteJobWorkerOptions = {
   leaseSeconds?: number;
   now?: Date;
   store?: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  controllerStore?: LoopControllerStore;
   storage?: StorageAdapter;
   simulate?: typeof simulateLoop;
   execute?: (input: Parameters<typeof executeLoop>[0]) => Promise<ExecuteResult>;
+  operationsStore?: HermesOperationsStore;
+  hermesTransport?: HermesExecutionTransport;
 };
 
 export async function runRouteJobWorker(
@@ -90,9 +107,11 @@ export async function runRouteJobWorker(
   const workerId = options.workerId ?? `worker_${process.pid}`;
   const store = options.store ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
   const storage = options.storage ?? new FileStorageAdapter(getLoopgraphRoot(projectRoot));
+  const operationsStore = options.operationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot));
   const reconciled = await reconcileReviewedRouteJobs({
     projectRoot,
     store,
+    loopSpecStore: options.loopSpecStore,
     storage,
     now,
     workerId,
@@ -112,9 +131,12 @@ export async function runRouteJobWorker(
     items.push(await processClaimedRouteJob({
       projectRoot,
       store,
+      loopSpecStore: options.loopSpecStore,
       storage,
       job,
       now,
+      operationsStore,
+      hermesTransport: options.hermesTransport,
       simulate: options.simulate ?? simulateLoop,
       execute: options.execute ?? executeLoop
     }));
@@ -139,7 +161,7 @@ export async function runRouteJobWorker(
           ...(item.runId ? [item.runId] : []),
           ...item.metricSampleIds
         ])
-      }, { now });
+      }, { now, store: options.controllerStore });
 
   return {
     schemaVersion: ROUTE_JOB_WORKER_SCHEMA_VERSION,
@@ -147,6 +169,7 @@ export async function runRouteJobWorker(
     claimed: claimed.length,
     processed: items.length,
     completed: items.filter((item) => item.status === "completed").length,
+    dispatched: items.filter((item) => item.status === "dispatched").length,
     waitingReview: items.filter((item) => item.status === "waiting_review").length,
     failed: items.filter((item) => item.status === "failed").length,
     deadLetter: items.filter((item) => item.status === "dead_letter").length,
@@ -159,11 +182,14 @@ export async function runRouteJobWorker(
 export async function processClaimedRouteJob(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   storage: StorageAdapter;
   job: RouteJob;
   now?: Date;
   simulate?: typeof simulateLoop;
   execute?: (input: Parameters<typeof executeLoop>[0]) => Promise<ExecuteResult>;
+  operationsStore?: HermesOperationsStore;
+  hermesTransport?: HermesExecutionTransport;
 }): Promise<RouteJobWorkerItemResult> {
   const now = input.now ?? new Date();
   const leaseToken = input.job.lease?.leaseToken;
@@ -175,6 +201,7 @@ export async function processClaimedRouteJob(input: {
     const context = await validateRouteJobContext({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job: input.job
     });
     const existingTrace = await input.storage.getRun(input.job.runId);
@@ -182,12 +209,26 @@ export async function processClaimedRouteJob(input: {
       return finalizeRouteJobFromTrace({
         projectRoot: input.projectRoot,
         store: input.store,
+        loopSpecStore: input.loopSpecStore,
         job: input.job,
         context,
         trace: existingTrace,
         now,
         leaseToken,
         duplicate: true
+      });
+    }
+
+    if (input.job.executionTarget.runtime === "hermes") {
+      return dispatchRouteJobToHermes({
+        projectRoot: input.projectRoot,
+        store: input.store,
+        operationsStore: input.operationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(input.projectRoot)),
+        transport: resolveHermesExecutionTransport({ transport: input.hermesTransport }),
+        job: input.job,
+        context,
+        leaseToken,
+        now
       });
     }
 
@@ -248,6 +289,7 @@ export async function processClaimedRouteJob(input: {
     return finalizeRouteJobFromTrace({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job: input.job,
       context: {
         ...context,
@@ -317,6 +359,89 @@ export async function processClaimedRouteJob(input: {
       }
     };
   }
+}
+
+async function dispatchRouteJobToHermes(input: {
+  projectRoot: string;
+  store: RoutingStore;
+  operationsStore: HermesOperationsStore;
+  transport?: HermesExecutionTransport;
+  job: RouteJob;
+  context: RouteJobContext;
+  leaseToken: string;
+  now: Date;
+}): Promise<RouteJobWorkerItemResult> {
+  if (!input.transport) {
+    throw workerError(
+      "HERMES_EXECUTION_TRANSPORT_MISSING",
+      "Live route jobs require LOOPGRAPH_HERMES_EXECUTION_URL and LOOPGRAPH_HERMES_EXECUTION_SECRET"
+    );
+  }
+  const agent = await selectHermesAgentForExecution({
+    store: input.operationsStore,
+    workspaceId: input.context.receipt.event.workspaceId,
+    environment: input.job.executionTarget.environment,
+    requiredCapabilities: input.job.executionTarget.requiredCapabilities,
+    loopId: input.job.loopId,
+    preferredAgentInstanceId: input.job.executionTarget.preferredAgentInstanceId,
+    now: input.now
+  });
+  if (!agent) {
+    throw workerError(
+      "HERMES_AGENT_UNAVAILABLE",
+      `No healthy Hermes agent matches ${input.job.executionTarget.environment} and the required capabilities`
+    );
+  }
+  const callbackOrigin = process.env.LOOPGRAPH_PUBLIC_URL?.replace(/\/+$/, "");
+  const assignment = hermesExecutionAssignmentSchema.parse({
+    assignmentId: `assignment_${contentHash({ routeJobId: input.job.id, agentInstanceId: agent.id })}`,
+    workspaceId: input.context.receipt.event.workspaceId,
+    companyId: input.context.receipt.event.companyId,
+    agentInstanceId: agent.id,
+    routeJobId: input.job.id,
+    routeCommitId: input.job.routeCommitId,
+    routeAttemptId: input.job.routeAttemptId,
+    eventId: input.job.eventId,
+    problemId: input.job.problemId,
+    loopId: input.job.loopId,
+    loopSpecHash: input.job.loopSpecHash,
+    runId: input.job.runId,
+    correlationId: input.job.correlationId,
+    activationMode: input.job.activationMode,
+    requiredCapabilities: input.job.executionTarget.requiredCapabilities,
+    eventRef: `loopgraph://events/${encodeURIComponent(input.job.eventId)}`,
+    ...(callbackOrigin ? { callbackUrl: `${callbackOrigin}/api/hermes/executions/events` } : {}),
+    inputMapping: input.context.commit.inputMapping,
+    issuedAt: input.now.toISOString()
+  });
+  const delivery = await input.transport.dispatch(assignment);
+  if (!delivery.accepted) {
+    throw workerError("HERMES_EXECUTION_DISPATCH_FAILED", delivery.error ?? "Hermes rejected the execution assignment");
+  }
+  const dispatched = await updateRouteJobStatus({
+    store: input.store,
+    jobId: input.job.id,
+    status: "dispatched",
+    leaseToken: input.leaseToken,
+    clearLease: true,
+    now: input.now
+  });
+  await input.store.saveRouteCommit({ ...input.context.commit, status: "queued", runId: input.job.runId });
+  await input.store.saveBusinessProblem({
+    ...input.context.problem,
+    status: "routed",
+    updatedAt: input.now.toISOString()
+  });
+  return {
+    jobId: dispatched.id,
+    routeCommitId: dispatched.routeCommitId,
+    status: dispatched.status,
+    runId: dispatched.runId,
+    traceStatus: "DISPATCHED",
+    duplicate: false,
+    lifecycleDeliveryIds: [],
+    metricSampleIds: []
+  };
 }
 
 async function runJobByActivationMode(input: {
@@ -429,6 +554,7 @@ function routeJobLeaseSeconds(job: RouteJob): number {
 async function finalizeRouteJobFromTrace(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   job: RouteJob;
   context: RouteJobContext;
   trace: LoopRunTrace;
@@ -445,7 +571,9 @@ async function finalizeRouteJobFromTrace(input: {
       now: input.now
     });
   }
-  const workspace = await readLoopgraphWorkspace(input.projectRoot);
+  const workspace = input.loopSpecStore
+    ? (await input.loopSpecStore.getWorkspace(input.projectRoot)).workspace
+    : await readLoopgraphWorkspace(input.projectRoot);
   const metricSamples = await recordTraceMetricSamples({
     store: new FileOutcomeStore(getLoopgraphRoot(input.projectRoot)),
     workspaceId: workspace.projectRootId,
@@ -553,6 +681,7 @@ async function finalizeRouteJobFromTrace(input: {
 async function reconcileReviewedRouteJobs(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   storage: StorageAdapter;
   now: Date;
   workerId: string;
@@ -583,12 +712,14 @@ async function reconcileReviewedRouteJobs(input: {
     const context = await validateRouteJobContext({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job,
       allowCompletedCommit: true
     });
     results.push(await finalizeRouteJobFromTrace({
       projectRoot: input.projectRoot,
       store: input.store,
+      loopSpecStore: input.loopSpecStore,
       job,
       context,
       trace,
@@ -632,6 +763,7 @@ type RouteJobContext = {
 async function validateRouteJobContext(input: {
   projectRoot: string;
   store: RoutingStore;
+  loopSpecStore?: LoopSpecRegistryStore;
   job: RouteJob;
   allowCompletedCommit?: boolean;
 }): Promise<RouteJobContext> {
@@ -651,6 +783,33 @@ async function validateRouteJobContext(input: {
     throw workerError("ROUTE_COMMIT_ALREADY_COMPLETED", `Route commit is already completed: ${commit.id}`);
   }
   assertRouteJobBindings(input.job, commit, receipt, problem);
+
+  if (input.loopSpecStore) {
+    const artifact = await input.loopSpecStore.getActiveLoopSpec(
+      input.projectRoot,
+      input.job.loopId
+    );
+    if (!artifact) {
+      throw workerError(
+        "LOOP_SPEC_NOT_REGISTERED",
+        `Registered LoopSpec not found: ${input.job.loopId}`
+      );
+    }
+    const hash = loopSpecHash(artifact.spec);
+    if (hash !== input.job.loopSpecHash || hash !== commit.loopSpecHash) {
+      throw workerError(
+        "LOOP_SPEC_HASH_MISMATCH",
+        `Registered LoopSpec hash ${hash} does not match immutable route binding ${input.job.loopSpecHash}`
+      );
+    }
+    if (artifact.spec.routing?.activationMode !== input.job.activationMode) {
+      throw workerError(
+        "ACTIVATION_MODE_MISMATCH",
+        `LoopSpec activation mode ${artifact.spec.routing?.activationMode ?? "missing"} does not match route job ${input.job.activationMode}`
+      );
+    }
+    return { receipt, problem, commit, spec: artifact.spec };
+  }
 
   const workspace = await readLoopgraphWorkspace(input.projectRoot);
   const registered = workspace.registeredSpecs.find((entry) => entry.id === input.job.loopId);
