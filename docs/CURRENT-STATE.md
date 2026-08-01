@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-07-30
+Last updated: 2026-07-31
 
 ## One-line summary
 
@@ -12,6 +12,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 - A clean local install starts with no demo loops.
 - `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
+- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph skill from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
 - Hermes immediately presents canonical departments and guides the user through five compact question bundles.
 - Project inspection reads allowlisted manifests and environment key names only after permission.
 - Durable Hermes design tasks can be dispatched over a signed transport, request focused evidence gaps, resume after answers, and submit schema-constrained proposals.
@@ -21,6 +22,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - High-reasoning design receives a bounded `LoopDesignContext`; deterministic local design remains a fallback.
 - Accepted proposals compile into versioned LoopSpecs, routing cards, connection requirements, graph nodes, and three starter fixtures.
 - The company graph visualizes `Hermes Brain → Department → Loop` plus routing signals, evidence returns, opportunities, and graph changes.
+- The local graph editor submits backend transactions for layout moves and governed semantic node/edge proposals; semantic edits never bypass approval or promotion.
 - Local workspaces show only their registered loops; the hosted preview can show a rich demonstration graph.
 
 ### Automatic opportunity detection
@@ -41,6 +43,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ### Hermes event brain and durable execution
 
 - Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision.
+- Thirteen provider onboarding profiles define least-privilege authorization, subscriptions/streams/detectors, signature requirements, and normalization transformers. Trusted Hermes MCP tools expose catalog, preparation, and bounded normalization operations while default-redacting one-time OAuth material.
+- Exact provider aliases resolve Account, Campaign, Incident, Customer, Contract, and related company objects to tenant-scoped canonical entities before routing; ambiguous deterministic matches require human review and fuzzy auto-merge is disabled.
 - Loopgraph validates route eligibility, evidence, confidence, readiness, deduplication, cooldown, concurrency, fan-out, policy, and immutable LoopSpec identity.
 - Accepted routes create durable jobs with atomic claims, leases, retries, dead-letter state, activation gates, and review reconciliation.
 - Shadow, recommendation, and simulation jobs run locally. Live jobs carry an explicit Hermes execution target and are dispatched only to a healthy registered runtime with the required capabilities.
@@ -56,6 +60,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Connection reconciliation checks capabilities, scopes, health freshness, Hermes route manifests, and overdue measurements, then triggers the controller.
 - Outcome evaluation compares baselines and post-loop windows without inventing missing measurements.
 - The value ledger subtracts review, rework, supervision, escalation, and governance cost.
+- Value proof additionally subtracts connector operations, ongoing supervision, and organizational-change time, and remains explicitly unproven without observed evidence and those cost inputs.
 - A durable controller reacts to events, jobs, reviews, outcomes, schedules, and management cycles.
 - Only policy-approved, low-risk, non-customer-facing additions can be committed automatically, and they remain in shadow mode.
 
@@ -100,6 +105,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Hosted initial design dispatch and evidence-resume dispatch use a tenant/project-scoped outbound
   queue. Task changes and enqueue are transactional; leased workers retry, dead-letter, reconcile
   task delivery receipts, and expose queue health through protected metrics.
+- Hosted measurement bindings/jobs, reconciliation reports, metric samples, observed outcomes,
+  and value-ledger entries use tenant/project-scoped Supabase storage. Due jobs are leased with
+  `FOR UPDATE SKIP LOCKED`, and immutable evidence conflicts fail at the database boundary.
+- Canonical company entities and exact provider aliases use tenant-scoped Supabase storage with
+  a uniqueness boundary that prevents an external object from mapping to multiple entities.
 - Signed inbound Hermes callbacks use a tenant/project-scoped callback inbox. Replay authorization
   and enqueue commit together; leased workers compile callbacks with retries, dead-letter state,
   lease fencing, idempotent proposal artifacts, and protected queue metrics.
@@ -130,18 +140,14 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ## Remaining product layers
 
-1. Continue the database migration beyond routing, route jobs, design tasks, callbacks, outbound
-   Hermes dispatch, discovery/design artifacts, the versioned LoopSpec registry, opportunities,
-   proposed graph changes, controller state, and semantic graph transactions: move measurements,
-   outcomes, and value-ledger records to tenant-scoped atomic stores.
+1. Apply the new evidence/entity migrations to staging and prove cross-replica measurement claims,
+   immutable conflicts, entity aliases, and restore behavior against a real hosted database.
 2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
-3. Send the tamper-evident audit stream to independent retention, add distributed tracing and
-   deployed alerts/SLOs, and prove restore procedures with scheduled backups and migration
-   rollback rehearsals.
-4. Implement provider API clients and apply provider subscriptions through Hermes-owned connector
-   onboarding; Loopgraph intentionally stores only non-secret references, route metadata,
-   contracts, and receipts.
+3. Configure a real independent audit-retention receiver and alert manager, then run the included
+   staging validation and isolated backup/restore rehearsal on every target environment.
+4. Register provider applications and use Hermes-owned credentials to execute the supplied OAuth,
+   webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
 

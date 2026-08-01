@@ -5,7 +5,7 @@ import {
   valueLedgerRecordInputSchema
 } from "loopgraph/runtime";
 import { isHostedPreview } from "../../../../lib/hosted-preview";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import { getActiveLoopgraphProjectRoot, getOutcomeStore } from "../../../../lib/loopgraph-runtime/storage-resolver";
 
 export const runtime = "nodejs";
 
@@ -20,9 +20,8 @@ export async function GET(request: Request) {
       windowStart: optionalParam(url, "windowStart"),
       windowEnd: optionalParam(url, "windowEnd")
     });
-    const result = await callLoopgraphOutcomeTool("loopgraph_value_ledger_get", input, {
-      projectRoot: getActiveLoopgraphProjectRoot()
-    });
+    const projectRoot = getActiveLoopgraphProjectRoot();
+    const result = await callLoopgraphOutcomeTool("loopgraph_value_ledger_get", input, { projectRoot, store: getOutcomeStore({ projectRoot }) });
     return NextResponse.json(result);
   } catch (error) {
     return errorResponse(error);
@@ -37,9 +36,8 @@ export async function POST(request: Request) {
   }
   try {
     const input = valueLedgerRecordInputSchema.parse(await request.json());
-    const result = await callLoopgraphOutcomeTool("loopgraph_value_ledger_record", input, {
-      projectRoot: getActiveLoopgraphProjectRoot()
-    });
+    const projectRoot = getActiveLoopgraphProjectRoot();
+    const result = await callLoopgraphOutcomeTool("loopgraph_value_ledger_record", input, { projectRoot, store: getOutcomeStore({ projectRoot }) });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return errorResponse(error);

@@ -1,0 +1,39 @@
+version: loopgraph-slo/v1
+service: loopgraph-hosted
+windows:
+  rolling_days: 30
+objectives:
+  - id: routing_ingest_availability
+    target: 99.9
+    indicator: successful_signed_event_ingests / valid_signed_event_ingest_attempts
+    alert:
+      fast_burn: { window: 1h, burn_rate: 14.4 }
+      slow_burn: { window: 6h, burn_rate: 6 }
+  - id: routing_decision_latency
+    target: 99
+    indicator: hermes_route_decision_seconds_bucket{le="30"}
+    alert: { p99_seconds: 30 }
+  - id: durable_receipt_integrity
+    target: 100
+    indicator: valid_audit_chain_checks / audit_chain_checks
+    alert: { consecutive_failures: 1 }
+  - id: measurement_freshness
+    target: 99
+    indicator: completed_measurement_jobs_before_deadline / due_measurement_jobs
+    alert: { overdue_minutes: 30 }
+  - id: audit_drain_freshness
+    target: 100
+    indicator: latest_external_audit_checkpoint_age_seconds
+    alert: { max_seconds: 900 }
+  - id: backup_recovery
+    target: 100
+    indicator: successful_quarterly_restore_rehearsals / scheduled_quarterly_restore_rehearsals
+    alert: { maximum_days_since_success: 100 }
+ownership:
+  primary: platform-on-call
+  security: security-owner
+  data: evidence-ledger-owner
+runbooks:
+  routing: docs/OPERATIONAL-AUDIT-OBSERVABILITY.md
+  restore: docs/PRODUCTION-OPERATIONS.md
+  audit: docs/PRODUCTION-OPERATIONS.md

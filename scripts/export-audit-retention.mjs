@@ -1,0 +1,25 @@
+import { createHmac } from "node:crypto";
+const source = required("LOOPGRAPH_AUDIT_SOURCE_URL");
+const sourceToken = required("LOOPGRAPH_AUDIT_SOURCE_TOKEN");
+const destination = required("LOOPGRAPH_AUDIT_RETENTION_URL");
+const signingKey = required("LOOPGRAPH_AUDIT_RETENTION_SIGNING_KEY");
+const checkpoint = process.env.LOOPGRAPH_AUDIT_AFTER?.trim();
+const url = new URL("/api/operations/audit-export", source);
+url.searchParams.set("limit", "1000");
+url.searchParams.set("verify", "1");
+if (checkpoint) url.searchParams.set("after", checkpoint);
+const response = await fetch(url, { headers: { authorization: `Bearer ${sourceToken}` }, signal: AbortSignal.timeout(30_000) });
+if (!response.ok) throw new Error(`Audit export failed with ${response.status}`);
+const body = await response.text();
+const exported = JSON.parse(body);
+if (exported?.integrity?.valid !== true) throw new Error("Audit export chain verification failed; refusing to drain unverified records");
+const sourceOrigin = new URL(source).origin;
+const destinationUrl = new URL(destination);
+if (destinationUrl.protocol !== "https:") throw new Error("Independent audit retention requires HTTPS");
+if (destinationUrl.origin === sourceOrigin) throw new Error("Independent audit retention must use a different origin from Loopgraph");
+const timestamp = new Date().toISOString();
+const signature = createHmac("sha256", signingKey).update(`${timestamp}.${body}`).digest("hex");
+const drained = await fetch(destination, { method: "POST", headers: { "content-type": "application/json", "x-loopgraph-timestamp": timestamp, "x-loopgraph-signature": `sha256=${signature}` }, body, signal: AbortSignal.timeout(30_000) });
+if (!drained.ok) throw new Error(`Independent audit retention target rejected export with ${drained.status}`);
+console.log(JSON.stringify({ schemaVersion: "audit-drain/v1", exportedAt: timestamp, bytes: Buffer.byteLength(body), destinationHost: new URL(destination).host }, null, 2));
+function required(name) { const value = process.env[name]?.trim(); if (!value) throw new Error(`${name} is required; audit retention cannot silently fall back to local storage`); return value; }

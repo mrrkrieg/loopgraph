@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type { SemanticTopology } from "@/lib/loopgraph-core/graph";
+import type { GraphEditorOperation } from "loopgraph/core";
+import type { GraphLayoutOverrides } from "loopgraph/runtime";
 import {
   buildBrainGraph,
   filterBrainGraphByDepth,
@@ -53,12 +55,16 @@ function settingsForStoryPreset(
 export function LoopgraphBrainView({
   actions,
   includeCatalogLoops = false,
+  initialLayout = {},
   previewMode = false,
+  topologyHash,
   topology
 }: {
   actions?: BrainGraphActions;
   includeCatalogLoops?: boolean;
+  initialLayout?: GraphLayoutOverrides;
   previewMode?: boolean;
+  topologyHash: string;
   topology: SemanticTopology;
 }) {
   const initialStoryPreset: Exclude<BrainGraphStoryPreset, "custom"> = previewMode
@@ -75,6 +81,10 @@ export function LoopgraphBrainView({
   const [localCenterId, setLocalCenterId] = useState<string | undefined>();
   const [fitRequest, setFitRequest] = useState(0);
   const [resetRequest, setResetRequest] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [pendingMoves, setPendingMoves] = useState<Record<string, { x: number; y: number }>>({});
+  const [editMessage, setEditMessage] = useState<string>();
+  const [isSubmitting, startSubmitting] = useTransition();
   const baseGraph = useMemo(
     () => buildBrainGraph({
       topology,
@@ -136,6 +146,24 @@ export function LoopgraphBrainView({
     setSettings(nextSettings);
   }
 
+  function submitOperations(operations: GraphEditorOperation[]) {
+    if (!actions?.submitGraphEdit || operations.length === 0) return;
+    startSubmitting(async () => {
+      try {
+        const formData = new FormData();
+        formData.set("expectedTopologyHash", topologyHash);
+        formData.set("operations", JSON.stringify(operations));
+        const result = await actions.submitGraphEdit!(formData);
+        setEditMessage(result.status === "layout_applied"
+          ? `Layout saved (${result.id}).`
+          : `Proposal submitted (${result.id}). Hermes design and approval are required before it becomes runnable.`);
+        if (result.status === "layout_applied") setPendingMoves({});
+      } catch (error) {
+        setEditMessage(error instanceof Error ? error.message : "Graph edit failed");
+      }
+    });
+  }
+
   return (
     <div className={`grid grid-rows-[minmax(520px,1fr)_auto] overflow-hidden rounded-lg border border-line bg-white shadow-sm xl:grid-cols-[minmax(0,1fr)_320px] xl:grid-rows-none ${
       previewMode
@@ -170,6 +198,18 @@ export function LoopgraphBrainView({
             storyPreset={storyPreset}
           />
         </div>
+        {!previewMode && actions?.submitGraphEdit ? (
+          <GraphEditorPanel
+            editing={editing}
+            isSubmitting={isSubmitting}
+            message={editMessage}
+            nodes={graph.nodes}
+            onEditingChange={setEditing}
+            onSaveLayout={() => submitOperations(Object.entries(pendingMoves).map(([nodeId, position]) => ({ kind: "move_node" as const, nodeId, ...position })))}
+            onSubmit={submitOperations}
+            selectedId={effectiveSelectedId}
+          />
+        ) : null}
         {previewMode ? <PreviewTraceGuide storyPreset={storyPreset} /> : null}
         <div className="absolute bottom-4 left-4 z-10 max-w-xl space-y-2">
           <div className="rounded-md border border-line bg-white/95 px-3 py-2 text-xs font-medium text-ink/65 shadow-sm backdrop-blur">
@@ -180,11 +220,14 @@ export function LoopgraphBrainView({
         <ObsidianGraphCanvas
           centerId={mode === "local" ? centerId : undefined}
           edges={graph.edges}
+          editable={editing}
           fitRequest={fitRequest}
           graphLabel={`${brainLabel} graph`}
+          initialPositions={initialLayout}
           mode={mode}
           nodes={graph.nodes}
           onOpenLocal={openLocalGraph}
+          onNodePositionChange={(nodeId, x, y) => setPendingMoves((current) => ({ ...current, [nodeId]: { x, y } }))}
           onSelect={setSelectedId}
           resetRequest={resetRequest}
           selectedId={effectiveSelectedId}
@@ -192,6 +235,53 @@ export function LoopgraphBrainView({
         />
       </section>
       <NodeInspector actions={actions} edges={graph.edges} node={inspectorNode} onOpenLocal={openLocalGraph} />
+    </div>
+  );
+}
+
+function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChange, onSaveLayout, onSubmit, selectedId }: {
+  editing: boolean;
+  isSubmitting: boolean;
+  message?: string;
+  nodes: ReturnType<typeof buildBrainGraph>["nodes"];
+  onEditingChange: (value: boolean) => void;
+  onSaveLayout: () => void;
+  onSubmit: (operations: GraphEditorOperation[]) => void;
+  selectedId?: string;
+}) {
+  const [targetId, setTargetId] = useState("");
+  const [loopLabel, setLoopLabel] = useState("");
+  const [departmentId, setDepartmentId] = useState("product");
+  const [purpose, setPurpose] = useState("");
+  return (
+    <div className="absolute right-4 top-4 z-20 w-80 rounded-md border border-line bg-white/95 p-3 text-xs shadow-lg backdrop-blur">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="font-semibold text-ink">Graph editor</div>
+          <div className="mt-1 text-ink/55">Layout saves directly. Semantic changes enter approval.</div>
+        </div>
+        <button className="rounded-md bg-ink px-3 py-2 font-semibold text-white" onClick={() => onEditingChange(!editing)} type="button">{editing ? "Done" : "Edit"}</button>
+      </div>
+      {editing ? <div className="mt-3 space-y-3 border-t border-line pt-3">
+        <button className="w-full rounded-md border border-ink px-3 py-2 font-semibold disabled:opacity-40" disabled={isSubmitting} onClick={onSaveLayout} type="button">Save moved nodes</button>
+        <div className="space-y-2 rounded-md bg-paper p-2">
+          <div className="font-semibold">Propose a connection</div>
+          <div className="text-ink/55">Source: {selectedId ?? "select a node"}</div>
+          <select className="w-full rounded border border-line bg-white p-2" onChange={(event) => setTargetId(event.target.value)} value={targetId}>
+            <option value="">Choose target</option>
+            {nodes.filter((node) => node.id !== selectedId).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
+          </select>
+          <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!selectedId || !targetId || isSubmitting} onClick={() => onSubmit([{ kind: "propose_edge", sourceId: selectedId!, targetId, relation: "learning_returns_to", reason: "User-authored connection requiring Hermes validation." }])} type="button">Submit connection proposal</button>
+        </div>
+        <div className="space-y-2 rounded-md bg-paper p-2">
+          <div className="font-semibold">Propose a workflow loop</div>
+          <input className="w-full rounded border border-line bg-white p-2" onChange={(event) => setLoopLabel(event.target.value)} placeholder="Loop name" value={loopLabel} />
+          <input className="w-full rounded border border-line bg-white p-2" onChange={(event) => setDepartmentId(event.target.value)} placeholder="Department ID" value={departmentId} />
+          <textarea className="w-full rounded border border-line bg-white p-2" onChange={(event) => setPurpose(event.target.value)} placeholder="Problem this loop should solve" value={purpose} />
+          <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!loopLabel.trim() || !departmentId.trim() || !purpose.trim() || isSubmitting} onClick={() => onSubmit([{ kind: "propose_node", temporaryId: `draft:${Date.now()}`, nodeType: "workflow_loop", label: loopLabel, departmentId, purpose }])} type="button">Submit loop proposal</button>
+        </div>
+      </div> : null}
+      {message ? <div className="mt-3 rounded border border-line bg-paper p-2 leading-5 text-ink/65">{message}</div> : null}
     </div>
   );
 }

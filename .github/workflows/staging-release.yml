@@ -1,0 +1,69 @@
+name: Staging release gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      promote_production:
+        description: Promote the verified prebuilt deployment to production
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loopgraph-staging-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run audit:prod
+
+  staging:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: staging
+    outputs:
+      deployment_url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx vercel pull --yes --environment=preview --token="${VERCEL_TOKEN}"
+        env: { VERCEL_TOKEN: "${{ secrets.VERCEL_TOKEN }}" }
+      - run: npx vercel build --token="${VERCEL_TOKEN}"
+        env: { VERCEL_TOKEN: "${{ secrets.VERCEL_TOKEN }}" }
+      - id: deploy
+        shell: bash
+        run: echo "url=$(npx vercel deploy --prebuilt --token=\"${VERCEL_TOKEN}\")" >> "$GITHUB_OUTPUT"
+        env: { VERCEL_TOKEN: "${{ secrets.VERCEL_TOKEN }}" }
+      - run: npm run validate:staging
+        env:
+          LOOPGRAPH_STAGING_URL: "${{ steps.deploy.outputs.url }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN: "${{ secrets.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN }}"
+
+  promote:
+    if: ${{ inputs.promote_production }}
+    needs: staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx vercel promote "${DEPLOYMENT_URL}" --token="${VERCEL_TOKEN}"
+        env:
+          DEPLOYMENT_URL: "${{ needs.staging.outputs.deployment_url }}"
+          VERCEL_TOKEN: "${{ secrets.VERCEL_TOKEN }}"

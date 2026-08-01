@@ -46,6 +46,7 @@ export type ValueLedgerFilters = {
 };
 
 export interface OutcomeStore {
+  readonly persistence?: "local" | "distributed";
   saveMetricSample(sample: MetricSample): Promise<OutcomeStoreSaveResult<MetricSample>>;
   getMetricSample(sampleId: string): Promise<MetricSample | undefined>;
   listMetricSamples(filters?: MetricSampleFilters): Promise<MetricSample[]>;
@@ -58,6 +59,7 @@ export interface OutcomeStore {
 }
 
 export class FileOutcomeStore implements OutcomeStore {
+  readonly persistence = "local" as const;
   constructor(private readonly loopgraphRoot = path.join(process.cwd(), ".loopgraph")) {}
 
   async saveMetricSample(sample: MetricSample): Promise<OutcomeStoreSaveResult<MetricSample>> {

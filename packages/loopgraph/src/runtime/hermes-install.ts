@@ -45,6 +45,7 @@ import {
 } from "../mcp/server";
 import { LOOPGRAPH_CONNECTION_TOOL_NAMES } from "./connection-tools";
 import { LOOPGRAPH_MEASUREMENT_TOOL_NAMES } from "./measurement-tools";
+import { LOOPGRAPH_PROVIDER_TOOL_NAMES } from "./provider-tools";
 import { LOOPGRAPH_DESIGN_TOOL_NAMES } from "./design-tools";
 import { LOOPGRAPH_DISCOVERY_TOOL_NAMES } from "./discovery-tools";
 import { LOOPGRAPH_HERMES_DESIGN_TOOL_NAMES } from "./hermes-design-tools";
@@ -64,8 +65,8 @@ import { getLoopgraphRoot } from "./storage-resolver";
 import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 
-export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha7" as const;
-export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.6.0" as const;
+export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha8" as const;
+export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.7.0" as const;
 export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha5" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha5" as const;
 export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha1" as const;
@@ -113,6 +114,7 @@ export const HERMES_LOOPGRAPH_MCP_TOOL_NAMES = [
   ...LOOPGRAPH_SEMANTIC_GRAPH_TOOL_NAMES,
   ...LOOPGRAPH_CONNECTION_TOOL_NAMES,
   ...LOOPGRAPH_MEASUREMENT_TOOL_NAMES,
+  ...LOOPGRAPH_PROVIDER_TOOL_NAMES,
   ...LOOPGRAPH_LOOP_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_OPS_TOOL_NAMES,
@@ -212,6 +214,8 @@ export type HermesDoctorOptions = {
 
 export type HermesSetupOptions = HermesInstallOptions & {
   hermesVersionCheck?: () => Promise<string | null>;
+  activate?: boolean;
+  commandRunner?: (command: string, args: string[]) => Promise<void>;
 };
 
 export type HermesSetupResult = {
@@ -250,6 +254,10 @@ export type HermesSetupResult = {
   nextSteps: string[];
   safety: string[];
   warnings: string[];
+  activation?: {
+    applied: boolean;
+    commands: Array<{ command: string; args: string[] }>;
+  };
 };
 
 type HermesInstallMetadata = {
@@ -476,7 +484,13 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
       hermesWebhookTest: true,
       departmentOperatingSkills: true,
       sharedLearningPlaybooks: true,
-      liveExecution: true
+      liveExecution: true,
+      providerOnboarding: true,
+      providerNormalization: true,
+      canonicalEntityResolution: true,
+      distributedEvidenceLedger: true,
+      governedGraphAuthoring: true,
+      observedValueProof: true
     },
     lastDoctor: null
   };
@@ -597,11 +611,14 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
     projectRoot,
     hermesVersionCheck: options.hermesVersionCheck
   });
+  const activation = options.activate
+    ? await activateHermesIntegration(install, options.commandRunner)
+    : undefined;
   const localReady = doctor.ok;
   const hermesReady = localReady && doctor.hermesAvailable;
   const commandUsage = {
     fromClone: {
-      setup: "npm run loopgraph -- hermes setup --project .",
+      setup: "npm run loopgraph -- hermes setup --project . --activate",
       doctor: "npm run loopgraph -- hermes doctor --project .",
       studio: "npm run loopgraph -- studio --project . --start",
       webhooksPlan: "npm run loopgraph -- hermes webhooks plan --project .",
@@ -610,7 +627,7 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
       eventTest: "npm run loopgraph -- events test --project . --fixture <event.json> --require-synced-manifest"
     },
     fromInstalledPackage: {
-      setup: "loopgraph hermes setup --project .",
+      setup: "loopgraph hermes setup --project . --activate",
       doctor: "loopgraph hermes doctor --project .",
       studio: "loopgraph studio --project . --start",
       webhooksPlan: "loopgraph hermes webhooks plan --project .",
@@ -621,8 +638,10 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
     firstHermesPrompt: install.firstPrompt
   };
   const nextSteps = [
-    "Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.",
-    "Make sure Hermes can load the generated Loopgraph skills directory.",
+    ...(activation ? [] : [
+      "Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.",
+      "Make sure Hermes can load the generated Loopgraph skills directory."
+    ]),
     `Open Hermes and say: ${install.firstPrompt}`,
     "After accepting loops, plan and sync Hermes webhook route metadata from Loopgraph.",
     "Before connecting live provider webhooks, test with generated synthetic or redacted EventEnvelope fixtures."
@@ -656,8 +675,39 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
       "Webhook signing secrets, OAuth tokens, API keys, and provider payloads stay in Hermes or an approved credential store.",
       "Newly materialized loops stay in shadow/simulation mode until a human explicitly promotes them and required connection checks pass."
     ],
-    warnings: doctor.warnings
+    warnings: doctor.warnings,
+    activation
   };
+}
+
+export async function activateHermesIntegration(
+  install: HermesInstallResult,
+  commandRunner: (command: string, args: string[]) => Promise<void> = runCommand
+) {
+  const commands: Array<{ command: string; args: string[] }> = [];
+  for (const server of install.mcpServers) {
+    commands.push({
+      command: "hermes",
+      args: ["mcp", "add", server.name, "--command", server.command, "--args", ...server.args]
+    });
+  }
+  commands.push({ command: "hermes", args: ["skills", "tap", "add", "mrrkrieg/loopgraph"] });
+  commands.push({ command: "hermes", args: ["skills", "install", "mrrkrieg/loopgraph/skills/loopgraph"] });
+  for (const command of commands) {
+    try {
+      await commandRunner(command.command, command.args);
+    } catch (error) {
+      const rendered = [command.command, ...command.args].map((part) => JSON.stringify(part)).join(" ");
+      throw new Error(`Hermes activation stopped at: ${rendered}. Project-local artifacts remain available for recovery. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return { applied: true, commands };
+}
+
+async function runCommand(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    execFile(command, args, { timeout: 30_000 }, (error) => error ? reject(error) : resolve());
+  });
 }
 
 function buildHermesMcpConfig(input: {

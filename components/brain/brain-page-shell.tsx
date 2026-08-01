@@ -3,17 +3,23 @@ import Link from "next/link";
 import {
   simulateBrainLoopManualEventAction,
   simulateBrainLoopFixtureAction,
+  submitBrainGraphEditAction,
   validateBrainLoopAction
 } from "@/app/brain/actions";
+import type { GraphLayoutOverrides } from "loopgraph/runtime";
 import { LoopgraphBrainView } from "./loopgraph-brain-view";
 
 export function BrainPageShell({
   includeCatalogLoops = false,
+  initialLayout = {},
   previewMode = false,
+  topologyHash,
   topology
 }: {
   includeCatalogLoops?: boolean;
+  initialLayout?: GraphLayoutOverrides;
   previewMode?: boolean;
+  topologyHash: string;
   topology: SemanticTopology;
 }) {
   const brainLabel = topology.metadata.brainLabel ?? "Company Brain";
@@ -62,12 +68,15 @@ export function BrainPageShell({
       {previewMode ? <PreviewStoryStrip /> : null}
       <LoopgraphBrainView
         actions={{
+          submitGraphEdit: submitBrainGraphEditAction,
           simulateManualEvent: simulateBrainLoopManualEventAction,
           simulateFixture: simulateBrainLoopFixtureAction,
           validateLoop: validateBrainLoopAction
         }}
         includeCatalogLoops={includeCatalogLoops}
+        initialLayout={initialLayout}
         previewMode={previewMode}
+        topologyHash={topologyHash}
         topology={topology}
       />
     </div>

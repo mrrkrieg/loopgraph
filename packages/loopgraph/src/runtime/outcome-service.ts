@@ -220,6 +220,7 @@ export async function recordValueLedgerEntry(input: {
   grossSavedMinutes?: number;
   modeledGrossSavedMinutes?: number;
   hiddenCostMinutes?: Partial<ValueLedgerEntry["hiddenCostMinutes"]>;
+  operatingCostMinutes?: ValueLedgerEntry["operatingCostMinutes"];
   observedOutcomeIds?: string[];
   runIds?: string[];
   reviewIds?: string[];
@@ -244,7 +245,10 @@ export async function recordValueLedgerEntry(input: {
     escalation: input.hiddenCostMinutes?.escalation ?? 0,
     governance: input.hiddenCostMinutes?.governance ?? 0
   };
-  const observedCostMinutes = Object.values(hiddenCostMinutes).reduce((sum, value) => sum + value, 0);
+  const observedCostMinutes = [
+    ...Object.values(hiddenCostMinutes),
+    ...Object.values(input.operatingCostMinutes ?? {})
+  ].reduce((sum, value) => sum + value, 0);
   const grossSavedMinutes = input.grossSavedMinutes ?? input.modeledGrossSavedMinutes ?? 0;
   const truthStatus = valueTruthStatus({
     hasObservedGrossValue: input.grossSavedMinutes !== undefined,
@@ -269,6 +273,7 @@ export async function recordValueLedgerEntry(input: {
     window: input.window,
     grossSavedMinutes,
     hiddenCostMinutes,
+    operatingCostMinutes: input.operatingCostMinutes,
     observedCostMinutes,
     netSavedMinutes: grossSavedMinutes - observedCostMinutes,
     monetaryValue: input.monetaryValue ? {
@@ -286,6 +291,30 @@ export async function recordValueLedgerEntry(input: {
     recordedAt: (input.now ?? new Date()).toISOString()
   });
   return input.store.saveValueLedgerEntry(entry);
+}
+
+export function assessValueProof(entry: ValueLedgerEntry) {
+  const completeOperatingCosts = Boolean(entry.operatingCostMinutes);
+  const observedEvidence = entry.truthStatus === "observed" && entry.observedOutcomeIds.length > 0 && entry.evidenceRefs.length > 0;
+  const status = !observedEvidence || !completeOperatingCosts
+    ? "unproven"
+    : entry.netSavedMinutes > 0
+      ? "proven_positive"
+      : "proven_non_positive";
+  return {
+    schemaVersion: "loop-value-proof/v1alpha1" as const,
+    entryId: entry.id,
+    loopId: entry.loopId,
+    status,
+    netSavedMinutes: entry.netSavedMinutes,
+    netAmount: entry.monetaryValue?.netAmount,
+    missingEvidence: [
+      ...(entry.truthStatus !== "observed" ? ["observed before/after outcome"] : []),
+      ...(entry.observedOutcomeIds.length === 0 ? ["observed outcome reference"] : []),
+      ...(entry.evidenceRefs.length === 0 ? ["evidence references"] : []),
+      ...(!completeOperatingCosts ? ["connector operations, supervision, and organizational change costs"] : [])
+    ]
+  };
 }
 
 export async function deriveLoopValueLedgerEntry(input: {

@@ -24,8 +24,8 @@ export type LayoutBounds = {
   height: number;
 };
 
-export function useObsidianForceLayout(input: LayoutInput) {
-  const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>({});
+export function useObsidianForceLayout(input: LayoutInput, initialPositions: Record<string, { x: number; y: number }> = {}) {
+  const [positionOverrides, setPositionOverrides] = useState<Record<string, { x: number; y: number }>>(initialPositions);
   const { centerId, edges, mode, nodes: inputNodes } = input;
   const baseNodes = useMemo(
     () => createObsidianLayout({ centerId, edges, mode, nodes: inputNodes }),

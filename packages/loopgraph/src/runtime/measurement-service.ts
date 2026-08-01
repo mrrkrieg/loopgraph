@@ -23,8 +23,8 @@ import {
 } from "./connector-registry";
 import { doctorHermesWebhookRoutes } from "./hermes-webhooks";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
-import { FileMeasurementStore } from "./measurement-store";
-import { FileOutcomeStore } from "./outcome-store";
+import { FileMeasurementStore, type MeasurementStore } from "./measurement-store";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { evaluateObservedOutcome, recordMetricSample } from "./outcome-service";
 import { readProjectMetricDefinitions } from "./outcome-tools";
 import { readWorkspaceGraphState } from "./semantic-graph-state";
@@ -43,7 +43,7 @@ export type UpsertMetricBindingInput = Omit<
 
 export async function upsertMetricBinding(
   input: UpsertMetricBindingInput,
-  options: { store?: FileMeasurementStore } = {}
+  options: { store?: MeasurementStore } = {}
 ): Promise<MetricBinding> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
@@ -76,7 +76,7 @@ export async function upsertMetricBinding(
   if (missingScopes.length > 0) {
     throw new Error(`Connection ${connection.id} is missing required scopes: ${missingScopes.join(", ")}`);
   }
-  const store = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
+  const store: MeasurementStore = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
   const id = input.id ?? `metric_binding_${contentHash({
     metricDefinitionId: input.metricDefinitionId,
     loopId: input.loopId,
@@ -101,7 +101,7 @@ export async function scheduleDueMeasurements(input: {
   backfillWindows?: number;
   maxAttempts?: number;
   now?: Date;
-}, options: { store?: FileMeasurementStore } = {}): Promise<{
+}, options: { store?: MeasurementStore } = {}): Promise<{
   schemaVersion: "measurement-scheduler/v1alpha1";
   scheduledAt: string;
   created: MeasurementJob[];
@@ -191,7 +191,7 @@ export async function claimMeasurementJobs(input: {
   leaseSeconds?: number;
   connectionInstanceId?: string;
   now?: Date;
-}, options: { store?: FileMeasurementStore } = {}): Promise<Array<{
+}, options: { store?: MeasurementStore } = {}): Promise<Array<{
   job: MeasurementJob;
   leaseToken: string;
 }>> {
@@ -199,7 +199,16 @@ export async function claimMeasurementJobs(input: {
   const now = input.now ?? new Date();
   const limit = boundedInteger(input.limit ?? 20, 1, 100, "limit");
   const leaseSeconds = boundedInteger(input.leaseSeconds ?? 300, 30, 3600, "leaseSeconds");
-  const store = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
+  const store: MeasurementStore = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
+  if (store.claimDueJobs) {
+    return store.claimDueJobs({
+      claimedBy: input.claimedBy,
+      limit,
+      leaseSeconds,
+      connectionInstanceId: input.connectionInstanceId,
+      now
+    });
+  }
   return store.withJobLock(async () => {
     const candidates = (await store.listMeasurementJobs())
       .filter((job) => !input.connectionInstanceId || job.connectorInstanceId === input.connectionInstanceId)
@@ -241,10 +250,10 @@ export async function completeMeasurementJob(input: {
   qualityReason?: string;
   evidenceRefs: string[];
   now?: Date;
-}, options: { store?: FileMeasurementStore; outcomeStore?: FileOutcomeStore } = {}) {
+}, options: { store?: MeasurementStore; outcomeStore?: OutcomeStore } = {}) {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
-  const store = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
+  const store: MeasurementStore = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
   const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
   return store.withJobLock(async () => {
     const job = await requireClaimedJob(store, input.jobId, input.leaseToken, now);
@@ -302,7 +311,11 @@ export async function completeMeasurementJob(input: {
       },
       updatedAt: now.toISOString()
     });
-    await store.saveMeasurementJob(completed);
+    if (store.saveClaimedMeasurementJob) {
+      await store.saveClaimedMeasurementJob(completed, contentHash(input.leaseToken));
+    } else {
+      await store.saveMeasurementJob(completed);
+    }
     const automaticOutcomes = await evaluateReadyBoundOutcomes({
       projectRoot,
       loopId: job.loopId,
@@ -328,10 +341,10 @@ export async function failMeasurementJob(input: {
   message: string;
   retryable?: boolean;
   now?: Date;
-}, options: { store?: FileMeasurementStore } = {}): Promise<MeasurementJob> {
+}, options: { store?: MeasurementStore } = {}): Promise<MeasurementJob> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
-  const store = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
+  const store: MeasurementStore = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
   return store.withJobLock(async () => {
     const job = await requireClaimedJob(store, input.jobId, input.leaseToken, now);
     const retryable = input.retryable ?? true;
@@ -347,7 +360,9 @@ export async function failMeasurementJob(input: {
       },
       updatedAt: now.toISOString()
     });
-    return store.saveMeasurementJob(next);
+    return store.saveClaimedMeasurementJob
+      ? store.saveClaimedMeasurementJob(next, contentHash(input.leaseToken))
+      : store.saveMeasurementJob(next);
   });
 }
 
@@ -356,7 +371,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
   healthStaleAfterHours?: number;
   measurementOverdueAfterHours?: number;
   now?: Date;
-}, options: { store?: FileMeasurementStore } = {}): Promise<{
+}, options: { store?: MeasurementStore } = {}): Promise<{
   report: ConnectionReconciliationReport;
   controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 }> {
@@ -531,7 +546,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
 }
 
 async function requireClaimedJob(
-  store: FileMeasurementStore,
+  store: MeasurementStore,
   jobId: string,
   leaseToken: string,
   now: Date
@@ -544,7 +559,7 @@ async function requireClaimedJob(
   return job;
 }
 
-async function requireCurrentBinding(store: FileMeasurementStore, job: MeasurementJob): Promise<MetricBinding> {
+async function requireCurrentBinding(store: MeasurementStore, job: MeasurementJob): Promise<MetricBinding> {
   const binding = await store.getMetricBinding(job.bindingId);
   if (!binding) throw new Error(`Metric binding not found: ${job.bindingId}`);
   if (!binding.enabled) throw new Error(`Metric binding ${binding.id} is disabled`);
@@ -569,8 +584,8 @@ async function evaluateReadyBoundOutcomes(input: {
   projectRoot: string;
   loopId: string;
   windowEnd: string;
-  store: FileMeasurementStore;
-  outcomeStore: FileOutcomeStore;
+  store: MeasurementStore;
+  outcomeStore: OutcomeStore;
   now: Date;
 }) {
   const bindings = (await input.store.listMetricBindings(input.loopId)).filter((binding) => binding.enabled);

@@ -47,6 +47,7 @@ import {
 import { simulateLoop } from "./simulator";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
+import { FileEntityResolutionStore, resolveCompanyEntity, type EntityResolutionStore } from "./entity-resolution";
 
 export const LOOPGRAPH_ROUTING_TOOL_NAMES = [
   "loopgraph_routing_catalog_get",
@@ -73,6 +74,7 @@ export type LoopgraphRoutingToolRuntimeOptions = {
   trustedSpecPaths?: string[];
   trustedRoutingCards?: RoutingCard[];
   trustedCatalogVersion?: string;
+  entityStore?: EntityResolutionStore;
 };
 
 export const routingCatalogGetInputSchema = z.object({
@@ -229,9 +231,31 @@ export async function loopgraph_events_ingest(
     projectRoot
   }, options);
   const store = options.store ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
+  const entityResolution = await resolveCompanyEntity({
+    store: options.entityStore ?? new FileEntityResolutionStore(getLoopgraphRoot(projectRoot)),
+    request: {
+      schemaVersion: "entity-resolution/v1alpha1",
+      workspaceId: parsed.event.workspaceId,
+      companyId: parsed.event.companyId,
+      provider: parsed.event.source,
+      externalType: parsed.event.subject.type,
+      externalId: parsed.event.subject.id,
+      expectedType: canonicalEntityType(parsed.event.subject.type),
+      deterministicKeys: deterministicEntityKeys(parsed.event.normalizedPayload)
+    },
+    createIfMissing: true,
+    now: options.now
+  });
+  const resolvedEvent = eventEnvelopeSchema.parse({
+    ...parsed.event,
+    normalizedPayload: {
+      ...parsed.event.normalizedPayload,
+      entityResolution
+    }
+  });
   const result = await ingestRoutingEvent({
     store,
-    event: parsed.event,
+    event: resolvedEvent,
     routingCards: catalog.routingCards,
     replay: parsed.replay,
     now: options.now
@@ -251,6 +275,27 @@ export async function loopgraph_events_ingest(
     catalogVersion: catalog.catalogVersion,
     controllerTrigger
   };
+}
+
+function canonicalEntityType(subjectType: string) {
+  const normalized = subjectType.toLowerCase();
+  if (normalized.includes("account") || normalized.includes("company")) return "account" as const;
+  if (normalized.includes("campaign")) return "campaign" as const;
+  if (normalized.includes("incident")) return "incident" as const;
+  if (normalized.includes("contract") || normalized.includes("subscription")) return "contract" as const;
+  if (normalized.includes("customer")) return "customer" as const;
+  if (normalized.includes("contact")) return "contact" as const;
+  if (normalized.includes("deal") || normalized.includes("opportunity")) return "deal" as const;
+  if (normalized.includes("employee") || normalized.includes("candidate")) return "employee" as const;
+  if (normalized.includes("invoice")) return "invoice" as const;
+  if (normalized.includes("repository")) return "repository" as const;
+  if (normalized.includes("ticket")) return "support_ticket" as const;
+  return "custom" as const;
+}
+
+function deterministicEntityKeys(payload: Record<string, unknown>) {
+  const allowed = ["domain", "email", "contract_number", "repository_full_name", "campaign_external_key", "incident_key"];
+  return Object.fromEntries(allowed.flatMap((key) => typeof payload[key] === "string" ? [[key, payload[key] as string]] : []));
 }
 
 export function assertSafeEventEnvelope(event: EventEnvelope): void {

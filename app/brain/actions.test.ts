@@ -9,6 +9,7 @@ import { resetStorageAdapterCache } from "../../lib/loopgraph-runtime/storage-re
 import {
   simulateBrainLoopFixtureAction,
   simulateBrainLoopManualEventAction,
+  submitBrainGraphEditAction,
   validateBrainLoopAction
 } from "./actions";
 
@@ -148,6 +149,16 @@ describe("brain graph loop actions", () => {
       loopId: "marketing_ads"
     });
     expect(runs.count).toBe(0);
+  });
+
+  it("fails closed for direct hosted graph-authoring actions", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon");
+    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+    const formData = new FormData();
+    formData.set("operations", JSON.stringify([{ kind: "move_node", nodeId: "brain", x: 0, y: 0 }]));
+    formData.set("expectedTopologyHash", "aaaaaaaaaaaaaaaa");
+    await expect(submitBrainGraphEditAction(formData)).rejects.toThrow("local-only");
   });
 });
 

@@ -3,20 +3,26 @@ import type { StorageAdapter } from "loopgraph/sdk";
 import { FileStorageAdapter } from "loopgraph/sdk";
 import {
   FileHermesDesignStore,
+  FileEntityResolutionStore,
   FileHermesOperationsStore,
   FileDiscoveryDesignStore,
   FileLoopControllerStore,
   FileLoopOpportunityStore,
   FileLoopSpecRegistryStore,
+  FileMeasurementStore,
+  FileOutcomeStore,
   FileRoutingStore,
   FileSemanticGraphStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
   type DiscoveryDesignStore,
+  type EntityResolutionStore,
   type HermesDesignStore,
   type HermesOperationsStore,
   type LoopControllerStore,
   type LoopOpportunityStore,
   type LoopSpecRegistryStore,
+  type MeasurementStore,
+  type OutcomeStore,
   type RoutingStore,
   type SemanticGraphStore
 } from "loopgraph/runtime";
@@ -57,6 +63,8 @@ import {
   isSupabaseSemanticGraphStoreEnabled
 } from "@/lib/db/adapters/supabase-semantic-graph-store";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
+import { createSupabaseEvidenceStore, isSupabaseEvidenceStoreEnabled } from "@/lib/db/adapters/supabase-evidence-store";
+import { createSupabaseEntityResolutionStore, isSupabaseEntityResolutionStoreEnabled } from "@/lib/db/adapters/supabase-entity-resolution-store";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
@@ -67,6 +75,9 @@ const cachedLoopSpecRegistryStores = new Map<string, LoopSpecRegistryStore>();
 const cachedLoopControllerStores = new Map<string, LoopControllerStore>();
 const cachedLoopOpportunityStores = new Map<string, LoopOpportunityStore>();
 const cachedSemanticGraphStores = new Map<string, SemanticGraphStore>();
+const cachedMeasurementStores = new Map<string, MeasurementStore>();
+const cachedOutcomeStores = new Map<string, OutcomeStore>();
+const cachedEntityStores = new Map<string, EntityResolutionStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -371,6 +382,42 @@ export function getSemanticGraphStore(options?: {
   return store;
 }
 
+export function getMeasurementStore(options?: { projectRoot?: string; forceFile?: boolean }): MeasurementStore {
+  const useSupabase = !options?.forceFile && isSupabaseEvidenceStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) throw new Error("Distributed measurement storage is required for the hosted runtime");
+  const projectRoot = path.resolve(options?.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase ? `supabase-measurements:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}` : `file-measurements:${projectRoot}`;
+  const existing = cachedMeasurementStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase ? createSupabaseEvidenceStore() : new FileMeasurementStore(getPackageLoopgraphRoot(projectRoot));
+  cachedMeasurementStores.set(cacheKey, store);
+  return store;
+}
+
+export function getOutcomeStore(options?: { projectRoot?: string; forceFile?: boolean }): OutcomeStore {
+  const useSupabase = !options?.forceFile && isSupabaseEvidenceStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) throw new Error("Distributed outcome storage is required for the hosted runtime");
+  const projectRoot = path.resolve(options?.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase ? `supabase-outcomes:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}` : `file-outcomes:${projectRoot}`;
+  const existing = cachedOutcomeStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase ? createSupabaseEvidenceStore() : new FileOutcomeStore(getPackageLoopgraphRoot(projectRoot));
+  cachedOutcomeStores.set(cacheKey, store);
+  return store;
+}
+
+export function getEntityResolutionStore(options?: { projectRoot?: string; forceFile?: boolean }): EntityResolutionStore {
+  const useSupabase = !options?.forceFile && isSupabaseEntityResolutionStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) throw new Error("Distributed entity resolution is required for the hosted runtime");
+  const projectRoot = path.resolve(options?.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase ? `supabase-entities:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}` : `file-entities:${projectRoot}`;
+  const existing = cachedEntityStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase ? createSupabaseEntityResolutionStore() : new FileEntityResolutionStore(getPackageLoopgraphRoot(projectRoot));
+  cachedEntityStores.set(cacheKey, store);
+  return store;
+}
+
 export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
@@ -381,6 +428,9 @@ export function resetStorageAdapterCache() {
   cachedLoopControllerStores.clear();
   cachedLoopOpportunityStores.clear();
   cachedSemanticGraphStores.clear();
+  cachedMeasurementStores.clear();
+  cachedOutcomeStores.clear();
+  cachedEntityStores.clear();
 }
 
 const UUID_PATTERN =

@@ -5,9 +5,14 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getActiveLoopgraphProjectRoot } from "../../lib/loopgraph-runtime/storage-resolver";
 import {
+  FileGraphAuthoringStore,
+  getLoopgraphRoot,
   simulateLoopForHermes,
   validateLoopForHermes
 } from "loopgraph/runtime";
+import { contentHash, graphEditorOperationSchema } from "loopgraph/core";
+import { getSemanticTopology } from "../../lib/loop-engineering-builder/workspace";
+import { isHostedAuthRequired } from "../../lib/auth/hosted-config";
 
 export async function validateBrainLoopAction(formData: FormData) {
   const loopId = requiredFormString(formData, "loopId");
@@ -75,6 +80,35 @@ export async function simulateBrainLoopManualEventAction(formData: FormData) {
     redirect(`/loops/${encodeURIComponent(loopId)}/reviews?runId=${encodeURIComponent(result.runId)}`);
   }
   redirect(`/loops/${encodeURIComponent(loopId)}/runs/${encodeURIComponent(result.runId)}`);
+}
+
+export async function submitBrainGraphEditAction(formData: FormData) {
+  if (isHostedAuthRequired()) {
+    throw new Error("Direct graph authoring is local-only. Hosted semantic changes must use the authenticated graph change and approval API.");
+  }
+  const raw = requiredFormString(formData, "operations");
+  if (raw.length > 100_000) throw new Error("Graph edit payload exceeds 100KB");
+  const value = JSON.parse(raw) as unknown;
+  if (!Array.isArray(value)) throw new Error("Graph edit operations must be an array");
+  const operations = value.map((operation) => graphEditorOperationSchema.parse(operation));
+  const topology = await getSemanticTopology(undefined, {
+    includeCatalogLoops: false,
+    brainLabel: "Hermes Brain",
+    hierarchyMode: "hermes_brain"
+  });
+  const topologyHash = contentHash({ nodes: topology.nodes, edges: topology.edges });
+  const suppliedHash = requiredFormString(formData, "expectedTopologyHash");
+  if (suppliedHash !== topologyHash) throw new Error("The company topology changed. Refresh before submitting this graph edit.");
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const transaction = await new FileGraphAuthoringStore(getLoopgraphRoot(projectRoot)).submit({
+    workspaceId: process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "local",
+    companyId: process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim() || "local",
+    actorId: "loopgraph-ui",
+    expectedTopologyHash: topologyHash,
+    operations
+  });
+  revalidatePath("/brain");
+  return { id: transaction.id, status: transaction.status };
 }
 
 async function resolveFixturePath(input: {

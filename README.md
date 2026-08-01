@@ -96,14 +96,14 @@ git clone https://github.com/mrrkrieg/loopgraph.git
 cd loopgraph
 npm ci --no-audit
 npm run audit:prod
-npm run loopgraph -- hermes setup --project .
+npm run loopgraph -- hermes setup --project . --activate
 ```
 
 Use `npm run loopgraph --` from a repository clone. The same commands work as `loopgraph ...` once you are using a published package that includes the Hermes commands.
 
 `npm install` runs npm's full audit, including local lint/build tooling. For the live-credential safety gate, use `npm run audit:prod`; it checks the packages that ship into production use.
 
-The setup command initializes the local workspace, writes the project-local Hermes skill/MCP files, runs doctor checks, and prints the exact next actions.
+The setup command initializes an empty local workspace, writes the project-local Hermes skill/MCP files, registers all three scoped MCP servers, installs the Loopgraph Hermes skill from GitHub, and runs doctor checks. It is the one-command activation path after cloning. If the installed Hermes build cannot apply one of those commands, setup fails with the exact manual recovery command instead of claiming activation succeeded.
 
 ```text
 .loopgraph/hermes/mcp.loopgraph.yaml
@@ -111,7 +111,20 @@ The setup command initializes the local workspace, writes the project-local Herm
 ~/.hermes/config.yaml
 ```
 
-Merge the generated MCP snippet into your Hermes config and make sure Hermes can load the generated skills directory. The setup output shows both paths. Loopgraph does **not** copy provider credentials, webhook secrets, or OAuth tokens into `.loopgraph/`.
+Loopgraph does **not** copy provider credentials, webhook secrets, or OAuth tokens into `.loopgraph/`.
+
+To inspect or prepare one of the 13 built-in Hermes connector contracts:
+
+```bash
+npm run loopgraph -- hermes providers list
+npm run loopgraph -- hermes providers prepare \
+  --provider hubspot \
+  --workspace workspace_acme \
+  --company company_acme \
+  --redirect-uri https://hermes.example/oauth/callback
+```
+
+HubSpot, Google Ads, Slack, Notion, Salesforce, Stripe, GitHub, Zendesk, Intercom, Workday, Greenhouse, NetSuite, and QuickBooks have explicit authorization, event-subscription, signature, and normalization contracts. Hermes can access the same catalog through `loopgraph_provider_catalog_get`, prepare consent with `loopgraph_provider_install_prepare`, and transform a verified delivery with `loopgraph_provider_event_normalize`. One-time OAuth state and PKCE material are redacted unless Hermes explicitly requests them for immediate secret-store capture.
 
 ### 2. Ask Hermes to design the first department
 
@@ -127,7 +140,7 @@ Hermes should immediately show the department catalog, suggest starting with Pro
 npm run loopgraph -- studio --project . --start
 ```
 
-Open the printed local URL. A new local workspace will be intentionally sparse: only loops you create through Hermes or the browser appear. You can inspect each accepted loop's connection checklist, routing receipt, readiness, generated fixtures, recent runs, reviews, and cases from the graph.
+Open the printed local URL. A new local workspace will be intentionally sparse: only loops you create through Hermes or the browser appear. You can inspect each accepted loop's connection checklist, routing receipt, readiness, generated fixtures, recent runs, reviews, and cases from the graph. In a local workspace, choose **Edit graph** to move nodes, propose a department/loop node, or propose a connection. Position changes are saved as layout transactions; semantic additions remain governed proposals until they pass design, approval, readiness, and promotion checks.
 
 ### 4. Plan and rehearse Hermes event routes
 
@@ -569,7 +582,9 @@ Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer.
 
 ## Project status
 
-Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. The Operate workspace exposes opportunities, graph change review, controller decisions, learning evidence, and net value as project-local views. Exact metric bindings, leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Hosted Hermes delivery uses durable outbound dispatch and inbound callback queues with atomic acceptance, leased workers, retry, and dead-letter handling. Discovery sessions, evidence gaps, bounded contexts, design runs, proposals, immutable active LoopSpec versions, opportunities, proposed graph changes, and controller triggers/runs are tenant-scoped and replica-safe. Semantic graph snapshots/approvals/transactions/promotions, measurements, outcomes, and value records remain the next distributed persistence boundary; hosted automatic graph mutation is disabled until that graph boundary is complete. Semantic changes are content-bound, atomic, and reversible; provider API clients, OAuth, and live webhook subscription application remain Hermes-owned integration steps, and live external writes remain experimental.
+Loopgraph is in active early development. The local Hermes discovery → design → governed graph transaction → visualize → route → durable worker → scheduled measurement → outcome/controller flow is implemented and covered by regression tests. The Operate workspace exposes opportunities, graph change review, controller decisions, learning evidence, and net value as project-local views. Exact metric bindings, atomically leased provider-read jobs, connector/route reconciliation, baseline/outcome evaluation, and a net-value ledger distinguish observed, modeled, and incomplete evidence without inventing local value. Hosted Hermes delivery uses durable outbound dispatch and inbound callback queues with atomic acceptance, leased workers, retry, and dead-letter handling. Discovery/design artifacts, immutable active LoopSpec versions, opportunities, semantic graph transactions, canonical entity aliases, measurements, outcomes, value records, and controller state have tenant-scoped persistence boundaries. The fallback designer scores the full 51-loop department library while preserving abstention when evidence is insufficient.
+
+The repository now supplies executable onboarding and normalization contracts; real provider app registration, tenant consent, webhook-subscription API calls, and secrets still execute in Hermes and require the operator's provider credentials. Production gates, SLO/alert contracts, independent audit-drain tooling, and destructive restore rehearsals are included, but a repository cannot truthfully claim that an organization's deployment, alert receiver, backup target, or provider account has been validated until those gates run in that environment. Likewise, value remains `unproven` until observed outcomes include connector operations, review, supervision, and organizational-change cost; Loopgraph never turns modeled savings into customer proof.
 
 The safest supported path today is **design locally, materialize, rehearse routing, run the worker in shadow/simulate mode, and review the resulting trace**.
 
@@ -586,6 +601,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Distributed Hermes routing store](docs/DISTRIBUTED-ROUTING-STORE.md) — shared routing evidence, PostgreSQL claims, lease fencing, and hosted queue metrics
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md) — source-qualified measurements, business outcomes, and net value after operating cost
 - [Hermes connector measurements](docs/CONNECTOR-MEASUREMENTS.md) — exact provider bindings, scheduled jobs, evidence collection, and reconciliation
+- [Hermes provider onboarding](docs/HERMES-PROVIDER-ONBOARDING.md) — OAuth/app contracts, subscriptions, normalization, and secret boundaries
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md) — durable evidence-to-design cycles with strict automatic-shadow policy receipts
 - [Semantic graph transactions](docs/SEMANTIC-GRAPH-TRANSACTIONS.md) — exact approvals, atomic add/update/split/merge/retire changes, promotion, lifecycle, and rollback
 - [Promotion rehearsal](docs/PROMOTION-REHEARSAL.md) — automatic simulation, routing, ambiguity, regression, policy, and evidence gates before promotion
@@ -602,6 +618,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Versioned LoopSpec registry](docs/VERSIONED-LOOPSPEC-REGISTRY.md) — atomic Hermes materialization, immutable versions, active routing state, and hosted readers
 - [Machine request guards](docs/MACHINE-REQUEST-GUARDS.md) — scoped worker identities, replay protection, durable rate windows, and schedule authentication
 - [Operational audit and observability](docs/OPERATIONAL-AUDIT-OBSERVABILITY.md) — tamper-evident machine decisions, readiness, protected metrics, and administrator export
+- [Production operations](docs/PRODUCTION-OPERATIONS.md) — staging promotion, SLOs, restore rehearsal, and independent audit retention
 
 ## Contributing
 
