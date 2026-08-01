@@ -1,5 +1,6 @@
 const MACHINE_ROUTE_PREFIXES = [
   "/api/controller",
+  "/api/connector-broker/",
   "/api/cron/",
   "/api/graph/transactions",
   "/api/measurements",

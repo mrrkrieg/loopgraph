@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { credentialReferenceSchema } from "./credential-reference";
 
 export const PROVIDER_ONBOARDING_SCHEMA_VERSION = "provider-onboarding/v1alpha1" as const;
 export const PROVIDER_INSTALLATION_SCHEMA_VERSION = "provider-installation/v1alpha1" as const;
@@ -63,8 +64,8 @@ export const providerInstallationSchema = z.object({
   providerId: providerIdSchema,
   workspaceId: z.string().min(1),
   companyId: z.string().min(1),
-  status: z.enum(["prepared", "awaiting_consent", "connected", "subscription_pending", "active", "failed", "revoked"]),
-  credentialRef: z.string().regex(/^(hermes|vault|keychain|env-ref):\/\//),
+  status: z.enum(["prepared", "awaiting_consent", "connected", "subscription_pending", "active", "degraded", "rotating", "revoking", "failed", "revoked", "disconnected"]),
+  credentialRef: credentialReferenceSchema,
   redirectUri: z.string().url().optional(),
   stateHash: z.string().min(16).optional(),
   grantedScopes: z.array(z.string().min(1)).default([]),

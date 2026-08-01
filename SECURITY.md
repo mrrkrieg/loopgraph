@@ -17,8 +17,9 @@ Include:
 
 - `loopgraph hermes setup --project .` writes only project-local files under `.loopgraph/`.
 - Generated Hermes MCP config contains local command paths, tool names, protocol versions, and skill directories only.
-- Provider webhooks should terminate at Hermes, not directly at Loopgraph workflow routes.
-- OAuth tokens, API keys, webhook signing secrets, and raw provider payloads must stay in Hermes or an approved credential store.
+- Provider webhooks terminate at the Hermes Connector Broker, which verifies the provider raw-body signature and replay identity before forwarding a normalized, attested event to Hermes.
+- OAuth tokens, API keys, webhook signing secrets, and OAuth PKCE material are written directly by the broker to AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, HashiCorp Vault, or local Keychain. Loopgraph stores opaque references only.
+- Production machine APIs prefer issuer/JWKS-verified workload identity. Static worker bearer credentials are disabled in production unless the explicit temporary compatibility flag is enabled.
 - New loops start in shadow/simulation mode.
 - Live external writes require connected capabilities, policy approval, and fingerprint-bound prepared actions.
 - Sensitive departments should stay in shadow mode unless explicit expert approval is configured.
@@ -71,6 +72,10 @@ shared multi-customer filesystem worker is not a supported production topology. 
 Hosted worker, scheduler, signed Hermes callback, and signed provider-forwarding endpoints also
 require the scoped identity, replay, body, and durable rate controls in
 [Machine request guards](docs/MACHINE-REQUEST-GUARDS.md).
+
+The enterprise connector trust boundary, capability protocol, vault adapters, OAuth workers,
+signature/replay verification, revocation controls, and audited administration flow are described in
+[Enterprise Connector Broker security](docs/ENTERPRISE-CONNECTOR-SECURITY.md).
 
 Accepted and denied hosted machine decisions are appended to a tenant/project hash chain. Public
 health checks expose status only, while detailed metrics and audit exports require separate

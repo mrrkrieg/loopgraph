@@ -15,7 +15,6 @@ export type OperationalLogInput = {
   metadata?: Record<string, unknown>;
 };
 
-const SENSITIVE_KEY = /authorization|cookie|credential|password|payload|secret|signature|token/i;
 const LOG_EVENT_PATTERN = /^[a-z0-9][a-z0-9_.-]{2,127}$/;
 
 export function emitOperationalLog(input: OperationalLogInput): void {
@@ -51,8 +50,9 @@ export function sanitizeMetadata(
   metadata: Record<string, unknown>
 ): Record<string, string | number | boolean | null> {
   const result: Record<string, string | number | boolean | null> = {};
-  for (const [key, value] of Object.entries(metadata)
-    .filter(([candidate]) => !SENSITIVE_KEY.test(candidate))
+  const sanitized = redactSensitive(metadata);
+  for (const [key, value] of Object.entries(sanitized)
+    .filter(([, value]) => value !== "[REDACTED]")
     .slice(0, 32)) {
     if (
       value === null ||
@@ -68,5 +68,6 @@ export function sanitizeMetadata(
 }
 
 function bounded(value: string, length = 256): string {
-  return value.replace(/[\r\n\t]/g, " ").slice(0, length);
+  return redactSensitiveString(value).slice(0, length);
 }
+import { redactSensitive, redactSensitiveString } from "@/lib/loopgraph-runtime/secret-redaction";

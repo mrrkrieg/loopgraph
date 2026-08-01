@@ -986,10 +986,12 @@ hermesProviders
   .requiredOption("--workspace <id>", "Workspace ID")
   .requiredOption("--company <id>", "Company ID")
   .option("--redirect-uri <url>", "Hermes OAuth callback URL")
-  .option("--include-one-time", "Include one-time state/PKCE material for immediate Hermes consumption")
-  .action((options: { provider: string; workspace: string; company: string; redirectUri?: string; includeOneTime?: boolean }) => {
+  .action((options: { provider: string; workspace: string; company: string; redirectUri?: string }) => {
     const result = prepareProviderInstallation({ providerId: providerIdSchema.parse(options.provider), workspaceId: options.workspace, companyId: options.company, redirectUri: options.redirectUri });
-    console.log(JSON.stringify(options.includeOneTime ? result : { ...result, oneTime: "redacted; rerun from Hermes with --include-one-time" }, null, 2));
+    console.log(JSON.stringify({
+      ...result,
+      nextAction: "Open consent through the broker OAuth start endpoint."
+    }, null, 2));
   });
 
 hermesProviders

@@ -1,10 +1,10 @@
 # Hermes provider onboarding
 
-Hermes owns authorization, signing secrets, webhook/stream lifecycle, and provider execution. Loopgraph owns the versioned non-secret contract, normalized event boundary, canonical entity mapping, routing validation, and durable evidence.
+The Hermes Connector Broker owns authorization, signing secrets, webhook/stream verification, and capability-scoped provider execution. Hermes owns semantic routing and loop execution. Loopgraph owns the versioned non-secret contract, normalized event boundary, canonical entity mapping, routing validation, and durable evidence.
 
 ## Supported contracts
 
-| Provider | Authorization | Intake owned by Hermes |
+| Provider | Authorization | Broker intake feeding Hermes |
 | --- | --- | --- |
 | HubSpot | OAuth 2.0 + PKCE | Webhook API subscriptions |
 | Google Ads | OAuth 2.0 + PKCE | Scheduled anomaly detector |
@@ -25,13 +25,15 @@ The executable source of truth is `PROVIDER_ONBOARDING_CATALOG`; the matching sy
 ## Hermes flow
 
 1. Call `loopgraph_provider_catalog_get` and choose a profile.
-2. Call `loopgraph_provider_install_prepare`. The default response redacts the OAuth state and PKCE verifier.
-3. When Hermes is ready to persist them immediately in its secret store, repeat with `includeOneTime: true`, open the authorization URL, and exchange the callback code inside Hermes.
-4. Store the token under the returned opaque `credentialRef`; never submit it to Loopgraph.
-5. Apply the declared subscription API, event stream, provider-console route, or scheduled detector in Hermes.
-6. Verify the provider signature before calling `loopgraph_provider_event_normalize`.
-7. Submit the normalized `EventEnvelope` to the isolated webhook-router MCP surface.
-8. Register only non-secret connection metadata and health receipts with Loopgraph.
+2. Call `loopgraph_provider_install_prepare` for a non-secret plan, or open **Settings → Integrations** to start live consent.
+3. The broker generates OAuth state and PKCE, writes one-time material directly to the configured tenant vault, and returns only the provider authorization URL.
+4. The broker consumes the callback once, exchanges the code at the catalog's fixed token endpoint, and writes the token bundle under the opaque `credentialRef`.
+5. Apply the declared subscription API, event stream, provider-console route, or scheduled detector through a capability-scoped broker operation.
+6. Send provider webhooks to `/api/connector-broker/v1/webhooks/{installationId}`. The installation selects the verifier; provider identity is never trusted from the webhook body or URL. The broker verifies the raw body, timestamp, and replay identity before normalization.
+7. The broker sends the verified normalized `EventEnvelope` to Hermes using workload identity; Hermes decides which eligible loop should handle it.
+8. Register only non-secret consent, scope, capability, health, and audit receipts with Loopgraph.
+9. In **Settings → Integrations**, register the Hermes workload principal and grant only the exact
+   provider capability and connection it needs. Use the hierarchical kill-switch panel for incident containment.
 
 Provider application registration, admin consent, callback-domain verification, and live subscription calls require credentials in the operator's provider tenant. The repository provides the executable contract and tests; it cannot manufacture those external grants.
 

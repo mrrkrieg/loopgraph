@@ -34,7 +34,7 @@ Loopgraph gives Hermes a governed map of the company:
 - **Operate** live work in Hermes while Loopgraph records the event, problem, route, tasks, tool calls, approvals, outputs, and observed outcome.
 - **Trace and approve** what the loop observed, proposed, verified, escalated, and changed.
 
-> **One brain, many loops.** Every provider webhook terminates at Hermes—not at an individual workflow. Hermes understands the incoming business problem and proposes a route; Loopgraph decides whether that route is valid and safe to run.
+> **One brain, many loops.** Every provider webhook passes through the Hermes Connector Broker for raw-body signature and replay verification, then terminates at Hermes—not at an individual workflow. Hermes understands the incoming business problem and proposes a route; Loopgraph decides whether that route is valid and safe to run.
 
 Loopgraph includes a [prebuilt company loop library](docs/COMPANY-LOOP-LIBRARY.md) with routing-ready defaults and Hermes operating skills for Product, Marketing, Sales, Customer Success, Engineering, Operations / Finance, HR / Talent, Legal / Compliance, and Management. A new local workspace still starts empty: Hermes proposes the relevant defaults, and only loops you accept are created.
 
@@ -59,10 +59,12 @@ Hermes and Loopgraph deliberately do different jobs:
 |---|---|---|
 | **Receives** | Provider webhooks and business signals | Normalized events and bounded routing decisions |
 | **Decides** | What business problem the event represents and which loop may fit | Whether that loop exists, accepts the event, has enough evidence, is ready, and is allowed to run |
-| **Owns** | Webhook routes, provider secrets, event normalization, semantic routing, and live task/tool execution | LoopSpecs, routing contracts, deduplication, policy, local simulation, approval records, traces, and outcomes |
+| **Owns** | Semantic routing and live task/tool execution; receives only verified normalized provider events | LoopSpecs, routing contracts, deduplication, policy, local simulation, approval records, traces, and outcomes |
 | **When uncertain** | Proposes human/context review instead of guessing | Rejects invalid, stale, forged, duplicate, incompatible, or unsafe routes |
 
 This separation lets Hermes reason broadly without giving an unvalidated model decision direct authority over business systems.
+
+Provider credentials sit behind a separate [enterprise connector boundary](docs/ENTERPRISE-CONNECTOR-SECURITY.md): OAuth code exchange, refresh, webhook signing secrets, and provider calls run in the Hermes Connector Broker; AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, HashiCorp Vault, or local Keychain holds the secret material. Loopgraph and Hermes receive opaque references, capability receipts, and verified events—not tokens.
 
 ## From a conversation to a running loop
 
@@ -124,7 +126,15 @@ npm run loopgraph -- hermes providers prepare \
   --redirect-uri https://hermes.example/oauth/callback
 ```
 
-HubSpot, Google Ads, Slack, Notion, Salesforce, Stripe, GitHub, Zendesk, Intercom, Workday, Greenhouse, NetSuite, and QuickBooks have explicit authorization, event-subscription, signature, and normalization contracts. Hermes can access the same catalog through `loopgraph_provider_catalog_get`, prepare consent with `loopgraph_provider_install_prepare`, and transform a verified delivery with `loopgraph_provider_event_normalize`. One-time OAuth state and PKCE material are redacted unless Hermes explicitly requests them for immediate secret-store capture.
+HubSpot, Google Ads, Slack, Notion, Salesforce, Stripe, GitHub, Zendesk, Intercom, Workday, Greenhouse, NetSuite, and QuickBooks have explicit authorization, event-subscription, signature, and normalization contracts. Hermes can inspect the same catalog through `loopgraph_provider_catalog_get`. The prepare command returns a non-secret plan only. Live consent starts in **Settings → Integrations**, and one-time OAuth state/PKCE material is written directly by the Connector Broker to the configured vault; it is never printed or returned through an MCP tool.
+
+For an enterprise deployment, configure workload identity and a customer-owned vault, apply the connector migration, then use the audited administration page:
+
+```text
+/settings/integrations
+```
+
+Admins can review scopes and capabilities, check provider health through a fixed operation, rotate credentials, manage short-lived Hermes workload identities and exact grants, activate hierarchical kill switches, block access immediately, queue provider/vault revocation, and delete revoked metadata while retaining the immutable audit chain.
 
 ### 2. Ask Hermes to design the first department
 

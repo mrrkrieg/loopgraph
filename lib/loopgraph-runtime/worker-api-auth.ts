@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { isHostedAuthRequired, getHostedOrganizationId } from "@/lib/auth/hosted-config";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
 import { emitOperationalLog } from "@/lib/observability/operational-log";
+import { WorkloadIdentityError, WorkloadIdentityVerifier, type VerifiedWorkloadIdentity } from "@/lib/loopgraph-runtime/workload-identity";
 
 const WORKER_API_TOKEN_ENV = "LOOPGRAPH_WORKER_API_TOKEN";
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/;
@@ -23,9 +24,15 @@ export type MachineCapability =
   | "measurements.collect"
   | "observability.read"
   | "provider.github_forward"
+  | "provider.connector_broker"
+  | "provider.oauth_worker"
+  | "provider.revocation_worker"
   | "routing.jobs"
   | "routing.worker"
   | "schedule.controller"
+  | "schedule.connector_oauth"
+  | "schedule.connector_revocations"
+  | "schedule.connector_webhooks"
   | "schedule.hermes_design"
   | "schedule.hermes_callbacks"
   | "schedule.management"
@@ -114,19 +121,64 @@ export async function authorizeBearerApiRequest(
         rateLimit: positiveInteger(process.env.LOOPGRAPH_WORKER_RATE_LIMIT_PER_MINUTE, 120)
       }
     : optionsOrEnvironmentVariable;
+  const authorization = request.headers.get("authorization");
+  const suppliedToken = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : "";
+  let workloadCredentialId: string | undefined;
+  let workloadIdentity: VerifiedWorkloadIdentity | undefined;
+  let workloadVerifier: WorkloadIdentityVerifier | undefined;
+  try {
+    workloadVerifier = WorkloadIdentityVerifier.fromEnvironment();
+  } catch {
+    return unavailable("LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS is invalid.");
+  }
+  if (workloadVerifier) {
+    try {
+      const identity = await workloadVerifier.verifyBearer(suppliedToken, {
+        capability: options.capability,
+        organizationId: getHostedOrganizationId(),
+        projectKey: isHostedAuthRequired()
+          ? process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default"
+          : undefined
+      });
+      workloadCredentialId = identity.credentialId;
+      workloadIdentity = identity;
+    } catch (error) {
+      const reason = error instanceof WorkloadIdentityError ? error.code : "identity_verification_failed";
+      emitOperationalLog({
+        level: "warn",
+        event: "machine.request.denied",
+        outcome: "denied",
+        capability: options.capability,
+        reason
+      });
+      return NextResponse.json({ error: "Workload identity is not authorized" }, {
+        status: 401,
+        headers: { "cache-control": "no-store", "www-authenticate": "Bearer" }
+      });
+    }
+  }
+
   const configuredToken = process.env[options.environmentVariable];
+  if (!workloadVerifier && process.env.NODE_ENV === "production" && process.env.LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS !== "true") {
+    return unavailable(
+      "Production machine APIs require LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS. " +
+      "Static bearer credentials are disabled unless the temporary LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true compatibility flag is set."
+    );
+  }
   if (!configuredToken) {
+    if (workloadVerifier && workloadCredentialId) {
+      if (!isHostedAuthRequired()) return null;
+      return authorizeHostedMachineRequest(request, options, workloadCredentialId, workloadIdentity);
+    }
     return unavailable(
       `${options.environmentVariable} must be configured before the ` +
       `${options.capability} machine API can be used.`
     );
   }
 
-  const authorization = request.headers.get("authorization");
-  const suppliedToken = authorization?.startsWith("Bearer ")
-    ? authorization.slice("Bearer ".length)
-    : "";
-  if (!constantTimeTokenEqual(suppliedToken, configuredToken)) {
+  if (!workloadVerifier && !constantTimeTokenEqual(suppliedToken, configuredToken)) {
     emitOperationalLog({
       level: "warn",
       event: "machine.request.denied",
@@ -144,16 +196,18 @@ export async function authorizeBearerApiRequest(
   }
 
   if (!isHostedAuthRequired()) return null;
-  return authorizeHostedMachineRequest(request, options);
+  return authorizeHostedMachineRequest(request, options, workloadCredentialId, workloadIdentity);
 }
 
 async function authorizeHostedMachineRequest(
   request: Request,
-  options: GuardOptions
+  options: GuardOptions,
+  workloadCredentialId?: string,
+  workloadIdentity?: VerifiedWorkloadIdentity
 ): Promise<NextResponse | null> {
   const organizationId = getHostedOrganizationId();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
-  const configuredCredentialId =
+  const configuredCredentialId = workloadCredentialId ??
     process.env[options.credentialEnvironmentVariable]?.trim();
   if (!organizationId || !configuredCredentialId) {
     return unavailable(
@@ -170,7 +224,7 @@ async function authorizeHostedMachineRequest(
 
   const platformCron = options.capability.startsWith("schedule.") &&
     Boolean(request.headers.get("x-vercel-id"));
-  const suppliedCredentialId = request.headers.get("x-loopgraph-credential-id") ??
+  const suppliedCredentialId = workloadCredentialId ?? request.headers.get("x-loopgraph-credential-id") ??
     (platformCron ? configuredCredentialId : null);
   if (
     !suppliedCredentialId ||
@@ -289,6 +343,16 @@ async function authorizeHostedMachineRequest(
     }
     throw error;
   }
+  if (workloadIdentity && shouldRequireDurableWorkloadGrant(options.capability)) {
+    const grantDenied = await authorizeDurableWorkloadGrant({
+      request,
+      identity: workloadIdentity,
+      organizationId,
+      projectKey,
+      broadCapability: options.capability
+    });
+    if (grantDenied) return grantDenied;
+  }
   return recordHostedMachineRequest({
     organizationId,
     projectKey,
@@ -299,6 +363,81 @@ async function authorizeHostedMachineRequest(
     requestedAt: new Date(timestamp).toISOString(),
     rateLimit: options.rateLimit
   });
+}
+
+async function authorizeDurableWorkloadGrant(input: {
+  request: Request;
+  identity: VerifiedWorkloadIdentity;
+  organizationId: string;
+  projectKey: string;
+  broadCapability: MachineCapability;
+}) {
+  const supabase = createSupabaseAdminClient();
+  if (!supabase) return unavailable("Durable workload grant storage is unavailable.");
+  const requestedCapability = input.request.headers.get("x-loopgraph-provider-capability") ?? input.broadCapability;
+  const connectionId = input.request.headers.get("x-loopgraph-connection-id");
+  const environment = input.identity.environment ?? process.env.LOOPGRAPH_DEPLOYMENT_ENVIRONMENT?.trim();
+  const audience = input.identity.audience.find((value) => value === process.env.LOOPGRAPH_CONNECTOR_BROKER_AUDIENCE) ?? input.identity.audience[0];
+  if (!environment || !["development", "staging", "production"].includes(environment) || !audience) {
+    return NextResponse.json({ error: "Workload identity is missing a bound environment or audience" }, {
+      status: 403,
+      headers: { "cache-control": "no-store" }
+    });
+  }
+  const tokenIdHash = input.identity.tokenId
+    ? createHash("sha256")
+        .update(input.identity.tokenId)
+        .update("|")
+        .update(input.request.headers.get("x-loopgraph-request-id") ?? "")
+        .digest("hex")
+    : null;
+  const confirmationKey = verifySenderBinding(input.request, input.identity.confirmationKey);
+  if (confirmationKey instanceof NextResponse) return confirmationKey;
+  const { data, error } = await supabase.rpc("authorize_connector_workload", {
+    p_organization_id: input.organizationId,
+    p_project_key: input.projectKey,
+    p_credential_id: input.identity.credentialId,
+    p_issuer: input.identity.issuer,
+    p_subject: input.identity.subject,
+    p_audience: audience,
+    p_environment: environment,
+    p_capability: requestedCapability,
+    p_connection_id: connectionId,
+    p_token_id_hash: tokenIdHash,
+    p_confirmation_key_thumbprint: confirmationKey,
+    p_now: new Date().toISOString()
+  });
+  if (error) return unavailable("Durable workload authorization is unavailable.");
+  const result = Array.isArray(data) ? data[0] : data;
+  if (result?.authorized === true) return null;
+  return NextResponse.json({ error: typeof result?.reason === "string" ? result.reason : "workload_capability_not_granted" }, {
+    status: 403,
+    headers: { "cache-control": "no-store" }
+  });
+}
+
+function verifySenderBinding(request: Request, expected?: string): string | null | NextResponse {
+  if (!expected) return null;
+  if (process.env.LOOPGRAPH_TRUSTED_MTLS_PROXY !== "true") {
+    return NextResponse.json({ error: "Sender-bound workload identity requires a trusted mTLS gateway" }, {
+      status: 503,
+      headers: { "cache-control": "no-store" }
+    });
+  }
+  const verified = request.headers.get("x-loopgraph-mtls-verified") === "true";
+  const supplied = request.headers.get("x-loopgraph-client-certificate-sha256")?.toLowerCase() ?? "";
+  if (!verified || !/^[a-f0-9]{64}$/.test(supplied) || !constantTimeTokenEqual(supplied, expected.toLowerCase())) {
+    return NextResponse.json({ error: "Workload sender binding is invalid" }, {
+      status: 401,
+      headers: { "cache-control": "no-store" }
+    });
+  }
+  return supplied;
+}
+
+function shouldRequireDurableWorkloadGrant(capability: MachineCapability) {
+  if (!capability.startsWith("provider.")) return false;
+  return process.env.NODE_ENV === "production" || process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS === "true";
 }
 
 export async function authorizeVerifiedHostedMachineRequest(

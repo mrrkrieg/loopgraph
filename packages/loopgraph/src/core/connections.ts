@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DepartmentTypeSchema } from "./department-skills";
+import { credentialReferenceSchema } from "./credential-reference";
 
 export const CONNECTION_PLAN_SCHEMA_VERSION = "connection-plan/v1alpha1" as const;
 export const CONNECTOR_MANIFEST_SCHEMA_VERSION = "connector-manifest/v1alpha1" as const;
@@ -13,13 +14,7 @@ export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hma
 export const connectorCapabilityDirectionSchema = z.enum(["read", "event", "draft_write", "approved_write"]);
 export const connectorRiskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
 export const connectionEnvironmentSchema = z.enum(["simulate", "sandbox", "live"]);
-export const credentialReferenceSchema = z.string()
-  .min(1)
-  .max(512)
-  .regex(
-    /^(?:hermes|keychain|vault|env-ref):\/\/[A-Za-z0-9][A-Za-z0-9._~:/-]*$/,
-    "credentialRef must be an opaque hermes://, keychain://, vault://, or env-ref:// reference"
-  );
+export { credentialReferenceSchema };
 export const connectorCategorySchema = z.enum([
   "ads",
   "analytics",

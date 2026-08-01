@@ -14,6 +14,11 @@ export type HostedOrganizationRole = (typeof hostedOrganizationRoles)[number];
 export const hostedPermissions = [
   "workspace.read",
   "audit.read",
+  "integrations.read",
+  "integrations.manage",
+  "credentials.rotate",
+  "credentials.revoke",
+  "workload_identities.manage",
   "loops.write",
   "runs.write",
   "reviews.write",
@@ -24,11 +29,16 @@ export const hostedPermissions = [
 export type HostedPermission = (typeof hostedPermissions)[number];
 
 const ROLE_PERMISSIONS: Record<HostedOrganizationRole, ReadonlySet<HostedPermission>> = {
-  viewer: new Set(["workspace.read"]),
-  operator: new Set(["workspace.read", "loops.write", "runs.write", "reviews.write"]),
+  viewer: new Set(["workspace.read", "integrations.read"]),
+  operator: new Set(["workspace.read", "integrations.read", "loops.write", "runs.write", "reviews.write"]),
   admin: new Set([
     "workspace.read",
     "audit.read",
+    "integrations.read",
+    "integrations.manage",
+    "credentials.rotate",
+    "credentials.revoke",
+    "workload_identities.manage",
     "loops.write",
     "runs.write",
     "reviews.write",
@@ -54,7 +64,7 @@ export type HostedIdentity = {
 
 export class HostedAccessError extends Error {
   readonly status: 401 | 403;
-  readonly code: "authentication_required" | "membership_required" | "permission_denied";
+  readonly code: "authentication_required" | "membership_required" | "permission_denied" | "step_up_required";
 
   constructor(
     code: HostedAccessError["code"],
@@ -65,6 +75,34 @@ export class HostedAccessError extends Error {
     this.name = "HostedAccessError";
     this.code = code;
     this.status = status;
+  }
+}
+
+export async function requireHostedStepUp(): Promise<void> {
+  if (!isHostedAuthRequired()) return;
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    throw new HostedAccessError("authentication_required", "Hosted authentication is not configured.", 401);
+  }
+  const { data, error } = await supabase.auth.getClaims();
+  const claims = data?.claims as Record<string, unknown> | undefined;
+  if (error || typeof claims?.sub !== "string") {
+    throw new HostedAccessError("authentication_required", "Sign in before changing connector credentials.", 401);
+  }
+  const aal = claims.aal;
+  const amr = Array.isArray(claims.amr) ? claims.amr : [];
+  const hasMfa = amr.some((entry) => {
+    if (typeof entry === "string") return ["mfa", "totp", "webauthn"].includes(entry);
+    if (!entry || typeof entry !== "object") return false;
+    const method = (entry as { method?: unknown }).method;
+    return typeof method === "string" && ["mfa", "totp", "webauthn"].includes(method);
+  });
+  if (aal !== "aal2" && !hasMfa) {
+    throw new HostedAccessError(
+      "step_up_required",
+      "Multi-factor step-up authentication is required for this credential operation.",
+      403
+    );
   }
 }
 
