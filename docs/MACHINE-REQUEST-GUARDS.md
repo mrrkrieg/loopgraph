@@ -11,16 +11,16 @@ or constrain request volume.
 Every non-platform hosted machine request provides:
 
 ```http
-Authorization: Bearer <capability secret>
-X-Loopgraph-Credential-Id: worker_primary
+Authorization: Bearer <short-lived workload JWT>
 X-Loopgraph-Organization-Id: 123e4567-e89b-12d3-a456-426614174000
 X-Loopgraph-Project-Key: main
 X-Loopgraph-Request-Id: request_01J...
 X-Loopgraph-Timestamp: 2026-07-30T15:00:00.000Z
 ```
 
-- The bearer secret is compared in constant time.
-- The credential ID must equal the server-side configured identity.
+- The JWT signature, issuer, audience, expiry/not-before/issued-at time, subject pattern, exact
+  capability, organization, and project are verified against `LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS`.
+- A non-secret credential ID is derived from issuer + subject.
 - Organization and project headers, when supplied, must equal the deployment binding.
 - Request IDs are unique per tenant/project/credential for 24 hours.
 - Timestamps must be within five minutes.
@@ -29,7 +29,9 @@ X-Loopgraph-Timestamp: 2026-07-30T15:00:00.000Z
 - Replays return `409`; rate limits return `429` with `Retry-After`.
 - Hosted requests fail closed if the service-role database guard is unavailable.
 
-Local development keeps the simpler exact bearer-token check and does not require Supabase.
+Local development may keep the simpler exact bearer-token check and does not require Supabase.
+Production static machine tokens fail closed unless the temporary
+`LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` compatibility flag is set.
 
 ## Capabilities
 
@@ -43,20 +45,23 @@ Requests are recorded under the narrow route capability:
 - `measurements.collect`
 - `observability.read`
 - `provider.github_forward`
+- `provider.connector_broker`
+- `provider.oauth_worker`
+- `provider.revocation_worker`
 - `schedule.controller`
+- `schedule.connector_oauth`
+- `schedule.connector_revocations`
 - `schedule.measurements`
 - `schedule.management`
 
-Worker and cron credentials remain separate. Deployments should use a different secret and
-credential ID for each class and rotate them through the hosting secrets manager.
+Workload issuers should mint a different short-lived subject/audience/capability set for each worker
+class. The issuer JSON is public verification policy; it does not contain private keys or tokens.
 
 ```dotenv
-LOOPGRAPH_WORKER_API_TOKEN=<long random secret>
-LOOPGRAPH_WORKER_CREDENTIAL_ID=worker_primary
+LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS=[{"issuer":"https://issuer.example","jwksUri":"https://issuer.example/.well-known/jwks.json","audiences":["loopgraph"],"allowedSubjectPatterns":["spiffe://company/*"],"capabilityClaim":"capabilities","organizationClaim":"organization_id","projectClaim":"project_key"}]
+LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE=/var/run/secrets/loopgraph/broker.jwt
 LOOPGRAPH_WORKER_RATE_LIMIT_PER_MINUTE=120
 
-CRON_SECRET=<different long random secret>
-LOOPGRAPH_CRON_CREDENTIAL_ID=cron_primary
 LOOPGRAPH_CRON_RATE_LIMIT_PER_MINUTE=20
 
 LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID=hermes_callback
@@ -65,8 +70,6 @@ LOOPGRAPH_HERMES_CALLBACK_RATE_LIMIT_PER_MINUTE=60
 LOOPGRAPH_GITHUB_WEBHOOK_CREDENTIAL_ID=github_forwarder
 LOOPGRAPH_GITHUB_WEBHOOK_RATE_LIMIT_PER_MINUTE=120
 
-LOOPGRAPH_OBSERVABILITY_API_TOKEN=<different read-only secret>
-LOOPGRAPH_OBSERVABILITY_CREDENTIAL_ID=metrics_primary
 LOOPGRAPH_OBSERVABILITY_RATE_LIMIT_PER_MINUTE=60
 ```
 
@@ -76,7 +79,9 @@ In hosted mode, the GitHub compatibility forwarder also requires `x-github-deliv
 
 ## Vercel schedules
 
-Vercel Cron supplies `Authorization: Bearer $CRON_SECRET`. For those scheduled calls, Loopgraph
+Vercel Cron currently supplies `Authorization: Bearer $CRON_SECRET`. Deployments using that platform
+adapter must temporarily set `LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` until the schedule invokes
+Loopgraph through a workload-identity gateway. For those scheduled calls, Loopgraph
 derives the durable request ID from Vercel's request identity and uses the configured cron
 credential ID. The controller schedule is registered every 15 minutes, measurement reconciliation
 hourly, and the management review weekly.

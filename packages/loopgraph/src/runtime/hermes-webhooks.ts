@@ -888,7 +888,7 @@ function routeIdentity(route: HermesRoutesManifestRoute): string {
 }
 
 function comparableRouteHash(route: HermesRoutesManifestRoute): string {
-  const { updatedAt: _updatedAt, ...comparable } = route;
+  const comparable = { ...route, updatedAt: undefined };
   return contentHash(comparable);
 }
 

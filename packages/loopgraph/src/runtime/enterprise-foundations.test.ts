@@ -19,10 +19,11 @@ describe("enterprise provider and department foundations", () => {
     }
   });
 
-  it("prepares OAuth state without placing a token in the installation receipt", () => {
+  it("prepares a non-secret broker handoff without generating OAuth material", () => {
     const plan = prepareProviderInstallation({ providerId: "hubspot", workspaceId: "workspace", companyId: "company", redirectUri: "https://hermes.example/oauth/callback", now: new Date("2026-07-31T00:00:00.000Z") });
-    expect(plan.authorizationUrl).toContain("state=");
-    expect(plan.oneTime.pkceVerifier).toBeTruthy();
+    expect(plan.authorizationUrl).toBeUndefined();
+    expect(plan).toMatchObject({ oneTimeRedacted: true, brokerStartEndpoint: "/api/connector-broker/v1/installations/start" });
+    expect(plan).not.toHaveProperty("oneTime");
     expect(JSON.stringify(providerInstallationSchema.parse(plan.installation))).not.toMatch(/access_token|refresh_token|client_secret/i);
   });
 

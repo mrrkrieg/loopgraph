@@ -10,7 +10,8 @@ export const primaryNav = [
   { href: "/operate", label: "Operate", description: "Improve and measure loops" },
   { href: "/management", label: "Management", description: "Operating review" },
   { href: "/loops", label: "Loops", description: "Loop definitions" },
-  { href: "/daily", label: "Daily", description: "Operating summary" }
+  { href: "/daily", label: "Daily", description: "Operating summary" },
+  { href: "/settings/integrations", label: "Integrations", description: "Provider access and consent" }
 ] as const;
 
 const previewNav = {

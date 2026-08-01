@@ -10,14 +10,16 @@ describe("primary navigation", () => {
       "Operate",
       "Management",
       "Loops",
-      "Daily"
+      "Daily",
+      "Integrations"
     ]);
     expect(primaryNav.map((item) => item.href)).toEqual([
       "/brain",
       "/operate",
       "/management",
       "/loops",
-      "/daily"
+      "/daily",
+      "/settings/integrations"
     ]);
   });
 

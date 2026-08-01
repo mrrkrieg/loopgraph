@@ -9,8 +9,9 @@ users, organizations, and machine workers must not share an implicit administrat
 - Browser pages and user-facing APIs require a verified session when
   `LOOPGRAPH_HOSTED_MODE=1` or the app is a production Vercel deployment with Supabase configured.
 - Mutating browser API requests must be same-origin.
-- Independently authenticated machine routes remain protected by their webhook signature,
-  callback signature, worker bearer token, or cron secret.
+- Independently authenticated machine routes verify signed workload identity against configured
+  issuer/JWKS/audience/capability policy. Legacy worker bearer tokens are a temporary, explicit
+  compatibility mode; provider webhooks use provider-specific raw-body verification and replay claims.
 - Organization access comes from `organization_memberships`, never editable user metadata.
 - Roles are monotonic: `viewer`, `operator`, `admin`, and `owner`.
 - Request-bound Design Studio reads and writes use the user's cookie-bound Supabase client.
@@ -34,10 +35,8 @@ LOOPGRAPH_HOSTED_MODE=1
 LOOPGRAPH_HOSTED_ORGANIZATION_ID=YOUR_ORGANIZATION_UUID
 LOOPGRAPH_HOSTED_RUNTIME_ROOT=/var/lib/loopgraph
 LOOPGRAPH_HOSTED_PROJECT_KEY=main
-CRON_SECRET=LONG_RANDOM_SECRET
-LOOPGRAPH_CRON_CREDENTIAL_ID=cron_primary
-LOOPGRAPH_WORKER_API_TOKEN=SEPARATE_LONG_RANDOM_TOKEN
-LOOPGRAPH_WORKER_CREDENTIAL_ID=worker_primary
+LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS=[{"issuer":"https://issuer.example","jwksUri":"https://issuer.example/.well-known/jwks.json","audiences":["loopgraph"],"allowedSubjectPatterns":["spiffe://company/*"],"capabilityClaim":"capabilities"}]
+LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=false
 LOOPGRAPH_HERMES_CALLBACK_SECRET=SEPARATE_LONG_RANDOM_SECRET
 LOOPGRAPH_HERMES_CALLBACK_CREDENTIAL_ID=hermes_callback
 GITHUB_WEBHOOK_SECRET=SEPARATE_LONG_RANDOM_SECRET
@@ -49,6 +48,10 @@ LOOPGRAPH_OBSERVABILITY_CREDENTIAL_ID=metrics_primary
 Never expose `SUPABASE_SERVICE_ROLE_KEY` through a `NEXT_PUBLIC_` variable or copy provider OAuth
 tokens into Loopgraph. Hermes or an approved secrets manager owns provider credentials; Loopgraph
 stores opaque references and evidence receipts.
+
+Provider access is managed through `/settings/integrations`. Admins can review consent and scopes,
+run a fixed health operation, rotate tokens, immediately block capabilities, queue provider/vault
+revocation, and delete revoked non-secret metadata. These actions append to the tenant audit chain.
 
 Configure the Supabase magic-link redirect URL:
 
@@ -75,6 +78,8 @@ Supabase's database linter and an integration test against the target project.
 | Design/update loops | No | Yes | Yes | Yes |
 | Start runs and submit reviews | No | Yes | Yes | Yes |
 | Export security audit | No | No | Yes | Yes |
+| View connector status | Yes | Yes | Yes | Yes |
+| Connect, rotate, revoke, or delete connectors | No | No | Yes | Yes |
 | Rename organization | No | No | Yes | Yes |
 | Manage members | No | No | Yes | Yes |
 | Delete organization | No | No | No | Yes |
@@ -87,12 +92,12 @@ Profile role fields are display-only. The authoritative role is the active membe
 `LOOPGRAPH_PREVIEW_CONTENT=1` may be used for an equivalent public demo. Never set that flag on a
 deployment connected to customer or company data.
 
-## Current production limitation
+## Production activation boundary
 
-The browser persistence boundary and the hosted routing store are tenant-aware. Routing state and
-route-job claims are database-backed, service-role-only, and scoped by organization/project, so
-multiple worker replicas can safely claim this queue. The worker token is still a deployment
-credential bound to one configured organization/project.
+The browser persistence boundary, hosted routing store, and connector control plane are tenant-aware.
+Routing state, connector installation metadata, single-use OAuth state, operation receipts, webhook
+replay claims, and revocation jobs are database-backed and scoped by organization/project. Provider
+credential contents remain outside this database.
 
 Hermes design tasks, outbound delivery, signed callback acceptance, callback-worker claims,
 discovery/evidence sessions, and immutable design contexts/runs/proposals are distributed.
@@ -102,9 +107,12 @@ workspace registry, and discovery completion also commit atomically through the 
 version registry. Opportunities, proposed graph changes, controller policies/checkpoints/runs,
 and controller triggers now use a tenant/project-scoped database boundary with atomic claims,
 UUID lease fencing, and a renewable controller lease. Graph snapshots, approvals, transactions,
-promotions, measurements, outcomes, and value records are not all distributed yet. Hosted
-automatic graph mutation therefore remains disabled, and those remaining subsystems must stay
-behind one active writer until their database migrations ship.
+promotions, measurements, outcomes, and value records also use the distributed tenant/project store.
+
+Production activation still requires organization-specific provider sandbox validation, backup and
+restore rehearsal, SLOs and alerts, revocation drills, audit export retention, and policy approval.
+The repository provides the enforcement paths, but cannot prove a customer's cloud IAM, provider
+application registration, or operational controls without running those deployment checks.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md) and
 [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md). The signed inbound delivery boundary

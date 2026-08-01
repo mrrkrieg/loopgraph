@@ -1,6 +1,7 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   PROVIDER_INSTALLATION_SCHEMA_VERSION,
+  buildCredentialNamespace,
   providerInstallationSchema,
   providerOnboardingProfileSchema,
   type ProviderId,
@@ -47,24 +48,23 @@ export function prepareProviderInstallation(input: {
   now?: Date;
 }) {
   const provider = getProviderOnboardingProfile(input.providerId);
-  const state = randomBytes(32).toString("base64url");
-  const verifier = provider.authorization.mode === "oauth2" && provider.authorization.pkce
-    ? randomBytes(48).toString("base64url")
-    : undefined;
-  const challenge = verifier
-    ? createHash("sha256").update(verifier).digest("base64url")
-    : undefined;
   const now = (input.now ?? new Date()).toISOString();
+  const installationId = `provider_${randomUUID()}`;
+  const credentialNamespace = buildCredentialNamespace({
+    organizationId: input.companyId,
+    projectKey: input.workspaceId,
+    providerId: input.providerId,
+    installationId
+  });
   const installation: ProviderInstallation = providerInstallationSchema.parse({
     schemaVersion: PROVIDER_INSTALLATION_SCHEMA_VERSION,
-    id: `provider_${randomUUID()}`,
+    id: installationId,
     providerId: input.providerId,
     workspaceId: input.workspaceId,
     companyId: input.companyId,
-    status: provider.authorization.mode === "admin_managed" ? "prepared" : "awaiting_consent",
-    credentialRef: input.credentialRef ?? `hermes://providers/${input.providerId}/${input.workspaceId}`,
+    status: "prepared",
+    credentialRef: input.credentialRef ?? `broker://${credentialNamespace}/tokens/provider`,
     redirectUri: input.redirectUri,
-    stateHash: createHash("sha256").update(state).digest("hex"),
     createdAt: now,
     updatedAt: now
   });
@@ -72,31 +72,15 @@ export function prepareProviderInstallation(input: {
     schemaVersion: "provider-install-plan/v1alpha1" as const,
     installation,
     provider,
-    authorizationUrl: buildAuthorizationUrl(provider, input.redirectUri, state, challenge),
-    oneTime: { state, pkceVerifier: verifier },
+    authorizationUrl: undefined,
+    oneTimeRedacted: true,
+    brokerStartEndpoint: "/api/connector-broker/v1/installations/start",
     hermesActions: [
-      "Store the one-time state and PKCE verifier in the Hermes secret store; never persist them in Loopgraph.",
-      "Complete provider consent, store the token under credentialRef, then apply the declared event subscription.",
+      "Ask the Hermes Connector Broker to start consent; it creates state and PKCE inside the vault boundary.",
+      "Complete provider consent; the broker stores the token under credentialRef and applies the declared event subscription.",
       "Send only the non-secret installation receipt and signed normalized EventEnvelopes to Loopgraph."
     ]
   };
-}
-
-function buildAuthorizationUrl(profile: ProviderOnboardingProfile, redirectUri: string | undefined, state: string, challenge?: string) {
-  if (profile.authorization.mode === "provider_app") return profile.authorization.installationUrl;
-  if (profile.authorization.mode === "admin_managed") return undefined;
-  if (!redirectUri) throw new Error(`${profile.label} OAuth onboarding requires redirectUri`);
-  const url = new URL(profile.authorization.authorizationUrl);
-  url.searchParams.set("redirect_uri", redirectUri);
-  url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", profile.authorization.scopes.join(" "));
-  url.searchParams.set("state", state);
-  if (challenge) {
-    url.searchParams.set("code_challenge", challenge);
-    url.searchParams.set("code_challenge_method", "S256");
-  }
-  for (const [key, value] of Object.entries(profile.authorization.extraAuthorizeParameters)) url.searchParams.set(key, value);
-  return url.toString();
 }
 
 function profile(providerId: ProviderId, label: string, systemClass: ProviderOnboardingProfile["systemClass"], authorization: Extract<ProviderOnboardingProfile["authorization"], { mode: "oauth2" }>, mode: ProviderOnboardingProfile["ingestion"]["mode"], eventFamilies: string[], transformerId: string, signatureStrategy: string, subscriptionApi?: string, pollCadenceMinutes?: number) {

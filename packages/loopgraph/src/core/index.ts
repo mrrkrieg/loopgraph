@@ -35,5 +35,7 @@ export * from "./readiness";
 export * from "./routing";
 export * from "./hermes-operations";
 export * from "./provider-onboarding";
+export * from "./credential-reference";
+export * from "./connector-broker";
 export * from "./entity-resolution";
 export * from "./graph-authoring";

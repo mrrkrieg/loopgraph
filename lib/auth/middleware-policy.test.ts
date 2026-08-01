@@ -12,6 +12,8 @@ describe("hosted middleware policy", () => {
     expect(isMachineAuthenticatedRoute("/api/cron/controller")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/webhooks/github")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/graph/transactions")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/connector-broker/v1/invocations")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/connector-broker/v1/oauth/callback")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/operations/metrics")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-tasks/task_1/callback")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-dispatch/worker")).toBe(true);

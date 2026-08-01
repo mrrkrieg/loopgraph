@@ -4,6 +4,7 @@ import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import { saveOrganizationAction, saveProfileAction } from "./actions";
 import { signOutAction } from "./sign-out-action";
+import Link from "next/link";
 
 export default async function SettingsPage() {
   const workspace = await getWorkspace();
@@ -57,6 +58,11 @@ export default async function SettingsPage() {
           </form>
         </SectionCard>
       </div>
+      <SectionCard className="mt-5" title="Enterprise provider access" description="Manage consent, least-privilege scopes, credential rotation, health, and emergency disconnects through the Hermes Connector Broker.">
+        <Link href="/settings/integrations" className="inline-flex rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white">
+          Open provider integrations
+        </Link>
+      </SectionCard>
       {hosted ? (
         <form action={signOutAction} className="mt-5">
           <button className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold" type="submit">
