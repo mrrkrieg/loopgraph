@@ -20,7 +20,8 @@ import {
   type DiscoveryAnswer,
   type LoopDesignContext,
   type LoopDesignProposal,
-  type LoopDesignProposalSet
+  type LoopDesignProposalSet,
+  type PrebuiltLoopDefinition
 } from "../core";
 import { getDiscoverySession } from "./discovery-session";
 import {
@@ -771,7 +772,83 @@ function prebuiltLoopName(templateId: string, departmentType: DepartmentType): s
 function proposalCandidates(context: LoopDesignContext): LoopDesignProposal[] {
   if (context.departmentType === "marketing") return marketingProposals(context);
   if (isSensitiveDepartment(context.departmentType)) return [sensitiveDepartmentProposal(context)];
-  return [genericDepartmentProposal(context)];
+  const candidates = PREBUILT_COMPANY_LOOPS
+    .filter((definition) => definition.departmentType === context.departmentType)
+    .map((definition) => ({ definition, score: scorePrebuiltCandidate(context, definition) }))
+    .sort((left, right) => right.score - left.score || right.definition.priority - left.definition.priority || left.definition.templateId.localeCompare(right.definition.templateId));
+  if (candidates.length === 0) return [genericDepartmentProposal(context)];
+  const highest = candidates[0]?.score ?? 0;
+  return candidates
+    .filter((candidate, index) => index === 0 || (candidate.score > 0 && candidate.score >= highest - 2))
+    .slice(0, 3)
+    .map(({ definition, score }) => prebuiltDepartmentProposal(context, definition, score));
+}
+
+function scorePrebuiltCandidate(context: LoopDesignContext, definition: PrebuiltLoopDefinition): number {
+  const corpus = context.confirmedAnswers
+    .map((answer) => JSON.stringify(answer.value))
+    .join(" ")
+    .toLowerCase();
+  const terms = uniqueStrings([
+    ...definition.problemTypes,
+    ...definition.eventTypes,
+    ...definition.subjectTypes,
+    ...definition.learningOutputs,
+    prebuiltLoopName(definition.templateId, definition.departmentType)
+  ])
+    .flatMap((value) => value.toLowerCase().split(/[^a-z0-9]+/))
+    .filter((value) => value.length >= 4);
+  return terms.reduce((score, term) => score + (corpus.includes(term) ? 1 : 0), 0) + (definition.priority >= 80 ? 1 : 0);
+}
+
+function prebuiltDepartmentProposal(context: LoopDesignContext, definition: PrebuiltLoopDefinition, score: number): LoopDesignProposal {
+  const base = genericDepartmentProposal(context);
+  const shortName = prebuiltLoopName(definition.templateId, definition.departmentType);
+  const sourcePatterns = uniqueStrings(definition.requiredConnections.map((connection) => connection.split(".")[0] || "provider"));
+  return loopDesignProposalSchema.parse({
+    ...base,
+    proposalId: `proposal_${definition.templateId.replace(/-/g, "_")}`,
+    loopSpecId: definition.templateId,
+    shortName,
+    goal: `Resolve ${definition.problemTypes.join(" or ")} and return ${definition.learningOutputs.join(", ")} as company evidence.`,
+    businessOutcome: `The ${formatDepartmentType(context.departmentType)} team gets an opinionated ${shortName} loop whose route, evidence, owner, and learning consumers are explicit.`,
+    reasoningSummary: `The deterministic fallback selected this prebuilt loop with evidence score ${score}. It uses exact event, subject, context, exclusion, and fan-out contracts instead of a generic department automation.`,
+    assumptions: [...base.assumptions, "Hermes may choose a different library candidate when high-reasoning context is available."],
+    alternativesConsidered: context.deterministicCandidates.filter((candidate) => candidate.id !== definition.templateId).slice(0, 3).map((candidate) => candidate.name),
+    trigger: { type: "event", description: `A signed ${definition.eventTypes.join(" or ")} event reaches Hermes.` },
+    workItem: `One ${definition.subjectTypes.join(" or ")} affected by ${definition.problemTypes.join(" or ")}.`,
+    observedSignals: definition.requiredContext,
+    routineSteps: [
+      step("observe", "Resolve event and company object", "system", "Normalize the provider event and resolve the affected canonical company object."),
+      step("assess", "Assemble route evidence", "agent", `Check ${definition.requiredContext.join(", ")} and all exclusion rules.`),
+      step("decide", "Choose or abstain", "agent", "Claim the problem only when this loop is uniquely eligible; otherwise ask a human."),
+      step("review", "Govern the proposed action", "human", "Review risky, customer-facing, financial, employment, legal, or production effects."),
+      step("learn", "Return outcome evidence", "system", `Publish ${definition.learningOutputs.join(", ")} to ${definition.learningConsumers.join(", ")}.`)
+    ],
+    connectorRequirements: definition.requiredConnections.map((capability) => ({ capability, reason: `Required to verify ${definition.templateId} routing and outcome evidence.`, requiredFor: "routing" as const })),
+    requiredFromUser: definition.requiredConnections.map((capability) => ({ type: "connection" as const, label: `Connect ${capability}`, reason: `Hermes needs this least-privilege capability before ${shortName} can leave shadow mode.` })),
+    topologyPreview: topologyPreview(formatDepartmentType(context.departmentType), shortName, definition.templateId, definition.requiredConnections),
+    routing: {
+      schemaVersion: "routing-contract/v1alpha1",
+      problemTypes: definition.problemTypes,
+      accepts: definition.eventTypes.map((eventType, index) => ({
+        sourcePattern: `${sourcePatterns[index % Math.max(sourcePatterns.length, 1)] ?? "*"}*`,
+        eventTypePattern: eventType,
+        subjectTypes: definition.subjectTypes,
+        requiredFields: definition.requiredContext,
+        reason: `Prebuilt route claim for ${definition.templateId}.`
+      })),
+      excludes: definition.exclusionRules.map((rule) => ({ sourcePattern: "*", eventTypePattern: rule.eventTypePattern, fields: rule.fields, reason: rule.reason })),
+      inputMapping: Object.fromEntries(definition.requiredContext.map((field, index) => [`context${index + 1}`, field])),
+      priority: definition.priority,
+      minimumConfidence: definition.minimumConfidence,
+      ambiguityPolicy: "request_human",
+      fanoutPolicy: definition.fanoutPolicy,
+      activationMode: "shadow",
+      requiredConnections: definition.requiredConnections,
+      examples: { shouldRoute: definition.shouldRouteExamples, shouldNotRoute: definition.shouldNotRouteExamples }
+    }
+  });
 }
 
 function isSensitiveDepartment(departmentType: DepartmentType): boolean {

@@ -5,7 +5,7 @@ import {
   type LoopgraphConnectionToolName,
   type LoopgraphMeasurementToolName
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../lib/loopgraph-runtime/storage-resolver";
+import { getActiveLoopgraphProjectRoot, getMeasurementStore } from "../../../lib/loopgraph-runtime/storage-resolver";
 import { authorizeWorkerApiRequest } from "../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
 
 async function callMeasurement(name: LoopgraphMeasurementToolName, input: Record<string, unknown>) {
   const projectRoot = getActiveLoopgraphProjectRoot();
-  return callLoopgraphMeasurementTool(name, { ...input, projectRoot }, { projectRoot });
+  return callLoopgraphMeasurementTool(name, { ...input, projectRoot }, { projectRoot, store: getMeasurementStore({ projectRoot }) });
 }
 
 async function callConnection(name: LoopgraphConnectionToolName, input: Record<string, unknown>) {

@@ -13,7 +13,7 @@ import {
   scheduleDueMeasurements,
   upsertMetricBinding
 } from "./measurement-service";
-import { FileMeasurementStore } from "./measurement-store";
+import { FileMeasurementStore, type MeasurementStore } from "./measurement-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const LOOPGRAPH_MEASUREMENT_TOOL_NAMES = [
@@ -33,6 +33,7 @@ export type LoopgraphMeasurementToolName = (typeof LOOPGRAPH_MEASUREMENT_TOOL_NA
 export type LoopgraphMeasurementToolRuntimeOptions = {
   projectRoot?: string;
   now?: Date;
+  store?: MeasurementStore;
 };
 
 const projectRootSchema = z.string().optional();
@@ -214,13 +215,13 @@ export async function callLoopgraphMeasurementTool(
         projectRoot: path.resolve(projectRoot ?? optionRoot),
         expectedRevision,
         now: options.now
-      })
+      }, { store: options.store })
     };
   }
 
   if (name === "loopgraph_metric_bindings_get") {
     const parsed = metricBindingsGetInputSchema.parse(input);
-    const store = measurementStore(parsed.projectRoot ?? optionRoot);
+    const store = options.store ?? measurementStore(parsed.projectRoot ?? optionRoot);
     if (parsed.bindingId) return { binding: await store.getMetricBinding(parsed.bindingId) };
     return { bindings: await store.listMetricBindings(parsed.loopId) };
   }
@@ -231,7 +232,7 @@ export async function callLoopgraphMeasurementTool(
       ...parsed,
       projectRoot: path.resolve(parsed.projectRoot ?? optionRoot),
       now: options.now
-    });
+    }, { store: options.store });
   }
 
   if (name === "loopgraph_measurement_jobs_claim") {
@@ -241,7 +242,7 @@ export async function callLoopgraphMeasurementTool(
         ...parsed,
         projectRoot: path.resolve(parsed.projectRoot ?? optionRoot),
         now: options.now
-      })
+      }, { store: options.store })
     };
   }
 
@@ -251,7 +252,7 @@ export async function callLoopgraphMeasurementTool(
       ...parsed,
       projectRoot: path.resolve(parsed.projectRoot ?? optionRoot),
       now: options.now
-    });
+    }, { store: options.store });
   }
 
   if (name === "loopgraph_measurement_jobs_fail") {
@@ -261,13 +262,13 @@ export async function callLoopgraphMeasurementTool(
         ...parsed,
         projectRoot: path.resolve(parsed.projectRoot ?? optionRoot),
         now: options.now
-      })
+      }, { store: options.store })
     };
   }
 
   if (name === "loopgraph_measurement_jobs_get") {
     const parsed = measurementJobsGetInputSchema.parse(input);
-    const store = measurementStore(parsed.projectRoot ?? optionRoot);
+    const store = options.store ?? measurementStore(parsed.projectRoot ?? optionRoot);
     if (parsed.jobId) return { job: await store.getMeasurementJob(parsed.jobId) };
     return {
       jobs: await store.listMeasurementJobs({
@@ -286,12 +287,12 @@ export async function callLoopgraphMeasurementTool(
       ...parsed,
       projectRoot: path.resolve(parsed.projectRoot ?? optionRoot),
       now: options.now
-    });
+    }, { store: options.store });
   }
 
   if (name === "loopgraph_connections_reconciliations_get") {
     const parsed = connectionReconciliationsGetInputSchema.parse(input);
-    const store = measurementStore(parsed.projectRoot ?? optionRoot);
+    const store = options.store ?? measurementStore(parsed.projectRoot ?? optionRoot);
     if (parsed.reportId) return { report: await store.getReconciliationReport(parsed.reportId) };
     return { reports: await store.listReconciliationReports() };
   }
@@ -299,6 +300,6 @@ export async function callLoopgraphMeasurementTool(
   throw new Error(`Unknown Loopgraph measurement tool: ${String(name)}`);
 }
 
-function measurementStore(projectRoot: string): FileMeasurementStore {
+function measurementStore(projectRoot: string): MeasurementStore {
   return new FileMeasurementStore(getLoopgraphRoot(path.resolve(projectRoot)));
 }

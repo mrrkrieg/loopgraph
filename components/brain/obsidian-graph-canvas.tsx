@@ -27,7 +27,10 @@ export function ObsidianGraphCanvas({
   onSelect,
   onOpenLocal,
   fitRequest,
-  resetRequest
+  resetRequest,
+  editable = false,
+  initialPositions = {},
+  onNodePositionChange
 }: {
   nodes: BrainGraphNode[];
   edges: BrainGraphEdge[];
@@ -40,6 +43,9 @@ export function ObsidianGraphCanvas({
   onOpenLocal: (nodeId: string) => void;
   fitRequest: number;
   resetRequest: number;
+  editable?: boolean;
+  initialPositions?: Record<string, { x: number; y: number }>;
+  onNodePositionChange?: (nodeId: string, x: number, y: number) => void;
 }) {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const fitViewRef = useRef<() => void>(() => undefined);
@@ -51,7 +57,7 @@ export function ObsidianGraphCanvas({
     edges,
     mode,
     centerId
-  });
+  }, initialPositions);
   const nodesById = useMemo(() => new Map(positionedNodes.map((node) => [node.id, node])), [positionedNodes]);
   const neighborIds = useMemo(() => {
     const activeId = hoveredId ?? selectedId;
@@ -162,6 +168,7 @@ export function ObsidianGraphCanvas({
 
   function handleNodePointerDown(event: React.PointerEvent<SVGGElement>, node: BrainGraphNode) {
     event.stopPropagation();
+    if (!editable) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = clientToGraph(event.clientX, event.clientY);
     setDragState({
@@ -190,6 +197,10 @@ export function ObsidianGraphCanvas({
 
   function handlePointerUp(event: React.PointerEvent<SVGSVGElement>) {
     if (dragState.kind !== "none" && dragState.pointerId === event.pointerId) {
+      if (dragState.kind === "node") {
+        const node = nodesById.get(dragState.nodeId);
+        if (node) onNodePositionChange?.(node.id, node.x, node.y);
+      }
       setDragState({ kind: "none" });
     }
   }

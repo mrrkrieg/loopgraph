@@ -20,7 +20,32 @@ export type MeasurementJobFilters = {
   dueBefore?: string;
 };
 
-export class FileMeasurementStore {
+export type MeasurementJobClaimInput = {
+  claimedBy: string;
+  limit: number;
+  leaseSeconds: number;
+  connectionInstanceId?: string;
+  now: Date;
+};
+
+export interface MeasurementStore {
+  readonly persistence?: "local" | "distributed";
+  listMetricBindings(loopId?: string): Promise<MetricBinding[]>;
+  getMetricBinding(bindingId: string): Promise<MetricBinding | undefined>;
+  saveMetricBinding(binding: MetricBinding, expectedRevision?: number): Promise<MetricBinding>;
+  saveMeasurementJob(job: MeasurementJob): Promise<MeasurementJob>;
+  saveClaimedMeasurementJob?(job: MeasurementJob, expectedLeaseTokenHash: string): Promise<MeasurementJob>;
+  getMeasurementJob(jobId: string): Promise<MeasurementJob | undefined>;
+  listMeasurementJobs(filters?: MeasurementJobFilters): Promise<MeasurementJob[]>;
+  claimDueJobs?(input: MeasurementJobClaimInput): Promise<Array<{ job: MeasurementJob; leaseToken: string }>>;
+  saveReconciliationReport(report: ConnectionReconciliationReport): Promise<ConnectionReconciliationReport>;
+  getReconciliationReport(reportId: string): Promise<ConnectionReconciliationReport | undefined>;
+  listReconciliationReports(): Promise<ConnectionReconciliationReport[]>;
+  withJobLock<T>(operation: () => Promise<T>): Promise<T>;
+}
+
+export class FileMeasurementStore implements MeasurementStore {
+  readonly persistence = "local" as const;
   constructor(private readonly loopgraphRoot = path.join(process.cwd(), ".loopgraph")) {}
 
   async listMetricBindings(loopId?: string): Promise<MetricBinding[]> {

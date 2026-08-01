@@ -406,7 +406,7 @@ describe("Hermes integration installer", () => {
       },
       commandUsage: {
         fromClone: {
-          setup: "npm run loopgraph -- hermes setup --project .",
+          setup: "npm run loopgraph -- hermes setup --project . --activate",
           doctor: "npm run loopgraph -- hermes doctor --project .",
           studio: "npm run loopgraph -- studio --project . --start",
           webhooksPlan: "npm run loopgraph -- hermes webhooks plan --project .",
@@ -415,7 +415,7 @@ describe("Hermes integration installer", () => {
           eventTest: "npm run loopgraph -- events test --project . --fixture <event.json> --require-synced-manifest"
         },
         fromInstalledPackage: {
-          setup: "loopgraph hermes setup --project ."
+          setup: "loopgraph hermes setup --project . --activate"
         },
         firstHermesPrompt: "start Loopgraph"
       },
@@ -432,6 +432,26 @@ describe("Hermes integration installer", () => {
     expect(result.safety).toContain("Provider webhooks should terminate at Hermes. Loopgraph receives normalized events through the Hermes event-router skill.");
     expect(JSON.stringify(result).toLowerCase()).not.toContain("api_key");
     expect(JSON.stringify(result).toLowerCase()).not.toContain("secret_value");
+  });
+
+  it("activates every scoped MCP server and the GitHub skill in one setup command", async () => {
+    const projectRoot = await temporaryProjectRoot();
+    const commands: Array<{ command: string; args: string[] }> = [];
+    const result = await setupHermesIntegration({
+      projectRoot,
+      cliEntryPath: path.join(projectRoot, "dist", "cli.js"),
+      nodeCommand: process.execPath,
+      hermesVersionCheck: async () => "hermes 1.0.0",
+      activate: true,
+      commandRunner: async (command, args) => { commands.push({ command, args }); }
+    });
+
+    expect(result.activation).toMatchObject({ applied: true });
+    expect(commands).toHaveLength(5);
+    expect(commands.filter((command) => command.args.slice(0, 2).join(" ") === "mcp add")).toHaveLength(3);
+    expect(commands).toContainEqual({ command: "hermes", args: ["skills", "tap", "add", "mrrkrieg/loopgraph"] });
+    expect(commands).toContainEqual({ command: "hermes", args: ["skills", "install", "mrrkrieg/loopgraph/skills/loopgraph"] });
+    expect(result.nextSteps).not.toContain("Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.");
   });
 
   it("keeps setup local-ready while warning when the Hermes CLI is not installed", async () => {

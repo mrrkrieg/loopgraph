@@ -34,3 +34,6 @@ export * from "./daily-summary";
 export * from "./readiness";
 export * from "./routing";
 export * from "./hermes-operations";
+export * from "./provider-onboarding";
+export * from "./entity-resolution";
+export * from "./graph-authoring";

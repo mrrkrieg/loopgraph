@@ -34,7 +34,7 @@ Use `npm run loopgraph --` from this repository clone. Do not use `npx loopgraph
 From a Loopgraph clone:
 
 ```bash
-npm run loopgraph -- hermes setup --project .
+npm run loopgraph -- hermes setup --project . --activate
 ```
 
 The setup command does the safe local work in one step:
@@ -43,10 +43,12 @@ The setup command does the safe local work in one step:
 - writes `.loopgraph/hermes/install.json`;
 - writes `.loopgraph/hermes/mcp.loopgraph.yaml`;
 - writes the generated Hermes skills under `.loopgraph/hermes/skills/`;
+- registers the admin, webhook-router, and lifecycle-router MCP servers with Hermes;
+- installs the Loopgraph skill from the GitHub skill tap;
 - runs the same protocol, MCP, workspace, and catalog checks as `hermes doctor`;
 - prints the exact file paths and first Hermes prompt.
 
-From an installed package, use `loopgraph hermes setup --project .` instead.
+From an installed package, use `loopgraph hermes setup --project . --activate` instead.
 
 If setup says Hermes is not on `PATH`, the local Loopgraph files were still generated. Install Hermes, confirm `hermes --version`, then rerun:
 
@@ -54,7 +56,9 @@ If setup says Hermes is not on `PATH`, the local Loopgraph files were still gene
 npm run loopgraph -- hermes doctor --project .
 ```
 
-## 3. Connect the generated Loopgraph integration to Hermes
+## 3. Verify the generated Loopgraph integration
+
+With `--activate`, the setup command already applies the MCP and skill registrations. Inspect the generated recovery artifacts if doctor reports a problem:
 
 Open the generated snippet:
 
@@ -62,7 +66,7 @@ Open the generated snippet:
 less .loopgraph/hermes/mcp.loopgraph.yaml
 ```
 
-Merge that YAML into your Hermes config:
+Without `--activate`, merge that YAML into your Hermes config manually:
 
 ```text
 ~/.hermes/config.yaml
@@ -76,6 +80,17 @@ The generated snippet registers:
 - the generated Loopgraph skills directory.
 
 It does not contain provider credentials. Google Ads, HubSpot, Notion, Slack, billing, email, CRM, analytics, and other provider credentials should remain in Hermes or an approved credential store.
+
+List the executable provider contracts or prepare one OAuth handoff:
+
+```bash
+npm run loopgraph -- hermes providers list
+npm run loopgraph -- hermes providers prepare \
+  --provider hubspot --workspace workspace_acme --company company_acme \
+  --redirect-uri https://hermes.example/oauth/callback
+```
+
+Hermes can call the same catalog, installer preparation, and normalization transformer through the trusted admin MCP surface. See [Hermes provider onboarding](./HERMES-PROVIDER-ONBOARDING.md).
 
 ### Optional: let Loopgraph wake Hermes for design work
 

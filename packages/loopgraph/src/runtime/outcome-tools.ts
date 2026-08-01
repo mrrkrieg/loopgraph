@@ -18,7 +18,8 @@ import {
   recordMetricSample,
   recordValueLedgerEntry
 } from "./outcome-service";
-import { FileOutcomeStore } from "./outcome-store";
+import { assessValueProof } from "./outcome-service";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
@@ -37,6 +38,7 @@ export type LoopgraphOutcomeToolName = (typeof LOOPGRAPH_OUTCOME_TOOL_NAMES)[num
 export type LoopgraphOutcomeToolRuntimeOptions = {
   projectRoot?: string;
   now?: Date;
+  store?: OutcomeStore;
 };
 
 const hiddenCostMinutesSchema = z.object({
@@ -46,6 +48,12 @@ const hiddenCostMinutesSchema = z.object({
   escalation: z.number().min(0).optional(),
   governance: z.number().min(0).optional()
 }).default({});
+
+const operatingCostMinutesSchema = z.object({
+  connectorOperations: z.number().min(0),
+  supervision: z.number().min(0),
+  organizationalChange: z.number().min(0)
+}).optional();
 
 export const metricSampleIngestInputSchema = z.object({
   projectRoot: z.string().optional(),
@@ -124,6 +132,7 @@ export const valueLedgerRecordInputSchema = z.object({
   grossSavedMinutes: z.number().min(0).optional(),
   modeledGrossSavedMinutes: z.number().min(0).optional(),
   hiddenCostMinutes: hiddenCostMinutesSchema,
+  operatingCostMinutes: operatingCostMinutesSchema,
   observedOutcomeIds: z.array(z.string().min(1)).max(100).default([]),
   runIds: z.array(z.string().min(1)).max(100).default([]),
   reviewIds: z.array(z.string().min(1)).max(100).default([]),
@@ -215,7 +224,7 @@ export async function callLoopgraphOutcomeTool(
 ) {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   const workspace = await readLoopgraphWorkspace(projectRoot);
-  const store = new FileOutcomeStore(getLoopgraphRoot(projectRoot));
+  const store = options.store ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
 
   if (name === "loopgraph_metric_samples_ingest") {
     const parsed = metricSampleIngestInputSchema.parse(input);
@@ -339,6 +348,7 @@ export async function callLoopgraphOutcomeTool(
       grossSavedMinutes: parsed.grossSavedMinutes,
       modeledGrossSavedMinutes: parsed.modeledGrossSavedMinutes,
       hiddenCostMinutes: parsed.hiddenCostMinutes,
+      operatingCostMinutes: parsed.operatingCostMinutes,
       observedOutcomeIds: parsed.observedOutcomeIds,
       runIds: parsed.runIds,
       reviewIds: parsed.reviewIds,
@@ -351,16 +361,15 @@ export async function callLoopgraphOutcomeTool(
   if (name === "loopgraph_value_ledger_get") {
     const parsed = valueLedgerGetInputSchema.parse(input);
     if (parsed.entryId) return { entry: await store.getValueLedgerEntry(parsed.entryId) };
-    return {
-      entries: await store.listValueLedgerEntries({
+    const entries = await store.listValueLedgerEntries({
         workspaceId: workspace.projectRootId,
         companyId: parsed.companyId,
         departmentId: parsed.departmentId,
         loopId: parsed.loopId,
         windowStart: parsed.windowStart,
         windowEnd: parsed.windowEnd
-      })
-    };
+      });
+    return { entries, proof: entries.map(assessValueProof) };
   }
   throw new Error(`Unknown Loopgraph outcome tool: ${String(name)}`);
 }

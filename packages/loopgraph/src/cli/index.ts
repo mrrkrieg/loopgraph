@@ -68,6 +68,9 @@ import {
   callLoopgraphConnectionTool,
   type LoopgraphConnectionToolName
 } from "../runtime/connection-tools";
+import { PROVIDER_ONBOARDING_CATALOG, prepareProviderInstallation } from "../runtime/provider-onboarding";
+import { normalizeProviderEvent } from "../runtime/provider-normalizers";
+import { providerIdSchema } from "../core/provider-onboarding";
 
 const HERO_TEMPLATES = [
   {
@@ -113,13 +116,14 @@ const storage = getStorageAdapter({ rootDir: getLoopgraphRoot(process.cwd()) });
 
 program.name("loopgraph").description("Loopgraph validate/simulate CLI");
 
-async function runHermesSetup(options: { project: string; scope: string; json?: boolean }): Promise<void> {
+async function runHermesSetup(options: { project: string; scope: string; json?: boolean; activate?: boolean }): Promise<void> {
   const scope = parseHermesScope(options.scope);
   const result = await setupHermesIntegration({
     projectRoot: path.resolve(options.project),
     scope,
     cliEntryPath: cliEntryFile,
-    nodeCommand: process.execPath
+    nodeCommand: process.execPath,
+    activate: Boolean(options.activate)
   });
   if (options.json) {
     console.log(JSON.stringify(result, null, 2));
@@ -957,15 +961,50 @@ const hermes = program.command("hermes").description("Hermes integration utiliti
 const hermesWebhooks = hermes.command("webhooks").description("Hermes webhook gateway route planning");
 const hermesEvents = hermes.command("events").description("Hermes durable event utilities");
 const hermesRouting = hermes.command("routing").description("Hermes local routing tests");
+const hermesProviders = hermes.command("providers").description("Hermes-owned OAuth, subscriptions, and event normalization");
 
 hermes
   .command("setup")
   .description("Initialize, install, and check the project-local Hermes Brain integration")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--scope <scope>", "Install scope (project)", "project")
+  .option("--activate", "Register MCP servers and the GitHub-hosted skill with Hermes")
   .option("--json", "Print the setup result as JSON")
-  .action(async (options: { project: string; scope: string; json?: boolean }) => {
+  .action(async (options: { project: string; scope: string; json?: boolean; activate?: boolean }) => {
     await runHermesSetup(options);
+  });
+
+hermesProviders
+  .command("list")
+  .description("List executable provider onboarding profiles without secrets")
+  .action(() => console.log(JSON.stringify({ providers: PROVIDER_ONBOARDING_CATALOG }, null, 2)));
+
+hermesProviders
+  .command("prepare")
+  .description("Prepare OAuth/app installation state for Hermes to complete in its credential store")
+  .requiredOption("--provider <id>", "Provider ID")
+  .requiredOption("--workspace <id>", "Workspace ID")
+  .requiredOption("--company <id>", "Company ID")
+  .option("--redirect-uri <url>", "Hermes OAuth callback URL")
+  .option("--include-one-time", "Include one-time state/PKCE material for immediate Hermes consumption")
+  .action((options: { provider: string; workspace: string; company: string; redirectUri?: string; includeOneTime?: boolean }) => {
+    const result = prepareProviderInstallation({ providerId: providerIdSchema.parse(options.provider), workspaceId: options.workspace, companyId: options.company, redirectUri: options.redirectUri });
+    console.log(JSON.stringify(options.includeOneTime ? result : { ...result, oneTime: "redacted; rerun from Hermes with --include-one-time" }, null, 2));
+  });
+
+hermesProviders
+  .command("normalize")
+  .description("Normalize one verified provider fixture into the EventEnvelope Hermes submits to Loopgraph")
+  .requiredOption("--provider <id>", "Provider ID")
+  .requiredOption("--input <file>", "Provider fixture JSON")
+  .requiredOption("--workspace <id>", "Workspace ID")
+  .requiredOption("--company <id>", "Company ID")
+  .requiredOption("--delivery <id>", "Stable provider delivery ID")
+  .option("--verified", "Mark signature verification complete")
+  .action(async (options: { provider: string; input: string; workspace: string; company: string; delivery: string; verified?: boolean }) => {
+    const payload = JSON.parse(await readFile(path.resolve(options.input), "utf8")) as unknown;
+    const event = normalizeProviderEvent({ providerId: providerIdSchema.parse(options.provider), workspaceId: options.workspace, companyId: options.company, sourceRoute: `hermes-${options.provider}`, deliveryId: options.delivery, signatureVerified: Boolean(options.verified), signer: options.verified ? options.provider : undefined }, payload);
+    console.log(JSON.stringify(event, null, 2));
   });
 
 hermes

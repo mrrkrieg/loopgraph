@@ -202,6 +202,14 @@ import {
   type LoopgraphMeasurementToolName
 } from "../runtime/measurement-tools";
 import {
+  callLoopgraphProviderTool,
+  loopgraphProviderToolDefinitions,
+  providerCatalogGetInputSchema,
+  providerEventNormalizeInputSchema,
+  providerInstallPrepareInputSchema,
+  type LoopgraphProviderToolName
+} from "../runtime/provider-tools";
+import {
   callLoopgraphSemanticGraphTool,
   graphChangeApplyInputSchema,
   graphChangeDecideInputSchema,
@@ -280,6 +288,7 @@ type LoopgraphMcpToolName =
   | LoopgraphSemanticGraphToolName
   | LoopgraphConnectionToolName
   | LoopgraphMeasurementToolName
+  | LoopgraphProviderToolName
   | LoopgraphLoopToolName;
 
 const toolInputSchemas = {
@@ -342,6 +351,9 @@ const toolInputSchemas = {
   loopgraph_measurement_jobs_get: measurementJobsGetInputSchema,
   loopgraph_connections_reconcile: connectionsReconcileInputSchema,
   loopgraph_connections_reconciliations_get: connectionReconciliationsGetInputSchema,
+  loopgraph_provider_catalog_get: providerCatalogGetInputSchema,
+  loopgraph_provider_install_prepare: providerInstallPrepareInputSchema,
+  loopgraph_provider_event_normalize: providerEventNormalizeInputSchema,
   loopgraph_loops_list: loopsListInputSchema,
   loopgraph_runs_get: runsGetInputSchema,
   loopgraph_loops_materialize: loopsMaterializeInputSchema,
@@ -386,6 +398,7 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphSemanticGraphToolDefinitions,
   ...loopgraphConnectionToolDefinitions,
   ...loopgraphMeasurementToolDefinitions,
+  ...loopgraphProviderToolDefinitions,
   ...loopgraphLoopToolDefinitions,
   ...loopgraphRoutingToolDefinitions,
   ...loopgraphRoutingOpsToolDefinitions,
@@ -1104,6 +1117,10 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphProviderToolName(name)) {
+    return callLoopgraphProviderTool(name, boundInput);
+  }
+
   if (isLoopgraphLoopToolName(name)) {
     return callLoopgraphLoopTool(name, boundInput, {
       projectRoot: options.projectRoot,
@@ -1417,6 +1434,10 @@ function isLoopgraphMeasurementToolName(value: unknown): value is LoopgraphMeasu
   return typeof value === "string" && loopgraphMeasurementToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphProviderToolName(value: unknown): value is LoopgraphProviderToolName {
+  return typeof value === "string" && loopgraphProviderToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphLoopToolName(value: unknown): value is LoopgraphLoopToolName {
   return typeof value === "string" && loopgraphLoopToolDefinitions.some((tool) => tool.name === value);
 }
@@ -1439,6 +1460,7 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphSemanticGraphToolName(value) ||
     isLoopgraphConnectionToolName(value) ||
     isLoopgraphMeasurementToolName(value) ||
+    isLoopgraphProviderToolName(value) ||
     isLoopgraphLoopToolName(value);
 }
 
@@ -1478,6 +1500,9 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
   if (isLoopgraphConnectionToolName(name)) {
     return loopgraphConnectionToolDefinitions
       .find((tool) => tool.name === name)?.readOnly ?? false;
+  }
+  if (isLoopgraphProviderToolName(name)) {
+    return loopgraphProviderToolDefinitions.find((tool) => tool.name === name)?.readOnly ?? false;
   }
   return name === "loopgraph_workspace_inspect" ||
     name === "loopgraph_departments_list" ||
@@ -1523,6 +1548,9 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
   if (isLoopgraphConnectionToolName(name)) {
     return loopgraphConnectionToolDefinitions
       .find((tool) => tool.name === name)?.idempotent ?? false;
+  }
+  if (isLoopgraphProviderToolName(name)) {
+    return loopgraphProviderToolDefinitions.find((tool) => tool.name === name)?.idempotent ?? false;
   }
   return ![
     "loopgraph_discovery_start",

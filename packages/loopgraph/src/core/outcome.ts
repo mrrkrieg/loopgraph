@@ -160,6 +160,11 @@ export const valueLedgerEntrySchema = z.object({
     escalation: z.number().min(0).default(0),
     governance: z.number().min(0).default(0)
   }),
+  operatingCostMinutes: z.object({
+    connectorOperations: z.number().min(0),
+    supervision: z.number().min(0),
+    organizationalChange: z.number().min(0)
+  }).optional(),
   observedCostMinutes: z.number().min(0),
   netSavedMinutes: z.number(),
   monetaryValue: z.object({
@@ -176,8 +181,10 @@ export const valueLedgerEntrySchema = z.object({
   evidenceRefs: z.array(z.string().min(1).max(512)).max(200).default([]),
   recordedAt: z.string().datetime()
 }).superRefine((entry, context) => {
-  const observedCostMinutes = Object.values(entry.hiddenCostMinutes)
-    .reduce((sum, value) => sum + value, 0);
+  const observedCostMinutes = [
+    ...Object.values(entry.hiddenCostMinutes),
+    ...Object.values(entry.operatingCostMinutes ?? {})
+  ].reduce((sum, value) => sum + value, 0);
   if (Math.abs(observedCostMinutes - entry.observedCostMinutes) > 0.000001) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
