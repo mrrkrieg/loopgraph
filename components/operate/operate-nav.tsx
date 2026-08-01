@@ -5,6 +5,11 @@ import { usePathname } from "next/navigation";
 
 export const operateNavItems = [
   {
+    href: "/operate/activity",
+    label: "Agent activity",
+    description: "What is running now"
+  },
+  {
     href: "/operate/opportunities",
     label: "Opportunities",
     description: "What Hermes found"
@@ -35,7 +40,7 @@ export function OperateNav() {
   const pathname = usePathname();
 
   return (
-    <nav aria-label="Operate Loopgraph" className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-5">
+    <nav aria-label="Operate Loopgraph" className="mb-6 grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
       {operateNavItems.map((item) => {
         const active = pathname === item.href;
         return (

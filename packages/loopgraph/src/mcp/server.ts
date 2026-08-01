@@ -8,6 +8,8 @@ import {
   graphSnapshotSchema,
   graphTransactionSchema,
   hermesDesignTaskSchema,
+  hermesAgentInstanceSchema,
+  hermesExecutionEventSchema,
   listDepartmentCatalog,
   loopPromotionReceiptSchema,
   metricBindingSchema,
@@ -64,6 +66,15 @@ import {
   loopgraphHermesWebhookToolDefinitions,
   type LoopgraphHermesWebhookToolName
 } from "../runtime/hermes-webhooks";
+import {
+  agentOperationsGetInputSchema,
+  callLoopgraphHermesOperationsTool,
+  hermesAgentHeartbeatInputSchema,
+  hermesAgentRegisterInputSchema,
+  hermesExecutionEventIngestInputSchema,
+  loopgraphHermesOperationsToolDefinitions,
+  type LoopgraphHermesOperationsToolName
+} from "../runtime/hermes-operations-tools";
 import {
   callLoopgraphWorkspaceTool,
   departmentsListInputSchema,
@@ -250,6 +261,7 @@ type LoopgraphMcpToolName =
   | LoopgraphRoutingOpsToolName
   | LoopgraphRoutingEvaluationToolName
   | LoopgraphHermesWebhookToolName
+  | LoopgraphHermesOperationsToolName
   | LoopgraphWorkspaceToolName
   | LoopgraphDiscoveryToolName
   | LoopgraphProjectToolName
@@ -348,7 +360,11 @@ const toolInputSchemas = {
   loopgraph_hermes_webhooks_plan: hermesWebhooksPlanInputSchema,
   loopgraph_hermes_webhooks_sync: hermesWebhooksSyncInputSchema,
   loopgraph_hermes_webhooks_doctor: hermesWebhooksDoctorInputSchema,
-  loopgraph_hermes_webhooks_test: hermesWebhookFixtureTestInputSchema
+  loopgraph_hermes_webhooks_test: hermesWebhookFixtureTestInputSchema,
+  loopgraph_hermes_agent_register: hermesAgentRegisterInputSchema,
+  loopgraph_hermes_agent_heartbeat: hermesAgentHeartbeatInputSchema,
+  loopgraph_hermes_execution_event_ingest: hermesExecutionEventIngestInputSchema,
+  loopgraph_agent_operations_get: agentOperationsGetInputSchema
 };
 
 const loopgraphMcpToolDefinitions = [
@@ -368,7 +384,8 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphRoutingToolDefinitions,
   ...loopgraphRoutingOpsToolDefinitions,
   ...loopgraphRoutingEvaluationToolDefinitions,
-  ...loopgraphHermesWebhookToolDefinitions
+  ...loopgraphHermesWebhookToolDefinitions,
+  ...loopgraphHermesOperationsToolDefinitions
 ] as const;
 
 export const LOOPGRAPH_WEBHOOK_ROUTER_MCP_TOOL_NAMES = [
@@ -410,6 +427,8 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/metric-binding",
   "loopgraph://schemas/measurement-job",
   "loopgraph://schemas/connection-reconciliation",
+  "loopgraph://schemas/hermes-agent-instance",
+  "loopgraph://schemas/hermes-execution-event",
   "loopgraph://graph/company"
 ] as const;
 
@@ -586,10 +605,22 @@ export async function listLoopgraphMcpResources(
       name: "ConnectionReconciliation schema",
       description: "Connector, scope, webhook, health, and overdue-measurement reconciliation report.",
       mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
+      name: "HermesAgentInstance schema",
+      description: "Capability-bounded Hermes runtime registration and heartbeat contract.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[23],
+      name: "HermesExecutionEvent schema",
+      description: "Assignment-bound task, tool, approval, output, outcome, and run telemetry contract.",
+      mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
@@ -962,6 +993,13 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphHermesOperationsToolName(name)) {
+    return callLoopgraphHermesOperationsTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
   if (isLoopgraphWorkspaceToolName(name)) {
     return callLoopgraphWorkspaceTool(name, boundInput, {
       projectRoot: options.projectRoot
@@ -1128,6 +1166,20 @@ function schemaResource(id: string) {
       jsonSchema: zodToJsonSchema(hermesDesignTaskSchema, "HermesDesignTask")
     };
   }
+  if (id === "hermes-agent-instance") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(hermesAgentInstanceSchema, "HermesAgentInstance")
+    };
+  }
+  if (id === "hermes-execution-event") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(hermesExecutionEventSchema, "HermesExecutionEvent")
+    };
+  }
   if (id === "loop-opportunity") {
     return {
       schemaVersion: "mcp-schema-resource/v1alpha1",
@@ -1282,6 +1334,10 @@ function isLoopgraphHermesWebhookToolName(value: unknown): value is LoopgraphHer
   return typeof value === "string" && loopgraphHermesWebhookToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphHermesOperationsToolName(value: unknown): value is LoopgraphHermesOperationsToolName {
+  return typeof value === "string" && loopgraphHermesOperationsToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphWorkspaceToolName(value: unknown): value is LoopgraphWorkspaceToolName {
   return typeof value === "string" && loopgraphWorkspaceToolDefinitions.some((tool) => tool.name === value);
 }
@@ -1339,6 +1395,7 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphRoutingOpsToolName(value) ||
     isLoopgraphRoutingEvaluationToolName(value) ||
     isLoopgraphHermesWebhookToolName(value) ||
+    isLoopgraphHermesOperationsToolName(value) ||
     isLoopgraphWorkspaceToolName(value) ||
     isLoopgraphDiscoveryToolName(value) ||
     isLoopgraphProjectToolName(value) ||
@@ -1376,6 +1433,9 @@ function mcpInstructionsForExposure(exposure: LoopgraphMcpExposure): string {
 }
 
 function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphHermesOperationsToolName(name)) {
+    return loopgraphHermesOperationsToolDefinitions.find((tool) => tool.name === name)?.readOnly ?? false;
+  }
   if (isLoopgraphSemanticGraphToolName(name)) {
     return loopgraphSemanticGraphToolDefinitions
       .find((tool) => tool.name === name)?.readOnly ?? false;
@@ -1418,6 +1478,9 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
 }
 
 function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphHermesOperationsToolName(name)) {
+    return loopgraphHermesOperationsToolDefinitions.find((tool) => tool.name === name)?.idempotent ?? false;
+  }
   if (isLoopgraphSemanticGraphToolName(name)) {
     return loopgraphSemanticGraphToolDefinitions
       .find((tool) => tool.name === name)?.idempotent ?? false;

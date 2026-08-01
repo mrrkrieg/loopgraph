@@ -3,6 +3,7 @@ import type { StorageAdapter } from "loopgraph/sdk";
 import { FileStorageAdapter } from "loopgraph/sdk";
 import {
   FileHermesDesignStore,
+  FileHermesOperationsStore,
   FileDiscoveryDesignStore,
   FileLoopControllerStore,
   FileLoopOpportunityStore,
@@ -12,6 +13,7 @@ import {
   getLoopgraphRoot as getPackageLoopgraphRoot,
   type DiscoveryDesignStore,
   type HermesDesignStore,
+  type HermesOperationsStore,
   type LoopControllerStore,
   type LoopOpportunityStore,
   type LoopSpecRegistryStore,
@@ -30,6 +32,10 @@ import {
   createSupabaseHermesDesignStore,
   isSupabaseHermesDesignStoreEnabled
 } from "@/lib/db/adapters/supabase-hermes-design-store";
+import {
+  createSupabaseHermesOperationsStore,
+  isSupabaseHermesOperationsStoreEnabled
+} from "@/lib/db/adapters/supabase-hermes-operations-store";
 import {
   createSupabaseDiscoveryDesignStore,
   isSupabaseDiscoveryDesignStoreEnabled
@@ -55,6 +61,7 @@ import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
 const cachedHermesDesignStores = new Map<string, HermesDesignStore>();
+const cachedHermesOperationsStores = new Map<string, HermesOperationsStore>();
 const cachedDiscoveryDesignStores = new Map<string, DiscoveryDesignStore>();
 const cachedLoopSpecRegistryStores = new Map<string, LoopSpecRegistryStore>();
 const cachedLoopControllerStores = new Map<string, LoopControllerStore>();
@@ -171,6 +178,30 @@ export function getHermesDesignStore(options?: {
     ? createSupabaseHermesDesignStore()
     : new FileHermesDesignStore(rootDir!);
   if (!options?.forceFile) cachedHermesDesignStores.set(cacheKey, store);
+  return store;
+}
+
+export function getHermesOperationsStore(options?: {
+  rootDir?: string;
+  forceFile?: boolean;
+}): HermesOperationsStore {
+  const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const useSupabase = !options?.forceFile && isSupabaseHermesOperationsStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Supabase Hermes operations storage is required for the hosted runtime");
+  }
+  const rootDir = useSupabase ? undefined : path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const cacheKey = useSupabase
+    ? `supabase-hermes-operations:${organizationId}:${projectKey}`
+    : `file-hermes-operations:${rootDir!}`;
+  if (!options?.forceFile && cachedHermesOperationsStores.has(cacheKey)) {
+    return cachedHermesOperationsStores.get(cacheKey)!;
+  }
+  const store = useSupabase
+    ? createSupabaseHermesOperationsStore()
+    : new FileHermesOperationsStore(rootDir!);
+  if (!options?.forceFile) cachedHermesOperationsStores.set(cacheKey, store);
   return store;
 }
 
@@ -344,6 +375,7 @@ export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
   cachedHermesDesignStores.clear();
+  cachedHermesOperationsStores.clear();
   cachedDiscoveryDesignStores.clear();
   cachedLoopSpecRegistryStores.clear();
   cachedLoopControllerStores.clear();

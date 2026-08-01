@@ -12,6 +12,8 @@ import {
   GRAPH_SNAPSHOT_SCHEMA_VERSION,
   GRAPH_TRANSACTION_SCHEMA_VERSION,
   HERMES_DESIGN_TASK_SCHEMA_VERSION,
+  HERMES_AGENT_INSTANCE_SCHEMA_VERSION,
+  HERMES_EXECUTION_EVENT_SCHEMA_VERSION,
   LOOP_CONTROLLER_POLICY_SCHEMA_VERSION,
   LOOP_CONTROLLER_RUN_SCHEMA_VERSION,
   LOOP_OPPORTUNITY_SCHEMA_VERSION,
@@ -41,6 +43,7 @@ import { LOOPGRAPH_DESIGN_TOOL_NAMES } from "./design-tools";
 import { LOOPGRAPH_DISCOVERY_TOOL_NAMES } from "./discovery-tools";
 import { LOOPGRAPH_HERMES_DESIGN_TOOL_NAMES } from "./hermes-design-tools";
 import { LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES } from "./hermes-webhooks";
+import { LOOPGRAPH_HERMES_OPERATIONS_TOOL_NAMES } from "./hermes-operations-tools";
 import { LOOPGRAPH_OPPORTUNITY_TOOL_NAMES } from "./loop-opportunity-tools";
 import { LOOPGRAPH_ROUTE_JOB_WORKER_TOOL_NAMES } from "./route-job-worker-tools";
 import { LOOPGRAPH_OUTCOME_TOOL_NAMES } from "./outcome-tools";
@@ -82,6 +85,8 @@ export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   routingCard: ROUTING_CARD_SCHEMA_VERSION,
   routingDecision: ROUTING_DECISION_SCHEMA_VERSION,
   routeJob: ROUTE_JOB_SCHEMA_VERSION,
+  hermesAgentInstance: HERMES_AGENT_INSTANCE_SCHEMA_VERSION,
+  hermesExecutionEvent: HERMES_EXECUTION_EVENT_SCHEMA_VERSION,
   metricSample: METRIC_SAMPLE_SCHEMA_VERSION,
   observedOutcome: OBSERVED_OUTCOME_SCHEMA_VERSION,
   valueLedgerEntry: VALUE_LEDGER_ENTRY_SCHEMA_VERSION,
@@ -105,7 +110,8 @@ export const HERMES_LOOPGRAPH_MCP_TOOL_NAMES = [
   ...LOOPGRAPH_ROUTING_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_OPS_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_EVALUATION_TOOL_NAMES,
-  ...LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES
+  ...LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES,
+  ...LOOPGRAPH_HERMES_OPERATIONS_TOOL_NAMES
 ] as const;
 
 export type HermesInstallScope = "project";
@@ -888,6 +894,8 @@ metadata:
     metricBindingSchema: ${METRIC_BINDING_SCHEMA_VERSION}
     measurementJobSchema: ${MEASUREMENT_JOB_SCHEMA_VERSION}
     connectionReconciliationSchema: ${CONNECTION_RECONCILIATION_SCHEMA_VERSION}
+    hermesAgentInstanceSchema: ${HERMES_AGENT_INSTANCE_SCHEMA_VERSION}
+    hermesExecutionEventSchema: ${HERMES_EXECUTION_EVENT_SCHEMA_VERSION}
 ---
 
 # Loopgraph Design
@@ -901,6 +909,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 1. Confirm the project root: \`${projectRoot}\`.
 2. Use the trusted Loopgraph MCP server named \`loopgraph_admin\`; Hermes may expose its tools with an \`mcp_loopgraph_admin_\` prefix. Never use the webhook or lifecycle profiles for discovery, design, materialization, review, or worker operations. Prefer Loopgraph MCP resources for canonical schemas and object reads when available.
 3. Call \`loopgraph_workspace_inspect\` to confirm the local workspace is bound and ready.
+3. Register this trusted Hermes runtime with \`loopgraph_hermes_agent_register\`, including only its runtime version, environment, and non-secret capability keys. Refresh it with \`loopgraph_hermes_agent_heartbeat\` during active operator sessions. Never register credential values.
 4. Call \`loopgraph_departments_list\` and immediately present only those canonical departments. Do not ask an open-ended question first. Recommend Product as the easiest first example, but let the user pick one or more departments.
 5. Call \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\` to start or resume the local session.
 6. Ask permission before project inspection; if granted, call \`loopgraph_project_inspect\` to read only allowlisted manifests and example env key names.
@@ -934,6 +943,9 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 31. To test an actual validated Hermes route locally, use \`loopgraph_route_commit_simulate\` only after a trusted human/operator asks to simulate the route commit.
 32. Call \`loopgraph_route_jobs_get\` to inspect durable queue status, leases, retries, and dead-letter state for Hermes-routed work.
 33. In a trusted operator turn, call \`loopgraph_route_worker_run\` to claim and process due jobs. Never call it from the isolated webhook-router or lifecycle-router turn.
+33. Shadow, recommend, and simulate jobs run locally. Live jobs are dispatched to a healthy registered Hermes runtime and remain \`dispatched\` until Hermes reports \`run.started\`; Loopgraph must not call provider tools for those jobs.
+33. While executing a live assignment, append ordered, idempotent \`${HERMES_EXECUTION_EVENT_SCHEMA_VERSION}\` facts with \`loopgraph_hermes_execution_event_ingest\`. Report task, tool, approval, output, outcome, and terminal state using durable references; never include tokens or unrestricted raw provider payloads.
+33. Use \`loopgraph_agent_operations_get\` to explain the complete signal -> Hermes Brain -> problem -> department loop -> agent work -> outcome path.
 34. Use \`loopgraph_route_job_retry\` or \`loopgraph_route_job_cancel\` only after an operator explicitly supplies the job ID, actor, and reason.
 35. Before recommending promotion, call \`loopgraph_promotion_rehearsal_run\` for the exact loop and next ordered activation mode. It must pass loop simulation, routing precision/recall, missing-context, risk, duplicate, no-match, ambiguity, catalog-overlap, graph-regression, and activation-policy checks.
 36. Use \`loopgraph_routing_evaluation_run\` for focused fixture diagnostics and \`loopgraph_routing_evaluations_get\` to inspect persisted expected-vs-actual results when explaining why a rehearsal passed or failed.
@@ -960,7 +972,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 
 ## Supporting References
 
-- MCP resources: \`loopgraph://schemas/loop-design-context\`, \`loopgraph://schemas/loop-design-proposal-set\`, \`loopgraph://schemas/evidence-gap-set\`, \`loopgraph://schemas/hermes-design-task\`, \`loopgraph://schemas/loop-opportunity\`, \`loopgraph://schemas/graph-change-set\`, \`loopgraph://schemas/graph-snapshot\`, \`loopgraph://schemas/graph-change-approval-receipt\`, \`loopgraph://schemas/graph-transaction\`, \`loopgraph://schemas/loop-promotion-receipt\`, \`loopgraph://schemas/promotion-rehearsal\`, \`loopgraph://schemas/metric-binding\`, \`loopgraph://schemas/measurement-job\`, \`loopgraph://schemas/connection-reconciliation\`, \`loopgraph://schemas/loop-controller-policy\`, \`loopgraph://schemas/loop-controller-run\`, \`loopgraph://departments/{departmentType}\`, \`loopgraph://discovery/{sessionId}\`, \`loopgraph://loops/{loopId}\`, and \`loopgraph://graph/company\`.
+- MCP resources: \`loopgraph://schemas/loop-design-context\`, \`loopgraph://schemas/loop-design-proposal-set\`, \`loopgraph://schemas/evidence-gap-set\`, \`loopgraph://schemas/hermes-design-task\`, \`loopgraph://schemas/hermes-agent-instance\`, \`loopgraph://schemas/hermes-execution-event\`, \`loopgraph://schemas/loop-opportunity\`, \`loopgraph://schemas/graph-change-set\`, \`loopgraph://schemas/graph-snapshot\`, \`loopgraph://schemas/graph-change-approval-receipt\`, \`loopgraph://schemas/graph-transaction\`, \`loopgraph://schemas/loop-promotion-receipt\`, \`loopgraph://schemas/promotion-rehearsal\`, \`loopgraph://schemas/metric-binding\`, \`loopgraph://schemas/measurement-job\`, \`loopgraph://schemas/connection-reconciliation\`, \`loopgraph://schemas/loop-controller-policy\`, \`loopgraph://schemas/loop-controller-run\`, \`loopgraph://departments/{departmentType}\`, \`loopgraph://discovery/{sessionId}\`, \`loopgraph://loops/{loopId}\`, and \`loopgraph://graph/company\`.
 - \`references/discovery-flow.md\`: exact discovery/design/materialization sequence.
 - \`references/proposal-schema.md\`: structured proposal expectations.
 - \`references/safety-and-approvals.md\`: trust boundaries and approval rules.

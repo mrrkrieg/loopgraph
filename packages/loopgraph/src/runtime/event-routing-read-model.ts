@@ -141,6 +141,7 @@ export type EventRoutingDecisionDetail = {
     maxAttempts: number;
     nextRunAt: string;
     updatedAt: string;
+    executionTarget?: RouteJob["executionTarget"];
   }>;
 };
 
@@ -604,7 +605,8 @@ function decisionDetailForRow(input: {
       attemptCount: job.attemptCount,
       maxAttempts: job.maxAttempts,
       nextRunAt: job.nextRunAt,
-      updatedAt: job.updatedAt
+      updatedAt: job.updatedAt,
+      executionTarget: job.executionTarget
     }))
   };
 }

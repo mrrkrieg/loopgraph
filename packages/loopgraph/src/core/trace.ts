@@ -28,6 +28,20 @@ export const toolCallTraceSchema = z.object({
   completedAt: z.string().optional()
 });
 
+export const taskRunTraceSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  owner: z.string().optional(),
+  status: z.enum(["pending", "running", "waiting_review", "completed", "failed"]),
+  summary: z.string().optional(),
+  startedAt: z.string().optional(),
+  completedAt: z.string().optional(),
+  error: z.object({
+    code: z.string(),
+    message: z.string()
+  }).optional()
+});
+
 export const policyDecisionSchema = z.object({
   ruleId: z.string(),
   matched: z.boolean(),
@@ -124,6 +138,7 @@ export const loopRunTraceSchema = z.object({
     customerFacing: z.boolean().default(false)
   })).default([]),
   preparedActions: z.array(preparedActionSchema).default([]),
+  taskRuns: z.array(taskRunTraceSchema).optional(),
   toolCalls: z.array(toolCallTraceSchema).default([]),
   policyDecisions: z.array(policyDecisionSchema).default([]),
   verificationResults: z.array(verificationResultSchema).default([]),
@@ -142,6 +157,7 @@ export const loopRunTraceSchema = z.object({
 export type TriggerRef = z.infer<typeof triggerRefSchema>;
 export type InputSnapshot = z.infer<typeof inputSnapshotSchema>;
 export type ToolCallTrace = z.infer<typeof toolCallTraceSchema>;
+export type TaskRunTrace = z.infer<typeof taskRunTraceSchema>;
 export type PolicyDecision = z.infer<typeof policyDecisionSchema>;
 export type VerificationResult = z.infer<typeof verificationResultSchema>;
 export type OutputArtifact = z.infer<typeof outputArtifactSchema>;

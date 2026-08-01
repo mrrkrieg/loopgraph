@@ -4,7 +4,7 @@ Last updated: 2026-07-30
 
 ## One-line summary
 
-Loopgraph is a local-first governed control plane for Hermes Brain: it discovers recurring business problems, asks only for missing evidence, compiles validated LoopSpecs, routes normalized company events, runs durable jobs, records outcomes, and evolves the company graph through accountable transactions.
+Loopgraph is a local-first governed control plane for Hermes Brain: it discovers recurring business problems, asks only for missing evidence, compiles validated LoopSpecs, validates normalized company-event routes, assigns live work to Hermes, records agent execution and outcomes, and evolves the company graph through accountable transactions.
 
 ## Implemented
 
@@ -43,6 +43,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision.
 - Loopgraph validates route eligibility, evidence, confidence, readiness, deduplication, cooldown, concurrency, fan-out, policy, and immutable LoopSpec identity.
 - Accepted routes create durable jobs with atomic claims, leases, retries, dead-letter state, activation gates, and review reconciliation.
+- Shadow, recommendation, and simulation jobs run locally. Live jobs carry an explicit Hermes execution target and are dispatched only to a healthy registered runtime with the required capabilities.
+- Hermes reports assignment, run, task, tool, approval, output, outcome, and terminal facts through signed APIs or trusted MCP tools. Loopgraph projects those facts into the same durable run trace without storing provider secrets.
 - Signed lifecycle events return route, run, escalation, outcome, and terminal evidence to Hermes.
 
 ### Outcomes and continuous improvement
@@ -59,7 +61,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ### Operating product views
 
-- One focused **Operate** navigation entry opens Opportunities, Change Review, Controller, Learning, and Value views.
+- One focused **Operate** navigation entry opens Agent Activity, Opportunities, Change Review, Controller, Learning, and Value views.
+- Agent Activity visualizes the complete incoming signal → Hermes Brain → business problem → department loop → Hermes runtime → tasks/tools/approvals → outcome path and supports operational filtering.
 - Opportunities explain recurrence, impact, evidence, risk, status, and the associated graph change.
 - Change Review joins exact semantic operations to accountable approval and transaction receipts.
 - Controller runs expose triggers, decisions, failed policy rules, checkpoints, and safety ceilings.

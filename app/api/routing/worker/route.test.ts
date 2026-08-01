@@ -6,6 +6,7 @@ const routingStore = vi.hoisted(() => ({ kind: "shared-routing" }));
 const storageAdapter = vi.hoisted(() => ({ kind: "shared-traces" }));
 const loopSpecStore = vi.hoisted(() => ({ kind: "shared-loop-specs" }));
 const controllerStore = vi.hoisted(() => ({ kind: "shared-controller" }));
+const operationsStore = vi.hoisted(() => ({ kind: "shared-hermes-operations" }));
 
 vi.mock("loopgraph/runtime", () => ({
   runRouteJobWorker
@@ -17,6 +18,7 @@ vi.mock("../../../../lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot: () => "/runtime/org/main",
   getLoopControllerStore: () => controllerStore,
   getLoopSpecRegistryStore: () => loopSpecStore,
+  getHermesOperationsStore: () => operationsStore,
   getRoutingStore: () => routingStore,
   getStorageAdapter: () => storageAdapter
 }));
@@ -53,7 +55,8 @@ describe("route-job worker API", () => {
       store: routingStore,
       loopSpecStore,
       controllerStore,
-      storage: storageAdapter
+      storage: storageAdapter,
+      operationsStore
     });
   });
 });

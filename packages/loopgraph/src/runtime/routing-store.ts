@@ -514,6 +514,7 @@ export async function submitRoutingDecision(input: {
       event: receipt.event,
       commit,
       activationMode: card.activationMode,
+      requiredCapabilities: card.requiredConnections,
       nowIso
     }));
   }
@@ -814,6 +815,7 @@ async function upsertRouteJobForCommit(input: {
   event: EventEnvelope;
   commit: RouteCommit;
   activationMode: RoutingCard["activationMode"];
+  requiredCapabilities: string[];
   nowIso: string;
 }): Promise<RouteJob> {
   const jobId = createRouteJobId({
@@ -840,6 +842,7 @@ async function upsertRouteJobForCommit(input: {
     loopSpecHash: input.commit.loopSpecHash,
     runId: input.commit.runId ?? `run_${contentHash({ commitId: input.commit.id })}`,
     activationMode: input.activationMode,
+    executionTarget: routeExecutionTargetForActivation(input.activationMode, input.requiredCapabilities),
     status: "queued",
     correlationId: input.event.correlationId,
     attemptCount: 0,
@@ -856,6 +859,28 @@ async function upsertRouteJobForCommit(input: {
 
   await input.store.saveRouteJob(job);
   return job;
+}
+
+function routeExecutionTargetForActivation(
+  activationMode: RoutingCard["activationMode"],
+  requiredCapabilities: string[]
+): RouteJob["executionTarget"] {
+  if (["execute_with_approval", "autonomous_low_risk"].includes(activationMode)) {
+    const configuredEnvironment = process.env.LOOPGRAPH_HERMES_EXECUTION_ENVIRONMENT;
+    const environment = ["local", "sandbox", "staging", "production"].includes(configuredEnvironment ?? "")
+      ? configuredEnvironment as RouteJob["executionTarget"]["environment"]
+      : process.env.NODE_ENV === "production" ? "production" : "local";
+    return {
+      runtime: "hermes",
+      environment,
+      requiredCapabilities
+    };
+  }
+  return {
+    runtime: "loopgraph_local",
+    environment: "local",
+    requiredCapabilities
+  };
 }
 
 function routeJobRetryDelaySeconds(job: RouteJob): number {

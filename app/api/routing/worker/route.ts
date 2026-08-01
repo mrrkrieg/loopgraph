@@ -3,6 +3,7 @@ import { runRouteJobWorker } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
   getLoopControllerStore,
+  getHermesOperationsStore,
   getLoopSpecRegistryStore,
   getRoutingStore,
   getStorageAdapter
@@ -25,7 +26,8 @@ export async function POST(request: Request) {
       store: getRoutingStore(),
       loopSpecStore: getLoopSpecRegistryStore(),
       controllerStore: getLoopControllerStore(),
-      storage: getStorageAdapter()
+      storage: getStorageAdapter(),
+      operationsStore: getHermesOperationsStore()
     });
     return NextResponse.json(result, { status: 202 });
   } catch (error) {

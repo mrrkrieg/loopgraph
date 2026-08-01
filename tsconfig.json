@@ -68,6 +68,9 @@
       "@/lib/loopgraph-runtime/operating-view-data": [
         "./lib/loopgraph-runtime/operating-view-data.ts"
       ],
+      "@/lib/loopgraph-runtime/agent-operations-view-data": [
+        "./lib/loopgraph-runtime/agent-operations-view-data.ts"
+      ],
       "@/lib/loopgraph-runtime/metric-planner": [
         "./lib/loopgraph-runtime/metric-planner.ts"
       ],

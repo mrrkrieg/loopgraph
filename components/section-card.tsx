@@ -3,14 +3,16 @@ import React from "react";
 export function SectionCard({
   title,
   description,
-  children
+  children,
+  className
 }: {
   title: string;
   description?: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
+    <section className={`rounded-lg border border-line bg-white p-5 shadow-sm ${className ?? ""}`}>
       <div className="mb-4">
         <h2 className="text-base font-semibold text-ink">{title}</h2>
         {description ? (

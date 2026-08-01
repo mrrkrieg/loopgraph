@@ -32,3 +32,4 @@ export * from "./outcome";
 export * from "./daily-summary";
 export * from "./readiness";
 export * from "./routing";
+export * from "./hermes-operations";
