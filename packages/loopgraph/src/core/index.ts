@@ -12,6 +12,7 @@ export * from "./graph";
 export * from "./studio-types";
 export * from "./studio-adapter";
 export * from "./department-skills";
+export * from "./company-loop-library";
 export * from "./discovery";
 export * from "./question-bundles";
 export * from "./project-inspection";

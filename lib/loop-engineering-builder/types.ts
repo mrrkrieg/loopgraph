@@ -1,4 +1,5 @@
 import type { LoopSpec } from "./loop-spec-schema";
+import type { PrebuiltLoopDefinition } from "loopgraph/core";
 
 export type DepartmentKey =
   | "marketing"
@@ -68,6 +69,8 @@ export type LoopTemplate = {
   defaultHiddenLabor?: Partial<HiddenLaborMetrics>;
   examplePath?: string;
   fixturePaths?: string[];
+  /** Hermes-native claim, context, connection, exclusion, and fan-out contract. */
+  routingDefinition?: PrebuiltLoopDefinition;
 };
 
 export type DepartmentTemplate = {

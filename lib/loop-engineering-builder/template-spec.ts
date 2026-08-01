@@ -1,4 +1,10 @@
-import { LOOPGRAPH_API_VERSION, LOOP_KIND, validateLoopSpec, type LoopSpec } from "loopgraph/core";
+import {
+  LOOPGRAPH_API_VERSION,
+  LOOP_KIND,
+  ROUTING_CONTRACT_SCHEMA_VERSION,
+  validateLoopSpec,
+  type LoopSpec
+} from "loopgraph/core";
 import { getDepartmentTemplate, getTemplateById } from "./templates";
 import type { DepartmentKey, LoopTemplate } from "./types";
 
@@ -28,6 +34,7 @@ export function createSpecFromTemplate(
   const safeLoopType = slug(template.loopType);
   const primaryToolKey = `draft_${safeLoopType}_summary`;
   const reviewToolKey = `create_${safeLoopType}_review_task`;
+  const route = template.routingDefinition;
 
   return validateLoopSpec({
     apiVersion: LOOPGRAPH_API_VERSION,
@@ -47,16 +54,18 @@ export function createSpecFromTemplate(
       }
     },
     trigger: {
-      type: "manual",
-      source: "loopgraph",
-      event: `${safeLoopType}.requested`
+      type: route ? "event" : "manual",
+      source: route ? "hermes" : "loopgraph",
+      event: route?.eventTypes[0] ?? `${safeLoopType}.requested`
     },
     input: {
       schema: {
         type: "object",
-        required: ["eventId", "workItem"],
+        required: ["eventId", "subjectId", "eventPayload", "workItem"],
         properties: {
           eventId: { type: "string" },
+          subjectId: { type: "string" },
+          eventPayload: { type: "object" },
           workItem: { type: "object" }
         }
       },
@@ -198,6 +207,45 @@ export function createSpecFromTemplate(
       captureToolInputOutput: true,
       evidenceRequired: true
     },
+    routing: route ? {
+      schemaVersion: ROUTING_CONTRACT_SCHEMA_VERSION,
+      problemTypes: route.problemTypes,
+      accepts: route.eventTypes.map((eventType) => ({
+        sourcePattern: "*",
+        eventTypePattern: eventType,
+        subjectTypes: route.subjectTypes,
+        requiredFields: route.requiredContext,
+        optionalConditions: [],
+        reason: `${template.name} claims this problem only when its required business context is present.`
+      })),
+      excludes: route.exclusionRules.map((rule) => ({
+        sourcePattern: "*",
+        eventTypePattern: rule.eventTypePattern,
+        subjectTypes: [],
+        fields: rule.fields,
+        reason: rule.reason
+      })),
+      inputMapping: {
+        eventId: "id",
+        subjectId: "subject.id",
+        eventPayload: "normalizedPayload",
+        workItem: "normalizedPayload"
+      },
+      priority: route.priority,
+      minimumConfidence: route.minimumConfidence,
+      ambiguityPolicy: "request_human",
+      noMatchPolicy: "unhandled",
+      fanoutPolicy: route.fanoutPolicy,
+      cooldown: { seconds: 0, dedupeWindowSeconds: 300 },
+      concurrency: { maxActive: 1, strategy: "append_evidence" },
+      activationMode: "shadow",
+      lifecycleEvents: ["loop.run.completed", "loop.outcome.recorded"],
+      requiredConnections: route.requiredConnections,
+      examples: {
+        shouldRoute: route.shouldRouteExamples,
+        shouldNotRoute: route.shouldNotRouteExamples
+      }
+    } : undefined,
     topology: {
       department: template.department,
       tags: [template.runtimeLevel, template.loopType, ...(metrics.slice(0, 2).map(slug))]

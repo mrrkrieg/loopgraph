@@ -696,7 +696,11 @@ function subjectIdentityMatches(left: EventSubject, right: EventSubject): boolea
 
 function eventPathHasValue(event: EventEnvelope, path: string): boolean {
   const value = eventPathValue(event, path);
-  return value !== undefined && value !== null;
+  if (value === undefined || value === null) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0;
+  return true;
 }
 
 function eventPathValue(event: EventEnvelope, path: string): unknown {

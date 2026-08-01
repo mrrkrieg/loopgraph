@@ -10,6 +10,12 @@ import {
   hermesDesignTaskSchema,
   hermesAgentInstanceSchema,
   hermesExecutionEventSchema,
+  COMPANY_LOOP_LIBRARY_SCHEMA_VERSION,
+  CROSS_DEPARTMENT_PLAYBOOKS,
+  DEPARTMENT_OPERATING_SKILLS,
+  HERMES_ROUTER_EVALUATION_QUESTIONS,
+  PREBUILT_COMPANY_LOOPS,
+  getDepartmentOperatingSkill,
   listDepartmentCatalog,
   loopPromotionReceiptSchema,
   metricBindingSchema,
@@ -429,7 +435,8 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/connection-reconciliation",
   "loopgraph://schemas/hermes-agent-instance",
   "loopgraph://schemas/hermes-execution-event",
-  "loopgraph://graph/company"
+  "loopgraph://graph/company",
+  "loopgraph://catalog/company-loops"
 ] as const;
 
 const LOOPGRAPH_ROUTER_SCHEMA_RESOURCE_URIS = new Set([
@@ -625,6 +632,12 @@ export async function listLoopgraphMcpResources(
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
   }];
+  const companyCatalogResources: LoopgraphMcpResource[] = [{
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[25],
+    name: "Prebuilt company loop library",
+    description: "Canonical department operating skills, Hermes routing questions, prebuilt loop claims, and shared-learning playbooks.",
+    mimeType: "application/json"
+  }];
   const exposure = normalizeLoopgraphMcpExposure(options.exposure);
   if (exposure !== "admin") {
     return [...schemaResources, ...graphResources]
@@ -650,6 +663,7 @@ export async function listLoopgraphMcpResources(
     ...departmentResources,
     ...sessionResources,
     ...loopResources,
+    ...companyCatalogResources,
     ...graphResources
   ];
 }
@@ -886,8 +900,25 @@ async function readLoopgraphMcpResource(
     const department = listDepartmentCatalog({ includeCustom: true }).find((item) => item.id === departmentType);
     if (!department) throw new Error(`Department resource not found: ${parsed.id}`);
     return {
-      schemaVersion: "department-resource/v1alpha1",
-      department
+      schemaVersion: "department-resource/v1alpha2",
+      department,
+      operatingSkill: getDepartmentOperatingSkill(departmentType),
+      prebuiltLoops: PREBUILT_COMPANY_LOOPS.filter((item) => item.departmentType === departmentType),
+      sharedLearningPlaybooks: CROSS_DEPARTMENT_PLAYBOOKS.filter((playbook) =>
+        playbook.orderedLoopTemplateIds.some((templateId) =>
+          PREBUILT_COMPANY_LOOPS.some((item) => item.templateId === templateId && item.departmentType === departmentType)
+        )
+      )
+    };
+  }
+
+  if (parsed.collection === "catalog" && parsed.id === "company-loops") {
+    return {
+      schemaVersion: COMPANY_LOOP_LIBRARY_SCHEMA_VERSION,
+      routerEvaluationQuestions: HERMES_ROUTER_EVALUATION_QUESTIONS,
+      departmentOperatingSkills: DEPARTMENT_OPERATING_SKILLS,
+      prebuiltLoops: PREBUILT_COMPANY_LOOPS,
+      sharedLearningPlaybooks: CROSS_DEPARTMENT_PLAYBOOKS
     };
   }
 

@@ -36,6 +36,8 @@ Loopgraph gives Hermes a governed map of the company:
 
 > **One brain, many loops.** Every provider webhook terminates at Hermes—not at an individual workflow. Hermes understands the incoming business problem and proposes a route; Loopgraph decides whether that route is valid and safe to run.
 
+Loopgraph includes a [prebuilt company loop library](docs/COMPANY-LOOP-LIBRARY.md) with routing-ready defaults and Hermes operating skills for Product, Marketing, Sales, Customer Success, Engineering, Operations / Finance, HR / Talent, Legal / Compliance, and Management. A new local workspace still starts empty: Hermes proposes the relevant defaults, and only loops you accept are created.
+
 ## How it works
 
 ```mermaid
@@ -588,6 +590,7 @@ The safest supported path today is **design locally, materialize, rehearse routi
 - [Semantic graph transactions](docs/SEMANTIC-GRAPH-TRANSACTIONS.md) — exact approvals, atomic add/update/split/merge/retire changes, promotion, lifecycle, and rollback
 - [Promotion rehearsal](docs/PROMOTION-REHEARSAL.md) — automatic simulation, routing, ambiguity, regression, policy, and evidence gates before promotion
 - [Hermes examples](docs/HERMES-EXAMPLES.md) — Marketing, Legal / Compliance, and custom flows
+- [Company loop library](docs/COMPANY-LOOP-LIBRARY.md) — prebuilt loops by department, Hermes decision logic, operating skills, and shared-learning topology
 - [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md) — implementation-to-test evidence map
 - [Event-brain integration plan](docs/HERMES-EVENT-BRAIN-INTEGRATION-PLAN.md) — detailed architecture and product plan
 - [LoopSpec reference](docs/loop-spec.md) — the loop contract

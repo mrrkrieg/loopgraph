@@ -14,6 +14,7 @@ import type {
 import { getDepartmentTemplate, getTemplateById, getTemplateCatalog } from "./templates";
 import type { LoadedRegisteredLoopSpec } from "./local-workspace";
 import { loopIdsMatch } from "@/lib/loopgraph-runtime/run-filters";
+import { CROSS_DEPARTMENT_PLAYBOOKS } from "loopgraph/core";
 
 const defaultView: LoopGraphViewState = {
   mode: "topology",
@@ -166,6 +167,7 @@ export function buildLoopGraph(input: {
       label: "department rollup"
     })),
     ...input.loops.flatMap((loop) => loopEdges(loop, mergedReviews, improvements)),
+    ...crossDepartmentLearningEdges(input.loops),
     ...caseEdges(cases, input.loops),
     ...traceEdges(runs, input.loops)
   ];
@@ -177,6 +179,60 @@ export function buildLoopGraph(input: {
     view: getDefaultGraphView(input.selectedNodeId ?? `loop:${input.loops[0]?.id ?? "management"}`),
     sourceLabel: input.sourceLabel
   };
+}
+
+/**
+ * Makes the company topology executable and explainable: adjacent edges describe
+ * a permitted supporting sequence, while return edges show where outcome evidence
+ * is expected to change a future Hermes decision.
+ */
+function crossDepartmentLearningEdges(loops: LoopRecord[]): LoopGraphEdge[] {
+  const loopByTemplate = new Map(loops.map((loop) => [loop.templateId, loop]));
+  const edges = new Map<string, LoopGraphEdge>();
+
+  for (const playbook of CROSS_DEPARTMENT_PLAYBOOKS) {
+    for (let index = 0; index < playbook.orderedLoopTemplateIds.length - 1; index += 1) {
+      const source = loopByTemplate.get(playbook.orderedLoopTemplateIds[index]!);
+      const target = loopByTemplate.get(playbook.orderedLoopTemplateIds[index + 1]!);
+      if (!source || !target) continue;
+      const id = `edge:playbook:${playbook.id}:${source.id}:${target.id}`;
+      edges.set(id, {
+        id,
+        source: `loop:${source.id}`,
+        target: `loop:${target.id}`,
+        kind: "data_flow",
+        label: index === 0 ? "permits supporting route" : "passes governed evidence",
+        metadata: {
+          semantic: true,
+          playbookId: playbook.id,
+          explicitFanoutPermitted: playbook.explicitFanoutPermitted,
+          relationship: "supporting_sequence"
+        }
+      });
+    }
+
+    const terminal = loopByTemplate.get(playbook.orderedLoopTemplateIds.at(-1)!);
+    if (!terminal) continue;
+    for (const consumerTemplateId of playbook.learningReturnTemplateIds) {
+      const consumer = loopByTemplate.get(consumerTemplateId);
+      if (!consumer || consumer.id === terminal.id) continue;
+      const id = `edge:learning:${playbook.id}:${terminal.id}:${consumer.id}`;
+      edges.set(id, {
+        id,
+        source: `loop:${terminal.id}`,
+        target: `loop:${consumer.id}`,
+        kind: "improves",
+        label: "outcome returns as evidence",
+        metadata: {
+          semantic: true,
+          playbookId: playbook.id,
+          relationship: "shared_learning"
+        }
+      });
+    }
+  }
+
+  return Array.from(edges.values());
 }
 
 export function buildGraphFromCatalog(input: {

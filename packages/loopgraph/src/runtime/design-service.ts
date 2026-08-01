@@ -13,6 +13,7 @@ import {
   loopDesignProposalSchema,
   loopDesignProposalSetSchema,
   normalizeDepartmentType,
+  PREBUILT_COMPANY_LOOPS,
   type BusinessDiscoverySession,
   type DepartmentType,
   type DesignRun,
@@ -730,24 +731,15 @@ function deterministicCandidatesForDepartment(departmentType: DepartmentType): L
     ];
   }
 
-  if (departmentType === "legal_compliance") {
-    return [{
-      id: "legal_compliance_evidence_review",
-      name: "Legal / Compliance Evidence Review",
-      whyCandidate: "Sensitive compliance work should start as an evidence packet and expert-review loop, not autonomous legal judgment.",
-      expectedRoutingProblemTypes: ["legal_compliance_review_required"],
-      requiredCapabilities: ["policy_repository.read", "compliance_evidence.read", "contract_repository.read"]
-    }];
-  }
-
-  if (departmentType === "hr_talent") {
-    return [{
-      id: "hr_talent_evidence_review",
-      name: "HR / Talent Evidence Review",
-      whyCandidate: "Sensitive people workflows need data minimization, human judgment, and strict blocking for employment decisions.",
-      expectedRoutingProblemTypes: ["hr_talent_review_required"],
-      requiredCapabilities: ["ats.read", "hris.read", "people_policy.read"]
-    }];
+  const prebuilt = PREBUILT_COMPANY_LOOPS.filter((item) => item.departmentType === departmentType);
+  if (prebuilt.length > 0) {
+    return prebuilt.map((item) => ({
+      id: item.templateId,
+      name: prebuiltLoopName(item.templateId, departmentType),
+      whyCandidate: `Prebuilt ${formatDepartmentType(departmentType)} loop for ${item.problemTypes.join(", ")}; it produces ${item.learningOutputs.join(", ")} for shared company learning.`,
+      expectedRoutingProblemTypes: item.problemTypes,
+      requiredCapabilities: item.requiredConnections
+    }));
   }
 
   return [{
@@ -757,6 +749,23 @@ function deterministicCandidatesForDepartment(departmentType: DepartmentType): L
     expectedRoutingProblemTypes: [`${departmentType}_recurring_work`],
     requiredCapabilities: ["manual_input", "trace.write"]
   }];
+}
+
+function prebuiltLoopName(templateId: string, departmentType: DepartmentType): string {
+  const prefixes = [
+    `${departmentType}-`,
+    departmentType === "ops_finance" ? "operations_finance-" : "",
+    departmentType === "legal_compliance" ? "legal_security-" : "",
+    departmentType === "hr_talent" ? "hr-" : "",
+    departmentType === "customer_success" ? "customer_success-" : ""
+  ].filter(Boolean);
+  const withoutPrefix = prefixes.reduce(
+    (value, prefix) => value.startsWith(prefix) ? value.slice(prefix.length) : value,
+    templateId
+  );
+  return withoutPrefix
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function proposalCandidates(context: LoopDesignContext): LoopDesignProposal[] {

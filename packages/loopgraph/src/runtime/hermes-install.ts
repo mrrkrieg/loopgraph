@@ -21,6 +21,12 @@ import {
   METRIC_BINDING_SCHEMA_VERSION,
   MEASUREMENT_JOB_SCHEMA_VERSION,
   CONNECTION_RECONCILIATION_SCHEMA_VERSION,
+  DEPARTMENT_OPERATING_SKILLS,
+  DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION,
+  CROSS_DEPARTMENT_PLAYBOOKS,
+  HERMES_ROUTER_EVALUATION_QUESTIONS,
+  PREBUILT_COMPANY_LOOPS,
+  type DepartmentOperatingSkill,
   LOOP_DESIGN_CONTEXT_SCHEMA_VERSION,
   LOOP_DESIGN_PROPOSAL_SET_SCHEMA_VERSION,
   METRIC_SAMPLE_SCHEMA_VERSION,
@@ -58,8 +64,8 @@ import { getLoopgraphRoot } from "./storage-resolver";
 import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 
-export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha6" as const;
-export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.5.0" as const;
+export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha7" as const;
+export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.6.0" as const;
 export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha5" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha5" as const;
 export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha1" as const;
@@ -67,6 +73,7 @@ export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   mcpServer: HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION,
   designSkill: HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
   eventRouterSkill: HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION,
+  departmentOperatingSkill: DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION,
   evidenceGapSet: EVIDENCE_GAP_SET_SCHEMA_VERSION,
   hermesDesignTask: HERMES_DESIGN_TASK_SCHEMA_VERSION,
   loopOpportunity: LOOP_OPPORTUNITY_SCHEMA_VERSION,
@@ -141,7 +148,7 @@ export type HermesCompatibilityStatus = {
     ok: boolean;
   }>;
   skills: Array<{
-    name: "loopgraph" | "loopgraph-event-router";
+    name: string;
     expectedVersion: typeof HERMES_LOOPGRAPH_SKILL_VERSION;
     actualVersion?: string;
     versionOk: boolean;
@@ -288,6 +295,14 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
   const skillsDir = path.join(hermesRoot, "skills");
   const designSkillDir = path.join(skillsDir, "loopgraph");
   const routerSkillDir = path.join(skillsDir, "loopgraph-event-router");
+  const departmentSkillArtifacts = DEPARTMENT_OPERATING_SKILLS.map((skill) => {
+    const name = `loopgraph-department-${skill.departmentType.replace(/_/g, "-")}`;
+    return {
+      name,
+      path: path.join(skillsDir, name, "SKILL.md"),
+      skill
+    };
+  });
   const scope = options.scope ?? "project";
   const command = path.resolve(options.nodeCommand ?? process.execPath);
   const cliEntryPath = path.resolve(options.cliEntryPath ?? process.argv[1] ?? "loopgraph");
@@ -368,6 +383,9 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
 
   await writeFile(designSkillPath, loopgraphDesignSkill(projectRoot));
   await writeFile(routerSkillPath, loopgraphEventRouterSkill(projectRoot));
+  for (const artifact of departmentSkillArtifacts) {
+    await writeTextFile(artifact.path, loopgraphDepartmentOperatingSkill(artifact.skill));
+  }
   for (const file of supportingFiles) {
     await writeTextFile(file.path, file.content);
   }
@@ -410,7 +428,13 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
         assets: supportingFiles
           .filter((file) => isPathInside(file.path, routerSkillDir))
           .map((file) => file.path)
-      }
+      },
+      ...departmentSkillArtifacts.map((artifact) => ({
+        name: artifact.name,
+        version: HERMES_LOOPGRAPH_SKILL_VERSION,
+        protocol: DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION,
+        path: artifact.path
+      }))
     ],
     capabilities: {
       routingCatalog: true,
@@ -450,7 +474,9 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
       hermesWebhookSync: true,
       hermesWebhookDoctor: true,
       hermesWebhookTest: true,
-      liveExecution: false
+      departmentOperatingSkills: true,
+      sharedLearningPlaybooks: true,
+      liveExecution: true
     },
     lastDoctor: null
   };
@@ -462,7 +488,7 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
     installStatePath,
     mcpConfigPath,
     skillsDir,
-    skillPaths: [designSkillPath, routerSkillPath],
+    skillPaths: [designSkillPath, routerSkillPath, ...departmentSkillArtifacts.map((artifact) => artifact.path)],
     supportingFilePaths: supportingFiles.map((file) => file.path),
     protocols: HERMES_LOOPGRAPH_PROTOCOL_VERSIONS,
     mcpServer: adminMcpServer,
@@ -485,6 +511,11 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
   const skillsDir = path.join(hermesRoot, "skills");
   const designSkillPath = path.join(skillsDir, "loopgraph", "SKILL.md");
   const routerSkillPath = path.join(skillsDir, "loopgraph-event-router", "SKILL.md");
+  const departmentSkillPaths = DEPARTMENT_OPERATING_SKILLS.map((skill) => path.join(
+    skillsDir,
+    `loopgraph-department-${skill.departmentType.replace(/_/g, "-")}`,
+    "SKILL.md"
+  ));
   const supportingArtifactPaths = [
     path.join(skillsDir, "loopgraph", "references", "discovery-flow.md"),
     path.join(skillsDir, "loopgraph", "references", "proposal-schema.md"),
@@ -503,6 +534,7 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
     mcpConfigPath,
     designSkillPath,
     routerSkillPath,
+    ...departmentSkillPaths,
     ...supportingArtifactPaths
   ].map(async (item) => ({
     path: item,
@@ -777,7 +809,11 @@ function checkHermesCompatibility(
     {
       name: "loopgraph-event-router" as const,
       expectedProtocol: HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION
-    }
+    },
+    ...DEPARTMENT_OPERATING_SKILLS.map((skill) => ({
+      name: `loopgraph-department-${skill.departmentType.replace(/_/g, "-")}`,
+      expectedProtocol: DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION
+    }))
   ];
   const skills = expectedSkills.map((expectedSkill) => {
     const actualSkill = actualSkills.find((item) => item.name === expectedSkill.name);
@@ -913,7 +949,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 4. Call \`loopgraph_departments_list\` and immediately present only those canonical departments. Do not ask an open-ended question first. Recommend Product as the easiest first example, but let the user pick one or more departments.
 5. Call \`loopgraph_discovery_start\` or \`loopgraph_discovery_get\` to start or resume the local session.
 6. Ask permission before project inspection; if granted, call \`loopgraph_project_inspect\` to read only allowlisted manifests and example env key names.
-7. After the user chooses departments, call \`loopgraph_discovery_select_departments\`.
+7. After the user chooses departments, call \`loopgraph_discovery_select_departments\`, then read each selected \`loopgraph://departments/{departmentType}\` resource. Use its operating skill, prebuilt loop claims, and shared-learning playbooks as candidates; do not materialize all defaults automatically.
 8. When Loopgraph initiates a design task, call \`loopgraph_hermes_design_tasks_get\` and preserve its task ID, session ID, and evidence-gap IDs throughout the conversation.
 9. Call \`loopgraph_evidence_gaps_get\` and ask only the returned focused questions, never more than three at once. Submit each user answer with \`loopgraph_evidence_gap_answer\`; this updates the same discovery session and lets Loopgraph resume the durable Hermes task automatically.
 10. If the task includes \`originOpportunityId\`, call \`loopgraph_opportunities_get\` and explain the observed signals, score components, target loop coverage, and proposed graph change before asking for missing evidence.
@@ -1025,12 +1061,15 @@ Use this skill only for isolated webhook, schedule, manual, or Loopgraph lifecyc
 3. If Loopgraph reports a duplicate, stop.
 4. If \`normalizedPayload.notificationOnly\` is true, or \`sourceRoute\` is \`loopgraph.lifecycle\`, record the event as a lifecycle notification and stop without submitting a RoutingDecision.
 5. Compare only the eligible routing cards returned by Loopgraph; each card must use routing card schema \`${ROUTING_CARD_SCHEMA_VERSION}\`.
-6. Submit exactly one schema-constrained RoutingDecision with \`schemaVersion: "${ROUTING_DECISION_SCHEMA_VERSION}"\` through \`loopgraph_routing_decision_submit\`.
-7. Use \`loopgraph_events_get\`, \`loopgraph_problems_get\`, \`loopgraph_routing_decision_get\`, or \`loopgraph_graph_get\` only when you need to explain existing durable state.
-8. Use \`append_evidence\` for matching open problems instead of creating duplicate work.
-9. If confidence is low or candidates are close, request human choice.
-10. If no loop matches, create an unhandled business problem and stop.
-11. For debugging or operator explanation, call \`loopgraph_graph_get\` with \`projection: "event_routing"\`.
+6. Evaluate these questions in order and record only the answer summary and evidence references, never hidden reasoning:
+${HERMES_ROUTER_EVALUATION_QUESTIONS.map((question, index) => `   ${index + 1}. ${question}`).join("\n")}
+7. Submit exactly one schema-constrained RoutingDecision with \`schemaVersion: "${ROUTING_DECISION_SCHEMA_VERSION}"\` through \`loopgraph_routing_decision_submit\`.
+8. Use \`loopgraph_events_get\`, \`loopgraph_problems_get\`, \`loopgraph_routing_decision_get\`, or \`loopgraph_graph_get\` only when you need to explain existing durable state.
+9. Use \`append_evidence\` for matching open problems instead of creating duplicate work.
+10. Fan out only when every selected card explicitly permits it and a canonical shared-learning playbook declares the sequence. One event should otherwise create one primary problem.
+11. If confidence is low, required context is missing, candidates are close, or exclusions conflict, request human choice.
+12. If no loop matches, create an unhandled business problem and stop.
+13. For debugging or operator explanation, call \`loopgraph_graph_get\` with \`projection: "event_routing"\`.
 
 ## Supporting References
 
@@ -1051,6 +1090,77 @@ Use this skill only for isolated webhook, schedule, manual, or Loopgraph lifecyc
 - Do not route notification-only Loopgraph lifecycle events into business loops; they are status callbacks to Hermes.
 - Do not route all events through one accumulating chat transcript.
 - Preserve correlation and causation IDs.
+`;
+}
+
+function loopgraphDepartmentOperatingSkill(skill: DepartmentOperatingSkill): string {
+  const loops = skill.defaultLoopTemplateIds
+    .map((templateId) => PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === templateId))
+    .filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const playbooks = CROSS_DEPARTMENT_PLAYBOOKS.filter((playbook) =>
+    playbook.orderedLoopTemplateIds.some((templateId) => skill.defaultLoopTemplateIds.includes(templateId))
+  );
+  const goals = skill.operatingGoals.map((goal) => `- ${goal}`).join("\n");
+  const approach = skill.taskApproach.map((phase, index) =>
+    `${index + 1}. **${phase.phase.replace(/_/g, " ")}** — ${phase.instruction}\n   - Required output: ${phase.requiredOutput}`
+  ).join("\n");
+  const loopCatalog = loops.map((item) =>
+    `### ${item.templateId}\n\n- Claims: ${item.problemTypes.join(", ")}\n- Events: ${item.eventTypes.join(", ")}\n- Company objects: ${item.subjectTypes.join(", ")}\n- Required context: ${item.requiredContext.join(", ")}\n- Required connections: ${item.requiredConnections.join(", ")}\n- Fan-out: ${item.fanoutPolicy.mode}, maximum ${item.fanoutPolicy.maxRoutes}\n- Learning produced: ${item.learningOutputs.join(", ")}`
+  ).join("\n\n");
+  const sharedLearning = playbooks.length
+    ? playbooks.map((playbook) =>
+      `- **${playbook.name}:** ${playbook.orderedLoopTemplateIds.join(" -> ")}\n  - Decision rule: ${playbook.decisionRule}\n  - Learning: ${playbook.sharedLearning}`
+    ).join("\n")
+    : "- No cross-department fan-out is enabled by default. Outcomes still return to Hermes as evidence.";
+  const boundaries = skill.boundaries.map((boundary) => `- ${boundary}`).join("\n");
+  const learningQuestions = skill.learningQuestions.map((question) => `- ${question}`).join("\n");
+
+  return `---
+name: loopgraph-department-${skill.departmentType.replace(/_/g, "-")}
+description: ${skill.mission}
+version: ${HERMES_LOOPGRAPH_SKILL_VERSION}
+metadata:
+  hermes:
+    tags: [loopgraph, department, ${skill.departmentType.replace(/_/g, "-")}]
+  loopgraph:
+    integrationProtocol: ${HERMES_LOOPGRAPH_INTEGRATION_VERSION}
+    skillProtocol: ${DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION}
+    departmentType: ${skill.departmentType}
+---
+
+# ${skill.name}
+
+## Mission
+
+${skill.mission}
+
+## Operating goals
+
+${goals}
+
+## How Hermes approaches work
+
+${approach}
+
+## Prebuilt loops
+
+${loopCatalog}
+
+## Shared-learning playbooks
+
+${sharedLearning}
+
+## Boundaries
+
+${boundaries}
+
+## Learning questions
+
+${learningQuestions}
+
+## Runtime rule
+
+This skill guides Hermes judgment; it does not bypass Loopgraph. Read current routing cards, connection/readiness state, exclusions, open problems, and approval policy before choosing work. Submit the structured decision to Loopgraph for validation and durable recording. Abstain when context or authority is missing.
 `;
 }
 

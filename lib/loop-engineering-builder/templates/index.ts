@@ -5,6 +5,7 @@ import type {
   QuestionDefinition,
   QuestionSection
 } from "../types";
+import { getPrebuiltLoopDefinition } from "loopgraph/core";
 
 const q = (
   section: QuestionSection,
@@ -765,6 +766,61 @@ const templateDetailsById: Record<string, Partial<LoopTemplate>> = {
     verification: ["Agenda items tie to evidence", "Follow-ups have owners", "Old decisions are not lost"],
     escalation: ["Decision keeps carrying over", "Unowned cross-functional risk", "Leadership attention conflict"]
   },
+  "engineering-incident_response": {
+    goal: "Stabilize production incidents quickly while preserving one source of truth for technical and customer impact.",
+    businessOutcome: "Incidents have clear ownership, bounded supporting work, safer communication, and faster mitigation.",
+    primaryMetric: "Time to mitigation",
+    secondaryMetrics: ["Time to ownership", "Customer impact duration", "Evidence completeness", "Recurrence rate"],
+    observes: ["Incident state", "Service health", "Customer impact", "Mitigation actions", "Decision timeline"],
+    requiredDataSources: ["Incident tracker", "Observability", "Repository", "Deployments", "CRM"],
+    routine: ["Establish incident identity and severity", "Assign accountable incident owner", "Collect current technical and customer evidence", "Prepare bounded mitigation actions", "Permit declared customer and learning routes only when evidence supports them"],
+    verification: ["One primary incident problem exists", "Mitigation evidence is current", "Affected accounts are explicit", "Actions respect approval policy"],
+    escalation: ["Critical severity", "Unclear blast radius", "Security or legal implication", "Material customer impact"]
+  },
+  "customer_success-customer_communication_review": {
+    goal: "Prepare accurate, timely, audience-specific customer communication from verified incident facts.",
+    businessOutcome: "Affected customers receive trustworthy updates without speculation or conflicting promises.",
+    primaryMetric: "Approved communication latency",
+    secondaryMetrics: ["Fact correction rate", "Customer response", "Approval time", "Promise accuracy"],
+    observes: ["Known incident facts", "Affected accounts", "Service status", "Approved commitments", "Prior messages"],
+    requiredDataSources: ["Incident tracker", "CRM", "Status page", "Communication drafts", "Approval log"],
+    routine: ["Resolve the affected audience", "Separate verified facts from unknowns", "Draft audience-specific update", "Route accountable approval", "Return customer response as incident evidence"],
+    verification: ["Every claim maps to current incident evidence", "Unknowns are explicit", "Commitments are approved"],
+    escalation: ["Possible breach", "Contractual commitment", "Strategic account harm", "Conflicting facts"]
+  },
+  "sales-pipeline_outcome": {
+    goal: "Connect campaign cohorts and qualification decisions to pipeline, revenue, and customer outcomes.",
+    businessOutcome: "Marketing and Sales optimize for qualified customers rather than inexpensive surface-level leads.",
+    primaryMetric: "Qualified pipeline per campaign cohort",
+    secondaryMetrics: ["Opportunity conversion", "Revenue conversion", "Time to qualify", "Healthy customer rate"],
+    observes: ["Campaign cohort", "Lead qualification", "Opportunity stage", "Revenue outcome", "Customer health"],
+    requiredDataSources: ["CRM", "Billing system", "Product analytics", "Customer success system", "Campaign attribution"],
+    routine: ["Join leads to a campaign cohort", "Measure qualification and opportunity progression", "Resolve revenue and early customer outcome", "Explain loss or quality patterns", "Return evidence to campaign and ICP learning"],
+    verification: ["Cohort identity is stable", "Qualification definitions are consistent", "Revenue and customer evidence is attributable"],
+    escalation: ["Attribution conflict", "Material pipeline discrepancy", "Missing customer outcome window"]
+  },
+  "operations_finance-resource_allocation": {
+    goal: "Prepare reconciled financial and capacity tradeoffs before resources move.",
+    businessOutcome: "Budget and capacity follow evidenced constraints with accountable approval.",
+    primaryMetric: "Resource decision cycle time",
+    secondaryMetrics: ["Constraint resolution", "Forecast impact", "Approval latency", "Decision follow-through"],
+    observes: ["Forecast variance", "Budget", "Capacity", "Operating constraint", "Decision options"],
+    requiredDataSources: ["Finance system", "Capacity plan", "Project system", "Approval system", "Metrics warehouse"],
+    routine: ["Reconcile the financial baseline", "Name the operating constraint", "Compare allocation options", "Prepare impact and risk", "Route an accountable management decision"],
+    verification: ["Numbers reconcile", "Constraint and alternatives are explicit", "Decision owner is accountable"],
+    escalation: ["Material spend", "Hiring or headcount change", "Runway impact", "Cross-functional conflict"]
+  },
+  "legal_security-compliance_evidence": {
+    goal: "Assemble current control evidence with exact sources, owners, gaps, and review boundaries.",
+    businessOutcome: "Audits and customer assurance move faster without unsupported security or compliance claims.",
+    primaryMetric: "Evidence request cycle time",
+    secondaryMetrics: ["Citation coverage", "Stale evidence rate", "Control gap age", "Reviewer rework"],
+    observes: ["Evidence request", "Control state", "Policy version", "Audit window", "Owner attestation"],
+    requiredDataSources: ["Control system", "Policy repository", "Cloud logs", "Ticketing", "Audit repository"],
+    routine: ["Resolve requested controls and time window", "Collect minimum necessary source evidence", "Validate owner and freshness", "Flag gaps without inferring compliance", "Route qualified review and record approval"],
+    verification: ["Every assertion has a source", "Evidence is current for the requested window", "Sensitive data is minimized"],
+    escalation: ["Material control gap", "Possible breach", "Unsupported external claim", "Legal interpretation required"]
+  },
   "custom-custom_company_loop": {
     goal: "Define one recurring workflow with observable signals, accountable owners, verification, and improvement.",
     businessOutcome: "A custom operating loop becomes explicit enough to run, review, and improve.",
@@ -842,6 +898,7 @@ const departments: DepartmentTemplate[] = [
       strategicAccountEscalationTemplate,
       supportTicketTriageTemplate,
       loop("customer_success", "customer_health_risk", "Customer Health Risk Loop", "Detect risk from usage, sentiment, tickets, and renewal context."),
+      loop("customer_success", "customer_communication_review", "Customer Communication Review Loop", "Prepare and approve fact-checked customer communication for incidents and material service changes."),
       loop("customer_success", "support_triage", "Support Triage Loop", "Classify, route, and draft support responses with human escalation."),
       loop("customer_success", "renewal_risk", "Renewal Risk Loop", "Surface renewal risk early and generate account intervention plans."),
       loop("customer_success", "proactive_outreach", "Proactive Outreach Loop", "Identify moments where proactive human outreach matters."),
@@ -863,6 +920,7 @@ const departments: DepartmentTemplate[] = [
       "Loops for qualification, account research, follow-up, and CRM hygiene.",
     commonLoops: [
       loop("sales", "lead_qualification", "Lead Qualification Loop", "Score and route leads using fit, intent, and readiness signals."),
+      loop("sales", "pipeline_outcome", "Pipeline Outcome Loop", "Return qualified pipeline and customer outcomes to the campaign and qualification loops that created them."),
       loop("sales", "account_research", "Account Research Loop", "Prepare concise account context and likely buying triggers."),
       loop("sales", "follow_up", "Follow-up Loop", "Keep next steps moving after meetings without losing personalization."),
       loop("sales", "crm_hygiene", "CRM Hygiene Loop", "Detect stale opportunities and missing fields."),
@@ -884,6 +942,7 @@ const departments: DepartmentTemplate[] = [
       "Loops for issue planning, review prep, quality checklists, and incident learning.",
     commonLoops: [
       githubIssueTriageTemplate,
+      loop("engineering", "incident_response", "Incident Response Loop", "Coordinate production incident ownership, mitigation, evidence, and governed supporting routes."),
       loop("engineering", "issue_to_plan", "Issue to Implementation Plan Loop", "Turn accepted issues into scoped implementation plans."),
       loop("engineering", "pr_review_prep", "PR Review Prep Loop", "Summarize risk, tests, and reviewer context before review."),
       loop("engineering", "qa_checklist", "QA Checklist Loop", "Generate release-specific QA checks and trace outcomes."),
@@ -909,7 +968,8 @@ const departments: DepartmentTemplate[] = [
       loop("operations_finance", "forecast_variance", "Forecast Variance Loop", "Explain changes in forecast and recommend action."),
       loop("operations_finance", "vendor_review", "Vendor Review Loop", "Review spend, usage, renewals, and ownership."),
       loop("operations_finance", "close_readiness", "Close Readiness Loop", "Track month-end close blockers and evidence."),
-      loop("operations_finance", "cash_collection", "Cash Collection Loop", "Detect invoice risk, owner follow-up, and customer communication needs.")
+      loop("operations_finance", "cash_collection", "Cash Collection Loop", "Detect invoice risk, owner follow-up, and customer communication needs."),
+      loop("operations_finance", "resource_allocation", "Finance Resource Allocation Loop", "Prepare reconciled budget and capacity tradeoffs for an accountable resource decision.")
     ],
     requiredQuestions: baseQuestions("operations and finance"),
     commonDataSources: ["stripe", "postgres", "supabase", "calendar", "custom_api"],
@@ -951,7 +1011,8 @@ const departments: DepartmentTemplate[] = [
       loop("legal_security", "policy_drift", "Policy Drift Loop", "Detect changes that require policy or control review."),
       loop("legal_security", "access_review", "Access Review Loop", "Track access exceptions and owner approvals."),
       loop("legal_security", "incident_evidence", "Incident Evidence Loop", "Collect incident evidence and prepare review summaries."),
-      loop("legal_security", "security_questionnaire", "Security Questionnaire Loop", "Draft evidence-backed security questionnaire responses for review.")
+      loop("legal_security", "security_questionnaire", "Security Questionnaire Loop", "Draft evidence-backed security questionnaire responses for review."),
+      loop("legal_security", "compliance_evidence", "Compliance Evidence Loop", "Assemble current, source-cited control evidence and route material gaps to qualified owners.")
     ],
     requiredQuestions: baseQuestions("legal and security"),
     commonDataSources: ["github", "slack", "gmail", "calendar", "postgres", "custom_api"],
@@ -1072,6 +1133,7 @@ function enrichTemplate(department: DepartmentTemplate, template: LoopTemplate):
     primaryMetric: detailedTemplate.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
     defaultMetrics: Array.from(new Set(metrics)).slice(0, 5),
     defaultOwners: owners,
+    routingDefinition: getPrebuiltLoopDefinition(template.id),
     defaultHiddenLabor: {
       ...hiddenLaborDefaults[department.key],
       ...detailedTemplate.defaultHiddenLabor

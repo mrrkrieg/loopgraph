@@ -747,14 +747,28 @@ describe("Loopgraph MCP server", () => {
       method: "resources/read",
       params: { uri: "loopgraph://graph/company" }
     }, { projectRoot }));
+    const companyCatalog = resourceJson(await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "company-loop-catalog-resource",
+      method: "resources/read",
+      params: { uri: "loopgraph://catalog/company-loops" }
+    }, { projectRoot }));
 
     expect(marketing).toMatchObject({
-      schemaVersion: "department-resource/v1alpha1",
+      schemaVersion: "department-resource/v1alpha2",
       department: {
         id: "marketing",
         label: "Marketing"
-      }
+      },
+      operatingSkill: { departmentType: "marketing" }
     });
+    expect((marketing as { prebuiltLoops: unknown[] }).prebuiltLoops.length).toBeGreaterThanOrEqual(5);
+    expect(companyCatalog).toMatchObject({
+      schemaVersion: "company-loop-library/v1alpha1"
+    });
+    expect((companyCatalog as { routerEvaluationQuestions: unknown[] }).routerEvaluationQuestions).toHaveLength(10);
+    expect((companyCatalog as { departmentOperatingSkills: unknown[] }).departmentOperatingSkills).toHaveLength(9);
+    expect((companyCatalog as { prebuiltLoops: unknown[] }).prebuiltLoops.length).toBeGreaterThanOrEqual(45);
     expect(JSON.stringify(proposalSchema)).toContain("LoopDesignProposalSet");
     expect(evidenceGapSchema).toMatchObject({
       schemaVersion: "mcp-schema-resource/v1alpha1",
