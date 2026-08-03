@@ -40,7 +40,7 @@ Even one department is not one workflow. Product may own Feedback Clustering, Pr
 
 A department is an ownership boundary. **A loop is a specialized operating unit inside that boundary.**
 
-![A company operating graph has a verified connector boundary, one semantic brain, department-owned loop libraries, and governed outcome evidence](paper-company-loop-topology-v3.png)
+![A company operating graph has a verified connector boundary, one semantic brain, department-owned loop libraries, and governed outcome evidence](paper-company-loop-topology-v4.png)
 
 This is why a company is better represented as a graph than as a list of agents.
 

@@ -14,7 +14,8 @@
 
     <g filter="url(#s)">
       <rect x="58" y="274" width="198" height="178" rx="28" fill="#fffdfa" stroke="#0b493f" stroke-width="4"/>
-      <text x="157" y="316" text-anchor="middle" font-size="17" font-weight="850" letter-spacing="1.5" fill="#f4511e">PROVIDER BOUNDARY</text>
+      <rect x="78" y="292" width="158" height="34" rx="17" fill="#fff0e8"/>
+      <text x="157" y="314" text-anchor="middle" font-size="12" font-weight="850" letter-spacing="1.05" fill="#f4511e">PROVIDER BOUNDARY</text>
       <text x="157" y="355" text-anchor="middle" font-size="24" font-weight="900" fill="#0b493f">CONNECTOR</text>
       <text x="157" y="385" text-anchor="middle" font-size="24" font-weight="900" fill="#0b493f">BROKER</text>
       <circle cx="115" cy="420" r="8" fill="#0b493f"/><circle cx="157" cy="420" r="8" fill="#0b493f"/><circle cx="199" cy="420" r="8" fill="#0b493f"/>
