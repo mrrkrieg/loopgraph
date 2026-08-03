@@ -33,7 +33,7 @@ export function PaperArticle({ markdown }: PaperArticleProps) {
           height={900}
           priority
           sizes="(max-width: 1024px) 100vw, 1024px"
-          src="/paper/01-loop-graph-engineering-cover-hd.png"
+          src="/paper/paper-loop-graph-engineering-cover-v3.png"
           width={1600}
         />
         <p>
