@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     title: "Loop Graph Engineering: The Operating System for AI-Run Companies",
     description:
       "The future company is not one enormous agent. It is a living graph of governed loops.",
-    images: ["/paper/paper-loop-graph-engineering-cover.png"],
+    images: ["/paper/01-loop-graph-engineering-cover-hd.png"],
     type: "article"
   },
   twitter: {
@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     title: "Loop Graph Engineering: The Operating System for AI-Run Companies",
     description:
       "How Hermes and Loopgraph turn AI reasoning into accountable company operations.",
-    images: ["/paper/paper-loop-graph-engineering-cover.png"]
+    images: ["/paper/01-loop-graph-engineering-cover-hd.png"]
   }
 };
 

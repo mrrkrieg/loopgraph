@@ -33,7 +33,7 @@ export function PaperArticle({ markdown }: PaperArticleProps) {
           height={900}
           priority
           sizes="(max-width: 1024px) 100vw, 1024px"
-          src="/paper/paper-loop-graph-engineering-cover.svg"
+          src="/paper/01-loop-graph-engineering-cover-hd.png"
           width={1600}
         />
         <p>
@@ -95,7 +95,7 @@ function renderBlock(block: Block, index: number) {
           <Image
             alt={block.alt}
             height={900}
-            sizes="(max-width: 1024px) 100vw, 960px"
+            sizes="(max-width: 640px) 672px, (max-width: 1024px) 100vw, 960px"
             src={block.src}
             width={1600}
           />
