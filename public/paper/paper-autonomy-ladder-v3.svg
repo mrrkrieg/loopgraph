@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg5" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f1ebdf"/></linearGradient>
+    <linearGradient id="dark5" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b4d42"/><stop offset="1" stop-color="#06342e"/></linearGradient>
+    <linearGradient id="orange5" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff6a2a"/><stop offset="1" stop-color="#ec4316"/></linearGradient>
+    <filter id="s5" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0b493f" flood-opacity=".13"/></filter>
+    <marker id="a5" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#0b493f"/></marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg5)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="58" y="67" font-size="20" font-weight="850" letter-spacing="3.2" fill="#f4511e">04 / AUTHORITY MUST BE EARNED</text>
+    <text x="58" y="136" font-size="58" font-weight="900" letter-spacing="-1.8" fill="#101312">Autonomy is promoted, not switched on</text>
+    <text x="58" y="178" font-size="25" fill="#0b493f">Each mode earns the next through evidence bound to the exact graph, loop version, and risk</text>
+
+    <g filter="url(#s5)">
+      <rect x="50" y="410" width="245" height="220" rx="30" fill="#eef4f1" stroke="#0b493f" stroke-width="4"/>
+      <rect x="350" y="360" width="245" height="270" rx="30" fill="#e5f0ec" stroke="#0b493f" stroke-width="4"/>
+      <rect x="650" y="310" width="245" height="320" rx="30" fill="#fffdfa" stroke="#0b493f" stroke-width="4"/>
+      <rect x="950" y="260" width="245" height="370" rx="30" fill="#fff4ee" stroke="#f4511e" stroke-width="5"/>
+      <rect x="1250" y="210" width="245" height="420" rx="30" fill="url(#dark5)"/>
+    </g>
+
+    <g text-anchor="middle">
+      <circle cx="172" cy="458" r="30" fill="#d4e6df"/><text x="172" y="467" font-size="24" font-weight="900" fill="#0b493f">01</text>
+      <text x="172" y="522" font-size="28" font-weight="900" fill="#0b493f">SIMULATE</text>
+      <text x="172" y="557" font-size="18" fill="#696963">fixtures and traces</text>
+      <text x="172" y="589" font-size="17" font-weight="800" fill="#0b493f">NO EXTERNAL WRITES</text>
+
+      <circle cx="472" cy="408" r="30" fill="#c4ddd4"/><text x="472" y="417" font-size="24" font-weight="900" fill="#0b493f">02</text>
+      <text x="472" y="474" font-size="28" font-weight="900" fill="#0b493f">SHADOW</text>
+      <text x="472" y="509" font-size="18" fill="#696963">real signals</text>
+      <text x="472" y="539" font-size="18" fill="#696963">route recorded only</text>
+      <text x="472" y="586" font-size="17" font-weight="800" fill="#0b493f">NO LIVE WORK</text>
+
+      <circle cx="772" cy="358" r="30" fill="#deeee9"/><text x="772" y="367" font-size="24" font-weight="900" fill="#0b493f">03</text>
+      <text x="772" y="424" font-size="28" font-weight="900" fill="#0b493f">RECOMMEND</text>
+      <text x="772" y="459" font-size="18" fill="#696963">prepared artifact</text>
+      <text x="772" y="489" font-size="18" fill="#696963">evidence attached</text>
+      <text x="772" y="536" font-size="17" font-weight="800" fill="#0b493f">HUMAN DECIDES</text>
+
+      <circle cx="1072" cy="308" r="30" fill="#f4511e"/><text x="1072" y="317" font-size="24" font-weight="900" fill="#fff">04</text>
+      <text x="1072" y="374" font-size="26" font-weight="900" fill="#f4511e">EXECUTE WITH</text>
+      <text x="1072" y="406" font-size="26" font-weight="900" fill="#f4511e">APPROVAL</text>
+      <text x="1072" y="451" font-size="18" fill="#696963">exact prepared action</text>
+      <text x="1072" y="481" font-size="18" fill="#696963">content-bound fingerprint</text>
+      <text x="1072" y="511" font-size="18" fill="#696963">single-use commit</text>
+      <text x="1072" y="570" font-size="14" font-weight="800" fill="#a83812">PRIVILEGED WRITES GATED</text>
+
+      <circle cx="1372" cy="258" r="30" fill="#f4511e"/><text x="1372" y="267" font-size="24" font-weight="900" fill="#fff">05</text>
+      <text x="1372" y="324" font-size="26" font-weight="900" fill="#fff">AUTONOMOUS</text>
+      <text x="1372" y="356" font-size="26" font-weight="900" fill="#fff">LOW RISK</text>
+      <text x="1372" y="401" font-size="18" fill="#d8ebe6">bounded capability</text>
+      <text x="1372" y="431" font-size="18" fill="#d8ebe6">reversible behavior</text>
+      <text x="1372" y="461" font-size="18" fill="#d8ebe6">observed supervision</text>
+      <text x="1372" y="491" font-size="18" fill="#d8ebe6">proven failure mode</text>
+      <text x="1372" y="550" font-size="14" font-weight="800" fill="#ffb18d">NO CUSTOMER-FACING RISK</text>
+    </g>
+
+    <line x1="922" y1="230" x2="922" y2="652" stroke="#f4511e" stroke-width="6"/>
+    <text x="922" y="216" text-anchor="middle" font-size="17" font-weight="900" letter-spacing="1.4" fill="#f4511e">HUMAN AUTHORITY BOUNDARY</text>
+
+    <path d="M74 723H1520" stroke="#0b493f" stroke-width="8" marker-end="url(#a5)"/>
+    <g>
+      <circle cx="172" cy="723" r="29" fill="#d4e6df" stroke="#fff" stroke-width="5"/>
+      <circle cx="472" cy="723" r="29" fill="#c4ddd4" stroke="#fff" stroke-width="5"/>
+      <circle cx="772" cy="723" r="29" fill="#b3d2c7" stroke="#fff" stroke-width="5"/>
+      <circle cx="1072" cy="723" r="29" fill="url(#orange5)" stroke="#fff" stroke-width="5"/>
+      <circle cx="1372" cy="723" r="29" fill="#0b493f" stroke="#fff" stroke-width="5"/>
+    </g>
+    <g text-anchor="middle" font-size="17" font-weight="750" fill="#696963">
+      <text x="172" y="780">routing precision</text><text x="472" y="780">false triggers</text><text x="772" y="780">outcome quality</text><text x="1072" y="780">review burden</text><text x="1372" y="780">failure behavior</text>
+    </g>
+    <text x="800" y="846" text-anchor="middle" font-size="23" font-style="italic" font-family="Georgia, serif" fill="#0b493f">Safety is how autonomy becomes credible.</text>
+  </g>
+</svg>

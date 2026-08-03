@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f1ebdf"/></linearGradient>
+    <linearGradient id="dark" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b4d42"/><stop offset="1" stop-color="#06342e"/></linearGradient>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0b493f" flood-opacity=".12"/></filter>
+    <marker id="a" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#0b493f"/></marker>
+    <marker id="ao" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#f4511e"/></marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="58" y="67" font-size="20" font-weight="850" letter-spacing="3.2" fill="#f4511e">01 / THE SHAPE IS THE OPERATING MODEL</text>
+    <text x="58" y="136" font-size="58" font-weight="900" letter-spacing="-1.8" fill="#101312">The company is not one agent</text>
+    <text x="58" y="178" font-size="25" fill="#0b493f">One semantic brain routes into department-owned libraries of versioned loops</text>
+
+    <g filter="url(#s)">
+      <rect x="58" y="274" width="198" height="178" rx="28" fill="#fffdfa" stroke="#0b493f" stroke-width="4"/>
+      <text x="157" y="316" text-anchor="middle" font-size="17" font-weight="850" letter-spacing="1.5" fill="#f4511e">PROVIDER BOUNDARY</text>
+      <text x="157" y="355" text-anchor="middle" font-size="24" font-weight="900" fill="#0b493f">CONNECTOR</text>
+      <text x="157" y="385" text-anchor="middle" font-size="24" font-weight="900" fill="#0b493f">BROKER</text>
+      <circle cx="115" cy="420" r="8" fill="#0b493f"/><circle cx="157" cy="420" r="8" fill="#0b493f"/><circle cx="199" cy="420" r="8" fill="#0b493f"/>
+      <circle cx="400" cy="363" r="126" fill="#fff7f0" stroke="#f4511e" stroke-width="6"/>
+      <circle cx="400" cy="363" r="102" fill="none" stroke="#f7b292" stroke-width="2"/>
+      <text x="400" y="346" text-anchor="middle" font-size="35" font-weight="900" fill="#101312">HERMES</text>
+      <text x="400" y="383" text-anchor="middle" font-size="18" font-weight="850" letter-spacing="1.8" fill="#f4511e">COMPANY BRAIN</text>
+      <text x="400" y="417" text-anchor="middle" font-size="16" font-weight="700" fill="#696963">object · problem · route</text>
+    </g>
+    <path d="M256 363H274" stroke="#0b493f" stroke-width="5" marker-end="url(#a)"/>
+
+    <g fill="none" stroke="#0b493f" stroke-width="5" marker-end="url(#a)">
+      <path d="M520 324C572 285 606 266 646 260"/><path d="M526 363H646"/><path d="M520 404C572 445 606 460 646 466"/>
+    </g>
+    <g filter="url(#s)">
+      <rect x="664" y="225" width="248" height="82" rx="22" fill="url(#dark)"/>
+      <rect x="664" y="322" width="248" height="82" rx="22" fill="url(#dark)"/>
+      <rect x="664" y="419" width="248" height="82" rx="22" fill="url(#dark)"/>
+    </g>
+    <g text-anchor="middle">
+      <text x="788" y="263" font-size="27" font-weight="900" fill="#fff">PRODUCT</text><text x="788" y="288" font-size="15" font-weight="700" fill="#b8ddd6">owns product outcomes</text>
+      <text x="788" y="360" font-size="27" font-weight="900" fill="#fff">SALES</text><text x="788" y="385" font-size="15" font-weight="700" fill="#b8ddd6">owns revenue outcomes</text>
+      <text x="788" y="457" font-size="27" font-weight="900" fill="#fff">OPERATIONS</text><text x="788" y="482" font-size="15" font-weight="700" fill="#b8ddd6">owns operating outcomes</text>
+    </g>
+    <g stroke="#0b493f" stroke-width="4"><path d="M912 266H964"/><path d="M912 363H964"/><path d="M912 460H964"/></g>
+
+    <g filter="url(#s)">
+      <rect x="964" y="210" width="560" height="112" rx="24" fill="#fffdfa" stroke="#d7d0c4" stroke-width="2"/>
+      <rect x="964" y="337" width="560" height="82" rx="24" fill="#fffdfa" stroke="#d7d0c4" stroke-width="2"/>
+      <rect x="964" y="434" width="560" height="82" rx="24" fill="#fffdfa" stroke="#d7d0c4" stroke-width="2"/>
+    </g>
+    <text x="990" y="239" font-size="14" font-weight="850" letter-spacing="1.5" fill="#f4511e">VERSIONED PRODUCT LOOPS</text>
+    <g font-size="16" font-weight="800" text-anchor="middle" fill="#0b493f">
+      <rect x="990" y="255" width="150" height="42" rx="21" fill="#deeee9"/><text x="1065" y="282">Feedback</text>
+      <rect x="1152" y="255" width="172" height="42" rx="21" fill="#deeee9"/><text x="1238" y="282">Product Problem</text>
+      <rect x="1336" y="255" width="162" height="42" rx="21" fill="#deeee9"/><text x="1417" y="282">Release Learning</text>
+      <rect x="990" y="357" width="150" height="42" rx="21" fill="#fff0e8"/><text x="1065" y="384">Qualification</text>
+      <rect x="1152" y="357" width="172" height="42" rx="21" fill="#fff0e8"/><text x="1238" y="384">Close Readiness</text>
+      <rect x="1336" y="357" width="162" height="42" rx="21" fill="#fff0e8"/><text x="1417" y="384">Forecast</text>
+      <rect x="990" y="454" width="150" height="42" rx="21" fill="#deeee9"/><text x="1065" y="481">Invoice Variance</text>
+      <rect x="1152" y="454" width="172" height="42" rx="21" fill="#deeee9"/><text x="1238" y="481">Approval Flow</text>
+      <rect x="1336" y="454" width="162" height="42" rx="21" fill="#deeee9"/><text x="1417" y="481">Resource Plan</text>
+    </g>
+
+    <rect x="58" y="588" width="1466" height="124" rx="28" fill="#073b34"/>
+    <text x="89" y="626" font-size="16" font-weight="850" letter-spacing="2" fill="#ffb18d">LOOPGRAPH CONTROL PLANE</text>
+    <text x="89" y="670" font-size="24" font-weight="800" fill="#fff">Every edge is declared, versioned, validated, and bound to an accountable owner</text>
+    <g font-size="16" font-weight="800" text-anchor="middle">
+      <rect x="1000" y="616" width="148" height="54" rx="27" fill="#135d51"/><text x="1074" y="649" fill="#fff">LoopSpecs</text>
+      <rect x="1162" y="616" width="148" height="54" rx="27" fill="#135d51"/><text x="1236" y="649" fill="#fff">Routing</text>
+      <rect x="1324" y="616" width="166" height="54" rx="27" fill="#135d51"/><text x="1407" y="649" fill="#fff">Policy + Audit</text>
+    </g>
+    <path d="M1480 522C1494 570 1474 735 1260 775C970 828 608 808 416 491" fill="none" stroke="#f4511e" stroke-width="4" stroke-dasharray="11 10" marker-end="url(#ao)"/>
+    <text x="1044" y="786" font-size="17" font-style="italic" font-family="Georgia, serif" fill="#0b493f">Outcomes return as evidence to the company brain</text>
+    <line x1="58" y1="844" x2="1524" y2="844" stroke="#0b493f" stroke-width="2"/>
+    <text x="58" y="876" font-size="16" font-weight="850" letter-spacing="1.8" fill="#0b493f">DEPARTMENTS OWN OUTCOMES</text>
+    <text x="1524" y="876" text-anchor="end" font-size="16" font-weight="850" letter-spacing="1.8" fill="#696963">LOOPS OWN RECURRING WORK · LOOPGRAPH GOVERNS EVERY EDGE</text>
+  </g>
+</svg>

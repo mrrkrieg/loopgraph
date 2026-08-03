@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg4" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f1ebdf"/></linearGradient>
+    <linearGradient id="dark4" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b4d42"/><stop offset="1" stop-color="#06342e"/></linearGradient>
+    <filter id="s4" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="13" flood-color="#0b493f" flood-opacity=".13"/></filter>
+    <marker id="a4" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#0b493f"/></marker>
+    <marker id="a4o" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#f4511e"/></marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg4)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="58" y="67" font-size="20" font-weight="850" letter-spacing="3.2" fill="#f4511e">03 / SEPARATE ACCESS, JUDGMENT, AND AUTHORITY</text>
+    <text x="58" y="136" font-size="58" font-weight="900" letter-spacing="-1.8" fill="#101312">Three trust layers. Three different jobs.</text>
+    <text x="58" y="178" font-size="25" fill="#0b493f">No component gets to interpret the world, authorize itself, and hold every credential</text>
+
+    <g filter="url(#s4)">
+      <rect x="58" y="252" width="430" height="470" rx="34" fill="url(#dark4)"/>
+      <rect x="585" y="252" width="430" height="470" rx="34" fill="#fff7f0" stroke="#f4511e" stroke-width="5"/>
+      <rect x="1112" y="252" width="430" height="470" rx="34" fill="#fffdfa" stroke="#0b493f" stroke-width="5"/>
+    </g>
+
+    <g>
+      <circle cx="112" cy="307" r="27" fill="#f4511e"/><text x="112" y="316" text-anchor="middle" font-size="24" font-weight="900" fill="#fff">1</text>
+      <text x="154" y="302" font-size="27" font-weight="900" fill="#fff">CONNECTOR BROKER</text>
+      <text x="154" y="334" font-size="16" font-weight="850" letter-spacing="1.7" fill="#ffb18d">PROVIDER AUTHORITY</text>
+      <line x1="88" y1="370" x2="458" y2="370" stroke="#397168" stroke-width="2"/>
+      <circle cx="110" cy="416" r="8" fill="#f4511e"/><text x="137" y="423" font-size="19" font-weight="750" fill="#fff">verifies signatures + replay</text>
+      <circle cx="110" cy="481" r="8" fill="#f4511e"/><text x="137" y="488" font-size="19" font-weight="750" fill="#fff">protects provider credentials</text>
+      <circle cx="110" cy="546" r="8" fill="#f4511e"/><text x="137" y="553" font-size="19" font-weight="750" fill="#fff">normalizes provider payloads</text>
+      <circle cx="110" cy="611" r="8" fill="#f4511e"/><text x="137" y="618" font-size="19" font-weight="750" fill="#fff">exposes scoped capabilities</text>
+      <rect x="88" y="660" width="370" height="42" rx="21" fill="#135d51"/>
+      <text x="273" y="687" text-anchor="middle" font-size="14" font-weight="850" fill="#d7ebe6">HERMES NEVER RECEIVES A REUSABLE TOKEN</text>
+
+      <circle cx="639" cy="307" r="27" fill="#f4511e"/><text x="639" y="316" text-anchor="middle" font-size="24" font-weight="900" fill="#fff">2</text>
+      <text x="681" y="302" font-size="31" font-weight="900" fill="#101312">HERMES BRAIN</text>
+      <text x="681" y="334" font-size="16" font-weight="850" letter-spacing="1.7" fill="#f4511e">SEMANTIC JUDGMENT</text>
+      <line x1="615" y1="370" x2="985" y2="370" stroke="#e8b49b" stroke-width="2"/>
+      <circle cx="637" cy="416" r="8" fill="#f4511e"/><text x="664" y="423" font-size="19" font-weight="750" fill="#101312">resolves company objects</text>
+      <circle cx="637" cy="481" r="8" fill="#f4511e"/><text x="664" y="488" font-size="19" font-weight="750" fill="#101312">interprets business problems</text>
+      <circle cx="637" cy="546" r="8" fill="#f4511e"/><text x="664" y="553" font-size="19" font-weight="750" fill="#101312">compares routes or abstains</text>
+      <circle cx="637" cy="611" r="8" fill="#f4511e"/><text x="664" y="618" font-size="19" font-weight="750" fill="#101312">performs issued assignments</text>
+      <rect x="615" y="660" width="370" height="42" rx="21" fill="#ffe3d6"/>
+      <text x="800" y="687" text-anchor="middle" font-size="14" font-weight="850" fill="#a83812">A MODEL DECISION IS NOT AUTHORIZATION</text>
+
+      <circle cx="1166" cy="307" r="27" fill="#0b493f"/><text x="1166" y="316" text-anchor="middle" font-size="24" font-weight="900" fill="#fff">3</text>
+      <text x="1208" y="302" font-size="31" font-weight="900" fill="#101312">LOOPGRAPH</text>
+      <text x="1208" y="334" font-size="14" font-weight="850" letter-spacing="1.2" fill="#0b493f">DETERMINISTIC AUTHORITY</text>
+      <line x1="1142" y1="370" x2="1512" y2="370" stroke="#b9d1ca" stroke-width="2"/>
+      <circle cx="1164" cy="416" r="8" fill="#0b493f"/><text x="1191" y="423" font-size="19" font-weight="750" fill="#101312">owns topology + LoopSpecs</text>
+      <circle cx="1164" cy="481" r="8" fill="#0b493f"/><text x="1191" y="488" font-size="19" font-weight="750" fill="#101312">validates readiness + policy</text>
+      <circle cx="1164" cy="546" r="8" fill="#0b493f"/><text x="1191" y="553" font-size="19" font-weight="750" fill="#101312">issues immutable assignments</text>
+      <circle cx="1164" cy="611" r="8" fill="#0b493f"/><text x="1191" y="618" font-size="19" font-weight="750" fill="#101312">records traces + outcomes</text>
+      <rect x="1142" y="660" width="370" height="42" rx="21" fill="#deeee9"/>
+      <text x="1327" y="687" text-anchor="middle" font-size="14" font-weight="850" fill="#0b493f">AUTHORITY STAYS EXPLICIT AND REVIEWABLE</text>
+    </g>
+
+    <path d="M488 414H565" fill="none" stroke="#0b493f" stroke-width="5" marker-end="url(#a4)"/>
+    <text x="526" y="394" text-anchor="middle" font-size="14" font-weight="850" letter-spacing="1.2" fill="#696963">VERIFIED EVENT</text>
+    <path d="M1015 414H1092" fill="none" stroke="#f4511e" stroke-width="5" marker-end="url(#a4o)"/>
+    <text x="1054" y="394" text-anchor="middle" font-size="14" font-weight="850" letter-spacing="1.2" fill="#f4511e">PROPOSED ROUTE</text>
+
+    <path d="M1327 740V788H800V740" fill="none" stroke="#0b493f" stroke-width="5" marker-end="url(#a4)"/>
+    <text x="1063" y="780" text-anchor="middle" font-size="15" font-weight="850" letter-spacing="1.3" fill="#0b493f">IMMUTABLE ASSIGNMENT</text>
+    <path d="M800 810H273V740" fill="none" stroke="#f4511e" stroke-width="4" stroke-dasharray="11 9" marker-end="url(#a4o)"/>
+    <text x="536" y="843" text-anchor="middle" font-size="15" font-weight="850" letter-spacing="1.3" fill="#f4511e">CAPABILITY-SCOPED PROVIDER ACTION</text>
+    <text x="1542" y="858" text-anchor="end" font-size="17" font-style="italic" font-family="Georgia, serif" fill="#0b493f">Flexible reasoning. Deterministic authority. Bounded access.</text>
+  </g>
+</svg>

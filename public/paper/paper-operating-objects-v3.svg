@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f1ebdf"/></linearGradient>
+    <linearGradient id="dark3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b4d42"/><stop offset="1" stop-color="#06342e"/></linearGradient>
+    <linearGradient id="orange3" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff6a2a"/><stop offset="1" stop-color="#ec4316"/></linearGradient>
+    <filter id="s3" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#0b493f" flood-opacity=".12"/></filter>
+    <marker id="a3" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#0b493f"/></marker>
+    <marker id="a3o" markerUnits="userSpaceOnUse" markerWidth="18" markerHeight="18" refX="15" refY="9" orient="auto"><path d="M0 0L18 9L0 18Z" fill="#f4511e"/></marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg3)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="58" y="67" font-size="20" font-weight="850" letter-spacing="3.2" fill="#f4511e">02 / THE OBJECTS ARE THE MEMORY</text>
+    <text x="58" y="136" font-size="54" font-weight="900" letter-spacing="-1.8" fill="#101312">An event is evidence. A problem has state. A run is an attempt.</text>
+    <text x="58" y="178" font-size="24" fill="#0b493f">Routing becomes accountable when every transition creates a durable object</text>
+
+    <g fill="none" stroke="#0b493f" stroke-width="5" marker-end="url(#a3)">
+      <path d="M264 410H294"/><path d="M514 410H544"/><path d="M764 410H794"/><path d="M1014 410H1044"/><path d="M1264 410H1294"/>
+    </g>
+
+    <g filter="url(#s3)">
+      <rect x="54" y="276" width="210" height="270" rx="28" fill="#fffdfa" stroke="#0b493f" stroke-width="4"/>
+      <rect x="304" y="276" width="210" height="270" rx="28" fill="#fffdfa" stroke="#0b493f" stroke-width="4"/>
+      <rect x="554" y="276" width="210" height="270" rx="28" fill="#e5f0ec" stroke="#0b493f" stroke-width="4"/>
+      <rect x="804" y="276" width="210" height="270" rx="28" fill="#fff4ee" stroke="#f4511e" stroke-width="4"/>
+      <rect x="1054" y="276" width="210" height="270" rx="28" fill="#fffdfa" stroke="#0b493f" stroke-width="4"/>
+      <rect x="1304" y="276" width="242" height="270" rx="28" fill="url(#dark3)"/>
+    </g>
+
+    <g text-anchor="middle">
+      <circle cx="159" cy="325" r="24" fill="#f4511e"/><text x="159" y="333" font-size="22" font-weight="900" fill="#fff">1</text>
+      <text x="159" y="380" font-size="27" font-weight="900" fill="#101312">EVENT</text>
+      <text x="159" y="415" font-size="13" font-weight="800" letter-spacing=".8" fill="#f4511e">IMMUTABLE EVIDENCE</text>
+      <text x="159" y="458" font-size="18" fill="#696963">verified source</text>
+      <text x="159" y="486" font-size="18" fill="#696963">delivery identity</text>
+      <text x="159" y="514" font-size="18" fill="#696963">normalized facts</text>
+
+      <circle cx="409" cy="325" r="24" fill="#0b493f"/><text x="409" y="333" font-size="22" font-weight="900" fill="#fff">2</text>
+      <text x="409" y="376" font-size="25" font-weight="900" fill="#101312">COMPANY</text>
+      <text x="409" y="407" font-size="25" font-weight="900" fill="#101312">OBJECT</text>
+      <text x="409" y="444" font-size="16" font-weight="800" letter-spacing="1.1" fill="#0b493f">RESOLVED IDENTITY</text>
+      <text x="409" y="482" font-size="18" fill="#696963">account · campaign</text>
+      <text x="409" y="510" font-size="18" fill="#696963">contract · incident</text>
+
+      <circle cx="659" cy="325" r="24" fill="#0b493f"/><text x="659" y="333" font-size="22" font-weight="900" fill="#fff">3</text>
+      <text x="659" y="376" font-size="25" font-weight="900" fill="#0b493f">BUSINESS</text>
+      <text x="659" y="407" font-size="25" font-weight="900" fill="#0b493f">PROBLEM</text>
+      <text x="659" y="444" font-size="16" font-weight="800" letter-spacing="1.1" fill="#0b493f">STATEFUL ISSUE</text>
+      <text x="659" y="482" font-size="18" fill="#696963">accumulates evidence</text>
+      <text x="659" y="510" font-size="18" fill="#696963">prevents duplicate work</text>
+
+      <circle cx="909" cy="325" r="24" fill="#f4511e"/><text x="909" y="333" font-size="22" font-weight="900" fill="#fff">4</text>
+      <text x="909" y="376" font-size="25" font-weight="900" fill="#101312">ROUTE</text>
+      <text x="909" y="407" font-size="25" font-weight="900" fill="#101312">COMMIT</text>
+      <text x="909" y="444" font-size="16" font-weight="800" letter-spacing="1.1" fill="#f4511e">GOVERNED DECISION</text>
+      <text x="909" y="482" font-size="18" fill="#696963">selected loop</text>
+      <text x="909" y="510" font-size="18" fill="#696963">exact LoopSpec hash</text>
+
+      <circle cx="1159" cy="325" r="24" fill="#0b493f"/><text x="1159" y="333" font-size="22" font-weight="900" fill="#fff">5</text>
+      <text x="1159" y="376" font-size="25" font-weight="900" fill="#101312">RUN</text>
+      <text x="1159" y="407" font-size="25" font-weight="900" fill="#101312">ATTEMPT</text>
+      <text x="1159" y="444" font-size="13" font-weight="800" letter-spacing=".7" fill="#0b493f">IMMUTABLE ASSIGNMENT</text>
+      <text x="1159" y="482" font-size="18" fill="#696963">tasks · approvals</text>
+      <text x="1159" y="510" font-size="18" fill="#696963">ordered execution trace</text>
+
+      <circle cx="1425" cy="325" r="24" fill="#f4511e"/><text x="1425" y="333" font-size="22" font-weight="900" fill="#fff">6</text>
+      <text x="1425" y="376" font-size="25" font-weight="900" fill="#fff">OBSERVED</text>
+      <text x="1425" y="407" font-size="25" font-weight="900" fill="#fff">OUTCOME</text>
+      <text x="1425" y="444" font-size="16" font-weight="800" letter-spacing="1.1" fill="#ffb18d">MEASURED CLAIM</text>
+      <text x="1425" y="482" font-size="18" fill="#d8ebe6">baseline · result</text>
+      <text x="1425" y="510" font-size="18" fill="#d8ebe6">guardrails · evidence</text>
+    </g>
+
+    <path d="M1425 546V680H659V566" fill="none" stroke="#f4511e" stroke-width="5" stroke-dasharray="12 10" marker-end="url(#a3o)"/>
+    <text x="1040" y="721" text-anchor="middle" font-size="24" font-style="italic" font-family="Georgia, serif" fill="#0b493f">The outcome becomes new evidence. The history survives every attempt.</text>
+
+    <g font-size="16" font-weight="850">
+      <rect x="182" y="782" width="318" height="56" rx="28" fill="#deeee9"/><text x="341" y="817" text-anchor="middle" fill="#0b493f">Evidence accumulates on the problem</text>
+      <rect x="632" y="782" width="336" height="56" rx="28" fill="#fff0e8"/><text x="800" y="817" text-anchor="middle" fill="#0b493f">Assignments bind the exact contract</text>
+      <rect x="1100" y="782" width="318" height="56" rx="28" fill="#deeee9"/><text x="1259" y="817" text-anchor="middle" fill="#0b493f">Value requires observed measurement</text>
+    </g>
+  </g>
+</svg>
