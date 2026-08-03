@@ -1,69 +1,87 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
-  <title id="title">Events, company objects, business problems, runs, and outcomes are different objects</title>
-  <desc id="desc">Several events resolve to a company object and one stateful business problem, which can have several governed run attempts before a measured outcome.</desc>
+  <title id="title">The five operating objects</title>
+  <desc id="desc">An event becomes evidence about a company object and a stateful problem. A loop run is an attempt, while the outcome is measured change.</desc>
   <defs>
-    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f3efe7"/></linearGradient>
-    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0d4a3e"/><stop offset="1" stop-color="#062f28"/></linearGradient>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#0b4137"/></marker>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fbf8f2"/>
+      <stop offset="1" stop-color="#f3efe7"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0d4a3e"/>
+      <stop offset="1" stop-color="#062f28"/>
+    </linearGradient>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="28" markerHeight="28" refX="25" refY="14" orient="auto">
+      <path d="M0 0L28 14L0 28Z" fill="#0b4137"/>
+    </marker>
   </defs>
+
   <rect width="1600" height="900" fill="url(#paper)"/>
+
   <g font-family="Arial, Helvetica, sans-serif">
-    <text x="62" y="65" font-size="20" font-weight="700" letter-spacing="3" fill="#f4511e">02 / ORGANIZATIONAL MEMORY</text>
-    <text x="62" y="139" font-size="49" font-weight="800" letter-spacing="-1.5" fill="#111">An event is evidence. A problem has state. A run is an attempt</text>
-    <text x="62" y="180" font-size="24" fill="#0b4137">The history survives every attempt</text>
+    <text x="68" y="72" font-size="24" font-weight="800" letter-spacing="3.5" fill="#f4511e">02 / ORGANIZATIONAL MEMORY</text>
+    <text x="68" y="148" font-size="58" font-weight="850" letter-spacing="-2" fill="#111">Event ≠ object ≠ problem ≠ run ≠ outcome</text>
+    <text x="68" y="193" font-size="28" font-weight="500" fill="#0b4137">Each object answers a different operating question</text>
 
-    <g fill="none" stroke="#0b4137" stroke-width="4" marker-end="url(#arrow)">
-      <path d="M285 300C341 300 349 411 412 411"/><path d="M285 411H412"/><path d="M285 522C341 522 349 411 412 411"/>
-      <path d="M641 411H732"/><path d="M1000 411H1080"/><path d="M1288 337C1352 337 1364 411 1412 411"/><path d="M1288 485C1352 485 1364 411 1412 411"/>
+    <g stroke="#0b4137" stroke-width="6" marker-end="url(#arrow)">
+      <path d="M326 468H362"/>
+      <path d="M625 468H661"/>
+      <path d="M924 468H960"/>
+      <path d="M1223 468H1259"/>
     </g>
 
-    <g transform="translate(62 248)">
-      <text x="110" y="0" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="2" fill="#6e6b65">IMMUTABLE EVENTS</text>
-      <rect y="20" width="224" height="82" rx="18" fill="#fff" stroke="#0b4137" stroke-width="3"/>
-      <rect y="131" width="224" height="82" rx="18" fill="#fff" stroke="#0b4137" stroke-width="3"/>
-      <rect y="242" width="224" height="82" rx="18" fill="#fff" stroke="#0b4137" stroke-width="3"/>
-      <g font-size="17" font-weight="700" fill="#0b4137"><text x="26" y="54">SUPPORT</text><text x="26" y="165">ANALYTICS</text><text x="26" y="276">CRM</text></g>
-      <g font-size="14" fill="#6e6b65"><text x="26" y="80">onboarding blocked</text><text x="26" y="191">activation step -18%</text><text x="26" y="302">5 affected accounts</text></g>
+    <g transform="translate(60 304)">
+      <text x="133" y="-34" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">01</text>
+      <rect width="266" height="328" rx="30" fill="#fff" stroke="#0b4137" stroke-width="5"/>
+      <text x="133" y="74" text-anchor="middle" font-size="36" font-weight="850" fill="#0b4137">EVENT</text>
+      <line x1="42" y1="106" x2="224" y2="106" stroke="#d9d3c8" stroke-width="3"/>
+      <text x="133" y="164" text-anchor="middle" font-size="27" font-weight="800" fill="#111">What happened?</text>
+      <text x="133" y="222" text-anchor="middle" font-size="24" fill="#6e6b65">Immutable</text>
+      <text x="133" y="260" text-anchor="middle" font-size="24" fill="#6e6b65">evidence</text>
     </g>
 
-    <g transform="translate(413 322)">
-      <rect width="228" height="178" rx="28" fill="#fff3ea" stroke="#f4511e" stroke-width="4"/>
-      <text x="114" y="45" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="1.5" fill="#f4511e">COMPANY OBJECT</text>
-      <text x="114" y="86" text-anchor="middle" font-size="28" font-weight="800" fill="#111">ACTIVATION</text>
-      <text x="114" y="116" text-anchor="middle" font-size="16" fill="#6e6b65">product surface</text>
-      <text x="114" y="146" text-anchor="middle" font-size="14" fill="#0b4137">exact provider aliases</text>
+    <g transform="translate(359 304)">
+      <text x="133" y="-34" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">02</text>
+      <rect width="266" height="328" rx="30" fill="#fff3ea" stroke="#f4511e" stroke-width="5"/>
+      <text x="133" y="66" text-anchor="middle" font-size="31" font-weight="850" fill="#111">COMPANY</text>
+      <text x="133" y="104" text-anchor="middle" font-size="31" font-weight="850" fill="#111">OBJECT</text>
+      <line x1="42" y1="132" x2="224" y2="132" stroke="#f2b596" stroke-width="3"/>
+      <text x="133" y="185" text-anchor="middle" font-size="26" font-weight="800" fill="#111">What is affected?</text>
+      <text x="133" y="243" text-anchor="middle" font-size="24" fill="#6e6b65">Customer</text>
+      <text x="133" y="281" text-anchor="middle" font-size="24" fill="#6e6b65">product · contract</text>
     </g>
 
-    <g transform="translate(733 290)">
-      <rect width="268" height="242" rx="30" fill="url(#green)"/>
-      <text x="134" y="48" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="1.5" fill="#ffb188">STATEFUL PROBLEM</text>
-      <text x="134" y="95" text-anchor="middle" font-size="27" font-weight="800" fill="#fff">ONBOARDING</text>
-      <text x="134" y="129" text-anchor="middle" font-size="27" font-weight="800" fill="#fff">FRICTION</text>
-      <line x1="36" y1="157" x2="232" y2="157" stroke="#89aaa1" stroke-width="2"/>
-      <text x="134" y="190" text-anchor="middle" font-size="15" fill="#d6e7e2">3 sources · 6 events</text>
-      <text x="134" y="217" text-anchor="middle" font-size="15" fill="#d6e7e2">open · severity high</text>
+    <g transform="translate(658 304)">
+      <text x="133" y="-34" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">03</text>
+      <rect width="266" height="328" rx="30" fill="url(#green)"/>
+      <text x="133" y="66" text-anchor="middle" font-size="31" font-weight="850" fill="#fff">BUSINESS</text>
+      <text x="133" y="104" text-anchor="middle" font-size="31" font-weight="850" fill="#fff">PROBLEM</text>
+      <line x1="42" y1="132" x2="224" y2="132" stroke="#6b9489" stroke-width="3"/>
+      <text x="133" y="185" text-anchor="middle" font-size="26" font-weight="800" fill="#fff">What must change?</text>
+      <text x="133" y="243" text-anchor="middle" font-size="24" fill="#d6e7e2">State persists</text>
+      <text x="133" y="281" text-anchor="middle" font-size="24" fill="#d6e7e2">across events</text>
     </g>
 
-    <g transform="translate(1081 236)">
-      <text x="104" y="0" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="2" fill="#6e6b65">GOVERNED ATTEMPTS</text>
-      <rect y="20" width="208" height="120" rx="24" fill="#fff" stroke="#f4511e" stroke-width="4"/>
-      <text x="104" y="66" text-anchor="middle" font-size="23" font-weight="800" fill="#111">RUN 01</text>
-      <text x="104" y="96" text-anchor="middle" font-size="15" fill="#6e6b65">missing evidence</text>
-      <rect y="168" width="208" height="120" rx="24" fill="#fff" stroke="#0b4137" stroke-width="4"/>
-      <text x="104" y="214" text-anchor="middle" font-size="23" font-weight="800" fill="#111">RUN 02</text>
-      <text x="104" y="244" text-anchor="middle" font-size="15" fill="#6e6b65">owner-approved fix</text>
+    <g transform="translate(957 304)">
+      <text x="133" y="-34" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">04</text>
+      <rect width="266" height="328" rx="30" fill="#fff" stroke="#0b4137" stroke-width="5"/>
+      <text x="133" y="74" text-anchor="middle" font-size="36" font-weight="850" fill="#0b4137">LOOP RUN</text>
+      <line x1="42" y1="106" x2="224" y2="106" stroke="#d9d3c8" stroke-width="3"/>
+      <text x="133" y="164" text-anchor="middle" font-size="27" font-weight="800" fill="#111">What did we try?</text>
+      <text x="133" y="222" text-anchor="middle" font-size="24" fill="#6e6b65">Attempt 01</text>
+      <text x="133" y="260" text-anchor="middle" font-size="24" fill="#6e6b65">Attempt 02</text>
     </g>
 
-    <g transform="translate(1412 323)">
-      <circle cx="82" cy="88" r="82" fill="#f4511e"/>
-      <text x="82" y="79" text-anchor="middle" font-size="18" font-weight="700" letter-spacing="1" fill="#fff">OBSERVED</text>
-      <text x="82" y="107" text-anchor="middle" font-size="18" font-weight="700" letter-spacing="1" fill="#fff">OUTCOME</text>
+    <g transform="translate(1256 304)">
+      <text x="133" y="-34" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">05</text>
+      <rect width="284" height="328" rx="30" fill="#f4511e"/>
+      <text x="142" y="74" text-anchor="middle" font-size="36" font-weight="850" fill="#fff">OUTCOME</text>
+      <line x1="46" y1="106" x2="238" y2="106" stroke="#ffb188" stroke-width="3"/>
+      <text x="142" y="164" text-anchor="middle" font-size="27" font-weight="800" fill="#fff">Did it improve?</text>
+      <text x="142" y="222" text-anchor="middle" font-size="24" fill="#fff">Observed</text>
+      <text x="142" y="260" text-anchor="middle" font-size="24" fill="#fff">measured change</text>
     </g>
 
-    <path d="M1494 500C1461 679 1160 745 863 687C746 665 693 588 673 509" fill="none" stroke="#f4511e" stroke-width="4" stroke-dasharray="10 10" marker-end="url(#arrow)"/>
-    <text x="1084" y="731" text-anchor="middle" font-size="20" font-style="italic" fill="#0b4137">Outcome evidence updates the problem; it does not erase the history</text>
-    <line x1="62" y1="822" x2="1538" y2="822" stroke="#0b4137" stroke-width="2"/>
-    <text x="62" y="855" font-size="15" font-weight="700" letter-spacing="1.5" fill="#0b4137">LOOPGRAPH</text>
-    <text x="1538" y="855" text-anchor="end" font-size="15" font-weight="700" letter-spacing="1.5" fill="#6e6b65">EVENT ≠ OBJECT ≠ PROBLEM ≠ RUN ≠ OUTCOME</text>
+    <rect x="245" y="724" width="1110" height="94" rx="28" fill="#e3eee9"/>
+    <text x="800" y="781" text-anchor="middle" font-size="30" font-weight="850" fill="#0b4137">The history survives every attempt</text>
   </g>
 </svg>

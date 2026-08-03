@@ -1,70 +1,76 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
   <title id="title">Autonomy is promoted through evidence</title>
-  <desc id="desc">Loops move in order from simulation to shadow, recommendation, approval-bound execution, and bounded low-risk autonomy.</desc>
+  <desc id="desc">A loop advances from simulation to shadow, recommendation, approval-bound execution, and bounded low-risk autonomy.</desc>
   <defs>
-    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f3efe7"/></linearGradient>
-    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0d4a3e"/><stop offset="1" stop-color="#062f28"/></linearGradient>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#0b4137"/></marker>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fbf8f2"/>
+      <stop offset="1" stop-color="#f3efe7"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0d4a3e"/>
+      <stop offset="1" stop-color="#062f28"/>
+    </linearGradient>
   </defs>
+
   <rect width="1600" height="900" fill="url(#paper)"/>
+
   <g font-family="Arial, Helvetica, sans-serif">
-    <text x="62" y="65" font-size="20" font-weight="700" letter-spacing="3" fill="#f4511e">04 / AUTONOMY IS EARNED</text>
-    <text x="62" y="139" font-size="52" font-weight="800" letter-spacing="-1.5" fill="#111">Do not switch autonomy on. Promote it with evidence</text>
-    <text x="62" y="180" font-size="24" fill="#0b4137">Every step increases authority—and raises the burden of proof</text>
+    <text x="68" y="72" font-size="24" font-weight="800" letter-spacing="3.5" fill="#f4511e">04 / AUTONOMY IS EARNED</text>
+    <text x="68" y="148" font-size="58" font-weight="850" letter-spacing="-2" fill="#111">Promote authority one evidence gate at a time</text>
+    <text x="68" y="193" font-size="28" font-weight="500" fill="#0b4137">Every step increases what the loop is allowed to do</text>
 
-    <path d="M92 660H1510" stroke="#0b4137" stroke-width="7" marker-end="url(#arrow)"/>
-    <line x1="1010" y1="224" x2="1010" y2="697" stroke="#f4511e" stroke-width="5" stroke-dasharray="12 10"/>
-    <text x="1010" y="213" text-anchor="middle" font-size="17" font-weight="800" letter-spacing="1.5" fill="#f4511e">HUMAN AUTHORITY BOUNDARY</text>
+    <line x1="965" y1="246" x2="965" y2="692" stroke="#f4511e" stroke-width="5" stroke-dasharray="14 12"/>
+    <rect x="817" y="222" width="296" height="50" rx="25" fill="#f4511e"/>
+    <text x="965" y="255" text-anchor="middle" font-size="22" font-weight="850" letter-spacing="1.5" fill="#fff">HUMAN AUTHORITY</text>
 
-    <g transform="translate(74 447)">
-      <rect width="252" height="190" rx="26" fill="#fff" stroke="#0b4137" stroke-width="4"/>
-      <text x="126" y="52" text-anchor="middle" font-size="17" font-weight="700" letter-spacing="2" fill="#f4511e">01</text>
-      <text x="126" y="95" text-anchor="middle" font-size="29" font-weight="800" fill="#0b4137">SIMULATE</text>
-      <text x="126" y="128" text-anchor="middle" font-size="15" fill="#6e6b65">fixtures + contracts</text>
-      <text x="126" y="154" text-anchor="middle" font-size="15" fill="#6e6b65">no external writes</text>
-    </g>
-    <g transform="translate(353 397)">
-      <rect width="252" height="240" rx="26" fill="#fff" stroke="#0b4137" stroke-width="4"/>
-      <text x="126" y="52" text-anchor="middle" font-size="17" font-weight="700" letter-spacing="2" fill="#f4511e">02</text>
-      <text x="126" y="102" text-anchor="middle" font-size="29" font-weight="800" fill="#0b4137">SHADOW</text>
-      <text x="126" y="139" text-anchor="middle" font-size="15" fill="#6e6b65">observe real events</text>
-      <text x="126" y="165" text-anchor="middle" font-size="15" fill="#6e6b65">measure route quality</text>
-      <text x="126" y="202" text-anchor="middle" font-size="14" font-weight="700" fill="#0b4137">precision · abstention</text>
-    </g>
-    <g transform="translate(632 347)">
-      <rect width="252" height="290" rx="26" fill="#fff" stroke="#0b4137" stroke-width="4"/>
-      <text x="126" y="52" text-anchor="middle" font-size="17" font-weight="700" letter-spacing="2" fill="#f4511e">03</text>
-      <text x="126" y="106" text-anchor="middle" font-size="27" font-weight="800" fill="#0b4137">RECOMMEND</text>
-      <text x="126" y="145" text-anchor="middle" font-size="15" fill="#6e6b65">prepare a decision</text>
-      <text x="126" y="171" text-anchor="middle" font-size="15" fill="#6e6b65">human owner chooses</text>
-      <text x="126" y="218" text-anchor="middle" font-size="14" font-weight="700" fill="#0b4137">quality · review burden</text>
-    </g>
-    <g transform="translate(1033 292)">
-      <rect width="252" height="345" rx="26" fill="#fff3ea" stroke="#f4511e" stroke-width="5"/>
-      <text x="126" y="52" text-anchor="middle" font-size="17" font-weight="700" letter-spacing="2" fill="#f4511e">04</text>
-      <text x="126" y="103" text-anchor="middle" font-size="26" font-weight="800" fill="#111">EXECUTE</text>
-      <text x="126" y="136" text-anchor="middle" font-size="22" font-weight="800" fill="#111">WITH APPROVAL</text>
-      <text x="126" y="182" text-anchor="middle" font-size="15" fill="#6e6b65">exact prepared action</text>
-      <text x="126" y="208" text-anchor="middle" font-size="15" fill="#6e6b65">single-use commit</text>
-      <rect x="35" y="252" width="182" height="52" rx="17" fill="#f4511e"/>
-      <text x="126" y="284" text-anchor="middle" font-size="14" font-weight="800" fill="#fff">CONTENT-BOUND</text>
-    </g>
-    <g transform="translate(1312 235)">
-      <rect width="226" height="402" rx="28" fill="url(#green)"/>
-      <text x="113" y="54" text-anchor="middle" font-size="17" font-weight="700" letter-spacing="2" fill="#ffb188">05</text>
-      <text x="113" y="113" text-anchor="middle" font-size="25" font-weight="800" fill="#fff">AUTONOMOUS</text>
-      <text x="113" y="147" text-anchor="middle" font-size="25" font-weight="800" fill="#fff">LOW RISK</text>
-      <text x="113" y="196" text-anchor="middle" font-size="15" fill="#d6e7e2">bounded capability</text>
-      <text x="113" y="222" text-anchor="middle" font-size="15" fill="#d6e7e2">proven failure behavior</text>
-      <text x="113" y="248" text-anchor="middle" font-size="15" fill="#d6e7e2">measured outcomes</text>
-      <circle cx="113" cy="318" r="39" fill="none" stroke="#fff" stroke-width="4"/>
-      <path d="M94 319L108 333L134 301" fill="none" stroke="#f4511e" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(50 318)">
+      <rect width="289" height="314" rx="32" fill="#fff" stroke="#0b4137" stroke-width="5"/>
+      <text x="145" y="58" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">01</text>
+      <text x="145" y="118" text-anchor="middle" font-size="37" font-weight="850" fill="#0b4137">SIMULATE</text>
+      <line x1="45" y1="149" x2="244" y2="149" stroke="#d9d3c8" stroke-width="3"/>
+      <text x="145" y="205" text-anchor="middle" font-size="25" font-weight="700" fill="#111">Test the contract</text>
+      <text x="145" y="257" text-anchor="middle" font-size="23" fill="#6e6b65">Fixtures only</text>
     </g>
 
-    <g fill="#f4511e"><circle cx="200" cy="660" r="14"/><circle cx="479" cy="660" r="14"/><circle cx="758" cy="660" r="14"/><circle cx="1159" cy="660" r="14"/><circle cx="1425" cy="660" r="14"/></g>
-    <text x="800" y="746" text-anchor="middle" font-size="21" font-style="italic" fill="#0b4137">Promotion requires a passing rehearsal bound to the exact graph, loop, version, and next mode</text>
-    <line x1="62" y1="822" x2="1538" y2="822" stroke="#0b4137" stroke-width="2"/>
-    <text x="62" y="855" font-size="15" font-weight="700" letter-spacing="1.5" fill="#0b4137">LOOPGRAPH</text>
-    <text x="1538" y="855" text-anchor="end" font-size="15" font-weight="700" letter-spacing="1.5" fill="#6e6b65">SIMULATE → SHADOW → RECOMMEND → APPROVE → BOUNDED AUTONOMY</text>
+    <g transform="translate(353 318)">
+      <rect width="289" height="314" rx="32" fill="#fff" stroke="#0b4137" stroke-width="5"/>
+      <text x="145" y="58" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">02</text>
+      <text x="145" y="118" text-anchor="middle" font-size="37" font-weight="850" fill="#0b4137">SHADOW</text>
+      <line x1="45" y1="149" x2="244" y2="149" stroke="#d9d3c8" stroke-width="3"/>
+      <text x="145" y="205" text-anchor="middle" font-size="25" font-weight="700" fill="#111">Observe real events</text>
+      <text x="145" y="257" text-anchor="middle" font-size="23" fill="#6e6b65">No live work</text>
+    </g>
+
+    <g transform="translate(656 318)">
+      <rect width="289" height="314" rx="32" fill="#fff" stroke="#0b4137" stroke-width="5"/>
+      <text x="145" y="58" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">03</text>
+      <text x="145" y="118" text-anchor="middle" font-size="35" font-weight="850" fill="#0b4137">RECOMMEND</text>
+      <line x1="45" y1="149" x2="244" y2="149" stroke="#d9d3c8" stroke-width="3"/>
+      <text x="145" y="205" text-anchor="middle" font-size="25" font-weight="700" fill="#111">Prepare the action</text>
+      <text x="145" y="257" text-anchor="middle" font-size="23" fill="#6e6b65">Owner decides</text>
+    </g>
+
+    <g transform="translate(959 318)">
+      <rect width="289" height="314" rx="32" fill="#fff3ea" stroke="#f4511e" stroke-width="6"/>
+      <text x="145" y="58" text-anchor="middle" font-size="25" font-weight="850" fill="#f4511e">04</text>
+      <text x="145" y="108" text-anchor="middle" font-size="32" font-weight="850" fill="#111">EXECUTE</text>
+      <text x="145" y="145" text-anchor="middle" font-size="26" font-weight="850" fill="#111">WITH APPROVAL</text>
+      <line x1="45" y1="170" x2="244" y2="170" stroke="#f2b596" stroke-width="3"/>
+      <text x="145" y="221" text-anchor="middle" font-size="24" font-weight="700" fill="#111">Exact action only</text>
+      <text x="145" y="267" text-anchor="middle" font-size="23" fill="#6e6b65">Single-use commit</text>
+    </g>
+
+    <g transform="translate(1262 318)">
+      <rect width="289" height="314" rx="32" fill="url(#green)"/>
+      <text x="145" y="58" text-anchor="middle" font-size="25" font-weight="850" fill="#ffb188">05</text>
+      <text x="145" y="108" text-anchor="middle" font-size="31" font-weight="850" fill="#fff">AUTONOMOUS</text>
+      <text x="145" y="145" text-anchor="middle" font-size="27" font-weight="850" fill="#fff">LOW RISK</text>
+      <line x1="45" y1="170" x2="244" y2="170" stroke="#6b9489" stroke-width="3"/>
+      <text x="145" y="221" text-anchor="middle" font-size="24" font-weight="700" fill="#fff">Bounded capability</text>
+      <text x="145" y="267" text-anchor="middle" font-size="23" fill="#d6e7e2">Measured outcomes</text>
+    </g>
+
+    <rect x="194" y="724" width="1212" height="94" rx="28" fill="#e3eee9"/>
+    <text x="800" y="781" text-anchor="middle" font-size="30" font-weight="850" fill="#0b4137">No loop skips a gate. Every promotion is bound to evidence.</text>
   </g>
 </svg>
