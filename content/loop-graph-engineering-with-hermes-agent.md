@@ -1,323 +1,319 @@
-# Loop Graph Engineering with Hermes Agent
+# Loop Graph Engineering: The Operating System for AI-Run Companies
 
-![Loop Graph Engineering with Hermes Agent](assets-improved-v2/01-loop-graph-engineering-cover.png)
+![Loop Graph Engineering: The Operating System for AI-Run Companies](paper-loop-graph-engineering-cover.svg)
 
-A campaign starts wasting money. A customer stops using the product. A deal slips backward. A contract approaches renewal. An invoice falls outside tolerance. A production incident opens.
+A customer stops using the product. The same onboarding complaint appears across five accounts. A deal slips backward. An invoice falls outside tolerance. A production incident threatens a strategic renewal.
 
-Most companies experience these moments as notifications.
+The software stack records each moment. The company still has to decide what it means.
 
-Someone sees the alert, decides what it means, remembers which department owns it, gathers context from several systems, chooses a process, asks for approval, follows up, and eventually checks whether the problem was actually solved.
+Someone must connect the evidence, identify the business problem, determine who owns it, choose the right process, gather context, respect policy, coordinate action, ask for approval, and later establish whether anything improved.
 
-Then another signal arrives and the whole process begins again.
+This is the invisible operating work inside every company. It is not one task and it is not one prompt. It is a graph of judgment, ownership, authority, action, and learning.
 
-This is the invisible work inside every company. It is not simply task execution. It is the continuous act of turning events into problems, problems into ownership, ownership into coordinated action, and action into outcomes the company can learn from.
+We began building Loopgraph for our own company because we wanted Hermes to help run recurring processes without turning the company into a prompt or handing one model every credential. That internal constraint led to a larger idea:
 
-Today, people carry most of that operating graph in their heads.
+> **AI makes reasoning abundant. The next hard problem is making company coordination programmable without making authority ambiguous.**
 
-We are building a different model: **Hermes Agent receives and interprets company events. It routes each business problem into the right department. Every department owns multiple specialized loops. Loopgraph governs which loop is allowed to run, what it may do, and how the result is recorded.**
+We call the discipline for solving that problem **Loop Graph Engineering**.
 
-We call the discipline behind this model **Loop Graph Engineering**.
+Loop Graph Engineering turns recurring company processes into versioned operating contracts. The Hermes Connector Broker verifies signals and constrains provider access. Hermes Brain determines what happened, which company object is affected, and which loop should respond. Loopgraph independently validates the decision, governs the authority of the work, records execution, measures the outcome, and evolves the graph through accountable transactions.
 
-It is the shift from automating isolated tasks to engineering how an entire company responds, decides, acts, verifies, and improves.
+The short version is:
 
-## A company is not a list of agents
+> **Hermes decides. Loopgraph validates, governs, and records.**
 
-The easiest way to imagine an autonomous company is one giant agent connected to every tool.
+This is the shift from automating isolated tasks to engineering how a company senses, decides, acts, verifies, and improves.
 
-That picture is exciting because it looks simple: give the model enough context, enough permissions, and a sufficiently ambitious prompt, then let it run.
+## The company is not one enormous agent
 
-But real companies are not simple.
+The easiest picture of an AI-run company is one agent connected to every system.
 
-Marketing, Sales, Customer Success, Finance, Operations, Legal, and Engineering do different kinds of work. They use different evidence. They answer to different owners. They operate under different risk limits. They have different definitions of done.
+It is also the wrong abstraction.
 
-Even inside one department, there is no single workflow.
+In that design, the context window becomes company memory. The prompt becomes policy. Tool access becomes authorization. A conversation becomes the audit trail. When the agent is uncertain, the same component that interprets the world also decides how much authority it has.
 
-Marketing may own an Ads Optimization loop, a Content Creation loop, a Lifecycle loop, an SEO loop, and a Launch Coordination loop. Sales may own Lead Qualification, Deal Risk, Follow-Up, Forecast Quality, and Expansion loops. Customer Success may own Onboarding, Adoption Risk, Renewal Risk, and Escalation loops.
+That may be acceptable for a personal assistant. It is not an operating model for a company.
 
-A department is an operating boundary. **A loop is a specialized unit of work inside that boundary.**
+Real companies contain distinct departments, owners, systems of record, approval boundaries, risk tolerances, and definitions of done. Product evaluates customer evidence differently from Sales. Finance does not share Legal's authority. Engineering incidents can affect Customer Success, but that does not give an incident workflow permission to promise a customer an outcome.
 
-That distinction matters. If every department points to one generic automation, the architecture only hides complexity behind a larger box. A real operating graph must show that Hermes routes into departments and that each department can own many loops with different jobs, evidence, permissions, and outcomes.
+Even one department is not one workflow. Product may own Feedback Clustering, Product Problem, Roadmap Evidence, and Release Learning loops. Customer Success may own Onboarding Progress, Customer Health, Renewal Risk, and Strategic Account Escalation loops. Each exists for a different problem and carries different evidence, actions, owners, and outcome tests.
 
-![Most automation is a line while a company is a graph](assets-improved-v2/02-hermes-departments-multiple-loops.png)
+A department is an ownership boundary. **A loop is a specialized operating unit inside that boundary.**
 
-Most automation is still designed as a line:
+![A company operating graph has a verified boundary, one semantic brain, departments, and many specialized loops](paper-company-loop-topology.svg)
 
-`trigger -> agent -> action`
+This is why a company is better represented as a graph than as a list of agents.
 
-That can make one task faster. It does not make the company more intelligent.
+The nodes describe durable business concepts: company objects, departments, recurring problems, loops, capabilities, owners, metrics, and policies. The edges describe declared relationships: which evidence a loop may consume, which department owns it, which supporting loop may be invoked, which approval gates an action, and which outcome feeds future decisions.
 
-The company-shaped architecture looks different:
-
-`events -> Hermes Agent -> departments -> multiple governed loops -> outcomes -> evidence`
-
-Hermes is not another department. It is the intelligence that interprets incoming signals and determines where a business problem belongs.
-
-Departments are not executable workflows. They are ownership and policy boundaries.
-
-Loops are the actual operating units. Each loop observes a bounded set of evidence, pursues a defined goal, prepares or performs allowed actions, verifies the result, escalates when human judgment is required, and records what happened.
-
-The model inside a loop can change. The tools can change. The provider can change. The loop still has a stable business contract:
-
-- Why does this loop exist?
-- What kind of problem wakes it up?
-- What evidence must be available?
-- What may it read or change?
-- What requires approval?
-- What proves the problem was resolved?
-- What should be learned from the outcome?
-
-The agent is powerful because it can reason. The loop is trustworthy because its authority is bounded.
+The graph is not a decorative diagram. It is the operating model.
 
 ## An event is evidence, not an instruction
 
-Traditional automation often hardwires an event directly to an action:
+Traditional automation hardwires an event directly to an action:
 
 `when X happens, run Y`
 
-That works when the world is clean and every event has exactly one meaning. Companies do not operate in that world.
+That works when an event has exactly one meaning. Companies rarely operate in that world.
 
-Ten webhook deliveries may describe one continuing problem. One payload may contain two independent problems. A valid event may arrive while the right loop is disabled, already running, missing data, inside a cooldown window, or outside its approved autonomy level.
+Ten webhook deliveries may describe one continuing problem. One payload may contain several independent problems. A valid event may arrive while the relevant loop is disabled, already active, missing evidence, inside a cooldown window, or outside its approved autonomy level.
 
-Sometimes the correct response is to wait. Sometimes it is to ask for context. Sometimes it is to record the problem without running anything.
+The right response may be to act. It may also be to wait, request context, ask a human, attach the event to an existing problem, or deliberately abstain.
 
-Loopgraph therefore separates three objects that most automation systems collapse into one.
+Loopgraph therefore separates the objects that trigger-based systems usually collapse.
 
-**An event is immutable evidence.** It records that something happened, where it came from, when it happened, which subject it concerns, how it was authenticated, and what normalized data was received.
+**An event is immutable evidence.** It records what happened, where it came from, when it happened, how it was verified, and what normalized facts were received.
 
-**A business problem is stateful.** It represents the issue the company needs to resolve. It can collect evidence from multiple events over time.
+**A company object anchors meaning.** The same customer, account, campaign, contract, incident, or invoice may appear under different identifiers across several systems. Exact provider aliases resolve those records to one tenant-scoped object before routing. Ambiguous matches stop for review; they are not silently merged by fuzzy inference.
 
-**A loop run is an attempt.** It is one governed effort to resolve the problem. A run can succeed, fail, wait for approval, or produce new evidence without erasing the history that came before it.
+**A business problem has state.** It represents the issue the company needs to resolve and accumulates evidence over time.
 
-![Events, business problems, and loop runs are different objects](assets-improved-v2/03-event-problem-run.png)
+**A loop run is an attempt.** It is one governed effort to resolve the problem. A run can succeed, fail, wait, escalate, or add evidence without rewriting the history that came before it.
 
-Imagine that a paid campaign produces ten anomaly alerts in one hour.
+**An observed outcome is a claim backed by measurement.** It answers whether the intended business condition changed—not merely whether the workflow reached its last step.
 
-A trigger-based system may start ten optimization jobs. A problem-based system recognizes ten pieces of evidence describing one open campaign-efficiency problem. It appends the new evidence, updates severity, checks whether a loop is already active, and avoids duplicate work.
+![Events become evidence about a company object, a stateful problem, governed attempts, and an observed outcome](paper-operating-objects.svg)
 
-If the first attempt fails verification, the event is not lost and the problem does not disappear. Another run can be attempted. A human can take ownership. A supporting loop can be introduced. The system remembers the difference between what happened, what the company believed it meant, and what it tried to do.
+Suppose five customers report the same onboarding failure while product analytics shows a drop at the same activation step. A trigger-based system may create six unrelated jobs. A problem-based system resolves the affected accounts and product surface, attaches the evidence to one product problem, checks whether an appropriate loop is already active, and avoids duplicate work.
 
-That is the beginning of organizational memory.
+That distinction creates organizational memory. The system remembers what happened, what the company believed it meant, what it tried, what changed, and what remains unresolved.
 
-## Hermes interprets and Loopgraph governs
+## Three layers turn intelligence into trusted operation
 
-Language judgment and operational authority are different jobs. The architecture separates them deliberately.
+Flexible reasoning, provider authority, and deterministic governance are different jobs. The architecture separates them deliberately.
 
-Hermes Agent is the visible intelligence at the center of the company graph and the sole external event ingress. Business systems send events to Hermes. Hermes authenticates and filters the route, normalizes provider payloads into bounded event envelopes, interprets the likely business problem, compares eligible loops, and proposes a structured route.
+![The Connector Broker, Hermes Brain, and Loopgraph form three distinct trust layers](paper-three-trust-layers.svg)
 
-Loopgraph is the governed registry and execution kernel. It owns the approved LoopSpecs, department structure, routing contracts, connector readiness, durable event receipts, business-problem records, cooldowns, concurrency rules, policy checks, queues, traces, reviews, approvals, and outcomes.
+The **Hermes Connector Broker** is the boundary to external systems. It verifies provider events, normalizes payloads, protects OAuth and API credentials, and exposes only fixed, capability-scoped provider operations. Hermes receives a bounded capability; it does not receive a reusable provider token or an arbitrary HTTP proxy.
 
-The cleanest way to say it is:
+**Hermes Brain** is the semantic intelligence of the company. It determines what business problem occurred, resolves the affected company object, compares the registered routes, selects a primary loop or declared supporting loops, requests missing evidence, and abstains when the problem is ambiguous. When a live job is authorized, Hermes also performs the tasks and tool calls defined by the assignment.
 
-> **Hermes proposes. Loopgraph commits.**
+**Loopgraph** is the governed control plane. It owns the company topology, versioned LoopSpecs, routing contracts, readiness, policy, deduplication, cooldowns, concurrency, approvals, durable jobs, immutable assignments, execution evidence, outcomes, and graph-change history. It validates what Hermes decided before work is allowed to proceed.
 
-![Hermes supplies judgment while Loopgraph holds operational authority](assets-improved-v2/04-hermes-loopgraph-responsibilities.png)
+This boundary is important: **Loopgraph does not become another all-powerful agent, and Hermes does not become its own authorization system.**
 
-Hermes can infer that a campaign has an acquisition-efficiency problem. It cannot invent a nonexistent loop, ignore a cooldown, bypass an approval, use an unavailable connector, or turn a draft into an autonomous customer-facing action.
+The Connector Broker constrains interaction with providers. Hermes supplies judgment and performs assigned work. Loopgraph supplies deterministic authority and a durable system of record.
 
-Those are not language questions. They are system facts and policy decisions. They belong in deterministic code.
+That separation allows models, prompts, and tools to improve without silently expanding what the company has authorized.
 
-This separation gives us the best properties of both layers:
+## A loop is a versioned contract for recurring work
 
-- Hermes can reason flexibly about messy business context.
-- Loopgraph can enforce stable operational boundaries.
-- Every decision can be inspected after the fact.
-- Models and tools can evolve without silently changing authority.
-- A bad inference can be rejected before it becomes a bad action.
+A loop is not simply a workflow diagram, a prompt, or a tool chain.
 
-The goal is not to make the reasoning layer less intelligent. It is to make intelligence safe enough to use in real operations.
+Each versioned LoopSpec answers a complete set of operating questions:
 
-## Routing is a governed decision
+- What recurring business problem does this loop exist to resolve?
+- Which company objects and event families does it accept?
+- What evidence is required, and what provenance must that evidence carry?
+- Which capabilities may it use, and which actions are forbidden?
+- What must be prepared for review before an action can be committed?
+- Which owner is accountable, and when must the loop escalate?
+- What primary outcome, leading indicators, and guardrails define success?
+- What exclusions prevent an attractive but incorrect route?
+- Which other loops may receive evidence, and when is fan-out permitted?
 
-When an event arrives, Hermes should not choose from every loop in the company.
+Because the contract is versioned, the company can inspect exactly which definition governed a decision. A route is bound to the immutable LoopSpec hash that was active at the time. Changing the prompt, evidence requirements, actions, or authority creates a new operational version rather than rewriting history.
 
-Routing happens in two stages.
+The model inside a loop can change. The provider can change. The tools can change. The business contract remains reviewable.
 
-The first stage is deterministic eligibility. Loopgraph filters the registry to loops that are active, accept the event family, belong to the relevant workspace and department, can map the required fields, have the necessary connectors or manual fallback, are within cooldown and concurrency limits, and have not already committed the same event.
+This is the practical meaning of **versioned contracts for recurring AI work**: an AI process becomes a governed company capability with a stable purpose, explicit authority, and measurable completion criteria.
 
-This stage answers:
+## Routing is a company decision, not a model suggestion
 
-> **What could run?**
+Hermes reasons over the business problem and the registered Routing Cards. It may select one primary loop, invoke explicitly permitted supporting loops, request more context, or abstain.
 
-Only then does Hermes compare the eligible Routing Cards. It evaluates the actual business problem, the specificity of each loop, the available evidence, the expected outcome, the risk level, and whether more than one independent problem is present.
+That decision is not trusted merely because the model produced valid JSON.
 
-This stage answers:
+Before a route becomes work, Loopgraph verifies that the exact LoopSpec exists and is active; the event and problem types match; the required evidence is present; company-object resolution is unambiguous; connector capabilities are healthy; exclusions do not apply; confidence and risk thresholds are satisfied; cooldown, deduplication, concurrency, and fan-out rules permit the run; and the requested autonomy level is allowed.
 
-> **What should run?**
+If no loop can safely own the problem, the problem is recorded as unhandled. Hermes does not invent a workflow.
 
-Loopgraph validates the proposed route again before committing it.
+If two routes remain genuinely ambiguous, the system requests human judgment. It does not turn confidence theater into authorization.
 
-![Two-stage governed routing](assets-improved-v2/05-two-stage-routing.png)
+If a repeated event belongs to an active problem, it becomes additional evidence. It does not create duplicate work.
 
-This architecture has explicit answers for the cases that autonomous systems usually hide.
+If one event contains independent problems, fan-out occurs only when every target contract declares it and every route passes its own validation.
 
-If no loop is eligible, the problem is recorded as unhandled. Hermes does not improvise a new workflow.
+The result is a routing decision that can be explained after the fact: what Hermes believed, what alternatives existed, what evidence was used, what policy was applied, what LoopSpec was selected, what Loopgraph rejected, and why the final route was committed.
 
-If two loops are similarly plausible, the system asks a human or uses a declared triage loop. It does not guess.
+## Route is not execution
 
-If the same event arrives again for an active problem, it becomes additional evidence. It does not create duplicate work.
+Many AI systems stop their architecture diagram at “agent selected a tool.” Company work begins there.
 
-If one event contains several genuinely independent problems, the route may fan out—but only when every selected loop permits it and the total number of routes stays bounded.
+When Loopgraph accepts a route, it creates a durable job and an immutable assignment for a specific Hermes runtime. That assignment names the company object, business problem, department, LoopSpec hash, allowed capabilities, task plan, approval requirements, and evidence expected in return.
 
-If a broad loop and a specialist loop both appear relevant, specificity wins. A management loop does not take work merely because it can observe everything.
+Hermes claims the assignment and performs the work. It can gather evidence, create drafts, call bounded tools through the Connector Broker, pause for approval, and report task, tool, output, escalation, and terminal facts in order.
 
-This is what turns routing from a prompt into an accountable company decision. The system can explain what was eligible, what was rejected, what evidence mattered, what policy was applied, which route was committed, and what happened next.
+Loopgraph records those facts into one reproducible trace. It enforces the approval boundary and refuses privileged writes whose prepared action no longer matches the exact reviewed fingerprint. A retry cannot silently become a different action.
 
-## One department can own many loops
+This distinction avoids two dangerous shortcuts.
 
-The department layer is where company ownership becomes visible.
+First, the reasoning system never needs broad reusable credentials. Second, the governance system does not pretend that recording a run is the same as performing the real work.
 
-It gives the graph a stable organizational shape without forcing all work through one giant departmental agent. Hermes can route a problem to Marketing, but Marketing still needs to decide which specialized loop owns the outcome.
+Hermes executes the assigned tasks. The Connector Broker performs permitted provider operations. Loopgraph governs the assignment and preserves the evidence.
 
-Our first reference design uses two concrete Marketing loops.
+## Departments own libraries of loops
 
-The **Ads loop** watches spend, campaign performance, analytics conversion, CRM-qualified outcomes, and prior experiments. Its goal is not more clicks. Its goal is improved qualified acquisition efficiency and faster learning. It can collect evidence, identify waste or opportunity, and prepare an experiment brief. It cannot silently change budget, targeting, claims, or campaign state.
+The architecture is company-wide, not a single-department demo.
 
-The **Content loop** watches approved positioning, customer and product evidence, the content backlog, past performance, and reviewer feedback. It can rank topics, prepare a brief, draft content, verify claims and voice, and send the result to review. It cannot publish unsupported claims or send material without the required approval.
+Loopgraph ships a candidate library across Product, Marketing, Sales, Customer Success, Engineering, Operations and Finance, HR and Talent, Legal and Compliance, and Management. A new workspace still begins empty: Hermes proposes relevant loops, and only accepted proposals become part of the company topology.
 
-Both loops belong to Marketing. They do not own the same problem.
+Product is a useful first example.
 
-![Hermes routes into Marketing, which owns multiple specialized loops](assets-improved-v2/06-hermes-marketing-multiple-loops.png)
+Intercom feedback, product analytics, roadmap evidence, CRM account context, and issue-tracker activity reach Hermes as verified events. Hermes resolves the affected customers and product surface, determines whether the evidence belongs to an existing product problem, and chooses among specialized Product loops such as Feedback Clustering, Product Problem, Roadmap Evidence, and Release Learning.
 
-A Google Ads anomaly with spend increasing while qualified conversion falls should route to Ads.
+Feedback Clustering can assemble cited themes. Product Problem can turn validated evidence into an owner-reviewed problem brief. Roadmap Evidence can prepare trade-offs without changing roadmap authority. Release Learning can compare adoption, retention, support, and guardrail measurements after a release.
 
-An approved Notion brief with evidence, audience, and a deadline should route to Content.
+The process is not successful because Hermes produced a polished document. It is successful only when the observed evidence supports the intended product outcome without violating the loop's guardrails.
 
-A landing-page conversion drop without a campaign mapping may route to neither until the missing context is supplied.
+The same pattern extends across the company. An incident may activate Engineering as the primary owner while sending evidenced customer impact to Customer Success and later returning prevention evidence through Incident Learning. A campaign can connect Marketing performance to qualified pipeline evidence without allowing Marketing to redefine Sales outcomes. A contract exception can inform Deal Risk while legal conclusions remain owned by Legal.
 
-The existence of traffic does not automatically justify the Ads loop. The word "page" does not automatically justify the Content loop. The route must match the business problem, not merely the vocabulary inside the event.
+Visual adjacency is never permission. Every cross-department edge must exist in the contracts and pass validation.
 
-As the graph grows, Marketing may add Lifecycle, SEO, Launch Coordination, Creative Testing, and Brand Review loops. Each new loop expands what the department can handle without turning the department itself into an unbounded agent.
+## The graph can change, but the model cannot rewrite it
 
-That is the pattern we want across the company:
+A living operating model must evolve. It must also resist unreviewed mutation.
 
-`Hermes Agent -> Department -> Multiple Specialized Loops`
+Loopgraph represents semantic changes as explicit transactions: add, update, split, merge, or retire. Each proposal is bound to the exact base graph hash and the full content of the affected LoopSpecs.
 
-## The graph is the operating model
+An accountable approval receipt records the actor, role, policy, reason, evidence, decision, and exact operations approved. Application is atomic. A stale proposal fails closed. A failed apply restores the base snapshot. A committed transaction produces a new graph snapshot and operation receipts. Rollback is permitted only while the graph still matches the transaction being reversed.
 
-Most workflow diagrams are drawn after software is built. They describe the system, but they do not govern it.
+This is infrastructure-level version control for how the company operates.
 
-Loopgraph works in the opposite direction. The graph is derived from the contracts and operational records that make the company run.
+Hermes can identify a repeated gap and design a candidate loop. It cannot treat its own recommendation as permission to install that loop, promote its authority, pause an existing process, or retire an owner-controlled capability.
 
-The same source of truth can produce several useful views.
+The company can improve its operating model without allowing an agent to silently redefine it.
 
-The **design view** shows Hermes, departments, loops, and their declared relationships. It helps a team understand the operating model it is building.
+## Autonomy is promoted, not switched on
 
-The **operating view** adds connector health, ownership, readiness, approvals, metrics, current load, recent traces, and escalations. It helps operators see whether the company is actually ready to run.
+Autonomy is not a Boolean setting. It is a sequence of evidence-backed authority levels.
 
-The **event view** follows one event through receipt, problem creation, eligibility, routing decision, route commit, loop run, review, and outcome. It answers the question every autonomous system must eventually answer: *Why did this happen?*
+![A loop progresses from simulation to shadow, recommendation, approval-bound execution, and bounded low-risk autonomy](paper-autonomy-ladder.svg)
 
-The **loop view** opens one specialized workflow and shows its internal logic: observe, assess, prepare, verify, review, act, trace, and improve.
+**Simulate** checks contracts and runs deterministic or redacted fixtures with no external writes.
 
-These are not separate diagrams maintained by hand. They are projections of one semantic operating graph.
+**Shadow** records what Hermes would select on real events and measures routing quality without starting live work.
 
-That matters because a structural edge is not automatically an executable edge. An arrow from Hermes to Marketing expresses routing and ownership. It does not grant permission to run every Marketing loop. An arrow from Marketing to an Ads loop does not bypass missing data, a disabled connector, a cooldown, or an approval boundary.
+**Recommend** prepares a governed decision or artifact for a human owner.
 
-The graph can remain visually simple while the contracts underneath it remain precise.
+**Execute with approval** allows the exact reviewed action to be committed through a single-use, content-bound approval.
 
-## Autonomy is earned with evidence
+**Autonomous low risk** is reserved for bounded actions whose failure behavior, supervision burden, outcome quality, and rollback path have earned it.
 
-The fastest way to lose trust in an autonomous system is to give it real authority before the organization can measure its judgment.
+Promotion follows that order. It requires a passing rehearsal report bound to the exact graph, loop, version, and requested next mode. Sensitive departments and high-impact actions can remain permanently below autonomous execution.
 
-Every new loop should begin in shadow mode.
-
-Hermes receives real or synthetic events. Loopgraph records the route it would have taken. Nothing starts automatically. A human marks the expected loop—or marks that no loop should run. Those corrections become routing evidence.
-
-The loop then moves through a deliberate progression:
-
-`shadow -> recommend -> simulate -> execute with approval -> autonomous low risk`
-
-![Autonomy is promoted through evidence rather than switched on](assets-improved-v2/07-autonomy-ladder.png)
-
-Promotion depends on measurable behavior: routing precision, missed-problem rate, false triggers, abstention quality, duplicate suppression, decision latency, outcome quality, review burden, and failure behavior.
-
-The ladder also respects the asymmetry of business risk.
-
-Reading campaign performance is not the same as changing budget. Drafting a customer message is not the same as sending it. Preparing a contract-risk summary is not the same as accepting legal risk. A loop can become highly autonomous in low-risk observation and preparation while permanent human authority remains at the boundary that matters.
+Reading an account is not the same as contacting it. Drafting a contract summary is not accepting legal risk. Preparing a budget recommendation is not moving money. The useful question is not “Is the agent autonomous?” It is “Which exact capability has earned which exact level of authority?”
 
 Safety is not the opposite of autonomy. **Safety is how autonomy becomes credible.**
 
-## The most valuable output may be the work the graph cannot handle
+## A completed run is not proof of value
 
-When no loop can safely own a problem, most automation systems fail quietly. The alert disappears into a log, or an agent improvises.
+Automation products often measure success at the point where the workflow completes. That is the wrong finish line.
 
-Loopgraph records an unhandled business problem.
+A completed run proves that the system operated. It does not prove that the customer was retained, the incident recurred less often, the campaign produced qualified demand, the invoice was reconciled, or the product change improved activation.
 
-Over time, those records reveal where the company's operating system is incomplete. If the same type of pricing exception, customer risk, campaign anomaly, vendor delay, or compliance request keeps appearing without an owner, the graph has discovered a missing loop.
+Loopgraph separates three kinds of evidence.
 
-This turns operational failure into organizational design data.
+**Observed** means the measurement came from an authoritative outcome source with the required time window and provenance. **Modeled** means the result is an estimate. **Incomplete** means the system still lacks the evidence required to make the claim.
 
-The graph can show not only the loops the company has, but also the recurring problems the company still does not know how to handle. That unhandled-problem inbox may become the best roadmap for what to automate next.
+The value ledger then asks a stricter question:
 
-## Why Loop Graph Engineering is huge
+`net value = observed benefit - review - rework - supervision - escalation - governance - connector operations - organizational change`
+
+A loop that saves ten minutes but creates twenty minutes of review burden is not valuable. A loop that completed successfully but has no measured outcome remains unproven. Modeled savings are useful for prioritization; they do not become observed customer value by repetition.
+
+This changes the optimization target from agent activity to company outcomes.
+
+## The operating graph becomes a learning system
+
+Once events, problems, decisions, runs, corrections, outcomes, and costs live in one traceable model, the company can see where its operating system is weak.
+
+Repeated unhandled problems reveal missing loops. Frequent abstentions reveal missing context. Duplicate suppression reveals noisy sources. Approval latency reveals ownership bottlenecks. Negative value reveals loops that should be redesigned. Repeated human corrections reveal a routing contract that is too broad or too vague.
+
+Loopgraph's continuous controller turns that evidence into an accountable improvement cycle:
+
+`business evidence -> outcome evaluation -> opportunity -> Hermes design -> policy decision -> graph transaction -> new evidence`
+
+The controller can request missing evidence, dispatch a bounded design task to Hermes, propose a graph change, or surface a pause or retirement recommendation. Under a strict default policy, only low-risk, non-customer-facing additions can be materialized automatically—and only in shadow mode. Pausing and retiring existing loops remain human-owned decisions.
+
+Learning therefore does not mean that a model silently retrains itself or edits production policy. It means that operating evidence produces inspectable proposals, deterministic policy receipts, versioned changes, rehearsals, and new measurements.
+
+The graph improves without losing accountability.
+
+## Enterprise authority cannot live in a prompt
+
+An AI-run company needs a security model designed for agents, not pasted credentials and optimistic instructions.
+
+The Connector Broker keeps provider tokens outside Hermes, the browser, LoopSpecs, and the Loopgraph database. Provider capabilities use fixed hosts, methods, schemas, scopes, and response limits. Webhook intake checks provider-specific signatures, timestamps, delivery identities, and replay claims before normalization.
+
+Privileged writes use a prepare, approve, and commit sequence bound to the exact action content. Workload identities can be short-lived and issuer-verified. Credential namespaces bind organization, project, environment, provider, and installation. Kill switches can stop a tenant, project, environment, provider, connection, or capability before credentials are resolved. Logs, errors, traces, and metadata are centrally redacted.
+
+These controls are not wrappers around the model. They are the operational boundary that makes model reasoning usable in the first place.
+
+## What is implemented now
+
+This is no longer only an architecture proposal.
+
+The current open-source build includes Hermes-guided department discovery, versioned LoopSpec generation, semantic validation, an editable company topology, routing contracts, exact company-object aliases, local fixtures and simulation, durable route jobs and immutable assignments, Hermes execution events, reproducible traces, approval-bound actions, a multi-department loop library, graph transactions, promotion rehearsals, outcome truth states, a value ledger, opportunity detection, a continuous controller, and an enterprise Connector Broker protocol with security controls.
+
+The local-first workflow is the safest place to begin. Teams can discover recurring processes, materialize accepted loops, inspect the graph, rehearse routing, simulate runs, review evidence, and promote authority deliberately.
+
+Live external execution remains experimental. A real hosted company deployment still requires provider applications and tenant consent, a production vault or cloud secret manager, webhook subscriptions, workload identity, staging migrations, SSO and provisioning where required, alerts and independent audit retention, backup and restore drills, load and recovery validation, and—most importantly—observed evidence that the loops create value in the company's environment.
+
+That boundary matters. We would rather publish an accurate operating model with explicit limits than market a demo as an autonomous company.
+
+## Why this is a large shift
 
 The first wave of AI made individual tasks cheaper.
 
-The next wave will make organizational coordination programmable.
+The next wave makes organizational coordination programmable.
 
-That is a much larger change.
+That is a larger change because the unit of automation moves from a task to a recurring business outcome. The interface moves from a prompt to a versioned contract. The scaling unit moves from one agent with more tools to many bounded loops connected by shared company objects and evidence. The system of record expands from “what ran” to “what the company believed, authorized, attempted, observed, and learned.”
 
-When every recurring process has a contract, the company can see what work exists, why it starts, what evidence it uses, who owns the outcome, where approval is required, and how success is measured.
+As reasoning becomes abundant, the scarce asset is not access to a model. It is a trusted operating graph: the accumulated definitions, ownership, policy, outcome evidence, exceptions, and learning that allow intelligence to act coherently across a real company.
 
-When Hermes becomes the shared event intelligence layer, every source no longer needs a brittle direct connection to every workflow. New loops can publish routing contracts into the graph. Hermes can reason over the eligible set without receiving unlimited authority.
-
-When departments own multiple specialized loops, the company can increase capability without creating one opaque agent per function. New operating units can be added, tested, compared, paused, or replaced independently.
-
-When every run belongs to a durable business problem, the organization stops confusing activity with progress. Ten alerts are not ten pieces of work. Three failed attempts are not a resolved outcome. A green automation run is not proof that the business problem disappeared.
-
-When every decision leaves a trace, the graph can improve. Human corrections sharpen routing. Review feedback improves verification. Outcome history reveals which loops resolve problems and which create rework. The operating model becomes versioned and learnable.
-
-And when the graph is no longer trapped in people's heads, human attention moves up one level. People define goals, set boundaries, approve risk, resolve ambiguity, exercise judgment, build relationships, and redesign loops when reality changes.
+When that graph is trapped in people's heads, every process depends on memory and manual coordination. When it becomes explicit and executable, the company can inspect it, test it, change it, and improve it.
 
 The goal is not to remove people from the company.
 
-The goal is to stop using people as the company's integration layer.
-
-## What exists and what we are building now
-
-Loopgraph already has the foundation: a versioned LoopSpec contract, semantic validation, local simulation, reproducible traces, approval binding for prepared actions, escalation cases, file-backed storage, department skill packs, discovery models, topology generation, a Company Brain view, and an adapter interface.
-
-The current build connects those pieces into a governed event-driven operating system.
-
-We are making Hermes the single external event brain. We are adding durable event receipts, stateful business-problem records, department-aware Routing Cards, structured decisions, atomic route commits, persistent queue behavior, lifecycle events, shadow evaluation, connector readiness, and graph projections that explain both the whole company and one event's path through it.
-
-The first complete proof is deliberately narrow: one Marketing department, two governed loops—Ads and Content—manual or fixture data for local simulation, and a graph that shows exactly how events become problems, problems become routes, and routes become reviewed outcomes.
-
-This is an implementation blueprint, not a claim that every component is already shipped. Publishing the architecture now makes it concrete enough to challenge, test, build, and improve in public.
+The goal is to stop using people as the company's integration layer—and to preserve human authority exactly where judgment, accountability, and risk require it.
 
 ## The prompt was never the company
 
 A prompt is a request.
 
-An agent is a reasoning engine.
+An agent is a reasoning and execution engine.
+
+A capability is bounded access to the outside world.
 
 A department is an ownership boundary.
 
-A loop is an operating unit.
+A loop is a versioned operating unit.
 
-A graph is how the company coordinates them.
+A graph is how the company coordinates them and remembers what happened.
 
-Loop Graph Engineering is the discipline of making those relationships explicit: the events, problems, departments, loops, evidence, permissions, approvals, outcomes, and feedback that determine how a company actually runs.
+Loop Graph Engineering makes those relationships explicit. For every important signal, the company should be able to answer:
 
-The companies that win the next phase of AI will not be the ones with the largest number of agents. They will be the ones that can answer, for every important event:
-
-- What business problem is this?
-- Which department owns it?
-- Which loops are eligible?
-- Which loop is the most specific fit?
+- What happened, and can we trust the evidence?
+- Which company object and stateful problem does it concern?
+- Which department owns the outcome?
+- Which loop is the most specific permitted response?
 - What evidence is missing?
-- What is the loop allowed to do?
-- Where does human judgment enter?
-- Was the problem actually resolved?
-- What should the graph learn from the outcome?
+- What can Hermes do, and through which bounded capability?
+- Where must a human decide?
+- Which exact contract and policy authorized the work?
+- Did the business condition improve?
+- What did the work cost?
+- What should change in the graph?
 
-Once those answers live in the operating graph, the company stops automating isolated steps and starts compounding operational judgment.
+Once those answers live in the operating graph, AI stops being a collection of disconnected automations and becomes part of a governable company system.
 
 If a process begins with a signal, crosses systems, requires judgment, ends in a measurable outcome, and should improve from experience, it can be loop-graph engineered.
 
-**The future company will not be one enormous agent. It will be a graph of governed loops—with Hermes Agent routing the work and Loopgraph making it safe to run.**
+> **The future company will not be one enormous agent. It will be a living graph of governed loops—with Hermes supplying intelligence and Loopgraph turning that intelligence into accountable operation.**
 
 ---
 
 ## Architecture note
 
-This article is based on the *Hermes Agent Event Brain Integration Plan*, a proposed implementation blueprint for connecting Hermes Agent to Loopgraph's governed loop registry and execution model.
+This paper describes the architecture implemented in the Loopgraph open-source repository as of August 2026. Local discovery, design, simulation, governance, and evidence workflows are available now. Production provider setup and live external actions require the enterprise controls and deployment work described above.
