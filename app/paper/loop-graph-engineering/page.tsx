@@ -6,22 +6,22 @@ import { PaperArticle } from "@/components/paper/paper-article";
 import { isHostedPreview } from "@/lib/hosted-preview";
 
 export const metadata: Metadata = {
-  title: "Loop Graph Engineering with Hermes Agent · Loopgraph",
+  title: "Loop Graph Engineering: The Operating System for AI-Run Companies · Loopgraph",
   description:
-    "Why the future company will be a graph of governed loops, with Hermes Agent routing work and Loopgraph making it safe to run.",
+    "How Hermes turns company signals into decisions and Loopgraph turns those decisions into governed, measurable operations.",
   openGraph: {
-    title: "Loop Graph Engineering with Hermes Agent",
+    title: "Loop Graph Engineering: The Operating System for AI-Run Companies",
     description:
-      "A governed operating model for how companies receive signals, route work, act safely, and learn from outcomes.",
-    images: ["/paper/01-loop-graph-engineering-cover.png"],
+      "The future company is not one enormous agent. It is a living graph of governed loops.",
+    images: ["/paper/paper-loop-graph-engineering-cover.png"],
     type: "article"
   },
   twitter: {
     card: "summary_large_image",
-    title: "Loop Graph Engineering with Hermes Agent",
+    title: "Loop Graph Engineering: The Operating System for AI-Run Companies",
     description:
-      "The future company will be a graph of governed loops.",
-    images: ["/paper/01-loop-graph-engineering-cover.png"]
+      "How Hermes and Loopgraph turn AI reasoning into accountable company operations.",
+    images: ["/paper/paper-loop-graph-engineering-cover.png"]
   }
 };
 

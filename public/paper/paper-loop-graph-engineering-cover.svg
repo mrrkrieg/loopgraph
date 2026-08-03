@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Loop Graph Engineering</title>
+  <desc id="desc">The operating system for AI-run companies, showing verified signals moving through Hermes and Loopgraph into governed company loops.</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbf8f2"/>
+      <stop offset="1" stop-color="#f3efe7"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0d4a3e"/>
+      <stop offset="1" stop-color="#062f28"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0 0L12 6L0 12Z" fill="#0b4137"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#paper)"/>
+  <path d="M0 0H1600V8H0Z" fill="#0b4137"/>
+
+  <g transform="translate(72 62)">
+    <circle cx="22" cy="22" r="18" fill="none" stroke="#0b4137" stroke-width="6"/>
+    <circle cx="42" cy="22" r="18" fill="none" stroke="#0b4137" stroke-width="6"/>
+    <path d="M31 31L48 14" stroke="#f4511e" stroke-width="7" stroke-linecap="round"/>
+    <text x="75" y="31" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="700" fill="#111">Loopgraph</text>
+  </g>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="76" y="190" font-size="22" font-weight="700" letter-spacing="4" fill="#f4511e">A PAPER ON GOVERNED AI OPERATIONS</text>
+    <text x="72" y="312" font-size="94" font-weight="800" letter-spacing="-4" fill="#101010">Loop Graph</text>
+    <text x="72" y="412" font-size="94" font-weight="800" letter-spacing="-4" fill="#101010">Engineering</text>
+    <text x="76" y="486" font-size="34" font-weight="500" fill="#0b4137">The operating system for AI-run companies</text>
+    <line x1="76" y1="542" x2="218" y2="542" stroke="#f4511e" stroke-width="9" stroke-linecap="round"/>
+    <text x="76" y="604" font-size="27" font-weight="700" fill="#0b4137">Hermes decides</text>
+    <text x="76" y="646" font-size="27" font-weight="700" fill="#0b4137">Loopgraph validates, governs, and records</text>
+    <text x="76" y="786" font-size="18" font-weight="700" letter-spacing="2.5" fill="#6e6b65">VERSIONED CONTRACTS · BOUNDED AUTHORITY · OBSERVED OUTCOMES</text>
+  </g>
+
+  <g font-family="Arial, Helvetica, sans-serif">
+    <path d="M866 178H1015" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+    <path d="M1201 178H1327" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+    <path d="M1430 254V333" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+    <path d="M1323 414H1230C1100 414 1037 480 1037 573" fill="none" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+
+    <g transform="translate(742 118)">
+      <rect width="155" height="120" rx="24" fill="#fff" stroke="#0b4137" stroke-width="4"/>
+      <circle cx="38" cy="39" r="10" fill="#f4511e"/>
+      <circle cx="74" cy="39" r="10" fill="#f4511e"/>
+      <circle cx="110" cy="39" r="10" fill="#f4511e"/>
+      <text x="77" y="82" text-anchor="middle" font-size="19" font-weight="700" fill="#0b4137">SIGNALS</text>
+      <text x="77" y="105" text-anchor="middle" font-size="14" fill="#6e6b65">verified evidence</text>
+    </g>
+
+    <g transform="translate(1036 105)">
+      <rect width="185" height="146" rx="28" fill="#fff3ea" stroke="#f4511e" stroke-width="5"/>
+      <text x="92" y="62" text-anchor="middle" font-size="29" font-weight="800" fill="#111">HERMES</text>
+      <text x="92" y="91" text-anchor="middle" font-size="15" font-weight="700" letter-spacing="1" fill="#f4511e">SEMANTIC BRAIN</text>
+      <text x="92" y="120" text-anchor="middle" font-size="14" fill="#6e6b65">understands the problem</text>
+    </g>
+
+    <g transform="translate(1328 105)">
+      <rect width="202" height="146" rx="28" fill="url(#green)"/>
+      <text x="101" y="62" text-anchor="middle" font-size="25" font-weight="800" fill="#fff">LOOPGRAPH</text>
+      <text x="101" y="91" text-anchor="middle" font-size="15" font-weight="700" letter-spacing="1" fill="#ffb188">CONTROL PLANE</text>
+      <text x="101" y="120" text-anchor="middle" font-size="14" fill="#d6e7e2">governs the decision</text>
+    </g>
+
+    <g transform="translate(1323 347)">
+      <rect width="214" height="136" rx="26" fill="#fff" stroke="#0b4137" stroke-width="4"/>
+      <text x="107" y="47" text-anchor="middle" font-size="22" font-weight="800" fill="#0b4137">DEPARTMENT</text>
+      <text x="107" y="78" text-anchor="middle" font-size="15" fill="#6e6b65">owns the outcome</text>
+      <g transform="translate(35 98)">
+        <circle cx="0" cy="0" r="12" fill="#f4511e"/>
+        <circle cx="48" cy="0" r="12" fill="#f4511e"/>
+        <circle cx="96" cy="0" r="12" fill="#f4511e"/>
+        <circle cx="144" cy="0" r="12" fill="#f4511e"/>
+      </g>
+    </g>
+
+    <g transform="translate(922 575)">
+      <rect width="232" height="130" rx="26" fill="#fff" stroke="#0b4137" stroke-width="4"/>
+      <text x="116" y="51" text-anchor="middle" font-size="23" font-weight="800" fill="#0b4137">OUTCOME</text>
+      <text x="116" y="80" text-anchor="middle" font-size="15" fill="#6e6b65">measured, not assumed</text>
+      <path d="M62 103L90 90L112 98L142 73L171 79" fill="none" stroke="#f4511e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <path d="M917 638C794 639 760 548 760 427C760 319 801 267 868 237" fill="none" stroke="#f4511e" stroke-width="4" stroke-dasharray="10 10" marker-end="url(#arrow)"/>
+    <text x="765" y="684" font-size="15" font-weight="700" letter-spacing="1" fill="#f4511e">EVIDENCE RETURNS TO THE GRAPH</text>
+  </g>
+</svg>

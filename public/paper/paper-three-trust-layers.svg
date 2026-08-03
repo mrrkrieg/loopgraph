@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">Three trust layers for AI-run company operations</title>
+  <desc id="desc">The Connector Broker constrains providers, Hermes supplies semantic judgment and execution, and Loopgraph supplies deterministic governance and records.</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f3efe7"/></linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0d4a3e"/><stop offset="1" stop-color="#062f28"/></linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#0b4137"/></marker>
+  </defs>
+  <rect width="1600" height="900" fill="url(#paper)"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="62" y="65" font-size="20" font-weight="700" letter-spacing="3" fill="#f4511e">03 / SEPARATE TRUST BOUNDARIES</text>
+    <text x="62" y="139" font-size="52" font-weight="800" letter-spacing="-1.5" fill="#111">Reasoning is not authorization</text>
+    <text x="62" y="180" font-size="24" fill="#0b4137">Three layers turn intelligence into accountable operation</text>
+
+    <path d="M486 441H550" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+    <path d="M1008 441H1073" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+
+    <g transform="translate(62 250)">
+      <rect width="424" height="380" rx="34" fill="#fff" stroke="#0b4137" stroke-width="4"/>
+      <text x="38" y="53" font-size="16" font-weight="700" letter-spacing="2" fill="#f4511e">01 / EXTERNAL BOUNDARY</text>
+      <text x="38" y="102" font-size="30" font-weight="800" fill="#111">CONNECTOR BROKER</text>
+      <line x1="38" y1="128" x2="386" y2="128" stroke="#d9d3c8" stroke-width="2"/>
+      <g font-size="18" fill="#0b4137">
+        <circle cx="52" cy="171" r="7" fill="#f4511e"/><text x="74" y="178">verifies provider events</text>
+        <circle cx="52" cy="221" r="7" fill="#f4511e"/><text x="74" y="228">protects OAuth and API secrets</text>
+        <circle cx="52" cy="271" r="7" fill="#f4511e"/><text x="74" y="278">normalizes bounded payloads</text>
+        <circle cx="52" cy="321" r="7" fill="#f4511e"/><text x="74" y="328">exposes capability-scoped ops</text>
+      </g>
+      <rect x="38" y="344" width="348" height="58" rx="18" fill="#e3eee9"/>
+      <text x="212" y="380" text-anchor="middle" font-size="16" font-weight="700" fill="#0b4137">NO REUSABLE TOKENS IN HERMES</text>
+    </g>
+
+    <g transform="translate(550 218)">
+      <rect width="458" height="446" rx="38" fill="#fff3ea" stroke="#f4511e" stroke-width="5"/>
+      <text x="40" y="55" font-size="16" font-weight="700" letter-spacing="2" fill="#f4511e">02 / SEMANTIC INTELLIGENCE</text>
+      <text x="40" y="111" font-size="42" font-weight="800" fill="#111">HERMES BRAIN</text>
+      <line x1="40" y1="139" x2="418" y2="139" stroke="#f2b596" stroke-width="2"/>
+      <g font-size="19" fill="#0b4137">
+        <circle cx="55" cy="185" r="7" fill="#f4511e"/><text x="79" y="192">interprets the business problem</text>
+        <circle cx="55" cy="239" r="7" fill="#f4511e"/><text x="79" y="246">resolves the company object</text>
+        <circle cx="55" cy="293" r="7" fill="#f4511e"/><text x="79" y="300">selects or abstains from a route</text>
+        <circle cx="55" cy="347" r="7" fill="#f4511e"/><text x="79" y="354">performs assigned tasks and tools</text>
+      </g>
+      <rect x="40" y="379" width="378" height="68" rx="20" fill="#f4511e"/>
+      <text x="229" y="421" text-anchor="middle" font-size="18" font-weight="800" letter-spacing="1" fill="#fff">DECIDES AND ORCHESTRATES</text>
+    </g>
+
+    <g transform="translate(1073 250)">
+      <rect width="465" height="380" rx="34" fill="url(#green)"/>
+      <text x="38" y="53" font-size="16" font-weight="700" letter-spacing="2" fill="#ffb188">03 / DETERMINISTIC AUTHORITY</text>
+      <text x="38" y="102" font-size="38" font-weight="800" fill="#fff">LOOPGRAPH</text>
+      <line x1="38" y1="128" x2="427" y2="128" stroke="#6b9489" stroke-width="2"/>
+      <g font-size="18" fill="#fff">
+        <circle cx="52" cy="171" r="7" fill="#f4511e"/><text x="74" y="178">validates the exact LoopSpec</text>
+        <circle cx="52" cy="221" r="7" fill="#f4511e"/><text x="74" y="228">enforces policy and readiness</text>
+        <circle cx="52" cy="271" r="7" fill="#f4511e"/><text x="74" y="278">binds approvals to exact actions</text>
+        <circle cx="52" cy="321" r="7" fill="#f4511e"/><text x="74" y="328">records execution and outcomes</text>
+      </g>
+      <rect x="38" y="344" width="389" height="58" rx="18" fill="#fff" opacity=".94"/>
+      <text x="232" y="380" text-anchor="middle" font-size="16" font-weight="800" fill="#0b4137">VALIDATES · GOVERNS · RECORDS</text>
+    </g>
+
+    <text x="800" y="748" text-anchor="middle" font-size="27" font-style="italic" fill="#0b4137">Flexible intelligence. Bounded access. Deterministic authority.</text>
+    <line x1="62" y1="822" x2="1538" y2="822" stroke="#0b4137" stroke-width="2"/>
+    <text x="62" y="855" font-size="15" font-weight="700" letter-spacing="1.5" fill="#0b4137">LOOPGRAPH</text>
+    <text x="1538" y="855" text-anchor="end" font-size="15" font-weight="700" letter-spacing="1.5" fill="#6e6b65">THE MODEL NEVER GRANTS ITSELF AUTHORITY</text>
+  </g>
+</svg>

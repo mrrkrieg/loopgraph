@@ -18,32 +18,34 @@ export function PaperArticle({ markdown }: PaperArticleProps) {
   const blocks = parseMarkdown(markdown).filter(
     (block) =>
       block.type !== "image" ||
-      !block.src.includes("01-loop-graph-engineering-cover")
+      !block.src.includes("paper-loop-graph-engineering-cover")
   );
 
   return (
     <article className="paper-article">
       <header className="paper-article__header">
-        <h1 className="sr-only">Loop Graph Engineering with Hermes Agent</h1>
+        <h1 className="sr-only">
+          Loop Graph Engineering: The Operating System for AI-Run Companies
+        </h1>
         <Image
-          alt="Loop Graph Engineering with Hermes Agent"
+          alt="Loop Graph Engineering: The Operating System for AI-Run Companies"
           className="paper-article__cover"
           height={900}
           priority
           sizes="(max-width: 1024px) 100vw, 1024px"
-          src="/paper/01-loop-graph-engineering-cover.png"
+          src="/paper/paper-loop-graph-engineering-cover.svg"
           width={1600}
         />
         <p>
-          A governed operating model for how companies receive signals, route
-          work, act safely, and learn from outcomes.
+          How Hermes turns company signals into decisions—and Loopgraph turns
+          those decisions into governed, measurable operations.
         </p>
         <div className="paper-article__meta">
           <span>Loopgraph</span>
           <span aria-hidden="true">·</span>
-          <span>July 2026</span>
+          <span>August 2026</span>
           <span aria-hidden="true">·</span>
-          <span>13 min read</span>
+          <span>18 min read</span>
         </div>
       </header>
 
@@ -53,8 +55,8 @@ export function PaperArticle({ markdown }: PaperArticleProps) {
 
       <footer className="paper-article__footer">
         <p>
-          The future company will not be one enormous agent. It will be a graph
-          of governed loops.
+          The future company will not be one enormous agent. It will be a
+          living graph of governed loops.
         </p>
         <a
           href="https://github.com/mrrkrieg/loopgraph"
@@ -93,14 +95,11 @@ function renderBlock(block: Block, index: number) {
           <Image
             alt={block.alt}
             height={900}
-            priority={block.src.includes("01-loop-graph-engineering-cover")}
             sizes="(max-width: 1024px) 100vw, 960px"
             src={block.src}
             width={1600}
           />
-          {!block.src.includes("01-loop-graph-engineering-cover") ? (
-            <figcaption>{block.alt}</figcaption>
-          ) : null}
+          <figcaption>{block.alt}</figcaption>
         </figure>
       );
     case "paragraph":
