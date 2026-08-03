@@ -343,10 +343,19 @@ body {
 
   .paper-article__figure {
     margin: 2.75rem 0 3.25rem;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+  }
+
+  .paper-article__figure img,
+  .paper-article__figure figcaption {
+    min-width: 42rem;
   }
 
   .paper-article__figure figcaption {
     padding: 0 1.25rem;
+    text-align: left;
   }
 
   .paper-article__footer {

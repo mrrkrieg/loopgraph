@@ -1,85 +1,90 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
-  <title id="title">The company is a graph of governed loops</title>
-  <desc id="desc">Verified provider signals reach Hermes, which routes to departments. Each department owns multiple specialized loops.</desc>
+  <title id="title">One brain, departments, and multiple specialized loops</title>
+  <desc id="desc">Hermes routes work into departments. Each department owns several distinct loops.</desc>
   <defs>
-    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbf8f2"/><stop offset="1" stop-color="#f3efe7"/></linearGradient>
-    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0d4a3e"/><stop offset="1" stop-color="#062f28"/></linearGradient>
-    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0 0L12 6L0 12Z" fill="#0b4137"/></marker>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fbf8f2"/>
+      <stop offset="1" stop-color="#f3efe7"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0d4a3e"/>
+      <stop offset="1" stop-color="#062f28"/>
+    </linearGradient>
+    <marker id="arrow" markerUnits="userSpaceOnUse" markerWidth="28" markerHeight="28" refX="25" refY="14" orient="auto">
+      <path d="M0 0L28 14L0 28Z" fill="#0b4137"/>
+    </marker>
   </defs>
+
   <rect width="1600" height="900" fill="url(#paper)"/>
+
   <g font-family="Arial, Helvetica, sans-serif">
-    <text x="62" y="65" font-size="20" font-weight="700" letter-spacing="3" fill="#f4511e">01 / THE SHAPE IS THE PRODUCT</text>
-    <text x="62" y="139" font-size="52" font-weight="800" letter-spacing="-1.5" fill="#111">The company is not one agent</text>
-    <text x="62" y="180" font-size="24" fill="#0b4137">One semantic brain coordinates many department-owned loops</text>
+    <text x="68" y="72" font-size="24" font-weight="800" letter-spacing="3.5" fill="#f4511e">01 / THE COMPANY IS A GRAPH</text>
+    <text x="68" y="148" font-size="58" font-weight="850" letter-spacing="-2" fill="#111">Departments own outcomes. Loops own the work</text>
+    <text x="68" y="193" font-size="28" font-weight="500" fill="#0b4137">Hermes routes each problem into a specific operating contract</text>
 
-    <g fill="none" stroke="#0b4137" stroke-width="4" marker-end="url(#arrow)">
-      <path d="M249 430H383"/>
-      <path d="M606 430C695 430 719 302 803 302"/>
-      <path d="M606 430H803"/>
-      <path d="M606 430C695 430 719 558 803 558"/>
-      <path d="M1047 302H1139"/>
-      <path d="M1047 430H1139"/>
-      <path d="M1047 558H1139"/>
-    </g>
-
-    <g transform="translate(62 330)">
-      <rect width="188" height="200" rx="28" fill="#fff" stroke="#0b4137" stroke-width="4"/>
-      <text x="94" y="42" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="1" fill="#f4511e">CONNECTOR</text>
-      <text x="94" y="69" text-anchor="middle" font-size="16" font-weight="700" letter-spacing="1" fill="#f4511e">BROKER</text>
-      <circle cx="52" cy="116" r="10" fill="#0b4137"/><circle cx="94" cy="116" r="10" fill="#0b4137"/><circle cx="136" cy="116" r="10" fill="#0b4137"/>
-      <text x="94" y="158" text-anchor="middle" font-size="14" fill="#6e6b65">verified events</text>
-      <text x="94" y="181" text-anchor="middle" font-size="14" fill="#6e6b65">bounded capabilities</text>
+    <g transform="translate(68 310)">
+      <rect width="300" height="330" rx="38" fill="#fff3ea" stroke="#f4511e" stroke-width="6"/>
+      <text x="150" y="96" text-anchor="middle" font-size="44" font-weight="850" fill="#111">HERMES</text>
+      <text x="150" y="140" text-anchor="middle" font-size="25" font-weight="800" letter-spacing="2" fill="#f4511e">COMPANY BRAIN</text>
+      <line x1="46" y1="177" x2="254" y2="177" stroke="#f1b18e" stroke-width="3"/>
+      <text x="150" y="226" text-anchor="middle" font-size="25" font-weight="700" fill="#0b4137">problem</text>
+      <text x="150" y="266" text-anchor="middle" font-size="25" font-weight="700" fill="#0b4137">company object</text>
+      <text x="150" y="306" text-anchor="middle" font-size="25" font-weight="700" fill="#0b4137">best route</text>
     </g>
 
-    <g transform="translate(385 306)">
-      <circle cx="112" cy="124" r="112" fill="#fff3ea" stroke="#f4511e" stroke-width="6"/>
-      <text x="112" y="107" text-anchor="middle" font-size="34" font-weight="800" fill="#111">HERMES</text>
-      <text x="112" y="138" text-anchor="middle" font-size="17" font-weight="700" letter-spacing="2" fill="#f4511e">COMPANY BRAIN</text>
-      <text x="112" y="171" text-anchor="middle" font-size="14" fill="#6e6b65">problem · object · route</text>
+    <path d="M372 475H458" stroke="#0b4137" stroke-width="6" marker-end="url(#arrow)"/>
+    <path d="M436 475V340H458" fill="none" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+    <path d="M436 475V610H458" fill="none" stroke="#0b4137" stroke-width="5" marker-end="url(#arrow)"/>
+
+    <g transform="translate(475 284)">
+      <rect width="300" height="112" rx="26" fill="url(#green)"/>
+      <text x="150" y="50" text-anchor="middle" font-size="34" font-weight="850" fill="#fff">PRODUCT</text>
+      <text x="150" y="84" text-anchor="middle" font-size="22" font-weight="700" fill="#d6e7e2">product outcomes</text>
+    </g>
+    <g transform="translate(475 419)">
+      <rect width="300" height="112" rx="26" fill="url(#green)"/>
+      <text x="150" y="50" text-anchor="middle" font-size="34" font-weight="850" fill="#fff">SALES</text>
+      <text x="150" y="84" text-anchor="middle" font-size="22" font-weight="700" fill="#d6e7e2">revenue outcomes</text>
+    </g>
+    <g transform="translate(475 554)">
+      <rect width="300" height="112" rx="26" fill="url(#green)"/>
+      <text x="150" y="50" text-anchor="middle" font-size="34" font-weight="850" fill="#fff">OPERATIONS</text>
+      <text x="150" y="84" text-anchor="middle" font-size="22" font-weight="700" fill="#d6e7e2">operating outcomes</text>
     </g>
 
-    <g transform="translate(804 251)">
-      <rect width="244" height="102" rx="24" fill="url(#green)"/>
-      <text x="122" y="44" text-anchor="middle" font-size="25" font-weight="800" fill="#fff">PRODUCT</text>
-      <text x="122" y="72" text-anchor="middle" font-size="14" fill="#d6e7e2">owns product outcomes</text>
-    </g>
-    <g transform="translate(804 379)">
-      <rect width="244" height="102" rx="24" fill="url(#green)"/>
-      <text x="122" y="44" text-anchor="middle" font-size="25" font-weight="800" fill="#fff">SALES</text>
-      <text x="122" y="72" text-anchor="middle" font-size="14" fill="#d6e7e2">owns revenue outcomes</text>
-    </g>
-    <g transform="translate(804 507)">
-      <rect width="244" height="102" rx="24" fill="url(#green)"/>
-      <text x="122" y="42" text-anchor="middle" font-size="22" font-weight="800" fill="#fff">OPERATIONS</text>
-      <text x="122" y="70" text-anchor="middle" font-size="14" fill="#d6e7e2">owns operating outcomes</text>
+    <g stroke="#0b4137" stroke-width="5" fill="none" marker-end="url(#arrow)">
+      <path d="M778 340H855"/>
+      <path d="M778 475H855"/>
+      <path d="M778 610H855"/>
     </g>
 
-    <g transform="translate(1140 236)">
-      <rect width="368" height="132" rx="24" fill="#fff" stroke="#d9d3c8" stroke-width="3"/>
-      <text x="28" y="34" font-size="15" font-weight="700" letter-spacing="1.5" fill="#f4511e">SPECIALIZED LOOPS</text>
-      <g font-size="15" font-weight="700" fill="#0b4137">
-        <rect x="28" y="53" width="142" height="30" rx="15" fill="#e3eee9"/><text x="99" y="74" text-anchor="middle">Feedback</text>
-        <rect x="184" y="53" width="156" height="30" rx="15" fill="#e3eee9"/><text x="262" y="74" text-anchor="middle">Product Problem</text>
-        <rect x="28" y="91" width="142" height="30" rx="15" fill="#e3eee9"/><text x="99" y="112" text-anchor="middle">Roadmap</text>
-        <rect x="184" y="91" width="156" height="30" rx="15" fill="#e3eee9"/><text x="262" y="112" text-anchor="middle">Release Learning</text>
+    <g transform="translate(875 266)">
+      <rect width="650" height="148" rx="30" fill="#fff" stroke="#d9d3c8" stroke-width="4"/>
+      <text x="34" y="44" font-size="23" font-weight="800" letter-spacing="2" fill="#f4511e">PRODUCT LOOPS</text>
+      <g font-size="24" font-weight="800" fill="#0b4137">
+        <rect x="34" y="70" width="176" height="54" rx="27" fill="#e3eee9"/><text x="122" y="105" text-anchor="middle">Feedback</text>
+        <rect x="229" y="70" width="184" height="54" rx="27" fill="#e3eee9"/><text x="321" y="105" text-anchor="middle">Problem</text>
+        <rect x="432" y="70" width="184" height="54" rx="27" fill="#e3eee9"/><text x="524" y="105" text-anchor="middle">Release</text>
       </g>
     </g>
-    <g transform="translate(1140 388)">
-      <rect width="368" height="84" rx="24" fill="#fff" stroke="#d9d3c8" stroke-width="3"/>
-      <circle cx="52" cy="42" r="16" fill="#f4511e"/><circle cx="103" cy="42" r="16" fill="#f4511e"/><circle cx="154" cy="42" r="16" fill="#f4511e"/><circle cx="205" cy="42" r="16" fill="#f4511e"/>
-      <text x="242" y="48" font-size="16" font-weight="700" fill="#0b4137">multiple Sales loops</text>
+    <g transform="translate(875 431)">
+      <rect width="650" height="88" rx="28" fill="#fff" stroke="#d9d3c8" stroke-width="4"/>
+      <g font-size="23" font-weight="800" fill="#0b4137">
+        <rect x="28" y="18" width="174" height="52" rx="26" fill="#e3eee9"/><text x="115" y="52" text-anchor="middle">Qualify</text>
+        <rect x="221" y="18" width="174" height="52" rx="26" fill="#e3eee9"/><text x="308" y="52" text-anchor="middle">Follow up</text>
+        <rect x="414" y="18" width="208" height="52" rx="26" fill="#e3eee9"/><text x="518" y="52" text-anchor="middle">Deal risk</text>
+      </g>
     </g>
-    <g transform="translate(1140 516)">
-      <rect width="368" height="84" rx="24" fill="#fff" stroke="#d9d3c8" stroke-width="3"/>
-      <circle cx="52" cy="42" r="16" fill="#f4511e"/><circle cx="103" cy="42" r="16" fill="#f4511e"/><circle cx="154" cy="42" r="16" fill="#f4511e"/><circle cx="205" cy="42" r="16" fill="#f4511e"/>
-      <text x="242" y="48" font-size="16" font-weight="700" fill="#0b4137">multiple Ops loops</text>
+    <g transform="translate(875 566)">
+      <rect width="650" height="88" rx="28" fill="#fff" stroke="#d9d3c8" stroke-width="4"/>
+      <g font-size="23" font-weight="800" fill="#0b4137">
+        <rect x="28" y="18" width="174" height="52" rx="26" fill="#e3eee9"/><text x="115" y="52" text-anchor="middle">Invoice</text>
+        <rect x="221" y="18" width="174" height="52" rx="26" fill="#e3eee9"/><text x="308" y="52" text-anchor="middle">Forecast</text>
+        <rect x="414" y="18" width="208" height="52" rx="26" fill="#e3eee9"/><text x="518" y="52" text-anchor="middle">Approval</text>
+      </g>
     </g>
 
-    <text x="926" y="676" text-anchor="middle" font-size="17" font-weight="700" fill="#6e6b65">+ MARKETING · CUSTOMER SUCCESS · ENGINEERING · HR · LEGAL · MANAGEMENT</text>
-    <path d="M1490 675C1454 761 1263 789 997 770C757 753 612 675 527 563" fill="none" stroke="#f4511e" stroke-width="4" stroke-dasharray="10 10" marker-end="url(#arrow)"/>
-    <text x="1009" y="823" text-anchor="middle" font-size="20" font-style="italic" fill="#0b4137">Outcomes return as evidence to the company brain</text>
-    <line x1="62" y1="853" x2="1538" y2="853" stroke="#0b4137" stroke-width="2"/>
-    <text x="62" y="881" font-size="15" font-weight="700" letter-spacing="1.5" fill="#0b4137">LOOPGRAPH</text>
-    <text x="1538" y="881" text-anchor="end" font-size="15" font-weight="700" letter-spacing="1.5" fill="#6e6b65">DEPARTMENTS OWN OUTCOMES · LOOPS OWN RECURRING WORK</text>
+    <rect x="68" y="735" width="1457" height="92" rx="26" fill="#0b4137"/>
+    <text x="797" y="791" text-anchor="middle" font-size="28" font-weight="800" fill="#fff">Every department can own many loops—with different evidence, authority, and outcomes</text>
   </g>
 </svg>
