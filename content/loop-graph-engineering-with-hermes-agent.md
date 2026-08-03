@@ -40,7 +40,7 @@ Even one department is not one workflow. Product may own Feedback Clustering, Pr
 
 A department is an ownership boundary. **A loop is a specialized operating unit inside that boundary.**
 
-![A company operating graph has a verified boundary, one semantic brain, departments, and many specialized loops](paper-company-loop-topology.svg)
+![A company operating graph has a verified boundary, one semantic brain, departments, and many specialized loops](02-hermes-departments-multiple-loops-hd.png)
 
 This is why a company is better represented as a graph than as a list of agents.
 
@@ -72,7 +72,7 @@ Loopgraph therefore separates the objects that trigger-based systems usually col
 
 **An observed outcome is a claim backed by measurement.** It answers whether the intended business condition changed—not merely whether the workflow reached its last step.
 
-![Events become evidence about a company object, a stateful problem, governed attempts, and an observed outcome](paper-operating-objects.svg)
+![Events become evidence about a company object, a stateful problem, governed attempts, and an observed outcome](03-event-problem-run-hd.png)
 
 Suppose five customers report the same onboarding failure while product analytics shows a drop at the same activation step. A trigger-based system may create six unrelated jobs. A problem-based system resolves the affected accounts and product surface, attaches the evidence to one product problem, checks whether an appropriate loop is already active, and avoids duplicate work.
 
@@ -82,7 +82,7 @@ That distinction creates organizational memory. The system remembers what happen
 
 Flexible reasoning, provider authority, and deterministic governance are different jobs. The architecture separates them deliberately.
 
-![The Connector Broker, Hermes Brain, and Loopgraph form three distinct trust layers](paper-three-trust-layers.svg)
+![Hermes provides semantic judgment while Loopgraph provides deterministic authority](04-hermes-loopgraph-responsibilities-hd.png)
 
 The **Hermes Connector Broker** is the boundary to external systems. It verifies provider events, normalizes payloads, protects OAuth and API credentials, and exposes only fixed, capability-scoped provider operations. Hermes receives a bounded capability; it does not receive a reusable provider token or an arbitrary HTTP proxy.
 
@@ -188,7 +188,7 @@ The company can improve its operating model without allowing an agent to silentl
 
 Autonomy is not a Boolean setting. It is a sequence of evidence-backed authority levels.
 
-![A loop progresses from simulation to shadow, recommendation, approval-bound execution, and bounded low-risk autonomy](paper-autonomy-ladder.svg)
+![A loop progresses from simulation to shadow, recommendation, approval-bound execution, and bounded low-risk autonomy](07-autonomy-ladder-hd.png)
 
 **Simulate** checks contracts and runs deterministic or redacted fixtures with no external writes.
 
