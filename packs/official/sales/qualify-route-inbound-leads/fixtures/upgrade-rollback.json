@@ -1,0 +1,9 @@
+{
+  "id": "fixture-upgrade-rollback",
+  "scenario": "upgrade_and_rollback",
+  "eventType": "loopgraph.app.update_requested",
+  "subject": { "type": "app_installation", "id": "install-sales-inbound" },
+  "normalizedPayload": { "fromVersion": "1.0.0", "toVersion": "1.1.0", "permissionChange": "mail.message.send added", "overlayPaths": ["/values/qualificationThreshold"] },
+  "expected": { "action": "request_human", "permissionReview": true, "rollbackAvailable": true, "preserveSharedConnections": true }
+}
+

@@ -1,0 +1,9 @@
+{
+  "id": "fixture-duplicate-lead",
+  "scenario": "duplicate",
+  "eventType": "lead.created",
+  "sourceDeliveryId": "hubspot-delivery-duplicate",
+  "subject": { "type": "lead", "id": "lead-duplicate" },
+  "normalizedPayload": { "leadId": "lead-duplicate", "email": "buyer@duplicate.test", "company": "Duplicate Test", "matchedLeadId": "lead-original" },
+  "expected": { "action": "append_evidence", "loopId": "sales-inbound-lead-intake", "newJobCount": 0 }
+}

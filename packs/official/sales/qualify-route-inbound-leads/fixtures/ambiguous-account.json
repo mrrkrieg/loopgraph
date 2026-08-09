@@ -1,0 +1,9 @@
+{
+  "id": "fixture-ambiguous-account",
+  "scenario": "ambiguous_account",
+  "eventType": "lead.intake_ready",
+  "subject": { "type": "lead", "id": "lead-ambiguous" },
+  "normalizedPayload": { "leadId": "lead-ambiguous", "accountId": "candidate-a", "domain": "shared-domain.test", "candidateAccountIds": ["candidate-a", "candidate-b"] },
+  "evidenceRefs": ["evidence:crm:candidate-a", "evidence:crm:candidate-b"],
+  "expected": { "action": "request_human", "reason": "No single company identity is supported." }
+}

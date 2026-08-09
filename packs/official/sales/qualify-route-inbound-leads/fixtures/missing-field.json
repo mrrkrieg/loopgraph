@@ -1,0 +1,9 @@
+{
+  "id": "fixture-missing-field",
+  "scenario": "missing_required_field",
+  "eventType": "account.research_ready",
+  "subject": { "type": "lead", "id": "lead-missing-field" },
+  "normalizedPayload": { "leadId": "lead-missing-field", "accountBrief": { "industry": "software" } },
+  "evidenceRefs": ["evidence:crm:lead-missing-field"],
+  "expected": { "action": "request_human", "missingFields": ["normalizedPayload.icpDefinition"] }
+}

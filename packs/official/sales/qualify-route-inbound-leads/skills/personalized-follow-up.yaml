@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-personalized-follow-up
+name: Personalized Follow-Up
+description: Prepare a concise, evidence-grounded message for the assigned owner to review.
+department: sales
+goal: Create useful follow-up without unsupported personalization or unauthorized sending.
+inputs: [verified account brief, observed buying signals, submitted request, assigned owner, approved messaging policy]
+outputs: [subject, message draft, evidence used, unsupported claims removed, recommended next step]
+instructions:
+  - Address the request or verified business trigger that caused qualification.
+  - Use only facts in the evidence packet and avoid hidden or sensitive enrichment details.
+  - Make the next step specific, reversible, and easy for the recipient to decline.
+  - Produce a draft and exact action fingerprint; do not send.
+boundaries:
+  - Never invent familiarity, pain, budget, authority, or urgency.
+  - Never expose internal scores, enrichment sources, or restricted company context.
+  - Never send a message unless a later policy promotion and exact approval permit it.
+requiredCapabilities: [crm.lead.read, mail.message.draft]
+

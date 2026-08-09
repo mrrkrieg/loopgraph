@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: inbound-sales-outcomes
+metrics:
+  - { id: meeting_conversion_rate, direction: increase, description: Qualified leads that produce an accepted meeting. }
+  - { id: opportunity_conversion_rate, direction: increase, description: Qualified leads that become accepted opportunities. }
+  - { id: false_positive_rate, direction: decrease, description: Routed leads later labeled as not qualified. }
+  - { id: review_minutes_per_lead, direction: decrease, description: Human review burden required per processed lead. }
+  - { id: duplicate_contact_rate, direction: decrease, description: Leads that would have created duplicate CRM activity without identity resolution. }
+  - { id: follow_up_sla_attainment, direction: increase, description: Qualified leads receiving a reviewed draft within the configured SLA. }
+

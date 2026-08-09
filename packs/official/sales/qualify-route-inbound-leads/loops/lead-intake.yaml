@@ -1,0 +1,57 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-inbound-lead-intake
+  name: Lead Intake
+  version: 1.0.0
+  description: Normalize an inbound lead event, establish durable lead and account identity, detect duplicates and existing customers, and create one bounded business problem for Hermes.
+  department: sales
+  ownerRole: sales_operations
+  tags: [inbound, identity, intake]
+trigger: { type: event, source: "*", event: lead.created }
+input:
+  requiredFields: [normalizedPayload.leadId, normalizedPayload.email, normalizedPayload.company]
+  subjectTypes: [lead, contact]
+  fixtures:
+    - { id: high-fit, path: fixtures/high-fit.json }
+    - { id: duplicate-lead, path: fixtures/duplicate-lead.json }
+    - { id: existing-customer, path: fixtures/existing-customer.json }
+routine:
+  - { id: normalize, name: Normalize provider event, actor: system, type: observe, description: Translate the provider payload into the shared lead and account contract. }
+  - { id: resolve, name: Resolve identity, actor: agent, type: assess, description: "Match the contact and account across provider identifiers, email, and verified domain evidence." }
+  - { id: gate, name: Apply intake exclusions, actor: system, type: decide, description: Suppress duplicates and redirect existing customers or excluded identities without creating duplicate work. }
+  - { id: emit, name: Open qualification problem, actor: system, type: prepare, description: Create or append evidence to one durable lead qualification problem. }
+capabilities:
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read the source lead and search for duplicates., customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Detect existing customers and match the affected company., customerFacing: false }
+skills: []
+outcomes:
+  - { metric: duplicate_contact_rate, description: Fraction of inbound events identified as duplicates before downstream work., direction: decrease, sourceCapability: crm.lead.read }
+  - { metric: identity_resolution_rate, description: Fraction of leads matched to one confident company object., direction: increase, sourceCapability: crm.account.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.inbound_lead_intake]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: lead.created, subjectTypes: [lead, contact], requiredFields: [normalizedPayload.leadId, normalizedPayload.email, normalizedPayload.company], reason: A new inbound lead has enough identity evidence for intake. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle callbacks are evidence and cannot create new lead problems. }
+  inputMapping: { leadId: normalizedPayload.leadId, email: normalizedPayload.email, company: normalizedPayload.company }
+  priority: 100
+  minimumConfidence: 0.85
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.lead.read, crm.account.read]
+  examples:
+    shouldRoute: [A signed CRM webhook contains a new lead ID, email, and company.]
+    shouldNotRoute: [The same provider delivery is replayed., The contact already belongs to an active customer.]
+policy:
+  forbiddenActions:
+    - { capability: crm.lead.update, reason: Intake may observe identity but cannot mutate the CRM. }
+  escalationOwner: sales_operations
+  escalationSla: 30m
+  separateCustomerFacingApproval: true

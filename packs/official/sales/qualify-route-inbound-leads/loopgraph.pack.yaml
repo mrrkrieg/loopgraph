@@ -1,0 +1,146 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.sales.qualify-route-inbound-leads
+  name: Qualify and Route Inbound Leads
+  version: 1.0.0
+  summary: Turn inbound demand into governed qualification, routing, follow-up, and measurable learning.
+  description: A complete Sales application in which Hermes receives inbound lead events, assembles account evidence, evaluates ICP and intent, routes clear cases, abstains on ambiguity, prepares bounded follow-up, and learns from meetings and pipeline outcomes.
+  department: sales
+  publisher:
+    id: loopgraph
+    name: Loopgraph
+    verified: true
+  license: MIT
+  visibility: official
+  tags: [sales, inbound, qualification, routing, learning]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: account-research
+    name: Account research
+    description: Enrich and verify the company behind a lead before scoring it.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/account-research.yaml, skills/account-research.yaml]
+  - id: governed-follow-up
+    name: Governed follow-up
+    description: Prepare personalized follow-up while keeping sending blocked by default.
+    defaultEnabled: true
+    dependsOn: [account-research]
+    assets: [loops/follow-up.yaml, skills/personalized-follow-up.yaml]
+presets:
+  - id: hubspot-gmail-slack
+    name: HubSpot + Gmail + Slack
+    description: Read and update HubSpot, prepare Gmail drafts, and notify an internal Slack channel.
+    path: presets/hubspot-gmail-slack.yaml
+    providerFamily: hubspot
+  - id: salesforce-outlook-teams
+    name: Salesforce + Outlook + Teams
+    description: Read and update Salesforce, prepare Outlook drafts, and notify an internal Teams channel.
+    path: presets/salesforce-outlook-teams.yaml
+    providerFamily: salesforce
+permissions:
+  - capability: crm.lead.read
+    authority: read
+    mode: required
+    risk: low
+    purpose: Read lead identity, lifecycle state, attribution, and qualification fields.
+    customerFacing: false
+    defaultPolicy: allowed
+    dataClasses: [business_contact, crm_activity]
+  - capability: crm.account.read
+    authority: read
+    mode: required
+    risk: low
+    purpose: Read account attributes and detect existing customers or duplicates.
+    customerFacing: false
+    defaultPolicy: allowed
+    dataClasses: [business_account]
+  - capability: enrichment.account.read
+    authority: read
+    mode: optional
+    risk: medium
+    purpose: Fill bounded firmographic gaps needed for ICP evaluation.
+    customerFacing: false
+    defaultPolicy: allowed
+    dataClasses: [business_account]
+  - capability: crm.lead.update
+    authority: approve
+    mode: optional
+    risk: high
+    purpose: Apply an approved qualification, owner, territory, and disposition to the exact lead.
+    customerFacing: false
+    defaultPolicy: approval_required
+    dataClasses: [business_contact, crm_activity]
+  - capability: mail.message.draft
+    authority: draft
+    mode: optional
+    risk: medium
+    purpose: Prepare a personalized follow-up draft for human review.
+    customerFacing: true
+    defaultPolicy: allowed
+    dataClasses: [business_contact, communication]
+  - capability: mail.message.send
+    authority: execute
+    mode: optional
+    risk: critical
+    purpose: Send the exact approved follow-up message.
+    customerFacing: true
+    defaultPolicy: forbidden
+    dataClasses: [business_contact, communication]
+  - capability: messaging.channel.post
+    authority: approve
+    mode: optional
+    risk: medium
+    purpose: Notify the configured internal sales channel about a routed lead.
+    customerFacing: false
+    defaultPolicy: approval_required
+    dataClasses: [business_contact, crm_activity]
+requiredCapabilities: [crm.lead.read, crm.account.read]
+optionalCapabilities: [enrichment.account.read, crm.lead.update, mail.message.draft, mail.message.send, messaging.channel.post]
+entrypoints:
+  loops:
+    - loops/lead-intake.yaml
+    - loops/account-research.yaml
+    - loops/lead-qualification.yaml
+    - loops/lead-routing.yaml
+    - loops/follow-up.yaml
+    - loops/qualification-learning.yaml
+  skills:
+    - skills/account-research.yaml
+    - skills/icp-evaluation.yaml
+    - skills/buying-signal-analysis.yaml
+    - skills/personalized-follow-up.yaml
+  connectors:
+    - connectors/hubspot-gmail-slack.yaml
+    - connectors/salesforce-outlook-teams.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/high-fit.json
+    - fixtures/low-fit.json
+    - fixtures/missing-enrichment.json
+    - fixtures/duplicate-lead.json
+    - fixtures/existing-customer.json
+    - fixtures/ambiguous-account.json
+    - fixtures/connector-unavailable.json
+    - fixtures/missing-field.json
+    - fixtures/approval-required.json
+    - fixtures/outcome-unavailable.json
+    - fixtures/retry-replay.json
+    - fixtures/upgrade-rollback.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: sales_operations
+  reviewRoles: [sales_manager, revenue_operations]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow
+

@@ -1,0 +1,9 @@
+{
+  "id": "fixture-outcome-unavailable",
+  "scenario": "outcome_unavailable",
+  "eventType": "sales.outcome_observed",
+  "subject": { "type": "lead", "id": "lead-no-outcome" },
+  "normalizedPayload": { "leadId": "lead-no-outcome", "originalDecision": { "version": "1.0.0", "decision": "qualified" }, "outcome": { "status": "unavailable", "reason": "crm_mapping_missing" } },
+  "evidenceRefs": ["evidence:decision:lead-no-outcome"],
+  "expected": { "action": "route", "loopId": "sales-inbound-qualification-learning", "excludeFromConversionDenominator": true }
+}

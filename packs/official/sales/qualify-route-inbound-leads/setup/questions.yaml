@@ -1,0 +1,77 @@
+schemaVersion: loopgraph-app-setup/v1alpha1
+kind: AppSetup
+questions:
+  - key: icpDefinition
+    prompt: Which account attributes define a strong fit?
+    why: Hermes needs a company-specific ICP rather than a generic score.
+    valueType: object
+    requirement: required
+    inferFromContext: sales.icp
+    confirmWhenInferred: true
+  - key: exclusions
+    prompt: Which leads must never enter this flow?
+    why: Existing customers, employees, partners, students, and unsupported regions often need separate handling.
+    valueType: string_list
+    requirement: required
+    inferFromContext: sales.leadExclusions
+    confirmWhenInferred: true
+  - key: employeeRange
+    prompt: What employee ranges affect qualification?
+    why: This can distinguish target accounts from low-fit inbound demand.
+    valueType: object
+    requirement: optional
+    inferFromContext: company.targetEmployeeRange
+    confirmWhenInferred: false
+  - key: revenueRange
+    prompt: What revenue ranges affect qualification?
+    why: Revenue is used only when it is part of the approved ICP.
+    valueType: object
+    requirement: optional
+    inferFromContext: company.targetRevenueRange
+    confirmWhenInferred: false
+  - key: territories
+    prompt: How are territories assigned to owners?
+    why: A deterministic rule is required before Hermes can recommend an owner.
+    valueType: object
+    requirement: required
+    inferFromContext: sales.territories
+    confirmWhenInferred: true
+  - key: qualificationThreshold
+    prompt: What score is clearly qualified, and what range requires review?
+    why: Hermes must know when to route and when to abstain.
+    valueType: object
+    requirement: required
+    inferFromContext: sales.qualificationThresholds
+    confirmWhenInferred: true
+  - key: lifecycleStages
+    prompt: Which CRM lifecycle stages represent new, qualified, accepted, and disqualified leads?
+    why: Provider fields must map to shared company concepts.
+    valueType: object
+    requirement: required
+    inferFromContext: sales.lifecycleStages
+    confirmWhenInferred: true
+  - key: followUpSlaMinutes
+    prompt: How quickly should a qualified inbound lead receive a reviewed follow-up?
+    why: The app measures routing and follow-up latency against this SLA.
+    valueType: number
+    requirement: required
+    inferFromContext: sales.inboundSlaMinutes
+    confirmWhenInferred: true
+    defaultValue: 30
+  - key: internalChannel
+    prompt: Where should internal routing recommendations be reviewed?
+    why: The app needs an accountable review destination before notifications can be enabled.
+    valueType: string
+    requirement: conditional
+    condition: messaging.channel.post is connected
+    inferFromContext: sales.routingChannel
+    confirmWhenInferred: true
+  - key: customerFacingPolicy
+    prompt: Should the app stop at a draft or allow exact approved sending later?
+    why: Customer-facing execution requires a separate explicit policy decision.
+    valueType: string
+    requirement: required
+    inferFromContext: policy.customerFacingSalesAutomation
+    confirmWhenInferred: true
+    defaultValue: draft_only
+

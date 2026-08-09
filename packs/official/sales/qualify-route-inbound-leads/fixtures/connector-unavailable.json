@@ -1,0 +1,9 @@
+{
+  "id": "fixture-connector-unavailable",
+  "scenario": "connector_unavailable",
+  "eventType": "lead.qualified",
+  "subject": { "type": "lead", "id": "lead-connector-down" },
+  "normalizedPayload": { "leadId": "lead-connector-down", "qualification": { "score": 94 }, "territoryRules": { "US-WEST": "owner-1" }, "connectionStatus": "degraded" },
+  "evidenceRefs": ["evidence:qualification:lead-connector-down"],
+  "expected": { "action": "defer", "loopId": "sales-inbound-lead-routing", "providerWrites": 0 }
+}

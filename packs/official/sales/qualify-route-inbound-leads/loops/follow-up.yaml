@@ -1,0 +1,58 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-inbound-follow-up
+  name: Follow-Up
+  version: 1.0.0
+  description: Prepare a personalized, evidence-grounded follow-up draft within the configured SLA while keeping customer-facing sending forbidden by default.
+  department: sales
+  ownerRole: sales_owner
+  tags: [follow-up, email, sla]
+trigger: { type: event, source: loopgraph, event: lead.routed }
+input:
+  requiredFields: [normalizedPayload.leadId, normalizedPayload.owner, normalizedPayload.accountBrief, evidenceRefs]
+  subjectTypes: [lead]
+  fixtures:
+    - { id: high-fit, path: fixtures/high-fit.json }
+    - { id: approval-required, path: fixtures/approval-required.json }
+routine:
+  - { id: verify-state, name: Verify current state, actor: system, type: observe, description: "Confirm the lead is still assigned, eligible, and not already contacted." }
+  - { id: select-evidence, name: Select personalization evidence, actor: agent, type: assess, description: Use only verified account and buying-signal evidence relevant to the recipient. }
+  - { id: draft, name: Prepare follow-up, actor: agent, type: prepare, description: "Produce a concise draft, subject, cited basis, and recommended next step." }
+  - { id: govern, name: Apply communication policy, actor: system, type: verify, description: Block unsupported claims and keep send authority disabled unless separately promoted. }
+capabilities:
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: "Confirm ownership, contact history, and current lead status.", customerFacing: false }
+  - { key: mail.message.draft, authority: draft, risk: medium, required: false, purpose: Create a reviewable personalized email draft., customerFacing: true }
+  - { key: mail.message.send, authority: execute, risk: critical, required: false, purpose: Send only the exact separately approved draft after promotion., customerFacing: true }
+skills: [sales-personalized-follow-up]
+outcomes:
+  - { metric: follow_up_sla_attainment, description: Qualified routed leads receiving a reviewed draft within SLA., direction: increase, sourceCapability: crm.lead.read }
+  - { metric: meeting_conversion_rate, description: Reviewed follow-ups that lead to accepted meetings., direction: increase, sourceCapability: crm.lead.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.follow_up]
+  accepts:
+    - { sourcePattern: loopgraph, eventTypePattern: lead.routed, subjectTypes: [lead], requiredFields: [normalizedPayload.leadId, normalizedPayload.owner, normalizedPayload.accountBrief, evidenceRefs], reason: A lead has one approved owner and verified personalization context. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: lead.disqualified, subjectTypes: [lead], fields: [], reason: Disqualified leads cannot receive follow-up. }
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Delivery receipts append evidence rather than restart follow-up. }
+  inputMapping: { leadId: normalizedPayload.leadId, owner: normalizedPayload.owner, accountBrief: normalizedPayload.accountBrief }
+  priority: 75
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.review.decided, loopgraph.action.executed, loopgraph.outcome.observed]
+  requiredConnections: [crm.lead.read]
+  examples:
+    shouldRoute: [An approved owner receives a high-fit lead with a verified account trigger and no previous follow-up.]
+    shouldNotRoute: [The recipient opted out, was disqualified, or already received the same message.]
+policy:
+  forbiddenActions:
+    - { capability: mail.message.send, reason: Customer-facing send remains forbidden in the initial app policy. }
+  escalationOwner: sales_owner
+  escalationSla: 30m
+  separateCustomerFacingApproval: true

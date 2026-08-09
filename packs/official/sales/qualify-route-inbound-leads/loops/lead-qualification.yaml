@@ -1,0 +1,59 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-inbound-lead-qualification
+  name: Lead Qualification
+  version: 1.0.0
+  description: Evaluate approved ICP, exclusions, and buying signals; explain the score; and abstain inside the review band.
+  department: sales
+  ownerRole: sales_manager
+  tags: [qualification, icp, intent]
+trigger: { type: event, source: loopgraph, event: account.research_ready }
+input:
+  requiredFields: [normalizedPayload.leadId, normalizedPayload.accountBrief, normalizedPayload.icpDefinition, evidenceRefs]
+  subjectTypes: [lead, account]
+  fixtures:
+    - { id: high-fit, path: fixtures/high-fit.json }
+    - { id: low-fit, path: fixtures/low-fit.json }
+    - { id: missing-field, path: fixtures/missing-field.json }
+routine:
+  - { id: exclusions, name: Evaluate exclusions, actor: system, type: assess, description: "Apply explicit employee, existing-customer, partner, regional, and other configured exclusions first." }
+  - { id: fit, name: Evaluate ICP fit, actor: agent, type: assess, description: Compare evidence-backed account attributes with the confirmed ICP. }
+  - { id: intent, name: Evaluate buying signals, actor: agent, type: assess, description: Separate observed intent from inferred or missing intent. }
+  - { id: decide, name: Decide or abstain, actor: agent, type: decide, description: "Qualify clear cases, reject clear exclusions, and request review inside the ambiguity band." }
+  - { id: verify, name: Verify explanation, actor: system, type: verify, description: Require cited evidence for every positive and negative factor. }
+capabilities:
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: "Read lead attribution, activity, and current lifecycle state.", customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read verified account attributes used by the ICP policy., customerFacing: false }
+skills: [sales-icp-evaluation, sales-buying-signal-analysis]
+outcomes:
+  - { metric: false_positive_rate, description: Qualified leads later labeled not qualified by owners., direction: decrease, sourceCapability: crm.lead.read }
+  - { metric: qualification_review_rate, description: Leads requiring human judgment because evidence is incomplete or ambiguous., direction: maintain, sourceCapability: crm.lead.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.lead_qualification]
+  accepts:
+    - { sourcePattern: loopgraph, eventTypePattern: account.research_ready, subjectTypes: [lead, account], requiredFields: [normalizedPayload.leadId, normalizedPayload.accountBrief, normalizedPayload.icpDefinition, evidenceRefs], reason: Research has supplied the evidence and approved ICP needed for qualification. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: lead.existing_customer, subjectTypes: [lead, account], fields: [], reason: Existing customers belong in the configured Customer Success route. }
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle evidence cannot restart qualification. }
+  inputMapping: { leadId: normalizedPayload.leadId, accountBrief: normalizedPayload.accountBrief, icp: normalizedPayload.icpDefinition }
+  priority: 90
+  minimumConfidence: 0.85
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.review.decided, loopgraph.outcome.observed]
+  requiredConnections: [crm.lead.read, crm.account.read]
+  examples:
+    shouldRoute: [A researched account has verified ICP attributes and observed high-intent activity.]
+    shouldNotRoute: [The account identity is ambiguous or a required ICP field is unverified.]
+policy:
+  forbiddenActions:
+    - { capability: crm.lead.update, reason: Qualification prepares a decision; the routing loop owns any approved CRM mutation. }
+  escalationOwner: sales_manager
+  escalationSla: 30m
+  separateCustomerFacingApproval: true

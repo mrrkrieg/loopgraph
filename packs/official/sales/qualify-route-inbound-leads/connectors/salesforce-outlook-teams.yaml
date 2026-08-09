@@ -1,0 +1,33 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: salesforce-outlook-teams
+providerId: salesforce
+providerFamily: salesforce
+displayName: Salesforce + Outlook + Teams
+capabilities:
+  - { logicalCapability: crm.lead.read, providerOperation: salesforce.lead.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: crm.account.read, providerOperation: salesforce.account.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: crm.lead.update, providerOperation: salesforce.lead.update, minimumScopes: [api], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: outlook.message.draft, minimumScopes: [Mail.ReadWrite], authority: draft, risk: medium }
+  - { logicalCapability: mail.message.send, providerOperation: outlook.message.send, minimumScopes: [Mail.Send], authority: execute, risk: critical }
+  - { logicalCapability: messaging.channel.post, providerOperation: teams.channel.post, minimumScopes: [ChannelMessage.Send], authority: approve, risk: medium }
+eventSources:
+  - eventFamily: lead.created
+    providerEvent: salesforce.Lead.created
+    transport: webhook
+    normalizationTransformer: salesforce.lead-to-lead.v1
+    signatureStrategy: salesforce-oauth-and-event-id
+    replayProtection: true
+    fallbackPollMinutes: 15
+fieldMappings:
+  - objectType: lead
+    requiredLogicalFields: [lead.id, lead.email, lead.company, lead.lifecycleStage]
+    optionalLogicalFields: [lead.source, lead.title, lead.employeeCount, lead.revenue, lead.country]
+  - objectType: account
+    requiredLogicalFields: [account.id, account.domain, account.customerStatus]
+    optionalLogicalFields: [account.industry, account.employeeCount, account.revenue, account.territory]
+healthCheck:
+  capability: crm.lead.read
+  sampleQuery: { soql: "SELECT Id, Email, Company, Status FROM Lead LIMIT 1" }
+  timeoutMs: 10000
+supportsBoundedSamples: true
+

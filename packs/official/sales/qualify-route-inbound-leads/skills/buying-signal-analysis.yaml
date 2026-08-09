@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-buying-signal-analysis
+name: Buying-Signal Analysis
+description: Separate observable buying intent from weak engagement and unsupported inference.
+department: sales
+goal: Explain whether the lead shows timely, relevant intent that should affect qualification.
+inputs: [lead source, campaign context, product activity, submitted request, CRM activity, event timestamps]
+outputs: [observed signals, weak signals, conflicting signals, recency assessment, intent confidence]
+instructions:
+  - Prefer explicit requests, product evaluation behavior, and recent relevant actions over surface engagement.
+  - Preserve source and timestamp for every observed signal.
+  - Down-weight repeated automated activity, internal traffic, and stale engagement.
+  - Identify when a marketing attribution event lacks downstream buying evidence.
+boundaries:
+  - Never claim intent from demographic or firmographic fit alone.
+  - Never use signals outside the approved data and retention policy.
+  - Never turn a weak signal into an autonomous customer-facing action.
+requiredCapabilities: [crm.lead.read]
+

@@ -1,0 +1,10 @@
+{
+  "id": "fixture-retry-replay",
+  "scenario": "retry_and_replay",
+  "eventType": "sales.outcome_observed",
+  "sourceDeliveryId": "outcome-delivery-1",
+  "subject": { "type": "opportunity", "id": "opportunity-replay" },
+  "normalizedPayload": { "leadId": "lead-replay", "originalDecision": { "version": "1.0.0", "decision": "qualified" }, "outcome": { "status": "opportunity_created" }, "deliveryAttempt": 2 },
+  "evidenceRefs": ["evidence:decision:lead-replay", "evidence:crm:opportunity-replay"],
+  "expected": { "action": "append_evidence", "loopId": "sales-inbound-qualification-learning", "newJobCount": 0, "metricIncrementCount": 0 }
+}

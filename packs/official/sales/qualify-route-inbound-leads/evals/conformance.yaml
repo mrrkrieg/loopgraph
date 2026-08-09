@@ -1,0 +1,17 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: sales-inbound-conformance
+appId: loopgraph.sales.qualify-route-inbound-leads
+scenarios:
+  - { id: high-fit, fixture: fixtures/high-fit.json, expectedAction: route, expectedLoopId: sales-inbound-lead-intake, connectorState: connected, expectedApproval: false, notes: A complete signed event enters intake and proceeds toward qualification. }
+  - { id: low-fit, fixture: fixtures/low-fit.json, expectedAction: route, expectedLoopId: sales-inbound-lead-qualification, connectorState: connected, expectedApproval: false, notes: A clear low-fit account is explained and not routed to an owner. }
+  - { id: missing-enrichment, fixture: fixtures/missing-enrichment.json, expectedAction: route, expectedLoopId: sales-inbound-account-research, connectorState: connected, expectedApproval: false, notes: Missing approved fields become an explicit evidence gap. }
+  - { id: duplicate-lead, fixture: fixtures/duplicate-lead.json, expectedAction: append_evidence, expectedLoopId: sales-inbound-lead-intake, connectorState: connected, expectedApproval: false, notes: A duplicate event cannot create duplicate work. }
+  - { id: existing-customer, fixture: fixtures/existing-customer.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Existing customers cannot be treated as new inbound demand. }
+  - { id: ambiguous-account, fixture: fixtures/ambiguous-account.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Hermes abstains when one affected company cannot be resolved. }
+  - { id: connector-unavailable, fixture: fixtures/connector-unavailable.json, expectedAction: defer, expectedLoopId: sales-inbound-lead-routing, connectorState: unavailable, expectedApproval: false, notes: Connector failure creates no provider write. }
+  - { id: missing-field, fixture: fixtures/missing-field.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: "Required qualification context is requested, not invented." }
+  - { id: approval-required, fixture: fixtures/approval-required.json, expectedAction: route, expectedLoopId: sales-inbound-lead-routing, connectorState: connected, expectedApproval: true, notes: CRM changes remain prepared until exact approval. }
+  - { id: outcome-unavailable, fixture: fixtures/outcome-unavailable.json, expectedAction: route, expectedLoopId: sales-inbound-qualification-learning, connectorState: connected, expectedApproval: false, notes: Missing outcomes are measured separately from negative outcomes. }
+  - { id: retry-replay, fixture: fixtures/retry-replay.json, expectedAction: append_evidence, expectedLoopId: sales-inbound-qualification-learning, connectorState: connected, expectedApproval: false, notes: Retries cannot double-count value or create duplicate learning jobs. }
+  - { id: upgrade-rollback, fixture: fixtures/upgrade-rollback.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission changes block update until review and preserve rollback. }

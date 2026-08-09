@@ -1,0 +1,33 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: hubspot-gmail-slack
+providerId: hubspot
+providerFamily: hubspot
+displayName: HubSpot + Gmail + Slack
+capabilities:
+  - { logicalCapability: crm.lead.read, providerOperation: hubspot.contacts.read, minimumScopes: [crm.objects.contacts.read], authority: read, risk: low }
+  - { logicalCapability: crm.account.read, providerOperation: hubspot.companies.read, minimumScopes: [crm.objects.companies.read], authority: read, risk: low }
+  - { logicalCapability: crm.lead.update, providerOperation: hubspot.contacts.update, minimumScopes: [crm.objects.contacts.write], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: gmail.drafts.create, minimumScopes: [gmail.compose], authority: draft, risk: medium }
+  - { logicalCapability: mail.message.send, providerOperation: gmail.messages.send, minimumScopes: [gmail.send], authority: execute, risk: critical }
+  - { logicalCapability: messaging.channel.post, providerOperation: slack.chat.postMessage, minimumScopes: [chat:write], authority: approve, risk: medium }
+eventSources:
+  - eventFamily: lead.created
+    providerEvent: hubspot.contact.creation
+    transport: webhook
+    normalizationTransformer: hubspot.contact-to-lead.v1
+    signatureStrategy: hubspot-v3
+    replayProtection: true
+    fallbackPollMinutes: 15
+fieldMappings:
+  - objectType: lead
+    requiredLogicalFields: [lead.id, lead.email, lead.company, lead.lifecycleStage]
+    optionalLogicalFields: [lead.source, lead.title, lead.employeeCount, lead.revenue, lead.country]
+  - objectType: account
+    requiredLogicalFields: [account.id, account.domain, account.customerStatus]
+    optionalLogicalFields: [account.industry, account.employeeCount, account.revenue, account.territory]
+healthCheck:
+  capability: crm.lead.read
+  sampleQuery: { limit: 1, properties: [email, company, lifecyclestage] }
+  timeoutMs: 10000
+supportsBoundedSamples: true
+
