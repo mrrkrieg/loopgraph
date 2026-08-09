@@ -208,6 +208,20 @@ export class FileConnectorFieldMappingStore {
     await atomicWriteJson(this.filePath, { schemaVersion: CONNECTOR_RECIPE_SCHEMA_VERSION, mappings: next });
     return next;
   }
+
+  async detachInstallation(installationId: string, now = new Date()): Promise<ConnectorFieldMapping[]> {
+    const mappings = await this.list();
+    const timestamp = now.toISOString();
+    const next = mappings.map((mapping) => mapping.dependentInstallationIds.includes(installationId)
+      ? connectorFieldMappingSchema.parse({
+          ...mapping,
+          dependentInstallationIds: mapping.dependentInstallationIds.filter((id) => id !== installationId),
+          updatedAt: timestamp
+        })
+      : mapping);
+    await atomicWriteJson(this.filePath, { schemaVersion: CONNECTOR_RECIPE_SCHEMA_VERSION, mappings: next });
+    return next;
+  }
 }
 
 function fieldSimilarity(logicalField: string, providerField: ProviderSchemaField): number {
@@ -274,4 +288,3 @@ async function atomicWriteJson(filePath: string, value: unknown): Promise<void> 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-

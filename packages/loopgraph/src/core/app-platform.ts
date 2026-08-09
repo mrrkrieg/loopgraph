@@ -546,6 +546,24 @@ export const appAssetOwnershipSchema = z.object({
   }
 });
 
+export const appInstallationRevisionSchema = z.object({
+  version: appVersionSchema,
+  artifactDigest: artifactDigestSchema,
+  state: appInstallationStateSchema,
+  mode: appRolloutModeSchema,
+  selectedModules: z.array(appIdSchema).default([]),
+  presetId: appIdSchema,
+  configuration: appConfigurationSchema,
+  overlay: appOverlaySchema.optional(),
+  connectionBindings: z.record(appIdSchema).default({}),
+  fieldMappingIds: z.array(appIdSchema).default([]),
+  permissions: z.array(permissionDecisionSchema),
+  ownedAssets: z.array(appAssetOwnershipSchema),
+  capturedAt: isoDateTimeSchema,
+  capturedBy: z.string().min(1),
+  reason: z.enum(["configure", "overlay", "update", "rollback", "repair", "detach"])
+}).strict();
+
 export const workspaceAppInstallationSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -563,6 +581,19 @@ export const workspaceAppInstallationSchema = z.object({
   fieldMappingIds: z.array(appIdSchema).default([]),
   permissions: z.array(permissionDecisionSchema),
   ownedAssets: z.array(appAssetOwnershipSchema),
+  derivation: z.object({
+    derivedAppId: appIdSchema,
+    upstreamAppId: appIdSchema,
+    upstreamVersion: appVersionSchema,
+    upstreamDigest: artifactDigestSchema,
+    parentInstallationId: appIdSchema.optional(),
+    createdAt: isoDateTimeSchema,
+    createdBy: z.string().min(1),
+    detachedAt: isoDateTimeSchema.optional(),
+    detachedBy: z.string().min(1).optional(),
+    snapshotPath: packRelativePathSchema.optional()
+  }).strict().optional(),
+  history: z.array(appInstallationRevisionSchema).max(20).default([]),
   installedAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
   installedBy: z.string().min(1),
@@ -758,6 +789,35 @@ export const appUpdatePlanSchema = z.object({
   }).strict(),
   rollbackVersion: appVersionSchema,
   rollbackDigest: artifactDigestSchema,
+  permissionReviewRequired: z.boolean(),
+  planDigest: artifactDigestSchema,
+  createdAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema
+}).strict().superRefine((plan, ctx) => {
+  if (Date.parse(plan.expiresAt) <= Date.parse(plan.createdAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Update plan expiry must be after creation" });
+  }
+  if (canonicalAppDigest({ ...plan, planDigest: undefined }) !== plan.planDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["planDigest"], message: "Update plan digest does not match canonical plan content" });
+  }
+});
+
+export const appLifecycleReceiptSchema = z.object({
+  schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  action: z.enum(["configure", "overlay", "repair", "duplicate", "detach", "update", "rollback", "uninstall"]),
+  actor: z.string().min(1),
+  previousRevision: z.number().int().nonnegative(),
+  resultingRevision: z.number().int().positive(),
+  previousArtifactDigest: artifactDigestSchema.optional(),
+  resultingArtifactDigest: artifactDigestSchema.optional(),
+  removedAssetIds: z.array(appIdSchema).default([]),
+  preservedSharedAssetIds: z.array(appIdSchema).default([]),
+  evidenceRetained: z.boolean(),
+  reversible: z.boolean(),
+  reason: z.string().min(1).max(2000),
   createdAt: isoDateTimeSchema
 }).strict();
 
@@ -782,6 +842,7 @@ export type AppEvalJudgment = z.infer<typeof appEvalJudgmentSchema>;
 export type AppPromotionRecommendation = z.infer<typeof appPromotionRecommendationSchema>;
 export type AppReadiness = z.infer<typeof appReadinessSchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
+export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
 export type AppInstallationState = z.infer<typeof appInstallationStateSchema>;
 export type AppRolloutMode = z.infer<typeof appRolloutModeSchema>;
 
@@ -807,7 +868,8 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppEvalJudgment: zodToJsonSchema(appEvalJudgmentSchema, "AppEvalJudgment") as Record<string, unknown>,
     AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
-    AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>
+    AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>,
+    AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>
   };
 }
 
