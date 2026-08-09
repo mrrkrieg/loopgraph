@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: product-feedback-synthesis
+name: Product Feedback Synthesis
+description: Synthesize recurring customer evidence without losing provenance, disagreement, affected workflow, or segment.
+department: product
+goal: Turn noisy feedback into reviewable recurring themes that can be validated as product problems.
+inputs: [normalized feedback, durable customer and product identities, existing themes, usage evidence]
+outputs: [theme assignment, new-theme proposal, missing-context request, evidence references]
+instructions:
+  - Preserve each source and never replace evidence with an unattributed summary.
+  - Separate the user problem from requested solutions and sentiment.
+  - Compare affected workflow, product area, segment, recurrence, and source diversity.
+  - Append to existing work when the durable problem identity matches.
+  - Ask a human when multiple product areas, accounts, or themes remain plausible.
+boundaries:
+  - Do not treat one loud account or repeated delivery as market evidence.
+  - Do not infer roadmap priority or customer commitment.
+  - Do not expose private customer text beyond the approved evidence surface.
+requiredCapabilities: [support.feedback.read, analytics.event.query, project.issue.read]

@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  feedback.read: allowed
+  analytics.query: allowed
+  issue.read: allowed
+  issue.create: approval_required
+  issue.update: approval_required
+  roadmap.priority: forbidden
+  customer.commitment: forbidden
+  ambiguous.identity: request_human
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

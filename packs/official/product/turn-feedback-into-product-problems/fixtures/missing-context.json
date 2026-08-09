@@ -1,0 +1,1 @@
+{"id":"product-feedback-missing","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-202"},"normalizedPayload":{"feedbackId":"202","text":"This workflow is confusing","confidence":0.94},"evidenceRefs":["zendesk:ticket:202"]}

@@ -1,0 +1,42 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: product-problem-validation, name: Product Problem Validation, version: 1.0.0, description: "Test whether a recurring theme represents a material problem for a defined workflow and customer segment.", department: product, ownerRole: product_manager, tags: [problem-validation, discovery, evidence] }
+trigger: { type: event, source: hermes, event: product.feedback_cluster_ready }
+input: { requiredFields: [normalizedPayload.clusterId, normalizedPayload.productArea, normalizedPayload.affectedWorkflow, normalizedPayload.segment], subjectTypes: [feedback_cluster, product_problem], fixtures: [] }
+routine:
+  - { id: inspect, name: Inspect cluster evidence, actor: system, type: observe, description: "Assemble recurrence, source diversity, segment, workflow, usage, support, and existing-issue evidence." }
+  - { id: test, name: Test the problem claim, actor: agent, type: assess, description: "Separate the user problem from requested solutions and evaluate materiality and alternative explanations." }
+  - { id: decide, name: Validate or abstain, actor: agent, type: decide, description: "Validate the narrowest evidenced problem or request the smallest missing fact." }
+  - { id: prepare, name: Prepare problem brief, actor: system, type: prepare, description: "Draft a reviewable problem statement with affected segment, workflow, evidence, uncertainty, and guardrails." }
+  - { id: learn, name: Return disposition, actor: system, type: learn, description: "Feed rejection, reframing, priority review, and release linkage back into clustering." }
+capabilities:
+  - { key: support.feedback.read, authority: read, risk: low, required: true, purpose: Read the supporting feedback evidence., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Test the problem against bounded behavior evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Check current product work and historical issue evidence., customerFacing: false }
+  - { key: project.issue.create, authority: approve, risk: high, required: false, purpose: Create the exact approved validated problem brief., customerFacing: false }
+skills: [product-evidence-quality, product-problem-framing]
+outcomes:
+  - { metric: validated_problem_precision, description: Problems later confirmed as material for the stated workflow and segment., direction: increase, sourceCapability: analytics.event.query }
+  - { metric: problem_validation_cycle_days, description: Time from cluster readiness to accountable validation disposition., direction: decrease, sourceCapability: project.issue.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [product.problem_validation]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: product.feedback_cluster_ready, subjectTypes: [feedback_cluster, product_problem], requiredFields: [normalizedPayload.clusterId, normalizedPayload.productArea, normalizedPayload.affectedWorkflow, normalizedPayload.segment], reason: A reviewed feedback cluster is ready for problem validation. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: product.feedback_received, subjectTypes: [], fields: [], reason: Raw feedback must be clustered before it can claim a product problem. }]
+  inputMapping: { clusterId: normalizedPayload.clusterId, productArea: normalizedPayload.productArea, workflow: normalizedPayload.affectedWorkflow, segment: normalizedPayload.segment }
+  priority: 85
+  minimumConfidence: 0.84
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 25, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.feedback.read, analytics.event.query, project.issue.read]
+  examples: { shouldRoute: ["A reviewed cluster defines the affected workflow and segment."], shouldNotRoute: ["A feature request arrives without problem evidence.", "Usage evidence is unavailable."] }
+policy:
+  forbiddenActions: [{ capability: project.issue.create, reason: Problem briefs require product-owner approval and cannot imply roadmap priority. }]
+  escalationOwner: product_manager
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

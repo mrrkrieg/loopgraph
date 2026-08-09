@@ -1,0 +1,1 @@
+{"id":"product-feedback-low-confidence","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-206"},"normalizedPayload":{"feedbackId":"206","text":"Maybe export performance is slower","productArea":"exports","confidence":0.35},"evidenceRefs":["zendesk:ticket:206"]}

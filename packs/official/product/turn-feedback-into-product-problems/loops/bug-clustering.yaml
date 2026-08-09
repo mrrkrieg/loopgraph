@@ -1,0 +1,45 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: product-bug-clustering, name: Bug Clustering, version: 1.0.0, description: "Cluster recurring defect signals independently from onboarding, support-process, and usability problems.", department: product, ownerRole: engineering_owner, tags: [bugs, defects, recurrence] }
+trigger: { type: event, source: hermes, event: product.defect_signal }
+input: { requiredFields: [normalizedPayload.signalId, normalizedPayload.productArea, normalizedPayload.symptom], subjectTypes: [defect_signal, incident, support_ticket], fixtures: [] }
+routine:
+  - { id: normalize, name: Normalize defect signal, actor: system, type: observe, description: "Preserve environment, version, symptom, account impact, and source identity." }
+  - { id: correlate, name: Correlate recurrence, actor: agent, type: assess, description: "Compare symptoms, versions, traces, incidents, and existing issues without over-merging distinct defects." }
+  - { id: classify, name: Classify the failure, actor: agent, type: decide, description: "Identify a recurring defect or route alternate onboarding, support-process, and usability explanations." }
+  - { id: prepare, name: Prepare defect evidence, actor: system, type: prepare, description: "Prepare an exact issue update or new defect proposal with reproduction evidence and affected versions." }
+  - { id: learn, name: Learn from resolution, actor: system, type: learn, description: "Return root cause, duplicate disposition, fix version, and recurrence evidence." }
+capabilities:
+  - { key: support.feedback.read, authority: read, risk: low, required: true, purpose: Read defect evidence from customer and support signals., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Query bounded product failure and version evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Match existing defects and historical fixes., customerFacing: false }
+  - { key: project.issue.create, authority: approve, risk: high, required: false, purpose: Create an exact approved defect issue., customerFacing: false }
+  - { key: project.issue.update, authority: approve, risk: high, required: false, purpose: Append verified recurrence evidence to an existing defect., customerFacing: false }
+skills: [product-evidence-quality, product-problem-framing]
+outcomes:
+  - { metric: duplicate_defect_rate, description: Proposed defects later merged into existing issues., direction: decrease, sourceCapability: project.issue.read }
+  - { metric: defect_recurrence_after_release, description: Confirmed recurrence after the recorded fix release., direction: decrease, sourceCapability: analytics.event.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [product.recurring_defect]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: product.defect_signal, subjectTypes: [defect_signal, incident, support_ticket], requiredFields: [normalizedPayload.signalId, normalizedPayload.productArea, normalizedPayload.symptom], reason: A normalized defect signal includes a symptom and affected product area. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: product.feedback_received, subjectTypes: [], fields: [], reason: Unclassified feedback must not be treated as a defect. }]
+  inputMapping: { signalId: normalizedPayload.signalId, productArea: normalizedPayload.productArea, symptom: normalizedPayload.symptom }
+  priority: 88
+  minimumConfidence: 0.86
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.feedback.read, analytics.event.query, project.issue.read]
+  examples: { shouldRoute: ["Multiple verified signals share a reproducible symptom and affected version."], shouldNotRoute: ["A feature request has no failure evidence.", "Similar text describes different symptoms."] }
+policy:
+  forbiddenActions:
+    - { capability: project.issue.create, reason: Creating a defect requires exact prepared-action approval. }
+    - { capability: project.issue.update, reason: Updating an issue requires verified recurrence evidence and approval. }
+  escalationOwner: engineering_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

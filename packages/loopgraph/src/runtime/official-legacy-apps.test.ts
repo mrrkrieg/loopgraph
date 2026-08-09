@@ -79,15 +79,16 @@ describe("official apps migrated from legacy templates", () => {
     expect(evaluation.scenarios).toHaveLength(13);
   });
 
-  it("indexes the Sales app and all three migrated apps in the official marketplace", async () => {
+  it("indexes the deep Sales and Product apps plus all three migrated apps in the official marketplace", async () => {
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-official-apps-"));
     temporaryDirectories.push(stateRoot);
     const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
     const apps = await marketplace.refreshAllCatalogSources();
     expect(apps.map((app) => app.id)).toEqual(expect.arrayContaining([
       "loopgraph.sales.qualify-route-inbound-leads",
+      "loopgraph.product.turn-feedback-into-product-problems",
       ...migratedApps.map((app) => app.appId)
     ]));
-    expect(apps).toHaveLength(4);
+    expect(apps).toHaveLength(5);
   });
 });
