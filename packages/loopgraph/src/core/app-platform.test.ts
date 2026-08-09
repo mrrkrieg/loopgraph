@@ -129,6 +129,15 @@ describe("Loopgraph App Platform contracts", () => {
         status: "connected"
       }],
       missingConfigurationKeys: [],
+      configuration: {
+        schemaVersion: APP_CONFIGURATION_SCHEMA_VERSION,
+        appId: "loopgraph.sales.inbound-leads",
+        version: "1.0.0",
+        fields: [],
+        values: {},
+        provenance: {},
+        completedAt: now
+      },
       fieldMappingIds: ["mapping.hubspot.lead-email"],
       permissions: [{
         capability: "crm.lead.read",
@@ -240,4 +249,3 @@ describe("Loopgraph App Platform contracts", () => {
     expect(() => assertSafeInitialRollout("live")).toThrow(/must begin/i);
   });
 });
-

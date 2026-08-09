@@ -504,6 +504,7 @@ export const appInstallPlanSchema = z.object({
     status: z.enum(["connected", "reusable", "missing", "degraded"])
   }).strict()).default([]),
   missingConfigurationKeys: z.array(z.string().min(1)).default([]),
+  configuration: appConfigurationSchema,
   fieldMappingIds: z.array(appIdSchema).default([]),
   permissions: z.array(permissionDecisionSchema).min(1),
   assets: z.array(plannedAssetSchema).min(1),
