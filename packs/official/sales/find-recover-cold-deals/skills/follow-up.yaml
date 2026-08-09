@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-follow-up
+name: Evidence-Backed Deal Follow-Up
+description: Prepare a bounded recovery plan and relevant follow-up draft from verified deal evidence.
+department: sales
+goal: Give the accountable owner the smallest credible action that can test or recover the deal.
+inputs: [deal-risk diagnosis, commitments, stakeholder gaps, owner, customer context, approved channel]
+outputs: [recovery goal, CRM update proposal, internal brief, customer-facing draft, approval packet]
+instructions:
+  - Tie each proposed action to one diagnosed risk and a measurable recovery signal.
+  - Preserve the owner's voice and use only verified customer and opportunity context.
+  - Keep the request specific and avoid pressure, fabricated urgency, or unsupported claims.
+  - Prepare exact provider actions with destination, content, and expected outcome.
+  - Require separate approval for customer-facing content even when internal work is approved.
+boundaries:
+  - Never send a message or change a provider record autonomously.
+  - Never promise pricing, legal terms, implementation, security, or a product roadmap.
+  - Never contact an unverified stakeholder.
+requiredCapabilities: [crm.opportunity.read, mail.thread.read, calendar.event.read]

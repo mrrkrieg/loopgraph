@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: sales-deal-risk-conformance
+appId: loopgraph.sales.find-recover-cold-deals
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: A complete open opportunity snapshot enters bounded deal-risk diagnosis. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: Missing activity evidence is requested rather than inferred. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Closed or explicitly excluded opportunities cannot create recovery work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: Repeated risk evidence updates one durable deal problem. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: Hermes abstains when communication evidence maps to multiple opportunities. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: A low-confidence risk signal requires owner judgment. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: sales-deal-risk-detection, connectorState: unavailable, expectedApproval: false, notes: Provider outage cannot create or mutate recovery work. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: Required opportunity evidence remains explicit. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: sales-deal-follow-up, connectorState: connected, expectedApproval: true, notes: CRM and drafting work stays bound to exact human approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: sales-deal-follow-up, connectorState: connected, expectedApproval: true, notes: Customer-facing content is separately reviewable and never sent by this app. }
+  - { id: missing-outcome, fixture: fixtures/outcome.json, expectedAction: route, expectedLoopId: sales-pipeline-outcome, connectorState: connected, expectedApproval: false, notes: Outcome learning records observed evidence without fabricating causality. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: sales-deal-risk-detection, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate risk or value records. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission increases require explicit update review and preserve rollback. }

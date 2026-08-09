@@ -189,6 +189,7 @@ Loopgraph Apps package one or more cooperating loops, Hermes skills, connector r
 |---|---|---|
 | [Turn Customer Feedback Into Validated Product Problems](packs/official/product/turn-feedback-into-product-problems) | Product | Join feedback, usage, issue, and release evidence into validated problems and measurable release learning |
 | [Qualify and Route Inbound Leads](packs/official/sales/qualify-route-inbound-leads) | Sales | Research, qualify, route, and learn from inbound demand |
+| [Find and Recover Deals Going Cold](packs/official/sales/find-recover-cold-deals) | Sales | Diagnose stalled deals, prepare governed recovery, and learn from pipeline outcomes |
 | [Triage GitHub Issues Safely](packs/official/engineering/triage-github-issues) | Engineering | Classify repository issues and govern security-sensitive escalation |
 | [Triage and Escalate Support Tickets](packs/official/customer-success/triage-support-tickets) | Customer Success | Route support demand, prepare responses, and identify material risk |
 | [Escalate Strategic Account Risk](packs/official/customer-success/escalate-strategic-accounts) | Customer Success | Join service, incident, renewal, and ownership evidence into a recovery response |

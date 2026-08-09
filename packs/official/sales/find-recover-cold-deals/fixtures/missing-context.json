@@ -1,0 +1,1 @@
+{"id":"deal-risk-missing-context","eventType":"sales.opportunity_changed","subject":{"type":"opportunity","id":"deal-302"},"normalizedPayload":{"opportunityId":"302","stage":"evaluation","ownerId":"owner-12","confidence":0.94},"evidenceRefs":["salesforce:opportunity:302"]}

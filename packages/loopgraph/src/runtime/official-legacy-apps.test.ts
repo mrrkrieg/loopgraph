@@ -86,9 +86,10 @@ describe("official apps migrated from legacy templates", () => {
     const apps = await marketplace.refreshAllCatalogSources();
     expect(apps.map((app) => app.id)).toEqual(expect.arrayContaining([
       "loopgraph.sales.qualify-route-inbound-leads",
+      "loopgraph.sales.find-recover-cold-deals",
       "loopgraph.product.turn-feedback-into-product-problems",
       ...migratedApps.map((app) => app.appId)
     ]));
-    expect(apps).toHaveLength(5);
+    expect(apps).toHaveLength(6);
   });
 });
