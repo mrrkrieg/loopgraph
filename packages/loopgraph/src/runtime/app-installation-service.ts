@@ -4,7 +4,9 @@ import YAML from "yaml";
 import {
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
+  appEvalJudgmentSchema,
   appEvalRunSchema,
+  appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
   appInstallationLockSchema,
   appReadinessSchema,
@@ -12,14 +14,17 @@ import {
   contentHash,
   type AppConfigField,
   type AppEvalRun,
+  type AppEvalJudgment,
+  type AppHistoricalReplayRequest,
   type AppInstallPlan,
   type AppInstallationLock,
   type AppReadiness,
+  type AppPromotionRecommendation,
   type AppRolloutMode,
   type ConnectionInstance,
   type WorkspaceAppInstallation
 } from "../core";
-import { appSetupDefinitionSchema, appEvalSuiteSchema } from "../core/app-pack-content";
+import { appSetupDefinitionSchema } from "../core/app-pack-content";
 import { compileLoopPack } from "./app-pack-compiler";
 import {
   loadConnectorRecipes,
@@ -41,6 +46,11 @@ import {
   type LoopgraphWorkspaceRegistry
 } from "./workspace";
 import { FileAppInstallationStore, type AppInstallationRegistry } from "./app-installation-store";
+import {
+  createPromotionRecommendation,
+  runAppHistoricalReplay,
+  runAppSyntheticConformance
+} from "./app-quality-engine";
 
 export type PlanAppInstallationInput = {
   projectRoot: string;
@@ -301,50 +311,92 @@ export class AppInstallationService {
       }
       const loaded = await this.marketplace.getAppArtifact(installation.appId, installation.version, installation.artifactDigest);
       const compiled = await compileLoopPack(loaded);
-      const suites = await Promise.all(loaded.manifest.entrypoints.evals.map(async (evalPath) =>
-        appEvalSuiteSchema.parse(await readPackYaml(loaded.root, evalPath))));
-      const knownLoopIds = new Set(compiled.loopSpecs.map((spec) => spec.metadata.id));
-      const startedAt = now.toISOString();
-      const scenarios = suites.flatMap((suite) => suite.scenarios.map((scenario) => {
-        const passed = (!scenario.expectedLoopId || knownLoopIds.has(scenario.expectedLoopId)) && loaded.artifact.files.some((file) => file.path === scenario.fixture);
-        return {
-          id: scenario.id,
-          status: passed ? "passed" as const : "failed" as const,
-          expectedRoute: scenario.expectedLoopId,
-          actualRoute: passed ? scenario.expectedLoopId : undefined,
-          evidenceRefs: [`fixture:${scenario.fixture}`]
-        };
-      }));
-      const passed = scenarios.every((scenario) => scenario.status === "passed") && installation.permissions.every((permission) => !(permission.authority === "execute" && permission.decision === "allow"));
-      const run = appEvalRunSchema.parse({
-        schemaVersion: APP_EVAL_SCHEMA_VERSION,
-        id: `eval.${contentHash({ installationId, startedAt, actor })}`,
-        installationId,
-        appId: installation.appId,
-        appVersion: installation.version,
-        artifactDigest: installation.artifactDigest,
-        level: "synthetic",
-        status: passed ? "passed" : "failed",
-        replay: false,
-        writeBlocked: true,
-        startedAt,
-        completedAt: startedAt,
-        scenarios,
-        metrics: { passed: scenarios.filter((scenario) => scenario.status === "passed").length, total: scenarios.length },
-        evidenceRefs: suites.map((suite) => `eval-suite:${suite.id}`)
-      });
-      const updated = { ...installation, state: passed ? "simulation_passed" as const : "broken" as const, updatedAt: startedAt, ...(passed ? {} : { failureReason: "Synthetic conformance suite failed" }) };
+      const run = await runAppSyntheticConformance({ loaded, compiled, installation, actor, now });
+      const passed = run.status === "passed";
+      const updated = { ...installation, state: passed ? "simulation_passed" as const : "broken" as const, updatedAt: run.completedAt!, ...(passed ? {} : { failureReason: "Synthetic conformance suite failed" }) };
       return {
         registry: {
           ...registry,
           revision: registry.revision + 1,
           installations: replaceInstallation(registry.installations, updated),
           evaluations: [...registry.evaluations, run],
-          updatedAt: startedAt
+          updatedAt: run.completedAt!
         },
         value: run
       };
     });
+  }
+
+  async historicalReplay(requestInput: AppHistoricalReplayRequest, now = new Date()): Promise<AppEvalRun> {
+    const request = appHistoricalReplayRequestSchema.parse(requestInput);
+    return this.installationStore.withExclusiveUpdate(async (registry) => {
+      const installation = requireInstallation(registry, request.installationId);
+      const passedSynthetic = [...registry.evaluations].reverse().find((run) =>
+        run.installationId === installation.id && run.level === "synthetic" && run.status === "passed");
+      if (!passedSynthetic) throw new Error("Historical replay requires a passing synthetic conformance run");
+      if (["revoked", "uninstalling", "rolled_back", "broken"].includes(installation.state)) {
+        throw new Error(`Historical replay is unavailable while the app is ${installation.state}`);
+      }
+      const loaded = await this.marketplace.getAppArtifact(installation.appId, installation.version, installation.artifactDigest);
+      const compiled = await compileLoopPack(loaded);
+      const run = runAppHistoricalReplay({ request, compiled, installation, now });
+      return {
+        registry: {
+          ...registry,
+          revision: registry.revision + 1,
+          evaluations: [...registry.evaluations, run],
+          updatedAt: run.completedAt!
+        },
+        value: run
+      };
+    });
+  }
+
+  async labelEvaluation(judgmentInput: AppEvalJudgment): Promise<AppEvalRun> {
+    const judgment = appEvalJudgmentSchema.parse(judgmentInput);
+    return this.installationStore.withExclusiveUpdate(async (registry) => {
+      const run = registry.evaluations.find((candidate) => candidate.id === judgment.runId);
+      if (!run) throw new Error(`App evaluation not found: ${judgment.runId}`);
+      requireInstallation(registry, run.installationId);
+      const scenario = run.scenarios.find((candidate) => candidate.id === judgment.scenarioId);
+      if (!scenario) throw new Error(`Evaluation scenario not found: ${judgment.scenarioId}`);
+      const scenarios = run.scenarios.map((candidate) => candidate.id === judgment.scenarioId
+        ? {
+            ...candidate,
+            humanLabel: judgment.label,
+            reviewMinutes: judgment.reviewMinutes,
+            evidenceRefs: Array.from(new Set([...candidate.evidenceRefs, `human-judgment:${judgment.reviewedBy}:${judgment.reviewedAt}`]))
+          }
+        : candidate);
+      const labeled = scenarios.filter((candidate) => candidate.humanLabel);
+      const updated = appEvalRunSchema.parse({
+        ...run,
+        scenarios,
+        metrics: {
+          ...run.metrics,
+          labeled: labeled.length,
+          correct: labeled.filter((candidate) => candidate.humanLabel === "correct").length,
+          incomplete: labeled.filter((candidate) => candidate.humanLabel === "incomplete").length,
+          falsePositive: labeled.filter((candidate) => candidate.humanLabel === "false_positive").length,
+          estimatedReviewMinutes: scenarios.reduce((total, candidate) => total + (candidate.reviewMinutes ?? 0), 0)
+        }
+      });
+      return {
+        registry: {
+          ...registry,
+          revision: registry.revision + 1,
+          evaluations: registry.evaluations.map((candidate) => candidate.id === updated.id ? updated : candidate),
+          updatedAt: judgment.reviewedAt
+        },
+        value: updated
+      };
+    });
+  }
+
+  async promotionRecommendation(installationId: string, now = new Date()): Promise<AppPromotionRecommendation> {
+    const registry = await this.installationStore.read();
+    requireInstallation(registry, installationId);
+    return createPromotionRecommendation({ installationId, evaluations: registry.evaluations, now });
   }
 
   async activate(installationId: string, mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval" | "live">, actor: string): Promise<WorkspaceAppInstallation> {

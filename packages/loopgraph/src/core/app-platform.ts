@@ -612,8 +612,12 @@ export const appEvalRunSchema = z.object({
   scenarios: z.array(z.object({
     id: appIdSchema,
     status: z.enum(["passed", "failed", "skipped"]),
+    sourceEventId: z.string().min(1).max(512).optional(),
+    expectedAction: z.enum(["route", "append_evidence", "request_human", "defer", "unhandled", "ignore"]).optional(),
+    actualAction: z.enum(["route", "append_evidence", "request_human", "defer", "unhandled", "ignore"]).optional(),
     expectedRoute: z.string().min(1).optional(),
     actualRoute: z.string().min(1).optional(),
+    reason: z.string().min(1).optional(),
     humanLabel: z.enum(["correct", "incomplete", "false_positive"]).optional(),
     evidenceRefs: z.array(z.string().min(1)).default([]),
     reviewMinutes: z.number().nonnegative().optional()
@@ -625,6 +629,81 @@ export const appEvalRunSchema = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["writeBlocked"], message: "Historical replay must be marked replay and block all writes" });
   }
 });
+
+export const historicalReplayEventSchema = z.object({
+  id: z.string().min(1).max(512),
+  occurredAt: isoDateTimeSchema,
+  source: z.string().min(1),
+  eventType: z.string().min(1),
+  subject: z.object({
+    type: z.string().min(1),
+    id: z.string().min(1)
+  }).strict(),
+  normalizedPayload: z.record(jsonValueSchema).default({}),
+  evidenceRefs: z.array(z.string().min(1)).default([]),
+  connectorState: z.enum(["connected", "degraded", "unavailable"]).default("connected"),
+  expectedAction: z.enum(["route", "append_evidence", "request_human", "defer", "unhandled", "ignore"]).optional(),
+  expectedLoopId: z.string().min(1).optional()
+}).strict();
+
+export const appHistoricalReplayRequestSchema = z.object({
+  schemaVersion: z.literal(APP_EVAL_SCHEMA_VERSION),
+  installationId: appIdSchema,
+  from: isoDateTimeSchema,
+  to: isoDateTimeSchema,
+  maxEvents: z.number().int().min(1).max(500).default(100),
+  events: z.array(historicalReplayEventSchema).min(1).max(500),
+  requestedAt: isoDateTimeSchema,
+  requestedBy: z.string().min(1)
+}).strict().superRefine((request, ctx) => {
+  const from = Date.parse(request.from);
+  const to = Date.parse(request.to);
+  if (from >= to) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["to"], message: "Historical replay end must be after its start" });
+  }
+  if (to - from > 90 * 24 * 60 * 60 * 1000) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["to"], message: "Historical replay is limited to a 90-day window" });
+  }
+  if (request.events.length > request.maxEvents) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["events"], message: "Historical replay event count exceeds maxEvents" });
+  }
+  request.events.forEach((event, index) => {
+    const occurredAt = Date.parse(event.occurredAt);
+    if (occurredAt < from || occurredAt > to) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["events", index, "occurredAt"], message: "Historical event is outside the approved replay window" });
+    }
+  });
+});
+
+export const appEvalJudgmentSchema = z.object({
+  schemaVersion: z.literal(APP_EVAL_SCHEMA_VERSION),
+  runId: appIdSchema,
+  scenarioId: appIdSchema,
+  label: z.enum(["correct", "incomplete", "false_positive"]),
+  reviewMinutes: z.number().nonnegative().max(480),
+  notes: z.string().max(2000).optional(),
+  reviewedBy: z.string().min(1),
+  reviewedAt: isoDateTimeSchema
+}).strict();
+
+export const appPromotionRecommendationSchema = z.object({
+  schemaVersion: z.literal(APP_EVAL_SCHEMA_VERSION),
+  installationId: appIdSchema,
+  recommendedMode: z.enum(["hold", "shadow", "recommend"]),
+  canAutoPromote: z.literal(false),
+  confidence: z.number().min(0).max(1),
+  falsePositiveRate: z.number().min(0).max(1).optional(),
+  incompleteRate: z.number().min(0).max(1).optional(),
+  estimatedReviewMinutes: z.number().nonnegative(),
+  gates: z.array(z.object({
+    id: appIdSchema,
+    status: z.enum(["pass", "warn", "fail"]),
+    summary: z.string().min(1)
+  }).strict()).min(1),
+  requiredApprovals: z.array(z.string().min(1)).min(1),
+  evidenceRefs: z.array(z.string().min(1)).default([]),
+  evaluatedAt: isoDateTimeSchema
+}).strict();
 
 export const appReadinessSchema = z.object({
   schemaVersion: z.literal(APP_EVAL_SCHEMA_VERSION),
@@ -698,6 +777,9 @@ export type AppConfiguration = z.infer<typeof appConfigurationSchema>;
 export type AppConfigField = z.infer<typeof appConfigFieldSchema>;
 export type AppOverlay = z.infer<typeof appOverlaySchema>;
 export type AppEvalRun = z.infer<typeof appEvalRunSchema>;
+export type AppHistoricalReplayRequest = z.infer<typeof appHistoricalReplayRequestSchema>;
+export type AppEvalJudgment = z.infer<typeof appEvalJudgmentSchema>;
+export type AppPromotionRecommendation = z.infer<typeof appPromotionRecommendationSchema>;
 export type AppReadiness = z.infer<typeof appReadinessSchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppInstallationState = z.infer<typeof appInstallationStateSchema>;
@@ -721,6 +803,9 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppConfiguration: zodToJsonSchema(appConfigurationSchema, "AppConfiguration") as Record<string, unknown>,
     AppOverlay: zodToJsonSchema(appOverlaySchema, "AppOverlay") as Record<string, unknown>,
     AppEvalRun: zodToJsonSchema(appEvalRunSchema, "AppEvalRun") as Record<string, unknown>,
+    AppHistoricalReplayRequest: zodToJsonSchema(appHistoricalReplayRequestSchema, "AppHistoricalReplayRequest") as Record<string, unknown>,
+    AppEvalJudgment: zodToJsonSchema(appEvalJudgmentSchema, "AppEvalJudgment") as Record<string, unknown>,
+    AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
     AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>
   };

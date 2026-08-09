@@ -151,5 +151,95 @@ describe("atomic app installation lifecycle", () => {
     await expect(service.apply({ ...plan, presetId: "salesforce-outlook-teams" }, "admin-1", new Date("2026-08-08T12:05:00.000Z"))).rejects.toThrow(/digest/i);
     await expect(service.apply(plan, "admin-1", new Date("2026-08-08T13:00:00.000Z"))).rejects.toThrow(/expired/i);
   });
-});
 
+  it("runs bounded historical replay, records human judgments, and recommends without auto-promoting", async () => {
+    const { projectRoot, service, connection, mappingIds } = await harness();
+    const plan = await service.plan({
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [connection],
+      installValues,
+      fieldMappingIds: mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T12:00:00.000Z")
+    });
+    const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T12:01:00.000Z"));
+    await service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const replay = await service.historicalReplay({
+      schemaVersion: "loopgraph-app-eval/v1alpha1",
+      installationId: applied.installation.id,
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-08T12:00:00.000Z",
+      maxEvents: 3,
+      requestedAt: "2026-08-08T12:03:00.000Z",
+      requestedBy: "admin-1",
+      events: [
+        {
+          id: "historical-high-fit",
+          occurredAt: "2026-08-02T09:00:00.000Z",
+          source: "hubspot",
+          eventType: "lead.created",
+          subject: { type: "lead", id: "lead-historical-1" },
+          normalizedPayload: { leadId: "lead-historical-1", email: "buyer@example.test", company: "Example" },
+          evidenceRefs: ["evidence:historical:1"],
+          connectorState: "connected",
+          expectedAction: "route",
+          expectedLoopId: "sales-inbound-lead-intake"
+        },
+        {
+          id: "historical-ambiguous",
+          occurredAt: "2026-08-03T09:00:00.000Z",
+          source: "loopgraph",
+          eventType: "lead.intake_ready",
+          subject: { type: "account", id: "account-historical-2" },
+          normalizedPayload: { accountId: "account-historical-2", domain: "shared.test", candidateAccountIds: ["a", "b"] },
+          evidenceRefs: ["evidence:historical:2"],
+          connectorState: "connected",
+          expectedAction: "request_human"
+        },
+        {
+          id: "historical-connector-down",
+          occurredAt: "2026-08-04T09:00:00.000Z",
+          source: "loopgraph",
+          eventType: "lead.qualified",
+          subject: { type: "lead", id: "lead-historical-3" },
+          normalizedPayload: { leadId: "lead-historical-3", qualification: { score: 92 }, territoryRules: { west: "owner-1" } },
+          evidenceRefs: ["evidence:historical:3"],
+          connectorState: "unavailable",
+          expectedAction: "defer",
+          expectedLoopId: "sales-inbound-lead-routing"
+        }
+      ]
+    }, new Date("2026-08-08T12:04:00.000Z"));
+
+    expect(replay).toMatchObject({ level: "historical_replay", status: "passed", replay: true, writeBlocked: true });
+    expect(replay.metrics).toMatchObject({ eventCount: 3, routed: 1, abstained: 1, deferred: 1, providerWrites: 0 });
+    for (const scenario of replay.scenarios) {
+      await service.labelEvaluation({
+        schemaVersion: "loopgraph-app-eval/v1alpha1",
+        runId: replay.id,
+        scenarioId: scenario.id,
+        label: "correct",
+        reviewMinutes: 1,
+        reviewedBy: "sales-manager",
+        reviewedAt: "2026-08-08T12:05:00.000Z"
+      });
+    }
+    const recommendation = await service.promotionRecommendation(applied.installation.id, new Date("2026-08-08T12:06:00.000Z"));
+    expect(recommendation).toMatchObject({
+      recommendedMode: "recommend",
+      canAutoPromote: false,
+      falsePositiveRate: 0,
+      incompleteRate: 0,
+      estimatedReviewMinutes: 3
+    });
+    expect(recommendation.requiredApprovals).toEqual(["app_owner", "promotion_approver"]);
+    const registry = await new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(registry.installations[0].state).toBe("simulation_passed");
+  });
+});
