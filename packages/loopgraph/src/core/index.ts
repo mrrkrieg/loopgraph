@@ -39,3 +39,5 @@ export * from "./credential-reference";
 export * from "./connector-broker";
 export * from "./entity-resolution";
 export * from "./graph-authoring";
+export * from "./app-platform";
+export * from "./app-pack-content";
