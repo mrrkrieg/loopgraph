@@ -43,7 +43,7 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <SectionCard title="Readiness checks" description="Promotion is evidence-derived. A downloaded or installed app is never automatically eligible to receive live work.">
             <div className="space-y-3">{data.readiness.checks.map((check) => <div className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-[8rem_minmax(0,1fr)_5rem]" key={check.id}><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{check.category}</div><div className="text-sm text-ink/70">{check.summary}</div><div className={`text-right text-xs font-semibold uppercase ${check.status === "pass" ? "text-emerald-700" : check.status === "fail" ? "text-red-700" : "text-orange-700"}`}>{check.status}</div></div>)}</div>
           </SectionCard>
@@ -114,7 +114,7 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
           </SectionCard>
         </div>
 
-        <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+        <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
           <SectionCard title="Recommended next action">
             <p className="text-sm leading-6 text-ink/65">{nextAction(data.installation.state, data.readiness.state)}</p>
             <div className="mt-4 space-y-2">

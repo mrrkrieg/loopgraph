@@ -7,6 +7,7 @@ import { FileConnectorFieldMappingStore } from "./app-connector-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
+import { callLoopgraphAppTool } from "./app-tools";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -110,6 +111,11 @@ describe("atomic app installation lifecycle", () => {
     const registry = await new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(registry.installations).toHaveLength(1);
     expect(registry.installations[0].ownedAssets.every((asset) => asset.refCount === 1)).toBe(true);
+    const browserStyleStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
+      projectRoot,
+      installationId: applied.installation.id
+    }) as { installations: Array<{ workspaceId: string }> };
+    expect(browserStyleStatus.installations[0].workspaceId).toBe("acme");
   });
 
   it("returns an explainable read-only plan when connections, mappings, and answers are missing", async () => {

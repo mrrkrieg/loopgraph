@@ -34,6 +34,16 @@ export class FileAppInstallationStore {
     this.mutexPath = path.join(appsRoot, ".installation.lock");
   }
 
+  static async discoverWorkspaceId(appsRoot: string): Promise<string | undefined> {
+    try {
+      const registry = appInstallationRegistrySchema.parse(JSON.parse(await readFile(path.join(appsRoot, "installations.json"), "utf8")));
+      return registry.workspaceId;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
   async read(): Promise<AppInstallationRegistry> {
     try {
       const registry = appInstallationRegistrySchema.parse(JSON.parse(await readFile(this.registryPath, "utf8")));
@@ -104,4 +114,3 @@ async function atomicWriteJson(filePath: string, value: unknown): Promise<void> 
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await rename(temporary, filePath);
 }
-

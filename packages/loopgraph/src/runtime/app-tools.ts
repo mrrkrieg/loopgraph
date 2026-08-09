@@ -279,7 +279,10 @@ export async function callLoopgraphAppTool(
 
 async function resolveIdentity(projectRoot: string, workspaceInput: unknown, companyInput: unknown): Promise<{ workspaceId: string; companyId: string }> {
   const workspace = await inspectLoopgraphWorkspace({ projectRoot, createIfMissing: true });
-  const workspaceId = typeof workspaceInput === "string" && workspaceInput ? workspaceInput : workspace.registry.projectRootId;
+  const persistedWorkspaceId = await FileAppInstallationStore.discoverWorkspaceId(path.join(projectRoot, ".loopgraph", "apps"));
+  const workspaceId = typeof workspaceInput === "string" && workspaceInput
+    ? workspaceInput
+    : persistedWorkspaceId ?? workspace.registry.projectRootId;
   const companyId = typeof companyInput === "string" && companyInput ? companyInput : workspaceId;
   return { workspaceId, companyId };
 }
