@@ -181,6 +181,82 @@ The printed URL opens the editable Hermes Brain topology. Layout changes are sav
 
 For event rehearsal, workers, outcome measurements, controllers, and hosted deployment, continue with the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
 
+## Install a complete business capability
+
+Loopgraph Apps package one or more cooperating loops, Hermes skills, connector requirements, setup questions, policies, fixtures, metrics, and graph relationships into one immutable, inspectable release.
+
+| Official app | Department | Business result |
+|---|---|---|
+| [Qualify and Route Inbound Leads](packs/official/sales/qualify-route-inbound-leads) | Sales | Research, qualify, route, and learn from inbound demand |
+| [Triage GitHub Issues Safely](packs/official/engineering/triage-github-issues) | Engineering | Classify repository issues and govern security-sensitive escalation |
+| [Triage and Escalate Support Tickets](packs/official/customer-success/triage-support-tickets) | Customer Success | Route support demand, prepare responses, and identify material risk |
+| [Escalate Strategic Account Risk](packs/official/customer-success/escalate-strategic-accounts) | Customer Success | Join service, incident, renewal, and ownership evidence into a recovery response |
+
+The three original runnable examples remain available for low-level LoopSpec teaching, but their corresponding LoopPacks are now the marketplace source of truth for new installations. Every official app is indexed from its pack files and includes the complete deterministic safety contract.
+
+Ask Hermes:
+
+```text
+Find an app that qualifies inbound leads.
+Show me the permissions and graph changes.
+Use HubSpot, Gmail, and Slack, and ask only for missing company settings.
+Install it, test it, and keep it in shadow mode.
+```
+
+Or use the same application service through the CLI:
+
+```bash
+# Discover and inspect without changing the workspace
+npm run loopgraph -- apps search "qualify inbound leads"
+npm run loopgraph -- apps get loopgraph.sales.qualify-route-inbound-leads
+
+# Review an exact, read-only plan before installation
+npm run --silent loopgraph -- apps plan loopgraph.sales.qualify-route-inbound-leads \
+  --preset hubspot-gmail-slack > install-plan.json
+
+# After connections, mappings, and required answers are ready
+npm run loopgraph -- apps install --plan install-plan.json
+npm run loopgraph -- apps test <installation-id>
+npm run loopgraph -- apps activate <installation-id> --mode shadow
+```
+
+The Marketplace and Installed Apps screens call the same governed service as Hermes and the CLI. A downloaded pack is never active automatically, installation never enables provider writes, and company-specific changes never mutate the signed upstream artifact.
+
+After synthetic conformance passes, Hermes or an operator can run a bounded historical preview:
+
+```bash
+npm run loopgraph -- apps replay <installation-id> --dataset historical-events.json
+npm run loopgraph -- apps label <eval-id> <scenario-id> --label correct --minutes 1
+npm run loopgraph -- apps recommendation <installation-id>
+```
+
+Historical replay is limited to 500 events and 90 days, records no raw provider credentials, blocks all provider writes, keeps entity resolution and routing constraints active, and cannot promote an app automatically.
+
+Installed Apps also support a complete governed lifecycle through the same Hermes service:
+
+```bash
+# Inspect the immutable base, effective configuration, overlay, and history
+npm run loopgraph -- apps diff <installation-id>
+
+# Company-specific changes always return to write-blocked testing
+npm run loopgraph -- apps configure <installation-id> --values company-values.json --expected <configuration-digest>
+npm run loopgraph -- apps overlay <installation-id> --file overlay.json --expected <artifact-digest>
+npm run loopgraph -- apps repair <installation-id>
+
+# Create a private variant without colliding with the upstream LoopSpecs
+npm run loopgraph -- apps duplicate <installation-id> --id private.sales.my-lead-qualification
+
+# Review graph, permission, and overlay changes before an update
+npm run --silent loopgraph -- apps update-plan <installation-id> > update-plan.json
+npm run loopgraph -- apps update --plan update-plan.json --approve crm.lead.update
+
+# Recovery and removal are bound to the exact artifact currently installed
+npm run loopgraph -- apps rollback <installation-id> --expected <artifact-digest>
+npm run loopgraph -- apps uninstall <installation-id> --expected <artifact-digest> --reason "Replaced by private variant" --yes
+```
+
+Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach pins a local immutable snapshot. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

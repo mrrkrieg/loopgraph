@@ -1,4 +1,5 @@
 import { access, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -17,6 +18,8 @@ type MarketplaceIndex = {
   apps: MarketplaceApp[];
   refreshedAt: string;
 };
+
+const activeMarketplaceRefreshes = new Map<string, Promise<MarketplaceApp[]>>();
 
 export type MarketplaceSearchInput = {
   query?: string;
@@ -134,6 +137,21 @@ export class LocalAppMarketplace {
   }
 
   async refreshAllCatalogSources(): Promise<MarketplaceApp[]> {
+    const refreshKey = path.resolve(this.stateRoot);
+    const active = activeMarketplaceRefreshes.get(refreshKey);
+    if (active) return active;
+    const refresh = this.refreshAllCatalogSourcesUnlocked();
+    activeMarketplaceRefreshes.set(refreshKey, refresh);
+    try {
+      return await refresh;
+    } finally {
+      if (activeMarketplaceRefreshes.get(refreshKey) === refresh) {
+        activeMarketplaceRefreshes.delete(refreshKey);
+      }
+    }
+  }
+
+  private async refreshAllCatalogSourcesUnlocked(): Promise<MarketplaceApp[]> {
     await this.initialize();
     const sources = await this.listCatalogSources();
     for (const source of sources.filter((candidate) => candidate.enabled)) {
@@ -325,7 +343,7 @@ async function readJson(filePath: string): Promise<unknown> {
 
 async function atomicWriteJson(filePath: string, value: unknown): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
-  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
   await writeFile(temporaryPath, JSON.stringify(value, null, 2));
   await rename(temporaryPath, filePath);
 }
@@ -338,4 +356,3 @@ async function pathExists(candidate: string): Promise<boolean> {
     return false;
   }
 }
-

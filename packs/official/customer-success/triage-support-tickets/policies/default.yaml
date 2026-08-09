@@ -1,0 +1,11 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  support.read: allowed
+  crm.read: allowed
+  ticket.update: approval_required
+  response.draft: allowed
+  response.send: forbidden
+  internal.notification: approval_required
+  ambiguous.identity: request_human
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

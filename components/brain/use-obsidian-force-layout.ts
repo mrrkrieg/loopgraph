@@ -231,6 +231,16 @@ function seedDirectHermesHierarchy(input: {
       columnGap: 210,
       maxRowsPerColumn: 4
     });
+    for (const workflow of workflows) {
+      const appLoops = (input.workflowsByDepartment.get(workflow.id) ?? []).sort(byLabel);
+      seedWorkflowLayer(appLoops, {
+        x: 475,
+        centerY: workflow.y,
+        rowGap: 86,
+        columnGap: 190,
+        maxRowsPerColumn: 6
+      });
+    }
   });
 
   const unassigned = (input.workflowsByDepartment.get("unassigned") ?? []).sort(byLabel);

@@ -103,3 +103,5 @@ export * from "./company-context-service";
 export * from "./app-connector-service";
 export * from "./app-installation-store";
 export * from "./app-installation-service";
+export * from "./app-quality-engine";
+export * from "./app-tools";

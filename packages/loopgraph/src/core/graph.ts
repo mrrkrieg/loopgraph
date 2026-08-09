@@ -415,6 +415,7 @@ export function buildSemanticTopology(input: {
   }
 
   const departmentNodeIds = new Map<string, string>();
+  const appNodeIds = new Map<string, string>();
   for (const spec of loopSpecs) {
     const department = departmentForSpec(spec);
     if (!department) {
@@ -430,14 +431,22 @@ export function buildSemanticTopology(input: {
       visibleByDefault: true,
       plainLabel: hierarchyMode === "hermes_brain"
     });
+    const appNodeId = ensureInstalledAppNode({
+      appNodeIds,
+      departmentNodeId,
+      edgeMap,
+      nodeMap,
+      spec
+    });
     const nodeId = loopNodeId(spec.metadata.id);
     addNode(nodeMap, loopNodeFromSpec(spec, {
       nodeId,
       parentId: spec.topology?.parentLoopId
         ? loopNodeId(spec.topology.parentLoopId)
-        : departmentNodeId,
+        : appNodeId ?? departmentNodeId,
       visibleByDefault: true,
-      isOrphan: false
+      isOrphan: false,
+      nodeType: appNodeId ? "task_loop" : undefined
     }));
   }
 
@@ -479,8 +488,11 @@ export function buildSemanticTopology(input: {
     const nodeId = loopNodeId(spec.metadata.id);
     const parentLoopId = spec.topology?.parentLoopId;
     const department = departmentForSpec(spec);
+    const appId = spec.metadata.labels?.appId;
     const parentNodeId = parentLoopId && specIds.has(parentLoopId)
       ? loopNodeId(parentLoopId)
+      : appId && appNodeIds.has(appId)
+        ? appNodeIds.get(appId)
       : department
         ? departmentNodeIds.get(departmentSlug(department))
         : undefined;
@@ -493,7 +505,7 @@ export function buildSemanticTopology(input: {
       source: parentNodeId,
       target: nodeId,
       kind: "contains",
-      label: parentLoopId ? "nested loop" : "department workflow"
+      label: parentLoopId ? "nested loop" : appId ? "app loop" : "department workflow"
     });
   }
 
@@ -793,7 +805,7 @@ export function createTopologyWarnings(input: {
   }
 
   for (const node of input.nodes) {
-    if (!["workflow_loop", "task_loop"].includes(node.type)) {
+    if (!["workflow_loop", "task_loop"].includes(node.type) || node.metadata?.appNode === true) {
       continue;
     }
 
@@ -894,6 +906,54 @@ function ensureDepartmentLoop(input: {
   return nodeId;
 }
 
+function ensureInstalledAppNode(input: {
+  appNodeIds: Map<string, string>;
+  departmentNodeId: string;
+  edgeMap: Map<string, TopologyEdge>;
+  nodeMap: Map<string, TopologyNode>;
+  spec: LoopSpec;
+}): string | undefined {
+  const appId = input.spec.metadata.labels?.appId;
+  if (!appId) return undefined;
+  const existing = input.appNodeIds.get(appId);
+  if (existing) return existing;
+  const nodeId = `app:${appId}`;
+  const appName = input.spec.metadata.labels?.appName ?? titleize(appId.split(".").at(-1) ?? appId);
+  input.appNodeIds.set(appId, nodeId);
+  addNode(input.nodeMap, {
+    id: nodeId,
+    type: "workflow_loop",
+    label: appName,
+    subtitle: "Installed Loopgraph App",
+    description: `Operates the ${appName} loops, skills, connector bindings, permissions, tests, and outcomes as one application.`,
+    refId: appId,
+    department: departmentForSpec(input.spec),
+    parentId: input.departmentNodeId,
+    layer: "structure",
+    status: "ready",
+    weight: 5,
+    visibleByDefault: true,
+    isExpandable: true,
+    metadata: {
+      synthetic: true,
+      appNode: true,
+      appId,
+      appName,
+      appVersion: input.spec.metadata.labels?.appVersion,
+      appDigest: input.spec.metadata.labels?.appDigest,
+      installationId: input.spec.metadata.labels?.installationId,
+      owner: input.spec.metadata.owner?.role
+    }
+  });
+  addEdge(input.edgeMap, input.nodeMap, {
+    source: input.departmentNodeId,
+    target: nodeId,
+    kind: "contains",
+    label: "installed app"
+  });
+  return nodeId;
+}
+
 function loopNodeFromSpec(
   spec: LoopSpec,
   input: {
@@ -901,6 +961,7 @@ function loopNodeFromSpec(
     parentId?: string;
     visibleByDefault: boolean;
     isOrphan: boolean;
+    nodeType?: "workflow_loop" | "task_loop";
   }
 ): TopologyNode {
   const department = departmentForSpec(spec);
@@ -910,7 +971,7 @@ function loopNodeFromSpec(
   const source = spec.metadata.labels?.source;
   return {
     id: input.nodeId,
-    type: spec.topology?.tags?.includes("task") ? "task_loop" : "workflow_loop",
+    type: input.nodeType ?? (spec.topology?.tags?.includes("task") ? "task_loop" : "workflow_loop"),
     label: spec.metadata.name,
     subtitle: spec.metadata.description ?? spec.trigger.event,
     description: spec.metadata.description,
@@ -939,6 +1000,11 @@ function loopNodeFromSpec(
       trigger: `${spec.trigger.source}:${spec.trigger.event}`,
       source,
       runtimeLevel,
+      appId: spec.metadata.labels?.appId,
+      appName: spec.metadata.labels?.appName,
+      appVersion: spec.metadata.labels?.appVersion,
+      appDigest: spec.metadata.labels?.appDigest,
+      installationId: spec.metadata.labels?.installationId,
       templateOnly: source === "demo_catalog" || runtimeLevel === "catalog",
       runtime: loopRuntimeMetadata(spec)
     }

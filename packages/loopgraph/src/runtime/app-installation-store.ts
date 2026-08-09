@@ -6,6 +6,7 @@ import {
   APP_INSTALL_SCHEMA_VERSION,
   appAssetOwnershipSchema,
   appEvalRunSchema,
+  appLifecycleReceiptSchema,
   appInstallationLockSchema,
   workspaceAppInstallationSchema,
   type AppInstallationLock
@@ -18,6 +19,7 @@ const appInstallationRegistrySchema = z.object({
   installations: z.array(workspaceAppInstallationSchema),
   assets: z.array(appAssetOwnershipSchema),
   evaluations: z.array(appEvalRunSchema),
+  lifecycleReceipts: z.array(appLifecycleReceiptSchema).default([]),
   updatedAt: z.string().datetime()
 }).strict();
 
@@ -34,6 +36,16 @@ export class FileAppInstallationStore {
     this.mutexPath = path.join(appsRoot, ".installation.lock");
   }
 
+  static async discoverWorkspaceId(appsRoot: string): Promise<string | undefined> {
+    try {
+      const registry = appInstallationRegistrySchema.parse(JSON.parse(await readFile(path.join(appsRoot, "installations.json"), "utf8")));
+      return registry.workspaceId;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
   async read(): Promise<AppInstallationRegistry> {
     try {
       const registry = appInstallationRegistrySchema.parse(JSON.parse(await readFile(this.registryPath, "utf8")));
@@ -48,6 +60,7 @@ export class FileAppInstallationStore {
         installations: [],
         assets: [],
         evaluations: [],
+        lifecycleReceipts: [],
         updatedAt: new Date(0).toISOString()
       };
     }
@@ -104,4 +117,3 @@ async function atomicWriteJson(filePath: string, value: unknown): Promise<void> 
   await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
   await rename(temporary, filePath);
 }
-

@@ -48,7 +48,7 @@ export function NodeInspector({
       <div className="mt-3 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold leading-tight">{node.label}</h2>
-          <p className="mt-1 text-sm text-ink/55">{readableType(node.type)}</p>
+          <p className="mt-1 text-sm text-ink/55">{node.metadata?.appNode === true ? "installed app" : readableType(node.type)}</p>
         </div>
         <span className="rounded-full border border-line px-2.5 py-1 text-xs font-semibold text-ink/70">
           {node.status.replace(/_/g, " ")}
@@ -69,7 +69,7 @@ export function NodeInspector({
         <InspectorFact label="Next action" value={nextActionForNode(node)} />
       </div>
 
-      {node.type === "workflow_loop" ? (
+      {node.type === "workflow_loop" && node.metadata?.appNode !== true ? (
         <div className="mt-5 space-y-4 rounded-md border border-line bg-paper p-4">
           <CompactList title="Trigger" items={trigger ? [trigger] : []} empty="Manual or event trigger not configured" />
           <CompactList title="Data" items={dataSources.values.slice(0, 4)} empty="No data source listed" />
@@ -89,6 +89,11 @@ export function NodeInspector({
         {node.loopId && node.type === "workflow_loop" ? (
           <Link className="rounded-md border border-ink px-4 py-2 text-sm font-semibold text-ink" href={`/loops/${node.loopId}`}>
             View full spec
+          </Link>
+        ) : null}
+        {node.metadata?.appNode === true && stringValue(node.metadata.installationId) ? (
+          <Link className="rounded-md border border-ink px-4 py-2 text-sm font-semibold text-ink" href={`/apps/${encodeURIComponent(stringValue(node.metadata.installationId)!)}`}>
+            Open installed app
           </Link>
         ) : null}
       </div>
@@ -328,6 +333,9 @@ function summaryForNode(node: BrainGraphNode) {
   if (node.type === "department_loop") {
     return "Coordinates workflow loops for a department and rolls evidence back into management.";
   }
+  if (node.metadata?.appNode === true) {
+    return node.purpose ?? "Operates a versioned set of loops, Hermes skills, connections, permissions, tests, and outcomes as one installed application.";
+  }
   if (node.type === "workflow_loop") {
     return node.purpose ?? node.subtitle ?? "Executes a recurring AI-human operating loop with evidence and review.";
   }
@@ -338,6 +346,7 @@ function nextActionForNode(node: BrainGraphNode) {
   if (node.status === "blocked") return "Resolve blocker";
   if (node.status === "needs_attention") return "Review evidence";
   if (node.type === "department_loop") return "Inspect managed workflows";
+  if (node.metadata?.appNode === true) return "Open installed app";
   if (node.type === "workflow_loop") return "Open loop detail";
   return "Monitor";
 }

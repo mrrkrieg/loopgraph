@@ -50,6 +50,21 @@ A pack is data, not executable code. It is untrusted until all of these checks p
 
 Installation is content-bound by an `AppInstallPlan` digest and committed atomically. Provider writes are never enabled by installation. Every new app starts in simulation or shadow mode.
 
+## Quality evidence and historical replay
+
+Marketplace maturity is derived from recorded evidence, not publisher claims. Every marketplace-ready app must cover the happy path, missing context, exclusions, duplicates, ambiguity, low confidence, unavailable connectors, missing fields, approval gates, customer-facing actions, missing outcomes, retries/idempotency, and upgrade/rollback.
+
+Synthetic conformance evaluates the declared fixture through the compiled routing contract and policy surface; referencing an existing fixture or loop ID alone is not a passing test. Historical replay accepts only a bounded normalized dataset:
+
+- no more than 500 events;
+- no more than a 90-day range;
+- every event inside the approved range;
+- read capabilities only and zero provider writes;
+- payloads reduced to decision evidence in the durable evaluation record;
+- entity ambiguity, missing context, connection state, exclusions, and approval policy remain active.
+
+Reviewers may label each historical decision `correct`, `incomplete`, or `false_positive` and record review minutes. The promotion recommendation separates routing quality from review burden and always returns `canAutoPromote: false`; an accountable owner must still approve a lifecycle transition.
+
 ## Configuration precedence
 
 Configuration is resolved in this deterministic order:
@@ -68,11 +83,16 @@ Every resolved value retains its winning layer and provenance. Hermes should inf
 
 Published artifacts are immutable. Company changes are typed overlay operations. Updates use a three-way merge between the original base, the company overlay, and the new base. Permission changes and graph changes are visible before apply. Unresolved conflicts block the update. Rollback restores the previous pinned version and digest.
 
+Every configure, overlay, repair, duplicate, detach, update, rollback, and uninstall mutation records a versioned lifecycle receipt with the previous and resulting registry revisions, artifact digests, accountable actor, retained-evidence flag, removed assets, and preserved shared assets. Mutations use optimistic content bindings so stale CLI, Hermes, or browser clients cannot overwrite a newer configuration, overlay, or artifact.
+
+Private duplication namespaces every generated LoopSpec and installation-owned asset, so a derived app can coexist with its upstream installation without overwriting active routes. Detach copies the exact verified LoopPack bytes into a confined workspace snapshot, records the snapshot path, and disables future upstream updates. It does not rewrite the original marketplace artifact.
+
 ## Removal and shared assets
 
 Every generated asset records owner installation IDs and a reference count. Uninstall removes only assets exclusively owned by the target installation. Shared connections, field mappings, company context, entity identities, and historical evidence remain available to other installations.
 
+The runtime LoopSpec registry supports content-bound writes and removals in one revision. App uninstall removes the target installation's active generated LoopSpecs, releases its asset references, detaches—but does not delete—shared mapping and context consumer references, preserves evaluation history, and writes a final uninstall receipt.
+
 ## Public contracts
 
 The strict Zod schemas and generated JSON Schemas live in `packages/loopgraph/src/core/app-platform.ts`. They are exported from `loopgraph/core` and must be reused by runtime services, CLI, MCP, and browser APIs. A client-specific shadow schema is not allowed.
-

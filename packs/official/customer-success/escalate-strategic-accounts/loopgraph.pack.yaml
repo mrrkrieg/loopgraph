@@ -1,0 +1,57 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.customer-success.escalate-strategic-accounts
+  name: Escalate Strategic Account Risk
+  version: 1.0.0
+  summary: Turn service and renewal signals into an evidence-backed strategic-account response.
+  description: An installable Customer Success application derived from the original Strategic Account Escalation template. Hermes resolves the affected account, joins support, CRM, incident, and renewal evidence, creates one durable risk problem, prepares accountable actions, and abstains when identity or business impact is unclear.
+  department: customer_success
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [customer-success, strategic-account, renewal-risk, incident, escalation]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: customer-communication
+    name: Customer communication review
+    description: Prepare an evidence-grounded customer communication for separate human approval.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/strategic-account-escalation.yaml, skills/strategic-risk-synthesis.yaml]
+presets:
+  - id: zendesk-salesforce-slack
+    name: Zendesk + Salesforce + Slack
+    description: Join support, CRM, and incident signals and prepare an accountable escalation in Slack.
+    path: presets/zendesk-salesforce-slack.yaml
+    providerFamily: zendesk
+permissions:
+  - { capability: support.ticket.read, authority: read, mode: required, risk: low, purpose: Read the triggering service issue and current support state., customerFacing: false, defaultPolicy: allowed, dataClasses: [support_content, business_contact] }
+  - { capability: crm.account.read, authority: read, mode: required, risk: low, purpose: "Resolve the account, tier, owner, renewal window, and relationship context.", customerFacing: false, defaultPolicy: allowed, dataClasses: [business_account] }
+  - { capability: incident.record.read, authority: read, mode: optional, risk: medium, purpose: Read verified service impact and incident severity evidence., customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_incident] }
+  - { capability: project.issue.create, authority: approve, mode: optional, risk: medium, purpose: Create an approved internal recovery or engineering follow-up task., customerFacing: false, defaultPolicy: approval_required, dataClasses: [business_account, operational_incident] }
+  - { capability: messaging.channel.post, authority: approve, mode: optional, risk: medium, purpose: Notify the accountable cross-functional escalation channel., customerFacing: false, defaultPolicy: approval_required, dataClasses: [business_account, support_content] }
+  - { capability: support.message.draft, authority: draft, mode: optional, risk: high, purpose: Prepare an evidence-grounded customer update for separate review., customerFacing: true, defaultPolicy: allowed, dataClasses: [support_content, communication] }
+requiredCapabilities: [support.ticket.read, crm.account.read]
+optionalCapabilities: [incident.record.read, project.issue.create, messaging.channel.post, support.message.draft]
+entrypoints:
+  loops: [loops/strategic-account-escalation.yaml]
+  skills: [skills/strategic-risk-synthesis.yaml]
+  connectors: [connectors/zendesk-salesforce-slack.yaml]
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: customer_success_owner
+  reviewRoles: [customer_success_owner, account_executive, incident_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

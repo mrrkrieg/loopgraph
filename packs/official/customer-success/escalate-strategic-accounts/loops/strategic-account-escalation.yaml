@@ -1,0 +1,64 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: customer-success-strategic-account-escalation
+  name: Strategic Account Escalation
+  version: 1.0.0
+  description: Resolve an affected strategic account, join service and renewal evidence, prepare an accountable recovery response, and learn from the outcome.
+  department: customer_success
+  ownerRole: customer_success_owner
+  tags: [strategic-account, renewal-risk, incident]
+trigger: { type: event, source: "*", event: account.risk_detected }
+input:
+  requiredFields: [normalizedPayload.ticketId, normalizedPayload.accountId, normalizedPayload.severity, normalizedPayload.renewalDaysRemaining]
+  subjectTypes: [account, support_ticket]
+  fixtures:
+    - { id: strategic-risk, path: fixtures/happy.json }
+    - { id: incomplete-risk, path: fixtures/missing-context.json }
+routine:
+  - { id: resolve, name: Resolve account identity, actor: system, type: observe, description: Bind the provider event to one durable customer account and append repeated evidence to existing work. }
+  - { id: assemble, name: Assemble risk evidence, actor: system, type: observe, description: "Join approved support, incident, renewal, owner, tier, and relationship context." }
+  - { id: assess, name: Assess strategic risk, actor: agent, type: assess, description: "Explain service impact, commercial risk, confidence, missing evidence, and urgency without inventing commitments." }
+  - { id: decide, name: Select response path, actor: agent, type: decide, description: Create one primary customer-risk problem and only invoke supporting work when the topology permits it. }
+  - { id: prepare, name: Prepare recovery package, actor: system, type: prepare, description: Prepare accountable internal actions and a separate customer-communication draft. }
+  - { id: learn, name: Learn from account outcome, actor: system, type: learn, description: "Return resolution, renewal, relationship, and reviewer outcomes as shared company evidence." }
+capabilities:
+  - { key: support.ticket.read, authority: read, risk: low, required: true, purpose: Read verified support demand and service history., customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: "Resolve account identity, tier, ownership, and renewal context.", customerFacing: false }
+  - { key: incident.record.read, authority: read, risk: medium, required: false, purpose: Read verified incident impact and severity., customerFacing: false }
+  - { key: project.issue.create, authority: approve, risk: medium, required: false, purpose: Create an exact approved recovery or engineering follow-up task., customerFacing: false }
+  - { key: messaging.channel.post, authority: approve, risk: medium, required: false, purpose: Notify the accountable cross-functional escalation channel., customerFacing: false }
+  - { key: support.message.draft, authority: draft, risk: high, required: false, purpose: Prepare an evidence-grounded customer update for separate review., customerFacing: true }
+skills: [customer-success-strategic-risk-synthesis]
+outcomes:
+  - { metric: strategic_risk_response_minutes, description: Time from confirmed risk evidence to accountable response ownership., direction: decrease, sourceCapability: support.ticket.read }
+  - { metric: risk_recovery_rate, description: Fraction of strategic risks resolved without unresolved customer impact., direction: increase, sourceCapability: crm.account.read }
+  - { metric: renewal_retention_rate, description: Renewal outcomes for accounts that entered the governed risk flow., direction: increase, sourceCapability: crm.account.read }
+  - { metric: escalation_review_minutes, description: Human review burden required per strategic risk case., direction: decrease, sourceCapability: support.ticket.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer.strategic_account_risk]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: account.risk_detected, subjectTypes: [account, support_ticket], requiredFields: [normalizedPayload.ticketId, normalizedPayload.accountId, normalizedPayload.severity, normalizedPayload.renewalDaysRemaining], reason: A verified service or relationship signal contains enough evidence to assess one strategic account. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle outcomes append evidence and cannot create duplicate strategic-risk work. }
+  inputMapping: { ticketId: normalizedPayload.ticketId, accountId: normalizedPayload.accountId, severity: normalizedPayload.severity, renewalDaysRemaining: normalizedPayload.renewalDaysRemaining }
+  priority: 95
+  minimumConfidence: 0.88
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.ticket.read, crm.account.read]
+  examples:
+    shouldRoute: [A signed event identifies one strategic account, affected ticket, severity, and renewal window.]
+    shouldNotRoute: [Multiple accounts match the signal., Renewal context is absent., The event is a replay of existing evidence.]
+policy:
+  forbiddenActions:
+    - { capability: support.message.draft, reason: Customer communication may be drafted but never sent by this app. }
+  escalationOwner: customer_success_owner
+  escalationSla: 15m
+  separateCustomerFacingApproval: true

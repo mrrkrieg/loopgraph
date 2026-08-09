@@ -1,0 +1,55 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.engineering.triage-github-issues
+  name: Triage GitHub Issues Safely
+  version: 1.0.0
+  summary: Classify new GitHub issues, prepare bounded actions, and escalate security-sensitive reports.
+  description: An installable Engineering application derived from the original GitHub Issue Triage template. Hermes normalizes issue events, applies repository policy, proposes labels and follow-up, abstains when evidence is incomplete, and routes security-sensitive reports for explicit review.
+  department: engineering
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [engineering, github, issue-triage, security, maintainer]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: security-escalation
+    name: Security escalation
+    description: Detect security-sensitive issue content and prepare a separately reviewable escalation package.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/issue-triage.yaml, skills/technical-issue-triage.yaml]
+presets:
+  - id: github-linear-slack
+    name: GitHub + Linear + Slack
+    description: Read GitHub issues, prepare reviewed issue changes, create follow-up work, and notify maintainers.
+    path: presets/github-linear-slack.yaml
+    providerFamily: github
+permissions:
+  - { capability: project.issue.read, authority: read, mode: required, risk: low, purpose: Read issue content and repository metadata needed for classification., customerFacing: false, defaultPolicy: allowed, dataClasses: [repository_content] }
+  - { capability: project.issue.update, authority: approve, mode: optional, risk: high, purpose: Apply exact approved labels or issue metadata changes., customerFacing: true, defaultPolicy: approval_required, dataClasses: [repository_content, public_communication] }
+  - { capability: project.issue.create, authority: approve, mode: optional, risk: medium, purpose: Create an approved internal follow-up issue for maintainers., customerFacing: false, defaultPolicy: approval_required, dataClasses: [repository_content] }
+  - { capability: messaging.channel.post, authority: approve, mode: optional, risk: medium, purpose: Notify the configured maintainer or security channel., customerFacing: false, defaultPolicy: approval_required, dataClasses: [repository_content] }
+requiredCapabilities: [project.issue.read]
+optionalCapabilities: [project.issue.update, project.issue.create, messaging.channel.post]
+entrypoints:
+  loops: [loops/issue-triage.yaml]
+  skills: [skills/technical-issue-triage.yaml]
+  connectors: [connectors/github-linear-slack.yaml]
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: repository_maintainer
+  reviewRoles: [repository_maintainer, security_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

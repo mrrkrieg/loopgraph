@@ -1,0 +1,14 @@
+{
+  "id": "fixture-low-confidence",
+  "scenario": "low_confidence",
+  "eventType": "account.research_ready",
+  "subject": { "type": "lead", "id": "lead-low-confidence" },
+  "normalizedPayload": {
+    "leadId": "lead-low-confidence",
+    "accountBrief": { "employeeCount": 80, "industry": "software" },
+    "icpDefinition": { "minimumEmployees": 50, "industries": ["software"] },
+    "confidence": 0.72
+  },
+  "evidenceRefs": ["evidence:crm:lead-low-confidence"],
+  "expected": { "action": "request_human", "reason": "Confidence is below the loop routing threshold." }
+}

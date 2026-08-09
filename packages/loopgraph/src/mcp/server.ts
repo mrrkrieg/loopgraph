@@ -172,6 +172,33 @@ import {
 } from "../runtime/loop-tools";
 import { listLoopgraphLoops } from "../runtime/loop-materialization";
 import {
+  appActivateInputSchema,
+  appGetInputSchema,
+  appHistoricalReplayInputSchema,
+  appEvaluationLabelInputSchema,
+  appConfigureInputSchema,
+  appOverlayApplyInputSchema,
+  appRepairInputSchema,
+  appDuplicateInputSchema,
+  appDiffInputSchema,
+  appUpdatePlanInputSchema,
+  appUpdateApplyInputSchema,
+  appRollbackInputSchema,
+  appDetachInputSchema,
+  appUninstallInputSchema,
+  appPromotionRecommendationInputSchema,
+  appInstallApplyInputSchema,
+  appInstallPlanInputSchema,
+  appInstallStatusInputSchema,
+  appPauseInputSchema,
+  appResumeInputSchema,
+  appTestInputSchema,
+  callLoopgraphAppTool,
+  loopgraphAppToolDefinitions,
+  marketplaceSearchInputSchema,
+  type LoopgraphAppToolName
+} from "../runtime/app-tools";
+import {
   callLoopgraphProjectTool,
   loopgraphProjectToolDefinitions,
   projectInspectInputSchema,
@@ -289,7 +316,8 @@ type LoopgraphMcpToolName =
   | LoopgraphConnectionToolName
   | LoopgraphMeasurementToolName
   | LoopgraphProviderToolName
-  | LoopgraphLoopToolName;
+  | LoopgraphLoopToolName
+  | LoopgraphAppToolName;
 
 const toolInputSchemas = {
   loopgraph_workspace_inspect: workspaceInspectInputSchema,
@@ -382,7 +410,29 @@ const toolInputSchemas = {
   loopgraph_hermes_agent_register: hermesAgentRegisterInputSchema,
   loopgraph_hermes_agent_heartbeat: hermesAgentHeartbeatInputSchema,
   loopgraph_hermes_execution_event_ingest: hermesExecutionEventIngestInputSchema,
-  loopgraph_agent_operations_get: agentOperationsGetInputSchema
+  loopgraph_agent_operations_get: agentOperationsGetInputSchema,
+  loopgraph_marketplace_search: marketplaceSearchInputSchema,
+  loopgraph_app_get: appGetInputSchema,
+  loopgraph_app_install_plan: appInstallPlanInputSchema,
+  loopgraph_app_install_apply: appInstallApplyInputSchema,
+  loopgraph_app_install_status: appInstallStatusInputSchema,
+  loopgraph_app_test: appTestInputSchema,
+  loopgraph_app_historical_replay: appHistoricalReplayInputSchema,
+  loopgraph_app_evaluation_label: appEvaluationLabelInputSchema,
+  loopgraph_app_promotion_recommendation: appPromotionRecommendationInputSchema,
+  loopgraph_app_configure: appConfigureInputSchema,
+  loopgraph_app_overlay_apply: appOverlayApplyInputSchema,
+  loopgraph_app_repair: appRepairInputSchema,
+  loopgraph_app_duplicate: appDuplicateInputSchema,
+  loopgraph_app_diff: appDiffInputSchema,
+  loopgraph_app_update_plan: appUpdatePlanInputSchema,
+  loopgraph_app_update_apply: appUpdateApplyInputSchema,
+  loopgraph_app_rollback: appRollbackInputSchema,
+  loopgraph_app_detach: appDetachInputSchema,
+  loopgraph_app_uninstall: appUninstallInputSchema,
+  loopgraph_app_activate: appActivateInputSchema,
+  loopgraph_app_pause: appPauseInputSchema,
+  loopgraph_app_resume: appResumeInputSchema
 };
 
 const loopgraphMcpToolDefinitions = [
@@ -404,7 +454,8 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphRoutingOpsToolDefinitions,
   ...loopgraphRoutingEvaluationToolDefinitions,
   ...loopgraphHermesWebhookToolDefinitions,
-  ...loopgraphHermesOperationsToolDefinitions
+  ...loopgraphHermesOperationsToolDefinitions,
+  ...loopgraphAppToolDefinitions
 ] as const;
 
 export const LOOPGRAPH_WEBHOOK_ROUTER_MCP_TOOL_NAMES = [
@@ -1128,6 +1179,13 @@ async function callLoopgraphMcpTool(
     });
   }
 
+  if (isLoopgraphAppToolName(name)) {
+    return callLoopgraphAppTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
   return callLoopgraphDiscoveryTool(name, boundInput, {
     projectRoot: options.projectRoot
   });
@@ -1442,6 +1500,10 @@ function isLoopgraphLoopToolName(value: unknown): value is LoopgraphLoopToolName
   return typeof value === "string" && loopgraphLoopToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphAppToolName(value: unknown): value is LoopgraphAppToolName {
+  return typeof value === "string" && loopgraphAppToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
   return isLoopgraphRoutingToolName(value) ||
     isLoopgraphRoutingOpsToolName(value) ||
@@ -1461,7 +1523,8 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphConnectionToolName(value) ||
     isLoopgraphMeasurementToolName(value) ||
     isLoopgraphProviderToolName(value) ||
-    isLoopgraphLoopToolName(value);
+    isLoopgraphLoopToolName(value) ||
+    isLoopgraphAppToolName(value);
 }
 
 function isToolAllowedForExposure(name: LoopgraphMcpToolName, exposure: LoopgraphMcpExposure): boolean {
@@ -1486,6 +1549,9 @@ function mcpInstructionsForExposure(exposure: LoopgraphMcpExposure): string {
 }
 
 function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphAppToolName(name)) {
+    return loopgraphAppToolDefinitions.find((tool) => tool.name === name)?.readOnly ?? false;
+  }
   if (isLoopgraphHermesOperationsToolName(name)) {
     return loopgraphHermesOperationsToolDefinitions.find((tool) => tool.name === name)?.readOnly ?? false;
   }
@@ -1534,6 +1600,9 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
 }
 
 function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphAppToolName(name)) {
+    return loopgraphAppToolDefinitions.find((tool) => tool.name === name)?.idempotent ?? false;
+  }
   if (isLoopgraphHermesOperationsToolName(name)) {
     return loopgraphHermesOperationsToolDefinitions.find((tool) => tool.name === name)?.idempotent ?? false;
   }
@@ -1578,6 +1647,9 @@ function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {
 }
 
 function isDestructiveToolName(name: LoopgraphMcpToolName): boolean {
+  if (isLoopgraphAppToolName(name)) {
+    return loopgraphAppToolDefinitions.find((tool) => tool.name === name)?.destructive ?? false;
+  }
   return name === "loopgraph_graph_change_apply" ||
     name === "loopgraph_loop_promote" ||
     name === "loopgraph_loop_lifecycle_set" ||
