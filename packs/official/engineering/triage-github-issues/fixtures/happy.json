@@ -1,0 +1,1 @@
+{"id":"github-issue-happy","eventType":"github.issue_opened","subject":{"type":"repository_issue","id":"issue-101"},"normalizedPayload":{"issueId":"101","title":"CLI exits after valid config reload","body":"Reproduction steps and expected behavior are included.","confidence":0.97},"evidenceRefs":["github:issue:101"]}

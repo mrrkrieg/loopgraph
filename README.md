@@ -183,7 +183,16 @@ For event rehearsal, workers, outcome measurements, controllers, and hosted depl
 
 ## Install a complete business capability
 
-Loopgraph Apps package several cooperating loops, Hermes skills, connector requirements, setup questions, policies, fixtures, metrics, and graph relationships into one immutable, inspectable release. The first complete app is **Qualify and Route Inbound Leads**.
+Loopgraph Apps package one or more cooperating loops, Hermes skills, connector requirements, setup questions, policies, fixtures, metrics, and graph relationships into one immutable, inspectable release.
+
+| Official app | Department | Business result |
+|---|---|---|
+| [Qualify and Route Inbound Leads](packs/official/sales/qualify-route-inbound-leads) | Sales | Research, qualify, route, and learn from inbound demand |
+| [Triage GitHub Issues Safely](packs/official/engineering/triage-github-issues) | Engineering | Classify repository issues and govern security-sensitive escalation |
+| [Triage and Escalate Support Tickets](packs/official/customer-success/triage-support-tickets) | Customer Success | Route support demand, prepare responses, and identify material risk |
+| [Escalate Strategic Account Risk](packs/official/customer-success/escalate-strategic-accounts) | Customer Success | Join service, incident, renewal, and ownership evidence into a recovery response |
+
+The three original runnable examples remain available for low-level LoopSpec teaching, but their corresponding LoopPacks are now the marketplace source of truth for new installations. Every official app is indexed from its pack files and includes the complete deterministic safety contract.
 
 Ask Hermes:
 

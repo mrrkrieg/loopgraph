@@ -1,0 +1,1 @@
+{"id":"support-ticket-excluded","eventType":"support.ticket_created","subject":{"type":"support_ticket","id":"ticket-203"},"normalizedPayload":{"ticketId":"203","summary":"Internal test conversation","priority":"low","excluded":true,"confidence":1},"evidenceRefs":["support:ticket:203","policy:test-traffic"]}

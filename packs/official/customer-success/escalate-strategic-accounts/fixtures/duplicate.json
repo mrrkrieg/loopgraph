@@ -1,0 +1,1 @@
+{"id":"strategic-risk-duplicate","eventType":"account.risk_detected","subject":{"type":"account","id":"account-304"},"normalizedPayload":{"ticketId":"304","accountId":"account-304","severity":"P1","renewalDaysRemaining":30,"matchedProblemId":"risk-account-304","confidence":0.98},"evidenceRefs":["support:ticket:304","problem:risk-account-304"]}

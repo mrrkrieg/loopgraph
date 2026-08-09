@@ -1,0 +1,1 @@
+{"id":"strategic-risk-permission-change","eventType":"account.risk_detected","subject":{"type":"account","id":"account-307"},"normalizedPayload":{"ticketId":"307","accountId":"account-307","severity":"P2","renewalDaysRemaining":75,"permissionChange":"project.issue.create: approve -> execute","confidence":1},"evidenceRefs":["fixture:permission-review"]}

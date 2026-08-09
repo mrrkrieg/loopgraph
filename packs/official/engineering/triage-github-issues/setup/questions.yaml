@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-setup/v1alpha1
+kind: AppSetup
+questions:
+  - { key: repositories, prompt: Which repositories should Hermes monitor?, why: The app must stay inside an explicit repository allowlist., valueType: string_list, requirement: required, inferFromContext: engineering.repositories, confirmWhenInferred: true }
+  - { key: ownership, prompt: Who owns each repository and issue area?, why: Clear ownership is required before Hermes can prepare routing., valueType: object, requirement: required, inferFromContext: engineering.repositoryOwnership, confirmWhenInferred: true }
+  - { key: taxonomy, prompt: Which issue classes and labels are approved?, why: Classification and label proposals must follow repository policy., valueType: object, requirement: required, inferFromContext: engineering.issueTaxonomy, confirmWhenInferred: true }
+  - { key: securitySignals, prompt: Which terms or labels require security review?, why: Possible vulnerabilities and credential disclosures require a separate accountable path., valueType: string_list, requirement: required, inferFromContext: policy.securityIssueSignals, confirmWhenInferred: true, defaultValue: [security, vulnerability, exploit, credential, cve] }
+  - { key: securityOwner, prompt: Who reviews possible security issues?, why: The app cannot activate escalation without an accountable owner., valueType: string, requirement: required, inferFromContext: engineering.securityOwner, confirmWhenInferred: true }
+  - { key: triageSlaMinutes, prompt: How quickly should new issues receive a reviewed triage decision?, why: Loopgraph measures the app against this service objective., valueType: number, requirement: required, inferFromContext: engineering.issueTriageSlaMinutes, confirmWhenInferred: true, defaultValue: 60 }
+  - { key: maintainerChannel, prompt: Where should reviewed maintainer notifications go?, why: Internal notification needs an explicit approved destination., valueType: string, requirement: conditional, condition: messaging.channel.post is connected, inferFromContext: engineering.maintainerChannel, confirmWhenInferred: true }

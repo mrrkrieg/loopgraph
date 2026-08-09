@@ -1,0 +1,8 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: strategic-account-risk-outcomes
+metrics:
+  - { id: strategic_risk_response_minutes, direction: decrease, description: Time from confirmed risk evidence to accountable ownership. }
+  - { id: risk_recovery_rate, direction: increase, description: Strategic risks resolved without unresolved customer impact. }
+  - { id: renewal_retention_rate, direction: increase, description: Renewal outcomes for accounts entering the governed flow. }
+  - { id: escalation_precision, direction: increase, description: Escalations confirmed by accountable reviewers. }
+  - { id: escalation_review_minutes, direction: decrease, description: Human review burden per strategic risk case. }
