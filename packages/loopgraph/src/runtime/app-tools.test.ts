@@ -19,6 +19,9 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
       "loopgraph_app_test",
+      "loopgraph_app_historical_replay",
+      "loopgraph_app_evaluation_label",
+      "loopgraph_app_promotion_recommendation",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
       "loopgraph_app_resume"
@@ -56,7 +59,7 @@ describe("shared Loopgraph App tools", () => {
     expect(detail.loops).toHaveLength(6);
     expect(detail.skills).toHaveLength(4);
     expect(detail.setupQuestions).toHaveLength(10);
-    expect(detail.evaluationSummary.scenarios).toBe(12);
+    expect(detail.evaluationSummary.scenarios).toBe(14);
     expect(detail.graphPreview.nodes.some((node) => node.type === "app")).toBe(true);
   });
 

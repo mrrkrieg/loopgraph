@@ -3,7 +3,10 @@ import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import {
+  APP_EVAL_SCHEMA_VERSION,
   appEvalSuiteSchema,
+  appHistoricalReplayRequestSchema,
+  historicalReplayEventSchema,
   appInstallPlanSchema,
   appRolloutModeSchema,
   appSetupDefinitionSchema
@@ -22,6 +25,9 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
   "loopgraph_app_test",
+  "loopgraph_app_historical_replay",
+  "loopgraph_app_evaluation_label",
+  "loopgraph_app_promotion_recommendation",
   "loopgraph_app_activate",
   "loopgraph_app_pause",
   "loopgraph_app_resume"
@@ -78,6 +84,23 @@ const appInstallationActionInputSchema = projectSchema.extend({
 }).strict();
 
 export const appTestInputSchema = appInstallationActionInputSchema;
+export const appHistoricalReplayInputSchema = appInstallationActionInputSchema.extend({
+  from: z.string().datetime(),
+  to: z.string().datetime(),
+  maxEvents: z.number().int().min(1).max(500).default(100),
+  events: z.array(historicalReplayEventSchema).min(1).max(500)
+}).strict();
+export const appEvaluationLabelInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  runId: z.string().min(1),
+  scenarioId: z.string().min(1),
+  label: z.enum(["correct", "incomplete", "false_positive"]),
+  reviewMinutes: z.number().nonnegative().max(480).default(0),
+  notes: z.string().max(2000).optional(),
+  actor: z.string().min(1).default("hermes")
+}).strict();
+export const appPromotionRecommendationInputSchema = appInstallationActionInputSchema.omit({ actor: true }).strict();
 export const appPauseInputSchema = appInstallationActionInputSchema;
 export const appResumeInputSchema = appInstallationActionInputSchema;
 export const appActivateInputSchema = appInstallationActionInputSchema.extend({
@@ -93,6 +116,9 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_test", description: "Run the installed app synthetic conformance suite with all provider writes blocked.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_historical_replay", description: "Evaluate a bounded historical event set through installed routing contracts with provider writes blocked and replay evidence recorded.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_evaluation_label", description: "Record an accountable correct, incomplete, or false-positive judgment and review burden for one replay decision.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_promotion_recommendation", description: "Derive a non-activating promotion recommendation from conformance, historical replay, human labels, and review burden.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_activate", description: "Promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_pause", description: "Pause an installed app without deleting shared connectors, mappings, context, entities, or evidence.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_resume", description: "Resume a paused app at its last safe non-live rollout mode.", readOnly: false, idempotent: true, destructive: false }
@@ -211,6 +237,37 @@ export async function callLoopgraphAppTool(
       evaluations: registry.evaluations,
       lock: await store.readLockfile()
     };
+  }
+  if (name === "loopgraph_app_historical_replay") {
+    const parsed = appHistoricalReplayInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const timestamp = (options.now ?? new Date()).toISOString();
+    return service.historicalReplay(appHistoricalReplayRequestSchema.parse({
+      schemaVersion: APP_EVAL_SCHEMA_VERSION,
+      installationId: parsed.installationId,
+      from: parsed.from,
+      to: parsed.to,
+      maxEvents: parsed.maxEvents,
+      events: parsed.events,
+      requestedAt: timestamp,
+      requestedBy: parsed.actor
+    }), options.now);
+  }
+  if (name === "loopgraph_app_evaluation_label") {
+    const parsed = appEvaluationLabelInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.labelEvaluation({
+      schemaVersion: APP_EVAL_SCHEMA_VERSION,
+      runId: parsed.runId,
+      scenarioId: parsed.scenarioId,
+      label: parsed.label,
+      reviewMinutes: parsed.reviewMinutes,
+      notes: parsed.notes,
+      reviewedBy: parsed.actor,
+      reviewedAt: (options.now ?? new Date()).toISOString()
+    });
+  }
+  if (name === "loopgraph_app_promotion_recommendation") {
+    const parsed = appPromotionRecommendationInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.promotionRecommendation(parsed.installationId, options.now);
   }
   const parsed = appInstallationActionInputSchema.parse({ ...raw, projectRoot, ...identity });
   if (name === "loopgraph_app_test") return service.test(parsed.installationId, parsed.actor, options.now);

@@ -40,6 +40,47 @@ export async function activateInstalledAppAction(formData: FormData) {
   revalidateInstalledApp(installationId);
 }
 
+export async function replayInstalledAppAction(formData: FormData) {
+  await requireHostedPermission("organization.manage");
+  const installationId = requiredFormString(formData, "installationId");
+  const rawDataset = requiredFormString(formData, "dataset", 1_000_000);
+  let dataset: unknown;
+  try {
+    dataset = JSON.parse(rawDataset);
+  } catch {
+    throw new Error("Historical replay dataset must be valid JSON");
+  }
+  if (!dataset || typeof dataset !== "object" || Array.isArray(dataset)) {
+    throw new Error("Historical replay dataset must be a JSON object with from, to, and events");
+  }
+  await callLoopgraphAppTool("loopgraph_app_historical_replay", {
+    ...(dataset as Record<string, unknown>),
+    projectRoot: getActiveLoopgraphProjectRoot(),
+    installationId,
+    actor: "loopgraph-browser"
+  });
+  revalidateInstalledApp(installationId);
+}
+
+export async function labelAppEvaluationAction(formData: FormData) {
+  await requireHostedPermission("organization.manage");
+  const installationId = requiredFormString(formData, "installationId");
+  const label = requiredFormString(formData, "label");
+  if (label !== "correct" && label !== "incomplete" && label !== "false_positive") {
+    throw new Error("Unsupported evaluation label");
+  }
+  const reviewMinutes = Number(requiredFormString(formData, "reviewMinutes"));
+  await callLoopgraphAppTool("loopgraph_app_evaluation_label", {
+    projectRoot: getActiveLoopgraphProjectRoot(),
+    runId: requiredFormString(formData, "runId"),
+    scenarioId: requiredFormString(formData, "scenarioId"),
+    label,
+    reviewMinutes,
+    actor: "loopgraph-browser"
+  });
+  revalidateInstalledApp(installationId);
+}
+
 function revalidateInstalledApp(installationId: string) {
   revalidatePath("/apps");
   revalidatePath(`/apps/${installationId}`);
@@ -47,9 +88,9 @@ function revalidateInstalledApp(installationId: string) {
   revalidatePath("/marketplace");
 }
 
-function requiredFormString(formData: FormData, key: string): string {
+function requiredFormString(formData: FormData, key: string, maxLength = 240): string {
   const value = formData.get(key);
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > 240) {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > maxLength) {
     throw new Error(`Missing or invalid form field: ${key}`);
   }
   return value.trim();

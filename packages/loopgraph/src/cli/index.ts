@@ -285,6 +285,69 @@ apps
     await printAppTool("loopgraph_app_activate", { projectRoot: options.project, installationId, mode: options.mode, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
   });
 
+apps
+  .command("replay")
+  .description("Run a bounded, read-only historical replay without enabling provider writes")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--dataset <path>", "JSON object containing from, to, and normalized historical events")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable replay requester", "cli")
+  .action(async (installationId: string, options: { dataset: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    const dataset = await readJsonRecord(path.resolve(options.dataset));
+    await printAppTool("loopgraph_app_historical_replay", {
+      ...dataset,
+      projectRoot: options.project,
+      installationId,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("label")
+  .description("Label one replay decision as correct, incomplete, or false positive")
+  .argument("<run-id>", "Evaluation run ID")
+  .argument("<scenario-id>", "Replay scenario ID")
+  .requiredOption("--label <label>", "correct, incomplete, or false_positive")
+  .option("--minutes <number>", "Review time in minutes", "0")
+  .option("--notes <text>", "Optional reviewer note")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable reviewer identity", "cli")
+  .action(async (runId: string, scenarioId: string, options: { label: string; minutes: string; notes?: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_evaluation_label", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      runId,
+      scenarioId,
+      label: options.label,
+      reviewMinutes: Number(options.minutes),
+      notes: options.notes,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("recommendation")
+  .description("Derive a non-activating promotion recommendation from app quality evidence")
+  .argument("<installation-id>", "Installed app ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_promotion_recommendation", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      installationId
+    });
+  });
+
 measurementBindings
   .command("set")
   .description("Create or revise one exact metric-to-provider binding from a JSON contract")

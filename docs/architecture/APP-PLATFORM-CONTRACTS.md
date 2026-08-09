@@ -50,6 +50,21 @@ A pack is data, not executable code. It is untrusted until all of these checks p
 
 Installation is content-bound by an `AppInstallPlan` digest and committed atomically. Provider writes are never enabled by installation. Every new app starts in simulation or shadow mode.
 
+## Quality evidence and historical replay
+
+Marketplace maturity is derived from recorded evidence, not publisher claims. Every marketplace-ready app must cover the happy path, missing context, exclusions, duplicates, ambiguity, low confidence, unavailable connectors, missing fields, approval gates, customer-facing actions, missing outcomes, retries/idempotency, and upgrade/rollback.
+
+Synthetic conformance evaluates the declared fixture through the compiled routing contract and policy surface; referencing an existing fixture or loop ID alone is not a passing test. Historical replay accepts only a bounded normalized dataset:
+
+- no more than 500 events;
+- no more than a 90-day range;
+- every event inside the approved range;
+- read capabilities only and zero provider writes;
+- payloads reduced to decision evidence in the durable evaluation record;
+- entity ambiguity, missing context, connection state, exclusions, and approval policy remain active.
+
+Reviewers may label each historical decision `correct`, `incomplete`, or `false_positive` and record review minutes. The promotion recommendation separates routing quality from review burden and always returns `canAutoPromote: false`; an accountable owner must still approve a lifecycle transition.
+
 ## Configuration precedence
 
 Configuration is resolved in this deterministic order:
@@ -75,4 +90,3 @@ Every generated asset records owner installation IDs and a reference count. Unin
 ## Public contracts
 
 The strict Zod schemas and generated JSON Schemas live in `packages/loopgraph/src/core/app-platform.ts`. They are exported from `loopgraph/core` and must be reused by runtime services, CLI, MCP, and browser APIs. A client-specific shadow schema is not allowed.
-

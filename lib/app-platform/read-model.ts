@@ -4,6 +4,7 @@ import type {
   AppEvalRun,
   AppInstallPlan,
   AppInstallationLock,
+  AppPromotionRecommendation,
   AppReadiness,
   AppSetupDefinition,
   AppSkillDefinition,
@@ -174,6 +175,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   readiness: AppReadiness;
   evaluations: AppEvalRun[];
   detail: MarketplaceAppDetail;
+  promotionRecommendation: AppPromotionRecommendation;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const installed = await callLoopgraphAppTool("loopgraph_app_install_status", {
@@ -183,15 +185,22 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   const installation = installed.installations[0];
   const readiness = installed.readiness[0];
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
-  const detail = await callLoopgraphAppTool("loopgraph_app_get", {
-    projectRoot,
-    appId: installation.appId,
-    version: installation.version
-  }) as MarketplaceAppDetail;
+  const [detail, promotionRecommendation] = await Promise.all([
+    callLoopgraphAppTool("loopgraph_app_get", {
+      projectRoot,
+      appId: installation.appId,
+      version: installation.version
+    }) as Promise<MarketplaceAppDetail>,
+    callLoopgraphAppTool("loopgraph_app_promotion_recommendation", {
+      projectRoot,
+      installationId
+    }) as Promise<AppPromotionRecommendation>
+  ]);
   return {
     installation,
     readiness,
     evaluations: installed.evaluations.filter((evaluation) => evaluation.installationId === installationId),
-    detail
+    detail,
+    promotionRecommendation
   };
 }
