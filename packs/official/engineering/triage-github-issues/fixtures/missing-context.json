@@ -1,0 +1,1 @@
+{"id":"github-issue-missing-context","eventType":"github.issue_opened","subject":{"type":"repository_issue","id":"issue-102"},"normalizedPayload":{"issueId":"102","title":"It does not work","confidence":0.95},"evidenceRefs":["github:issue:102"]}

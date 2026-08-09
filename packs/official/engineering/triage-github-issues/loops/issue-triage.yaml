@@ -1,0 +1,60 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: engineering-github-issue-triage
+  name: GitHub Issue Triage
+  version: 1.0.0
+  description: Normalize a GitHub issue, apply repository and security policy, prepare bounded classification actions, and learn from maintainer review.
+  department: engineering
+  ownerRole: repository_maintainer
+  tags: [github, triage, security]
+trigger: { type: event, source: "*", event: github.issue_opened }
+input:
+  requiredFields: [normalizedPayload.issueId, normalizedPayload.title, normalizedPayload.body]
+  subjectTypes: [repository_issue, issue]
+  fixtures:
+    - { id: normal-issue, path: fixtures/happy.json }
+    - { id: incomplete-issue, path: fixtures/missing-context.json }
+routine:
+  - { id: normalize, name: Normalize issue event, actor: system, type: observe, description: Translate provider data into the shared repository-issue contract and bind durable delivery identity. }
+  - { id: classify, name: Classify issue and risk, actor: agent, type: assess, description: "Apply repository policy and distinguish bugs, questions, feature requests, abuse, and possible security reports." }
+  - { id: decide, name: Select governed route, actor: agent, type: decide, description: "Route one clear issue class or abstain when evidence, ownership, or security sensitivity is ambiguous." }
+  - { id: prepare, name: Prepare maintainer actions, actor: system, type: prepare, description: "Prepare exact labels, follow-up work, and internal notifications without mutating the provider." }
+  - { id: learn, name: Learn from review, actor: system, type: learn, description: Return maintainer corrections and downstream resolution as evidence for future triage. }
+capabilities:
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Read the issue and repository metadata needed for triage., customerFacing: false }
+  - { key: project.issue.update, authority: approve, risk: high, required: false, purpose: Apply exact approved labels or metadata changes., customerFacing: true }
+  - { key: project.issue.create, authority: approve, risk: medium, required: false, purpose: Create an approved maintainer follow-up issue., customerFacing: false }
+  - { key: messaging.channel.post, authority: approve, risk: medium, required: false, purpose: Notify the responsible maintainer or security channel., customerFacing: false }
+skills: [engineering-technical-issue-triage]
+outcomes:
+  - { metric: issue_triage_latency_minutes, description: Time from a new issue to an evidence-backed maintainer decision., direction: decrease, sourceCapability: project.issue.read }
+  - { metric: security_escalation_precision, description: Fraction of security escalations confirmed by the accountable reviewer., direction: increase, sourceCapability: project.issue.read }
+  - { metric: maintainer_review_minutes, description: Human review time required per triaged issue., direction: decrease, sourceCapability: project.issue.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [engineering.issue_triage]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: github.issue_opened, subjectTypes: [repository_issue, issue], requiredFields: [normalizedPayload.issueId, normalizedPayload.title, normalizedPayload.body], reason: A new repository issue contains the minimum evidence required for policy-aware triage. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle evidence updates existing work and cannot create a new issue-triage problem. }
+  inputMapping: { issueId: normalizedPayload.issueId, title: normalizedPayload.title, body: normalizedPayload.body }
+  priority: 90
+  minimumConfidence: 0.85
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [project.issue.read]
+  examples:
+    shouldRoute: [A signed GitHub event contains a new issue ID, title, and body.]
+    shouldNotRoute: [A duplicate provider delivery arrives., The event lacks issue content., Security sensitivity cannot be classified confidently.]
+policy:
+  forbiddenActions:
+    - { capability: project.issue.update, reason: Issue changes require an exact prepared-action approval. }
+  escalationOwner: repository_maintainer
+  escalationSla: 30m
+  separateCustomerFacingApproval: true

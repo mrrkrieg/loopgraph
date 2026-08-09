@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: support-ticket-triage-conformance
+appId: loopgraph.customer-success.triage-support-tickets
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: true, notes: A complete ticket routes while ticket mutations remain approval-bound. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: false, notes: Missing priority evidence is requested rather than invented. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Explicit test or excluded traffic does not create normal support work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: false, notes: Duplicate tickets append evidence instead of creating work. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: false, notes: Hermes abstains when customer identity is ambiguous. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: false, notes: Low-confidence urgency requires human judgment. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: customer-success-support-ticket-triage, connectorState: unavailable, expectedApproval: false, notes: Provider unavailability creates no ticket mutation. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: false, notes: Required ticket fields are requested explicitly. }
+  - { id: human-approval, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: true, notes: Queue and ticket updates remain approval-bound. }
+  - { id: customer-facing-action, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: true, notes: Customer-facing work remains a draft with separate review. }
+  - { id: missing-outcome, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: true, notes: Missing resolution evidence is not treated as a failed outcome. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: customer-success-support-ticket-triage, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate work or value. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission changes require explicit review and preserve rollback. }

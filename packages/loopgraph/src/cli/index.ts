@@ -285,6 +285,212 @@ apps
     await printAppTool("loopgraph_app_activate", { projectRoot: options.project, installationId, mode: options.mode, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
   });
 
+apps
+  .command("replay")
+  .description("Run a bounded, read-only historical replay without enabling provider writes")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--dataset <path>", "JSON object containing from, to, and normalized historical events")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable replay requester", "cli")
+  .action(async (installationId: string, options: { dataset: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    const dataset = await readJsonRecord(path.resolve(options.dataset));
+    await printAppTool("loopgraph_app_historical_replay", {
+      ...dataset,
+      projectRoot: options.project,
+      installationId,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("label")
+  .description("Label one replay decision as correct, incomplete, or false positive")
+  .argument("<run-id>", "Evaluation run ID")
+  .argument("<scenario-id>", "Replay scenario ID")
+  .requiredOption("--label <label>", "correct, incomplete, or false_positive")
+  .option("--minutes <number>", "Review time in minutes", "0")
+  .option("--notes <text>", "Optional reviewer note")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable reviewer identity", "cli")
+  .action(async (runId: string, scenarioId: string, options: { label: string; minutes: string; notes?: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_evaluation_label", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      runId,
+      scenarioId,
+      label: options.label,
+      reviewMinutes: Number(options.minutes),
+      notes: options.notes,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("recommendation")
+  .description("Derive a non-activating promotion recommendation from app quality evidence")
+  .argument("<installation-id>", "Installed app ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_promotion_recommendation", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      installationId
+    });
+  });
+
+apps
+  .command("configure")
+  .description("Apply confirmed setup values against an exact configuration digest")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--values <path>", "JSON object containing confirmed configuration values")
+  .requiredOption("--expected <digest>", "Current configuration digest from apps diff")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable configurer identity", "cli")
+  .action(async (installationId: string, options: { values: string; expected: string; project: string; actor: string }) => {
+    await printAppTool("loopgraph_app_configure", {
+      projectRoot: options.project,
+      installationId,
+      values: await readJsonRecord(path.resolve(options.values)),
+      expectedConfigurationDigest: options.expected,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("overlay")
+  .description("Apply a version-bound customization overlay without mutating the base app")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--file <path>", "JSON object containing an operations array")
+  .requiredOption("--expected <digest>", "Current installed artifact digest")
+  .option("--revision <number>", "Expected overlay revision", "0")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable editor identity", "cli")
+  .action(async (installationId: string, options: { file: string; expected: string; revision: string; project: string; actor: string }) => {
+    const overlay = await readJsonRecord(path.resolve(options.file));
+    await printAppTool("loopgraph_app_overlay_apply", {
+      projectRoot: options.project,
+      installationId,
+      operations: overlay.operations,
+      expectedArtifactDigest: options.expected,
+      expectedOverlayRevision: Number(options.revision),
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("repair")
+  .description("Recompile the exact pinned app and return it to write-blocked testing")
+  .argument("<installation-id>", "Installed app ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable repair identity", "cli")
+  .action(async (installationId: string, options: { project: string; actor: string }) => {
+    await printAppTool("loopgraph_app_repair", { projectRoot: options.project, installationId, actor: options.actor });
+  });
+
+apps
+  .command("duplicate")
+  .description("Create a namespaced private derived app with an optional initial overlay")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--id <private-app-id>", "Stable private derived app ID")
+  .option("--overlay <path>", "JSON object containing an operations array")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable duplicator identity", "cli")
+  .action(async (installationId: string, options: { id: string; overlay?: string; project: string; actor: string }) => {
+    const overlay = options.overlay ? await readJsonRecord(path.resolve(options.overlay)) : {};
+    await printAppTool("loopgraph_app_duplicate", {
+      projectRoot: options.project,
+      installationId,
+      derivedAppId: options.id,
+      overlayOperations: overlay.operations ?? [],
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("diff")
+  .description("Show base version, private overlay, revision history, and update availability")
+  .argument("<installation-id>", "Installed app ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (installationId: string, options: { project: string }) => {
+    await printAppTool("loopgraph_app_diff", { projectRoot: options.project, installationId });
+  });
+
+apps
+  .command("update-plan")
+  .description("Create a graph, permission, and three-way-overlay update plan")
+  .argument("<installation-id>", "Installed app ID")
+  .option("--version <range>", "Target semantic version or range", "latest")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable planner identity", "cli")
+  .action(async (installationId: string, options: { version: string; project: string; actor: string }) => {
+    await printAppTool("loopgraph_app_update_plan", { projectRoot: options.project, installationId, versionRange: options.version, actor: options.actor });
+  });
+
+apps
+  .command("update")
+  .description("Apply an exact unexpired app update plan after reviewing permission changes")
+  .requiredOption("--plan <path>", "Update plan JSON file")
+  .option("--approve <capabilities...>", "Explicitly approved changed permission capabilities")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable updater identity", "cli")
+  .action(async (options: { plan: string; approve?: string[]; project: string; actor: string }) => {
+    await printAppTool("loopgraph_app_update_apply", {
+      projectRoot: options.project,
+      plan: await readJsonRecord(path.resolve(options.plan)),
+      approvedPermissionCapabilities: options.approve ?? [],
+      actor: options.actor
+    });
+  });
+
+for (const action of ["rollback", "detach"] as const) {
+  apps
+    .command(action)
+    .description(action === "rollback" ? "Restore the exact prior installation revision" : "Pin a local immutable snapshot and stop upstream updates")
+    .argument("<installation-id>", "Installed app ID")
+    .requiredOption("--expected <digest>", "Current installed artifact digest")
+    .option("--project <root>", "Explicit project root", process.cwd())
+    .option("--actor <id>", "Accountable actor identity", "cli")
+    .action(async (installationId: string, options: { expected: string; project: string; actor: string }) => {
+      await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
+        projectRoot: options.project,
+        installationId,
+        expectedArtifactDigest: options.expected,
+        actor: options.actor
+      });
+    });
+}
+
+apps
+  .command("uninstall")
+  .description("Remove installation-owned assets while preserving shared resources and evidence")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--expected <digest>", "Current installed artifact digest")
+  .requiredOption("--reason <text>", "Accountable uninstall reason")
+  .option("--yes", "Explicitly confirm the uninstall")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--actor <id>", "Accountable uninstaller identity", "cli")
+  .action(async (installationId: string, options: { expected: string; reason: string; yes?: boolean; project: string; actor: string }) => {
+    if (!options.yes) throw new Error("apps uninstall requires --yes");
+    await printAppTool("loopgraph_app_uninstall", {
+      projectRoot: options.project,
+      installationId,
+      expectedArtifactDigest: options.expected,
+      reason: options.reason,
+      confirmed: true,
+      actor: options.actor
+    });
+  });
+
 measurementBindings
   .command("set")
   .description("Create or revise one exact metric-to-provider binding from a JSON contract")

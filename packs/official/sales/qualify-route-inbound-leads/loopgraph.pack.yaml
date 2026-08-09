@@ -129,9 +129,11 @@ entrypoints:
     - fixtures/duplicate-lead.json
     - fixtures/existing-customer.json
     - fixtures/ambiguous-account.json
+    - fixtures/low-confidence.json
     - fixtures/connector-unavailable.json
     - fixtures/missing-field.json
     - fixtures/approval-required.json
+    - fixtures/customer-facing-action.json
     - fixtures/outcome-unavailable.json
     - fixtures/retry-replay.json
     - fixtures/upgrade-rollback.json
@@ -143,4 +145,3 @@ ownership:
   reviewRoles: [sales_manager, revenue_operations]
   supportUrl: https://github.com/mrrkrieg/loopgraph/issues
 defaultRolloutMode: shadow
-

@@ -113,6 +113,29 @@ export class FileCompanyContextStore {
     await atomicWriteJson(this.filePath, next);
     return next;
   }
+
+  async detachConsumer(input: {
+    workspaceId: string;
+    companyId: string;
+    installationId: string;
+    actor: string;
+    now?: Date;
+  }): Promise<CompanyContext> {
+    const current = await this.get(input.workspaceId, input.companyId);
+    const timestamp = (input.now ?? new Date()).toISOString();
+    const next = companyContextSchema.parse({
+      ...current,
+      revision: current.revision + 1,
+      values: current.values.map((value) => ({
+        ...value,
+        consumerInstallationIds: value.consumerInstallationIds.filter((id) => id !== input.installationId)
+      })),
+      updatedAt: timestamp,
+      updatedBy: input.actor
+    });
+    await atomicWriteJson(this.filePath, next);
+    return next;
+  }
 }
 
 export function resolveAppConfiguration(input: {

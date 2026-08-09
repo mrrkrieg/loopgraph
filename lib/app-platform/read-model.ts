@@ -4,7 +4,10 @@ import type {
   AppEvalRun,
   AppInstallPlan,
   AppInstallationLock,
+  AppLifecycleReceipt,
+  AppPromotionRecommendation,
   AppReadiness,
+  AppUpdatePlan,
   AppSetupDefinition,
   AppSkillDefinition,
   LoopPackManifest,
@@ -83,8 +86,21 @@ export type InstalledAppsViewData = {
     app: MarketplaceApp;
   }>;
   readiness: AppReadiness[];
+  installedLoops: Array<{ installationId: string; loops: Array<{ id: string; name: string; path: string }> }>;
   evaluations: AppEvalRun[];
+  lifecycleReceipts: AppLifecycleReceipt[];
   lock?: AppInstallationLock;
+};
+
+export type InstalledAppDiff = {
+  installationId: string;
+  base: { appId: string; version: string; artifactDigest: string };
+  derivation?: WorkspaceAppInstallation["derivation"];
+  overlay?: WorkspaceAppInstallation["overlay"];
+  effectiveConfigurationDigest: string;
+  selectedModules: string[];
+  history: WorkspaceAppInstallation["history"];
+  updateAvailable?: { version: string; artifactDigest: string };
 };
 
 export type MarketplaceAppDetailView = MarketplaceAppDetail & {
@@ -174,6 +190,11 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   readiness: AppReadiness;
   evaluations: AppEvalRun[];
   detail: MarketplaceAppDetail;
+  promotionRecommendation: AppPromotionRecommendation;
+  diff: InstalledAppDiff;
+  updatePlan?: AppUpdatePlan;
+  lifecycleReceipts: AppLifecycleReceipt[];
+  installedLoops: Array<{ id: string; name: string; path: string }>;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const installed = await callLoopgraphAppTool("loopgraph_app_install_status", {
@@ -183,15 +204,38 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   const installation = installed.installations[0];
   const readiness = installed.readiness[0];
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
-  const detail = await callLoopgraphAppTool("loopgraph_app_get", {
-    projectRoot,
-    appId: installation.appId,
-    version: installation.version
-  }) as MarketplaceAppDetail;
+  const [detail, promotionRecommendation, diff] = await Promise.all([
+    callLoopgraphAppTool("loopgraph_app_get", {
+      projectRoot,
+      appId: installation.appId,
+      version: installation.version
+    }) as Promise<MarketplaceAppDetail>,
+    callLoopgraphAppTool("loopgraph_app_promotion_recommendation", {
+      projectRoot,
+      installationId
+    }) as Promise<AppPromotionRecommendation>,
+    callLoopgraphAppTool("loopgraph_app_diff", {
+      projectRoot,
+      installationId
+    }) as Promise<InstalledAppDiff>
+  ]);
+  const updatePlan = diff.updateAvailable
+    ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
+        projectRoot,
+        installationId,
+        versionRange: diff.updateAvailable.version,
+        actor: "loopgraph-browser"
+      }) as AppUpdatePlan
+    : undefined;
   return {
     installation,
     readiness,
     evaluations: installed.evaluations.filter((evaluation) => evaluation.installationId === installationId),
-    detail
+    detail,
+    promotionRecommendation,
+    diff,
+    updatePlan,
+    lifecycleReceipts: installed.lifecycleReceipts.filter((receipt) => receipt.installationId === installationId),
+    installedLoops: installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? []
   };
 }

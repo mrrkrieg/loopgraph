@@ -5,6 +5,7 @@ import {
   APP_INSTALL_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
   appEvalRunSchema,
+  appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
   appInstallationLockSchema,
   appPlatformJsonSchemas,
@@ -236,10 +237,46 @@ describe("Loopgraph App Platform contracts", () => {
     expect(() => appEvalRunSchema.parse({ ...base, writeBlocked: false })).toThrow(/block all writes/i);
   });
 
+  it("bounds historical replay by time window, event count, and event occurrence", () => {
+    const request = {
+      schemaVersion: APP_EVAL_SCHEMA_VERSION,
+      installationId: "install.sales.inbound",
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-08T00:00:00.000Z",
+      maxEvents: 1,
+      requestedAt: now,
+      requestedBy: "sales-manager",
+      events: [{
+        id: "historical-event-1",
+        occurredAt: "2026-08-02T00:00:00.000Z",
+        source: "hubspot",
+        eventType: "lead.created",
+        subject: { type: "lead", id: "lead-1" },
+        normalizedPayload: {},
+        evidenceRefs: [],
+        connectorState: "connected"
+      }]
+    } as const;
+    expect(appHistoricalReplayRequestSchema.parse(request).events).toHaveLength(1);
+    expect(() => appHistoricalReplayRequestSchema.parse({
+      ...request,
+      to: "2026-12-01T00:00:00.000Z"
+    })).toThrow(/90-day/i);
+    expect(() => appHistoricalReplayRequestSchema.parse({
+      ...request,
+      events: [{ ...request.events[0], occurredAt: "2026-07-01T00:00:00.000Z" }]
+    })).toThrow(/outside/i);
+  });
+
   it("exports the public schemas as JSON Schema", () => {
     const schemas = appPlatformJsonSchemas();
     expect(Object.keys(schemas)).toContain("LoopPackManifest");
     expect(Object.keys(schemas)).toContain("AppUpdatePlan");
+    expect(Object.keys(schemas)).toEqual(expect.arrayContaining([
+      "AppHistoricalReplayRequest",
+      "AppEvalJudgment",
+      "AppPromotionRecommendation"
+    ]));
     expect(JSON.stringify(schemas.LoopPackManifest)).toContain("loopgraph-pack/v1alpha1");
   });
 

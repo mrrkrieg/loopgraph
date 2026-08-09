@@ -283,6 +283,13 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("only after the user explicitly asks to write or refresh");
     expect(designSkill).toContain("Do not point provider webhooks directly at Loopgraph");
     expect(designSkill).toContain("loopgraph_loops_list");
+    expect(designSkill).toContain("## Loopgraph Apps");
+    expect(designSkill).toContain("loopgraph_marketplace_search");
+    expect(designSkill).toContain("loopgraph_app_install_plan");
+    expect(designSkill).toContain("loopgraph_app_historical_replay");
+    expect(designSkill).toContain("loopgraph_app_update_plan");
+    expect(designSkill).toContain("loopgraph_app_uninstall");
+    expect(designSkill).toContain("never authorizes activation");
     expect(routerSkill).toContain("name: loopgraph-event-router");
     expect(routerSkill).toContain(`skillProtocol: ${HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION}`);
     expect(routerSkill).toContain(`mcpProtocol: ${HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION}`);

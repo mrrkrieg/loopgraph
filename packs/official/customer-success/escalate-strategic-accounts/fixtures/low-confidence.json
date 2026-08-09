@@ -1,0 +1,1 @@
+{"id":"strategic-risk-low-confidence","eventType":"account.risk_detected","subject":{"type":"account","id":"account-306"},"normalizedPayload":{"ticketId":"306","accountId":"account-306","severity":"P1","renewalDaysRemaining":50,"confidence":0.41},"evidenceRefs":["support:ticket:306","crm:account:306"]}
