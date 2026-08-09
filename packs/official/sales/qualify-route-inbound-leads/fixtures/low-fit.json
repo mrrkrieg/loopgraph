@@ -1,0 +1,14 @@
+{
+  "id": "fixture-low-fit",
+  "scenario": "low_fit",
+  "eventType": "account.research_ready",
+  "subject": { "type": "lead", "id": "lead-low-fit" },
+  "normalizedPayload": {
+    "leadId": "lead-low-fit",
+    "accountBrief": { "employeeCount": 2, "revenue": 100000, "industry": "consumer_hobby" },
+    "icpDefinition": { "minimumEmployees": 50, "businessOnly": true },
+    "intentSignals": ["newsletter_signup"]
+  },
+  "evidenceRefs": ["evidence:crm:lead-low-fit", "evidence:crm:account-low-fit"],
+  "expected": { "action": "route", "loopId": "sales-inbound-lead-qualification", "qualification": "not_qualified" }
+}

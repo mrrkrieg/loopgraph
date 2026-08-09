@@ -1,0 +1,19 @@
+{
+  "id": "fixture-high-fit",
+  "scenario": "high_fit",
+  "eventType": "lead.created",
+  "subject": { "type": "lead", "id": "lead-high-fit" },
+  "normalizedPayload": {
+    "leadId": "lead-high-fit",
+    "email": "buyer@example-enterprise.test",
+    "company": "Example Enterprise",
+    "domain": "example-enterprise.test",
+    "employeeCount": 1200,
+    "revenue": 180000000,
+    "country": "US",
+    "title": "VP Operations",
+    "intentSignals": ["requested_demo", "pricing_reviewed"],
+    "existingCustomer": false
+  },
+  "expected": { "action": "route", "loopId": "sales-inbound-lead-intake", "laterQualification": "qualified" }
+}

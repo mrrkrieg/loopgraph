@@ -1,0 +1,16 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  crm.read: allowed
+  crm.update: approval_required
+  internal.notification: approval_required
+  email.draft: allowed
+  email.send: forbidden
+  money.movement: forbidden
+  ambiguous.identity: request_human
+  existing.customer: route_to_customer_success
+approval:
+  requireExactPreparedActionFingerprint: true
+  separateCustomerFacingApproval: true
+  expiresMinutes: 60
+

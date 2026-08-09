@@ -1,5 +1,6 @@
 .next
 node_modules
+packages/loopgraph/packs/
 .env
 .env.local
 .env.*.local

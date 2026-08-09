@@ -1,0 +1,11 @@
+id: salesforce-outlook-teams
+providers:
+  crm: salesforce
+  mail: outlook
+  messaging: teams
+recipe: salesforce-outlook-teams
+defaults:
+  customerFacingPolicy: draft_only
+  internalNotificationPolicy: approval_required
+  crmUpdatePolicy: approval_required
+

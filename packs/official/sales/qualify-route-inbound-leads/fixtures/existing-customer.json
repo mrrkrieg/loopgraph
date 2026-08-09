@@ -1,0 +1,8 @@
+{
+  "id": "fixture-existing-customer",
+  "scenario": "existing_customer",
+  "eventType": "lead.created",
+  "subject": { "type": "lead", "id": "lead-customer" },
+  "normalizedPayload": { "leadId": "lead-customer", "email": "admin@customer.test", "company": "Current Customer", "accountId": "account-customer", "existingCustomer": true },
+  "expected": { "action": "request_human", "reason": "Customer Success route is not installed; do not qualify as new demand." }
+}

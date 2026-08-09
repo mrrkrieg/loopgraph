@@ -1,0 +1,57 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-inbound-lead-routing
+  name: Lead Routing
+  version: 1.0.0
+  description: Select one accountable owner from confirmed territory rules and prepare exact CRM and internal-notification actions for approval.
+  department: sales
+  ownerRole: sales_operations
+  tags: [routing, territory, ownership]
+trigger: { type: event, source: loopgraph, event: lead.qualified }
+input:
+  requiredFields: [normalizedPayload.leadId, normalizedPayload.qualification, normalizedPayload.territoryRules, evidenceRefs]
+  subjectTypes: [lead]
+  fixtures:
+    - { id: approval-required, path: fixtures/approval-required.json }
+    - { id: connector-unavailable, path: fixtures/connector-unavailable.json }
+routine:
+  - { id: territory, name: Match territory, actor: system, type: assess, description: Apply the approved territory hierarchy and effective dates. }
+  - { id: owner, name: Resolve owner, actor: agent, type: decide, description: Select one eligible owner or abstain when rules conflict or capacity data is missing. }
+  - { id: prepare-crm, name: Prepare CRM update, actor: system, type: prepare, description: "Bind the exact lead, owner, stage, score, reason, and current source version." }
+  - { id: prepare-notice, name: Prepare internal notice, actor: system, type: prepare, description: Prepare a bounded internal notification with evidence links and no hidden customer action. }
+  - { id: verify, name: Verify approval packet, actor: system, type: verify, description: Require an exact action fingerprint and fresh owner eligibility before execution. }
+capabilities:
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Confirm current lead state before preparing a route., customerFacing: false }
+  - { key: crm.lead.update, authority: approve, risk: high, required: false, purpose: Apply the exact approved qualification and owner assignment., customerFacing: false }
+  - { key: messaging.channel.post, authority: approve, risk: medium, required: false, purpose: Post the exact approved routing summary to an internal channel., customerFacing: false }
+skills: [sales-icp-evaluation]
+outcomes:
+  - { metric: owner_acceptance_rate, description: Routed leads accepted by the assigned owner without correction., direction: increase, sourceCapability: crm.lead.read }
+  - { metric: routing_latency_minutes, description: Time from clear qualification to an approved owner assignment., direction: decrease, sourceCapability: crm.lead.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.lead_routing]
+  accepts:
+    - { sourcePattern: loopgraph, eventTypePattern: lead.qualified, subjectTypes: [lead], requiredFields: [normalizedPayload.leadId, normalizedPayload.qualification, normalizedPayload.territoryRules, evidenceRefs], reason: A qualification decision is ready and confirmed territory rules are available. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Action and lifecycle receipts append evidence rather than create new routing work. }
+  inputMapping: { leadId: normalizedPayload.leadId, qualification: normalizedPayload.qualification, territoryRules: normalizedPayload.territoryRules }
+  priority: 95
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.action.approved, loopgraph.action.executed, loopgraph.action.failed]
+  requiredConnections: [crm.lead.read]
+  examples:
+    shouldRoute: [A high-confidence qualified lead matches one active territory and owner.]
+    shouldNotRoute: [Two territory rules claim the same lead or the owner roster is stale.]
+policy:
+  forbiddenActions: []
+  escalationOwner: sales_operations
+  escalationSla: 15m
+  separateCustomerFacingApproval: true

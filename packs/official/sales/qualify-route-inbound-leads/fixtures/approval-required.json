@@ -1,0 +1,9 @@
+{
+  "id": "fixture-approval-required",
+  "scenario": "approval_required",
+  "eventType": "lead.qualified",
+  "subject": { "type": "lead", "id": "lead-approval" },
+  "normalizedPayload": { "leadId": "lead-approval", "qualification": { "score": 96, "decision": "qualified" }, "territoryRules": { "US-EAST": "owner-2" }, "proposedCrmUpdate": true },
+  "evidenceRefs": ["evidence:qualification:lead-approval"],
+  "expected": { "action": "route", "loopId": "sales-inbound-lead-routing", "approvalRequired": true, "providerWritesBeforeApproval": 0 }
+}

@@ -1,0 +1,58 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-inbound-qualification-learning
+  name: Qualification Learning
+  version: 1.0.0
+  description: Join qualification decisions with meetings, opportunities, reviewer corrections, and pipeline outcomes so Hermes learns which signals create business value.
+  department: sales
+  ownerRole: revenue_operations
+  tags: [learning, outcomes, calibration]
+trigger: { type: event, source: "*", event: sales.outcome_observed }
+input:
+  requiredFields: [normalizedPayload.leadId, normalizedPayload.originalDecision, normalizedPayload.outcome, evidenceRefs]
+  subjectTypes: [lead, opportunity]
+  fixtures:
+    - { id: outcome-unavailable, path: fixtures/outcome-unavailable.json }
+    - { id: retry-replay, path: fixtures/retry-replay.json }
+routine:
+  - { id: join, name: Join decision and outcome, actor: system, type: observe, description: "Link the outcome to the exact qualification version, lead identity, campaign, and evidence set." }
+  - { id: classify, name: Classify learning signal, actor: agent, type: assess, description: "Distinguish true positive, false positive, false negative, incomplete evidence, and process failure." }
+  - { id: measure, name: Measure value and burden, actor: system, type: verify, description: "Record conversion, duplicate suppression, latency, review minutes, and unavailable outcomes separately." }
+  - { id: recommend, name: Recommend bounded improvement, actor: agent, type: learn, description: "Propose threshold, field, or process changes without mutating the installed app." }
+capabilities:
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read the original lead decision and later lifecycle result., customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Attribute outcomes to the resolved account and segment., customerFacing: false }
+skills: [sales-icp-evaluation, sales-buying-signal-analysis]
+outcomes:
+  - { metric: meeting_conversion_rate, description: Qualified leads that produce accepted meetings., direction: increase, sourceCapability: crm.lead.read }
+  - { metric: opportunity_conversion_rate, description: Qualified leads that become accepted opportunities., direction: increase, sourceCapability: crm.lead.read }
+  - { metric: false_positive_rate, description: Qualified leads corrected as not qualified or rejected by owners., direction: decrease, sourceCapability: crm.lead.read }
+  - { metric: review_minutes_per_lead, description: Human review time required by the qualification system., direction: decrease, sourceCapability: crm.lead.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.qualification_learning]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: sales.outcome_observed, subjectTypes: [lead, opportunity], requiredFields: [normalizedPayload.leadId, normalizedPayload.originalDecision, normalizedPayload.outcome, evidenceRefs], reason: A durable business outcome can be joined to the exact prior qualification decision. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Generic lifecycle callbacks without a business outcome are not learning signals. }
+  inputMapping: { leadId: normalizedPayload.leadId, originalDecision: normalizedPayload.originalDecision, outcome: normalizedPayload.outcome }
+  priority: 60
+  minimumConfidence: 0.85
+  ambiguityPolicy: defer
+  noMatchPolicy: ignore
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 300, dedupeWindowSeconds: 2592000 }
+  concurrency: { maxActive: 10, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.improvement.proposed]
+  requiredConnections: [crm.lead.read, crm.account.read]
+  examples:
+    shouldRoute: [A qualified lead has an opportunity outcome tied to the original decision version.]
+    shouldNotRoute: [A status changed without a stable lead identity or original decision reference.]
+policy:
+  forbiddenActions:
+    - { capability: crm.lead.update, reason: Learning may propose an overlay change but cannot edit CRM records or app policy. }
+  escalationOwner: revenue_operations
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

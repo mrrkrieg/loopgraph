@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-icp-evaluation
+name: ICP Evaluation
+description: Evaluate evidence against the company-approved ICP and exclusion policy.
+department: sales
+goal: Produce an explainable fit decision that is specific to this company and safe to route.
+inputs: [approved ICP definition, exclusion rules, verified account brief, lead context, qualification thresholds]
+outputs: [fit score, positive factors, negative factors, exclusion result, confidence, missing evidence, decision or abstention]
+instructions:
+  - Apply explicit exclusions before positive scoring.
+  - Use the approved company context and installation configuration, never a generic ICP.
+  - Score only attributes supported by cited evidence.
+  - Distinguish missing evidence from evidence that fails a criterion.
+  - Route only above the confirmed threshold and request review inside the ambiguity band.
+boundaries:
+  - Never infer protected traits or use them as qualification inputs.
+  - Never silently change weights, thresholds, exclusions, or territory rules.
+  - Never qualify an existing customer into the new-lead route.
+requiredCapabilities: [crm.lead.read, crm.account.read]
+

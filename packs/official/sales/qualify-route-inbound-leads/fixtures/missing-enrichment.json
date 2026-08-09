@@ -1,0 +1,9 @@
+{
+  "id": "fixture-missing-enrichment",
+  "scenario": "missing_enrichment",
+  "eventType": "lead.intake_ready",
+  "subject": { "type": "account", "id": "account-missing-data" },
+  "normalizedPayload": { "accountId": "account-missing-data", "domain": "missing-data.test", "approvedMissingFields": ["employeeCount", "industry"] },
+  "evidenceRefs": ["evidence:crm:account-missing-data"],
+  "expected": { "action": "route", "loopId": "sales-inbound-account-research", "result": "evidence_gap" }
+}

@@ -1,0 +1,57 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-inbound-account-research
+  name: Account Research
+  version: 1.0.0
+  description: Assemble a bounded, provenance-aware account brief and identify missing firmographic evidence without inventing facts.
+  department: sales
+  ownerRole: revenue_operations
+  tags: [account, research, evidence]
+trigger: { type: event, source: loopgraph, event: lead.intake_ready }
+input:
+  requiredFields: [normalizedPayload.accountId, normalizedPayload.domain, evidenceRefs]
+  subjectTypes: [account, lead]
+  fixtures:
+    - { id: missing-enrichment, path: fixtures/missing-enrichment.json }
+    - { id: ambiguous-account, path: fixtures/ambiguous-account.json }
+routine:
+  - { id: load, name: Load account record, actor: system, type: observe, description: Read the matched CRM account and retain field-level provenance. }
+  - { id: gaps, name: Identify evidence gaps, actor: agent, type: assess, description: Compare available attributes with the approved ICP fields. }
+  - { id: enrich, name: Request bounded enrichment, actor: system, type: prepare, description: Query only missing approved fields when enrichment is connected. }
+  - { id: verify, name: Verify account brief, actor: agent, type: verify, description: Mark unverified and conflicting values and request a human when one company cannot be identified. }
+capabilities:
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read the matched company and its current CRM attributes., customerFacing: false }
+  - { key: enrichment.account.read, authority: read, risk: medium, required: false, purpose: Retrieve only missing approved firmographic fields., customerFacing: false }
+skills: [sales-account-research]
+outcomes:
+  - { metric: account_context_coverage, description: Required qualification attributes supported by evidence., direction: increase, sourceCapability: crm.account.read }
+  - { metric: account_identity_correction_rate, description: Research briefs corrected by reviewers before routing., direction: decrease, sourceCapability: crm.account.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.account_research]
+  accepts:
+    - { sourcePattern: loopgraph, eventTypePattern: lead.intake_ready, subjectTypes: [account, lead], requiredFields: [normalizedPayload.accountId, normalizedPayload.domain, evidenceRefs], reason: Intake established a candidate account that needs qualification evidence. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle callbacks return evidence instead of opening research work. }
+  inputMapping: { accountId: normalizedPayload.accountId, domain: normalizedPayload.domain }
+  priority: 80
+  minimumConfidence: 0.85
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 60, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 10, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed]
+  requiredConnections: [crm.account.read]
+  examples:
+    shouldRoute: [A lead was matched to one company domain and the approved ICP fields need evidence.]
+    shouldNotRoute: [Two companies share the same unverified domain and no stable account ID exists.]
+policy:
+  forbiddenActions:
+    - { capability: crm.lead.update, reason: Research produces evidence and never mutates qualification fields. }
+  escalationOwner: revenue_operations
+  escalationSla: 2h
+  separateCustomerFacingApproval: true
+

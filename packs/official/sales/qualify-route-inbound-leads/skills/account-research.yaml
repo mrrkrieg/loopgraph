@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-account-research
+name: Account Research
+description: Build a bounded, provenance-aware company brief for lead qualification.
+department: sales
+goal: Establish which company is affected and which verified facts are relevant to the approved ICP.
+inputs: [resolved account identity, approved ICP fields, CRM account evidence, optional enrichment evidence]
+outputs: [account brief, field-level provenance, missing evidence list, identity ambiguity decision]
+instructions:
+  - Begin with provider and entity-resolution evidence already attached to the problem.
+  - Query only approved fields that are missing from the CRM record.
+  - Keep observed, provider-reported, inferred, conflicting, and missing values distinct.
+  - Cite a source reference for every field used by qualification.
+  - Abstain when one legal or operating company cannot be established confidently.
+boundaries:
+  - Never browse or collect personal data unrelated to a business qualification decision.
+  - Never treat an unverified company name or email domain as a definitive account match.
+  - Never mutate CRM data from the research skill.
+requiredCapabilities: [crm.account.read]
+
