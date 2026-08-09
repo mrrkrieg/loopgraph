@@ -1,0 +1,8 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: support-ticket-triage-outcomes
+metrics:
+  - { id: support_triage_latency_minutes, direction: decrease, description: Time from ticket creation to accountable triage. }
+  - { id: first_response_sla_attainment, direction: increase, description: Tickets receiving a reviewed response within policy. }
+  - { id: escalation_precision, direction: increase, description: Escalations confirmed as materially high risk. }
+  - { id: classification_correction_rate, direction: decrease, description: Triage decisions corrected by reviewers. }
+  - { id: support_review_minutes, direction: decrease, description: Human review burden per ticket. }

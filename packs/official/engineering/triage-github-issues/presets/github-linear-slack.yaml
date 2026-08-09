@@ -1,0 +1,7 @@
+id: github-linear-slack
+providers: { repository: github, project: linear, messaging: slack }
+recipe: github-linear-slack
+defaults:
+  publicResponsePolicy: draft_only
+  issueMutationPolicy: approval_required
+  securityEscalationPolicy: approval_required

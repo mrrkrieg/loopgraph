@@ -306,16 +306,21 @@ function evaluateQualityEvent(event: QualityEvent, compiled: CompiledLoopPack): 
   if (event.connectorState !== "connected") {
     return { action: "defer", loopId: primaryCandidate?.loopId, approvalRequired: false, reason: `Connector state is ${event.connectorState}; replay cannot assume provider availability.` };
   }
-  if (Array.isArray(event.normalizedPayload.candidateAccountIds) && event.normalizedPayload.candidateAccountIds.length > 1) {
-    return { action: "request_human", loopId: primaryCandidate?.loopId, approvalRequired: false, reason: "Multiple company identities match the event." };
+  const candidateSubjectIds = Array.isArray(event.normalizedPayload.candidateSubjectIds)
+    ? event.normalizedPayload.candidateSubjectIds
+    : event.normalizedPayload.candidateAccountIds;
+  if (Array.isArray(candidateSubjectIds) && candidateSubjectIds.length > 1) {
+    return { action: "request_human", loopId: primaryCandidate?.loopId, approvalRequired: false, reason: "Multiple subject identities match the event." };
   }
-  if (event.normalizedPayload.existingCustomer === true) {
-    return { action: "request_human", approvalRequired: false, reason: "Existing-customer handling is excluded from the inbound-sales app." };
+  if (event.normalizedPayload.excluded === true || event.normalizedPayload.existingCustomer === true) {
+    return { action: "request_human", approvalRequired: false, reason: "The event matches an explicit app exclusion and requires a bounded alternate route or human decision." };
   }
   if (typeof event.normalizedPayload.permissionChange === "string") {
     return { action: "request_human", approvalRequired: true, reason: "Permission changes require explicit update review and a rollback plan." };
   }
-  if (typeof event.normalizedPayload.matchedLeadId === "string" || Number(event.normalizedPayload.deliveryAttempt ?? 0) > 1) {
+  if (typeof event.normalizedPayload.matchedProblemId === "string" ||
+      typeof event.normalizedPayload.matchedLeadId === "string" ||
+      Number(event.normalizedPayload.deliveryAttempt ?? 0) > 1) {
     return { action: "append_evidence", loopId: primaryCandidate?.loopId, approvalRequired: false, reason: "The event is additional evidence for existing work and cannot create duplicate work." };
   }
   const confidence = Number(event.normalizedPayload.confidence ?? 1);

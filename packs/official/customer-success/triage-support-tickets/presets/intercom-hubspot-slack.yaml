@@ -1,0 +1,7 @@
+id: intercom-hubspot-slack
+providers: { support: intercom, crm: hubspot, messaging: slack }
+recipe: intercom-hubspot-slack
+defaults:
+  ticketMutationPolicy: approval_required
+  customerResponsePolicy: draft_only
+  internalNotificationPolicy: approval_required

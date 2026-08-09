@@ -1,0 +1,1 @@
+{"id":"github-issue-ambiguous","eventType":"github.issue_opened","subject":{"type":"repository_issue","id":"issue-105"},"normalizedPayload":{"issueId":"105","title":"Shared component fails","body":"The component is mirrored in two repositories.","candidateSubjectIds":["repo-a:105","repo-b:105"],"confidence":0.92},"evidenceRefs":["github:issue:105"]}

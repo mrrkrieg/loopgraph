@@ -1,0 +1,1 @@
+{"id":"github-issue-excluded","eventType":"github.issue_opened","subject":{"type":"repository_issue","id":"issue-103"},"normalizedPayload":{"issueId":"103","title":"Automated dependency notice","body":"Generated notification handled by the dependency service.","excluded":true,"confidence":0.99},"evidenceRefs":["github:issue:103","policy:dependency-bot"]}

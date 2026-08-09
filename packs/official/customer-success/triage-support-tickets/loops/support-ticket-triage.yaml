@@ -1,0 +1,63 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: customer-success-support-ticket-triage
+  name: Support Ticket Triage
+  version: 1.0.0
+  description: Normalize support demand, join approved account context, classify urgency, prepare bounded routing and response work, and learn from resolution.
+  department: customer_success
+  ownerRole: support_queue_owner
+  tags: [support, triage, escalation]
+trigger: { type: event, source: "*", event: support.ticket_created }
+input:
+  requiredFields: [normalizedPayload.ticketId, normalizedPayload.summary, normalizedPayload.priority]
+  subjectTypes: [support_ticket, conversation]
+  fixtures:
+    - { id: normal-ticket, path: fixtures/happy.json }
+    - { id: incomplete-ticket, path: fixtures/missing-context.json }
+routine:
+  - { id: normalize, name: Normalize support event, actor: system, type: observe, description: Translate provider payloads into one durable support-ticket identity and append duplicate evidence safely. }
+  - { id: context, name: Assemble customer context, actor: system, type: observe, description: "Join approved account, tier, ownership, incident, and service-level context when available." }
+  - { id: assess, name: Assess urgency and risk, actor: agent, type: assess, description: "Classify intent, urgency, business impact, sentiment, and escalation risk with explicit evidence." }
+  - { id: route, name: Select accountable route, actor: agent, type: decide, description: Select one clear queue and owner or ask a human when evidence or identity is ambiguous. }
+  - { id: prepare, name: Prepare response work, actor: system, type: prepare, description: Prepare an internal update and customer-response draft without sending or mutating the provider. }
+  - { id: learn, name: Learn from resolution, actor: system, type: learn, description: "Return response time, resolution, escalation, and reviewer corrections as evidence." }
+capabilities:
+  - { key: support.ticket.read, authority: read, risk: low, required: true, purpose: Read the source ticket and its durable identity., customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: low, required: false, purpose: Join approved account and renewal context., customerFacing: false }
+  - { key: support.ticket.update, authority: approve, risk: high, required: false, purpose: "Apply an exact approved queue, priority, owner, or internal note.", customerFacing: false }
+  - { key: support.message.draft, authority: draft, risk: medium, required: false, purpose: Prepare a customer response draft for review., customerFacing: true }
+  - { key: messaging.channel.post, authority: approve, risk: medium, required: false, purpose: Notify the accountable support or escalation channel., customerFacing: false }
+skills: [customer-success-support-risk-triage]
+outcomes:
+  - { metric: support_triage_latency_minutes, description: Time from ticket creation to an accountable triage decision., direction: decrease, sourceCapability: support.ticket.read }
+  - { metric: first_response_sla_attainment, description: Fraction of tickets receiving a reviewed response within policy., direction: increase, sourceCapability: support.ticket.read }
+  - { metric: escalation_precision, description: Fraction of escalations confirmed as materially high risk., direction: increase, sourceCapability: support.ticket.read }
+  - { metric: support_review_minutes, description: Human review time required per processed ticket., direction: decrease, sourceCapability: support.ticket.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer.support_request]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: support.ticket_created, subjectTypes: [support_ticket, conversation], requiredFields: [normalizedPayload.ticketId, normalizedPayload.summary, normalizedPayload.priority], reason: A new support request contains the minimum evidence required for triage. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle evidence updates existing support work and cannot create a duplicate ticket problem. }
+  inputMapping: { ticketId: normalizedPayload.ticketId, summary: normalizedPayload.summary, priority: normalizedPayload.priority }
+  priority: 85
+  minimumConfidence: 0.82
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.ticket.read]
+  examples:
+    shouldRoute: [A signed support event contains a ticket ID, summary, and provider priority.]
+    shouldNotRoute: [A duplicate delivery arrives., Ticket content is incomplete., Customer identity has multiple matches.]
+policy:
+  forbiddenActions:
+    - { capability: support.ticket.update, reason: Ticket mutations require exact prepared-action approval. }
+  escalationOwner: support_queue_owner
+  escalationSla: 15m
+  separateCustomerFacingApproval: true
