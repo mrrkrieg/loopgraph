@@ -223,6 +223,31 @@ npm run loopgraph -- apps recommendation <installation-id>
 
 Historical replay is limited to 500 events and 90 days, records no raw provider credentials, blocks all provider writes, keeps entity resolution and routing constraints active, and cannot promote an app automatically.
 
+Installed Apps also support a complete governed lifecycle through the same Hermes service:
+
+```bash
+# Inspect the immutable base, effective configuration, overlay, and history
+npm run loopgraph -- apps diff <installation-id>
+
+# Company-specific changes always return to write-blocked testing
+npm run loopgraph -- apps configure <installation-id> --values company-values.json --expected <configuration-digest>
+npm run loopgraph -- apps overlay <installation-id> --file overlay.json --expected <artifact-digest>
+npm run loopgraph -- apps repair <installation-id>
+
+# Create a private variant without colliding with the upstream LoopSpecs
+npm run loopgraph -- apps duplicate <installation-id> --id private.sales.my-lead-qualification
+
+# Review graph, permission, and overlay changes before an update
+npm run --silent loopgraph -- apps update-plan <installation-id> > update-plan.json
+npm run loopgraph -- apps update --plan update-plan.json --approve crm.lead.update
+
+# Recovery and removal are bound to the exact artifact currently installed
+npm run loopgraph -- apps rollback <installation-id> --expected <artifact-digest>
+npm run loopgraph -- apps uninstall <installation-id> --expected <artifact-digest> --reason "Replaced by private variant" --yes
+```
+
+Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach pins a local immutable snapshot. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

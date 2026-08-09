@@ -998,6 +998,35 @@ export class AppInstallationService {
     return createPromotionRecommendation({ installationId, evaluations: registry.evaluations, now });
   }
 
+  async diff(installationId: string): Promise<{
+    installationId: string;
+    base: { appId: string; version: string; artifactDigest: string };
+    derivation?: WorkspaceAppInstallation["derivation"];
+    overlay?: AppOverlay;
+    effectiveConfigurationDigest: string;
+    selectedModules: string[];
+    history: WorkspaceAppInstallation["history"];
+    updateAvailable?: { version: string; artifactDigest: string };
+  }> {
+    const registry = await this.installationStore.read();
+    const installation = requireInstallation(registry, installationId);
+    let updateAvailable: { version: string; artifactDigest: string } | undefined;
+    if (!installation.derivation?.detachedAt) {
+      const latest = await this.marketplace.resolveAppVersion(installation.appId, "latest");
+      if (latest.digest !== installation.artifactDigest) updateAvailable = { version: latest.version, artifactDigest: latest.digest };
+    }
+    return {
+      installationId,
+      base: { appId: installation.appId, version: installation.version, artifactDigest: installation.artifactDigest },
+      derivation: installation.derivation,
+      overlay: installation.overlay,
+      effectiveConfigurationDigest: canonicalAppDigest(installation.configuration),
+      selectedModules: installation.selectedModules,
+      history: installation.history,
+      updateAvailable
+    };
+  }
+
   async activate(installationId: string, mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval" | "live">, actor: string): Promise<WorkspaceAppInstallation> {
     return this.transition(installationId, mode, actor, (installation, registry) => {
       const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installationId && run.status === "passed");

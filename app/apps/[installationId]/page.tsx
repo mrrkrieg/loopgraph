@@ -6,9 +6,16 @@ import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
 import {
   activateInstalledAppAction,
+  applyInstalledAppUpdateAction,
+  configureInstalledAppAction,
+  detachInstalledAppAction,
+  duplicateInstalledAppAction,
   labelAppEvaluationAction,
+  overlayInstalledAppAction,
   operateInstalledAppAction,
-  replayInstalledAppAction
+  replayInstalledAppAction,
+  rollbackInstalledAppAction,
+  uninstallInstalledAppAction
 } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +31,7 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
   }
   const latestSynthetic = data.evaluations.filter((evaluation) => evaluation.level === "synthetic").at(-1);
   const latestReplay = data.evaluations.filter((evaluation) => evaluation.level === "historical_replay").at(-1);
+  const installedLoopByName = new Map(data.installedLoops.map((loop) => [loop.name, loop]));
   return (
     <>
       <div className="mb-4 text-sm text-ink/50"><Link className="hover:text-ink" href="/apps">Installed Apps</Link> / {data.detail.app.name}</div>
@@ -49,7 +57,13 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
           </SectionCard>
 
           <SectionCard title="Installed loops" description="These LoopSpecs remain independently inspectable under Advanced, while this page operates them as one business application.">
-            <div className="grid gap-3 sm:grid-cols-2">{data.detail.loops.map((loop) => <Link className="rounded-md border border-line p-4 hover:border-ink" href={`/loops/${encodeURIComponent(loop.id)}`} key={loop.id}><div className="font-semibold">{loop.name}</div><p className="mt-2 text-sm leading-6 text-ink/55">{loop.description}</p></Link>)}</div>
+            <div className="grid gap-3 sm:grid-cols-2">{data.detail.loops.map((loop) => {
+              const installedLoop = installedLoopByName.get(loop.name);
+              const content = <><div className="font-semibold">{loop.name}</div><p className="mt-2 text-sm leading-6 text-ink/55">{loop.description}</p></>;
+              return installedLoop
+                ? <Link className="rounded-md border border-line p-4 hover:border-ink" href={`/loops/${encodeURIComponent(installedLoop.id)}`} key={loop.id}>{content}</Link>
+                : <div className="rounded-md border border-line p-4" key={loop.id}>{content}</div>;
+            })}</div>
           </SectionCard>
 
           <SectionCard title="Historical preview" description="Replay a bounded normalized event set through the installed app. The engine records decisions and review burden but cannot write to a provider or promote the app.">
@@ -112,6 +126,77 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
           <SectionCard title="Capability and permission bindings">
             <div className="overflow-x-auto"><table className="w-full min-w-[42rem] text-left text-sm"><thead className="text-xs uppercase tracking-[0.1em] text-ink/40"><tr><th className="pb-3">Capability</th><th className="pb-3">Provider binding</th><th className="pb-3">Authority</th><th className="pb-3">Decision</th></tr></thead><tbody className="divide-y divide-line">{data.installation.permissions.map((permission) => <tr key={permission.capability}><td className="py-3 font-mono text-xs">{permission.capability}</td><td className="py-3 font-mono text-xs">{data.installation.connectionBindings[permission.capability] ?? "not connected"}</td><td className="py-3 capitalize">{permission.authority}</td><td className="py-3 capitalize">{permission.decision.replace(/_/g, " ")}</td></tr>)}</tbody></table></div>
           </SectionCard>
+
+          <SectionCard title="Customize and maintain" description="Company changes stay in a version-bound overlay. Every change returns the app to write-blocked testing; the immutable marketplace artifact is never edited in place.">
+            <div className="space-y-3">
+              <details className="rounded-md border border-line p-4">
+                <summary className="cursor-pointer text-sm font-semibold">Change confirmed setup</summary>
+                <form action={configureInstalledAppAction} className="mt-4 space-y-3">
+                  <input name="installationId" type="hidden" value={data.installation.id} />
+                  <input name="expectedConfigurationDigest" type="hidden" value={data.diff.effectiveConfigurationDigest} />
+                  <textarea className="min-h-40 w-full rounded-md border border-line p-3 font-mono text-xs" defaultValue={JSON.stringify(data.installation.configuration.values, null, 2)} name="values" required />
+                  <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">Save and require retest</button>
+                </form>
+              </details>
+
+              <details className="rounded-md border border-line p-4">
+                <summary className="cursor-pointer text-sm font-semibold">Edit company overlay</summary>
+                <form action={overlayInstalledAppAction} className="mt-4 space-y-3">
+                  <input name="installationId" type="hidden" value={data.installation.id} />
+                  <input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} />
+                  <input name="expectedOverlayRevision" type="hidden" value={data.installation.overlay?.revision ?? 0} />
+                  <textarea className="min-h-40 w-full rounded-md border border-line p-3 font-mono text-xs" defaultValue={JSON.stringify({ operations: data.installation.overlay?.operations ?? [] }, null, 2)} name="overlay" required />
+                  <p className="text-xs leading-5 text-ink/50">Supported operations set/remove <code>/values/…</code> fields or enable/disable declared modules. Unknown paths fail closed.</p>
+                  <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" type="submit">Apply overlay and retest</button>
+                </form>
+              </details>
+
+              <details className="rounded-md border border-line p-4">
+                <summary className="cursor-pointer text-sm font-semibold">Duplicate as a private app</summary>
+                <form action={duplicateInstalledAppAction} className="mt-4 space-y-3">
+                  <input name="installationId" type="hidden" value={data.installation.id} />
+                  <label className="block text-xs font-semibold uppercase tracking-[0.1em] text-ink/45" htmlFor="derivedAppId">Private app ID</label>
+                  <input className="w-full rounded-md border border-line px-3 py-2 font-mono text-sm" id="derivedAppId" name="derivedAppId" placeholder="private.sales.my-lead-qualification" required />
+                  <label className="block text-xs font-semibold uppercase tracking-[0.1em] text-ink/45" htmlFor="duplicateOverlay">Optional initial overlay</label>
+                  <textarea className="min-h-28 w-full rounded-md border border-line p-3 font-mono text-xs" defaultValue={'{"operations":[]}'} id="duplicateOverlay" name="overlay" />
+                  <button className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold hover:border-ink" type="submit">Create private duplicate</button>
+                </form>
+              </details>
+            </div>
+          </SectionCard>
+
+          {data.updatePlan ? (
+            <SectionCard title={`Update available · v${data.updatePlan.toVersion}`} description="Updates are three-way merges: original base + company overlay + new immutable base. Permission increases and conflicts require explicit review.">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md bg-surface p-4"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">Graph change</div><div className="mt-2 text-sm">+{data.updatePlan.graphDiff.nodesAdded.length} / −{data.updatePlan.graphDiff.nodesRemoved.length} nodes</div></div>
+                <div className="rounded-md bg-surface p-4"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">Overlay conflicts</div><div className="mt-2 text-sm">{data.updatePlan.merge.conflicts.length}</div></div>
+              </div>
+              <form action={applyInstalledAppUpdateAction} className="mt-4 space-y-3">
+                <input name="installationId" type="hidden" value={data.installation.id} />
+                <textarea className="hidden" name="plan" readOnly value={JSON.stringify(data.updatePlan)} />
+                {data.updatePlan.permissionChanges.filter((change) => change.change !== "unchanged").map((change) => (
+                  <label className="flex items-start gap-3 rounded-md border border-line p-3 text-sm" key={`${change.capability}:${change.authority}`}>
+                    <input className="mt-1" name="approvedPermissionCapabilities" required={change.requiresReview} type="checkbox" value={change.capability} />
+                    <span><span className="font-mono text-xs">{change.capability}</span><span className="ml-2 capitalize text-ink/55">{change.change.replace(/_/g, " ")}</span></span>
+                  </label>
+                ))}
+                {data.updatePlan.merge.conflicts.length > 0 ? <p className="rounded-md bg-orange-50 p-3 text-sm text-orange-900">Resolve overlay conflicts through Hermes or the CLI before applying this update.</p> : null}
+                <button className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40" disabled={data.updatePlan.merge.conflicts.length > 0} type="submit">Apply reviewed update</button>
+              </form>
+            </SectionCard>
+          ) : null}
+
+          <SectionCard title="Lifecycle history" description="Every configuration, overlay, repair, duplicate, update, rollback, detach, and uninstall decision receives an accountable receipt.">
+            {data.lifecycleReceipts.length > 0 ? <div className="space-y-2">{data.lifecycleReceipts.slice().reverse().map((receipt) => <div className="rounded-md border border-line p-3" key={receipt.id}><div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold capitalize">{receipt.action.replace(/_/g, " ")}</span><span className="text-xs text-ink/40">{new Date(receipt.createdAt).toLocaleString()}</span></div><p className="mt-2 text-xs leading-5 text-ink/55">{receipt.reason}</p></div>)}</div> : <p className="text-sm text-ink/55">No lifecycle mutations have been recorded after installation.</p>}
+          </SectionCard>
+
+          <SectionCard title="Danger zone" description="These operations require the current immutable digest so a stale browser tab cannot change a newer installation.">
+            <div className="space-y-3">
+              {data.diff.history.length > 0 ? <form action={rollbackInstalledAppAction} className="rounded-md border border-orange-200 bg-orange-50 p-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><div className="text-sm font-semibold text-orange-950">Roll back to the prior exact revision</div><p className="mt-1 text-xs leading-5 text-orange-900/70">The restored revision returns to simulation and must pass conformance again.</p><button className="mt-3 rounded-md border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-950" type="submit">Roll back</button></form> : null}
+              {data.installation.derivation && !data.installation.derivation.detachedAt ? <form action={detachInstalledAppAction} className="rounded-md border border-orange-200 bg-orange-50 p-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><div className="text-sm font-semibold text-orange-950">Detach private app from upstream</div><p className="mt-1 text-xs leading-5 text-orange-900/70">Pins a local immutable snapshot and permanently disables upstream updates.</p><button className="mt-3 rounded-md border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-950" type="submit">Detach from upstream</button></form> : null}
+              <details className="rounded-md border border-red-200 bg-red-50 p-4"><summary className="cursor-pointer text-sm font-semibold text-red-950">Uninstall app</summary><form action={uninstallInstalledAppAction} className="mt-4 space-y-3"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><input className="w-full rounded-md border border-red-200 bg-white px-3 py-2 text-sm" name="reason" placeholder="Why is this app being removed?" required /><input className="w-full rounded-md border border-red-200 bg-white px-3 py-2 font-mono text-sm" name="confirmation" placeholder="Type UNINSTALL" required /><p className="text-xs leading-5 text-red-900/70">Only exclusively owned generated assets are removed. Shared connections, mappings, company context, identities, and evidence remain.</p><button className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white" type="submit">Uninstall owned assets</button></form></details>
+            </div>
+          </SectionCard>
         </div>
 
         <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
@@ -122,6 +207,7 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
               {data.installation.state === "simulation_passed" ? <ActivationForm installationId={data.installation.id} mode="shadow" label="Activate in shadow" /> : null}
               {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationForm installationId={data.installation.id} mode="recommend" label="Promote to recommend" /> : null}
               {data.installation.state === "paused" ? <OperationForm action="resume" installationId={data.installation.id} label="Resume app" primary /> : <OperationForm action="pause" installationId={data.installation.id} label="Pause app" />}
+              <OperationForm action="repair" installationId={data.installation.id} label="Repair generated assets" />
             </div>
           </SectionCard>
           <SectionCard title="Pinned installation">
@@ -138,7 +224,7 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
 
 function ScoreCard({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="rounded-xl border border-line bg-white p-4 shadow-sm"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold capitalize">{value}</div><div className="mt-1 text-xs text-ink/45">{detail}</div></div>; }
 function Definition({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="border-b border-line py-3 last:border-0"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className={`mt-1 break-all text-xs text-ink/65 ${mono ? "font-mono" : ""}`}>{value}</div></div>; }
-function OperationForm({ action, installationId, label, primary = false }: { action: "test" | "pause" | "resume"; installationId: string; label: string; primary?: boolean }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} /><button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
+function OperationForm({ action, installationId, label, primary = false }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} /><button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
 function ActivationForm({ installationId, mode, label }: { installationId: string; mode: "shadow" | "recommend"; label: string }) { return <form action={activateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="mode" type="hidden" value={mode} /><button className="w-full rounded-md bg-ink px-4 py-2.5 text-sm font-semibold text-white" type="submit">{label}</button></form>; }
 function EvaluationLabelForm({ installationId, runId, scenarioId, label }: { installationId: string; runId: string; scenarioId: string; label: "correct" | "incomplete" | "false_positive" }) { return <form action={labelAppEvaluationAction} className="flex items-center rounded-md border border-line bg-white"><input name="installationId" type="hidden" value={installationId} /><input name="runId" type="hidden" value={runId} /><input name="scenarioId" type="hidden" value={scenarioId} /><input name="label" type="hidden" value={label} /><label className="sr-only" htmlFor={`${scenarioId}-${label}-minutes`}>Review minutes</label><input className="w-12 border-r border-line px-2 py-1.5 text-xs" defaultValue="1" id={`${scenarioId}-${label}-minutes`} min="0" name="reviewMinutes" step="0.5" type="number" /><button className="px-3 py-1.5 text-xs font-semibold capitalize hover:bg-surface" type="submit">{label.replace(/_/g, " ")}</button></form>; }
 function nextAction(state: string, readiness: string) { if (state === "ready_to_test" || state === "broken") return "Run the deterministic, write-blocked conformance suite and inspect every failure."; if (state === "simulation_passed") return "Activate in shadow mode to observe real routing without committing provider work."; if (readiness === "ready_for_recommend") return "Review shadow evidence, false positives, and human burden before recommendation mode."; if (state === "paused") return "Resolve the pause reason before resuming at the previous safe mode."; return "Monitor routing quality, approvals, failures, review burden, and outcomes."; }
