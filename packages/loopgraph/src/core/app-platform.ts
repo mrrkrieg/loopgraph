@@ -114,6 +114,25 @@ export const appAssetKindSchema = z.enum([
 export const permissionRiskSchema = z.enum(["low", "medium", "high", "critical"]);
 export const permissionModeSchema = z.enum(["required", "optional"]);
 export const actionAuthoritySchema = z.enum(["read", "draft", "approve", "execute"]);
+export const LOOP_PACK_SIGNATURE_SCHEMA_VERSION = "loopgraph-pack-signature/v1alpha1" as const;
+
+export const loopPackSignatureSchema = z.object({
+  schemaVersion: z.literal(LOOP_PACK_SIGNATURE_SCHEMA_VERSION),
+  publisherId: appIdSchema,
+  digest: artifactDigestSchema,
+  algorithm: z.enum(["ed25519", "ecdsa-p256-sha256"]),
+  keyId: appIdSchema,
+  publicKey: z.string().min(32),
+  value: z.string().min(32),
+  signedAt: isoDateTimeSchema
+}).strict();
+
+export const publisherTrustKeySchema = z.object({
+  publisherId: appIdSchema,
+  keyId: appIdSchema,
+  algorithm: z.enum(["ed25519", "ecdsa-p256-sha256"]),
+  publicKey: z.string().min(32)
+}).strict();
 
 const publisherSchema = z.object({
   id: appIdSchema,
@@ -253,7 +272,9 @@ export const loopPackArtifactSchema = z.object({
     builderId: z.string().min(1).optional(),
     signature: z.object({
       algorithm: z.enum(["ed25519", "ecdsa-p256-sha256"]),
+      publisherId: appIdSchema,
       keyId: z.string().min(1),
+      publicKey: z.string().min(32),
       value: z.string().min(1)
     }).strict().optional()
   }).strict()
@@ -313,6 +334,7 @@ export const marketplaceCatalogSourceSchema = z.object({
   expectedDigest: artifactDigestSchema.optional(),
   enabled: z.boolean().default(true),
   trustPolicy: z.enum(["official_only", "signed", "explicit_local"]),
+  trustedPublisherKeys: z.array(publisherTrustKeySchema).default([]),
   refreshedAt: isoDateTimeSchema.optional()
 }).strict();
 
@@ -823,6 +845,8 @@ export const appLifecycleReceiptSchema = z.object({
 
 export type LoopPackManifest = z.infer<typeof loopPackManifestSchema>;
 export type LoopPackArtifact = z.infer<typeof loopPackArtifactSchema>;
+export type LoopPackSignature = z.infer<typeof loopPackSignatureSchema>;
+export type PublisherTrustKey = z.infer<typeof publisherTrustKeySchema>;
 export type MarketplaceApp = z.infer<typeof marketplaceAppSchema>;
 export type MarketplaceAppVersion = z.infer<typeof marketplaceAppVersionSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
@@ -854,6 +878,8 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
   return {
     LoopPackManifest: zodToJsonSchema(loopPackManifestSchema, "LoopPackManifest") as Record<string, unknown>,
     LoopPackArtifact: zodToJsonSchema(loopPackArtifactSchema, "LoopPackArtifact") as Record<string, unknown>,
+    LoopPackSignature: zodToJsonSchema(loopPackSignatureSchema, "LoopPackSignature") as Record<string, unknown>,
+    PublisherTrustKey: zodToJsonSchema(publisherTrustKeySchema, "PublisherTrustKey") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,

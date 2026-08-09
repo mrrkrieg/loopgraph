@@ -34,8 +34,50 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_uninstall",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
-      "loopgraph_app_resume"
+      "loopgraph_app_resume",
+      "loopgraph_app_publisher_key_generate",
+      "loopgraph_app_publisher_keys_get",
+      "loopgraph_app_init",
+      "loopgraph_app_capture",
+      "loopgraph_app_validate",
+      "loopgraph_app_pack",
+      "loopgraph_app_sign",
+      "loopgraph_app_publish",
+      "loopgraph_app_release_status",
+      "loopgraph_marketplace_sources_get",
+      "loopgraph_marketplace_source_add",
+      "loopgraph_marketplace_source_refresh"
     ]);
+  });
+
+  it("uses the same publisher service for Hermes-facing init, validation, signing, and publishing", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-tools-"));
+    temporaryDirectories.push(projectRoot);
+    const initialized = await callLoopgraphAppTool("loopgraph_app_init", {
+      projectRoot,
+      destination: "apps/product-learning",
+      appId: "acme.product.product-learning",
+      name: "Product Learning",
+      department: "product",
+      publisherId: "acme"
+    }) as { packRoot: string };
+    const validation = await callLoopgraphAppTool("loopgraph_app_validate", { projectRoot, packRoot: initialized.packRoot }) as { ok: boolean };
+    expect(validation.ok).toBe(true);
+    const key = await callLoopgraphAppTool("loopgraph_app_publisher_key_generate", {
+      projectRoot,
+      publisherId: "acme",
+      keyId: "acme.product.release"
+    }) as { keyId: string; publicKey: string; privateKeyStored: boolean };
+    expect(key).toMatchObject({ keyId: "acme.product.release", privateKeyStored: true });
+    expect(key.publicKey).toContain("BEGIN PUBLIC KEY");
+    await callLoopgraphAppTool("loopgraph_app_sign", { projectRoot, packRoot: initialized.packRoot, keyId: key.keyId });
+    const published = await callLoopgraphAppTool("loopgraph_app_publish", {
+      projectRoot,
+      packRoot: initialized.packRoot,
+      catalogId: "acme.private"
+    }) as { sourceId: string };
+    const sources = await callLoopgraphAppTool("loopgraph_marketplace_sources_get", { projectRoot }) as { sources: Array<{ id: string }> };
+    expect(sources.sources.map((source) => source.id)).toContain(published.sourceId);
   });
 
   it("discovers official apps and returns an immutable app detail contract", async () => {

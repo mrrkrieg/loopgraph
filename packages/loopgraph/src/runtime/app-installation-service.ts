@@ -1,4 +1,4 @@
-import { cp, open, readFile, rm } from "node:fs/promises";
+import { cp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -274,7 +274,6 @@ export class AppInstallationService {
 
       await initLoopgraphWorkspace({ projectRoot: this.projectRoot });
       const workspaceBefore = await readLoopgraphWorkspace(this.projectRoot);
-      const snapshot = registry;
       const timestamp = now.toISOString();
       const ownedAssets = plan.assets.filter((asset) => asset.action !== "reuse").map((asset) => ({
         assetId: asset.id,
@@ -344,7 +343,7 @@ export class AppInstallationService {
         const lock = createInstallationLock(nextRegistry);
         return { registry: nextRegistry, lock, value: { installation, lock, loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: true } };
       } catch (error) {
-        await rollbackGeneratedInstallation(this.projectRoot, installationId, workspaceBefore, snapshot);
+        await rollbackGeneratedInstallation(this.projectRoot, installationId, workspaceBefore);
         throw error;
       }
     });
@@ -1489,11 +1488,11 @@ function resolvePackFile(root: string, relativePath: string): string {
 }
 
 function resolveSelectedModules(modules: Array<{ id: string; defaultEnabled: boolean; dependsOn: string[] }>, requested?: string[]): string[] {
-  const selected = new Set(requested ?? modules.filter((module) => module.defaultEnabled).map((module) => module.id));
-  const known = new Set(modules.map((module) => module.id));
+  const selected = new Set(requested ?? modules.filter((moduleDefinition) => moduleDefinition.defaultEnabled).map((moduleDefinition) => moduleDefinition.id));
+  const known = new Set(modules.map((moduleDefinition) => moduleDefinition.id));
   for (const id of selected) if (!known.has(id)) throw new Error(`Unknown app module: ${id}`);
-  for (const module of modules.filter((candidate) => selected.has(candidate.id))) {
-    for (const dependency of module.dependsOn) if (!selected.has(dependency)) throw new Error(`Module ${module.id} requires ${dependency}`);
+  for (const moduleDefinition of modules.filter((candidate) => selected.has(candidate.id))) {
+    for (const dependency of moduleDefinition.dependsOn) if (!selected.has(dependency)) throw new Error(`Module ${moduleDefinition.id} requires ${dependency}`);
   }
   return [...selected].sort();
 }
@@ -1561,7 +1560,7 @@ function assertLifecycleTransition(from: WorkspaceAppInstallation["state"], requ
   if (!(allowed[from] ?? []).includes(resolved)) throw new Error(`Invalid app lifecycle transition: ${from} -> ${resolved}`);
 }
 
-async function rollbackGeneratedInstallation(projectRoot: string, installationId: string, workspace: LoopgraphWorkspaceRegistry, _registry: AppInstallationRegistry): Promise<void> {
+async function rollbackGeneratedInstallation(projectRoot: string, installationId: string, workspace: LoopgraphWorkspaceRegistry): Promise<void> {
   await writeLoopgraphWorkspace(workspace, projectRoot);
   const installationRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps", "installations", installationId);
   await rm(installationRoot, { recursive: true, force: true });

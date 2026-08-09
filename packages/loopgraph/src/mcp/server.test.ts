@@ -363,7 +363,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(113);
+    expect(listLoopgraphMcpTools()).toHaveLength(125);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
@@ -390,7 +390,19 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_app_uninstall",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
-      "loopgraph_app_resume"
+      "loopgraph_app_resume",
+      "loopgraph_app_publisher_key_generate",
+      "loopgraph_app_publisher_keys_get",
+      "loopgraph_app_init",
+      "loopgraph_app_capture",
+      "loopgraph_app_validate",
+      "loopgraph_app_pack",
+      "loopgraph_app_sign",
+      "loopgraph_app_publish",
+      "loopgraph_app_release_status",
+      "loopgraph_marketplace_sources_get",
+      "loopgraph_marketplace_source_add",
+      "loopgraph_marketplace_source_refresh"
     ]));
     const graphApply = listLoopgraphMcpTools()
       .find((tool) => tool.name === "loopgraph_graph_change_apply");
@@ -581,7 +593,19 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_app_promotion_recommendation",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
-      "loopgraph_app_resume"
+      "loopgraph_app_resume",
+      "loopgraph_app_publisher_key_generate",
+      "loopgraph_app_publisher_keys_get",
+      "loopgraph_app_init",
+      "loopgraph_app_capture",
+      "loopgraph_app_validate",
+      "loopgraph_app_pack",
+      "loopgraph_app_sign",
+      "loopgraph_app_publish",
+      "loopgraph_app_release_status",
+      "loopgraph_marketplace_sources_get",
+      "loopgraph_marketplace_source_add",
+      "loopgraph_marketplace_source_refresh"
     ];
     const adminNames = listLoopgraphMcpTools().map((tool) => tool.name);
     const webhookNames = listLoopgraphMcpTools({ exposure: "webhook_router" }).map((tool) => tool.name);

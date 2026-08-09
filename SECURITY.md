@@ -57,6 +57,11 @@ Do not commit or paste:
 - webhook signing secrets;
 - raw customer data or unredacted provider payloads;
 - exported Hermes credential stores.
+- `.loopgraph/apps/publisher/keys/*.private.pem` or the publisher key registry.
+
+Private Loopgraph App catalogs use detached Ed25519 signatures. A signed catalog must pin the publisher ID, algorithm, key ID, and exact public key; key IDs are labels and are never sufficient trust anchors. Publisher private keys remain project-confined under the Git-ignored `.loopgraph/` directory with mode `0600`. The CLI, MCP tools, and Hermes skill return only public trust material and never expose private-key contents.
+
+`loopgraph app capture` copies the immutable pack behavior, not installation configuration. It reports configuration key names and overlay paths for deliberate parameterization, but it does not copy values, credentials, tokens, or raw provider payloads. Always inspect the resulting pack and run `loopgraph app validate` before signing.
 
 ## Supported security posture
 

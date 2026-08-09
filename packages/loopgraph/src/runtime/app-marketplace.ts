@@ -9,9 +9,11 @@ import {
   type LoopPackArtifact,
   type MarketplaceApp,
   type MarketplaceAppVersion,
-  type MarketplaceCatalogSource
+  type MarketplaceCatalogSource,
+  type PublisherTrustKey
 } from "../core";
 import { loadLoopPackDirectory, marketplaceVersionFromArtifact, satisfiesVersionRange } from "./app-pack-loader";
+import { publishedReleaseKey, readPublishedCatalog } from "./app-publisher-catalog";
 
 type MarketplaceIndex = {
   schemaVersion: typeof MARKETPLACE_SCHEMA_VERSION;
@@ -40,6 +42,7 @@ export class LocalAppMarketplace {
   private readonly sourcesPath: string;
   private readonly indexPath: string;
   private artifactLocations = new Map<string, string>();
+  private artifactTrust = new Map<string, { requireSignature: boolean; trustedPublisherKeys: PublisherTrustKey[] }>();
 
   constructor(
     private readonly stateRoot: string,
@@ -65,10 +68,22 @@ export class LocalAppMarketplace {
     }
   }
 
-  async addCatalogSource(sourceInput: MarketplaceCatalogSource): Promise<MarketplaceCatalogSource> {
+  async addCatalogSource(sourceInput: Omit<MarketplaceCatalogSource, "trustedPublisherKeys"> & {
+    trustedPublisherKeys?: PublisherTrustKey[];
+  }): Promise<MarketplaceCatalogSource> {
     const source = marketplaceCatalogSourceSchema.parse(sourceInput);
+    if (source.id === "loopgraph-official" || source.type === "official" || source.trustPolicy === "official_only") {
+      const officialRoot = path.resolve(this.bundledPacksRoot ?? await resolveBundledPacksRoot());
+      const sourceRoot = source.uri.startsWith("file://") ? path.resolve(source.uri.slice("file://".length)) : path.resolve(source.uri);
+      if (source.id !== "loopgraph-official" || source.type !== "official" || source.trustPolicy !== "official_only" || sourceRoot !== officialRoot) {
+        throw new Error("The official catalog identity and trust policy are reserved for the bundled Loopgraph packs");
+      }
+    }
     if (source.type === "github" && (!source.pinnedRef || !source.expectedDigest)) {
       throw new Error("GitHub catalog sources must pin both a ref and expected digest");
+    }
+    if (source.trustPolicy === "signed" && source.trustedPublisherKeys.length === 0) {
+      throw new Error("Signed catalog sources must pin at least one trusted publisher public key");
     }
     const sources = await this.listCatalogSources();
     const next = [...sources.filter((candidate) => candidate.id !== source.id), source]
@@ -94,29 +109,52 @@ export class LocalAppMarketplace {
 
     const sourceRoot = resolveSourceRoot(source);
     const packDirectories = await discoverPackDirectories(sourceRoot);
+    const publishedCatalog = await readPublishedCatalog(sourceRoot);
+    const releases = new Map((publishedCatalog?.releases ?? []).map((release) => [
+      publishedReleaseKey(release.appId, release.version, release.digest),
+      release
+    ]));
     const versions: Array<{ artifact: LoopPackArtifact; location: string; marketplaceVersion: MarketplaceAppVersion }> = [];
     for (const directory of packDirectories) {
-      const loaded = await loadLoopPackDirectory(directory, { requireSignature: source.trustPolicy === "signed" });
+      const loaded = await loadLoopPackDirectory(directory, {
+        requireSignature: source.trustPolicy === "signed",
+        trustedPublisherKeys: source.trustedPublisherKeys
+      });
       if (source.expectedDigest && packDirectories.length === 1 && loaded.artifact.digest !== source.expectedDigest) {
         throw new Error(`Catalog source digest mismatch: expected ${source.expectedDigest}, received ${loaded.artifact.digest}`);
       }
       const artifactUri = `file://${directory}`;
+      const marketplaceVersion = marketplaceVersionFromArtifact(
+        {
+          ...loaded.artifact,
+          provenance: {
+            ...loaded.artifact.provenance,
+            sourceType: source.type,
+            sourceUri: source.uri,
+            sourceRef: source.pinnedRef
+          }
+        },
+        artifactUri,
+        "tested"
+      );
+      marketplaceVersion.provenanceVerified = source.trustPolicy === "signed"
+        ? Boolean(loaded.artifact.provenance.signature)
+        : source.trustPolicy === "official_only" && loaded.manifest.metadata.publisher.id === "loopgraph" && loaded.manifest.metadata.publisher.verified;
+      const release = releases.get(publishedReleaseKey(
+        loaded.manifest.metadata.id,
+        loaded.manifest.metadata.version,
+        loaded.artifact.digest
+      ));
       versions.push({
         artifact: loaded.artifact,
         location: directory,
-        marketplaceVersion: marketplaceVersionFromArtifact(
-          {
-            ...loaded.artifact,
-            provenance: {
-              ...loaded.artifact.provenance,
-              sourceType: source.type,
-              sourceUri: source.uri,
-              sourceRef: source.pinnedRef
-            }
-          },
-          artifactUri,
-          "tested"
-        )
+        marketplaceVersion: {
+          ...marketplaceVersion,
+          deprecated: release?.status === "deprecated",
+          deprecationMessage: release?.status === "deprecated" ? release.message : undefined,
+          revokedAt: release?.status === "revoked" ? release.updatedAt : undefined,
+          revocationReason: release?.status === "revoked" ? release.message : undefined
+        }
       });
     }
 
@@ -127,7 +165,12 @@ export class LocalAppMarketplace {
     for (const entry of versions) {
       const id = entry.artifact.manifest.metadata.id;
       grouped.set(id, [...(grouped.get(id) ?? []), entry]);
-      this.artifactLocations.set(artifactKey(id, entry.artifact.manifest.metadata.version, entry.artifact.digest), entry.location);
+      const key = artifactKey(id, entry.artifact.manifest.metadata.version, entry.artifact.digest);
+      this.artifactLocations.set(key, entry.location);
+      this.artifactTrust.set(key, {
+        requireSignature: source.trustPolicy === "signed",
+        trustedPublisherKeys: source.trustedPublisherKeys
+      });
     }
     const refreshed = Array.from(grouped.values()).map((entries) => marketplaceAppFromVersions(entries));
     const apps = [...retained, ...refreshed].sort((left, right) => left.name.localeCompare(right.name));
@@ -202,10 +245,22 @@ export class LocalAppMarketplace {
     const appVersion = (await this.listAppVersions(appId)).find((candidate) => candidate.version === version);
     if (!appVersion) throw new Error(`Marketplace version not found: ${appId}@${version}`);
     if (expectedDigest && appVersion.digest !== expectedDigest) throw new Error("Requested artifact digest does not match marketplace metadata");
-    let location = this.artifactLocations.get(artifactKey(appId, version, appVersion.digest));
+    const key = artifactKey(appId, version, appVersion.digest);
+    let location = this.artifactLocations.get(key);
     if (!location && appVersion.artifactUri.startsWith("file://")) location = appVersion.artifactUri.slice("file://".length);
     if (!location) throw new Error("Artifact is not available in the local marketplace cache");
-    const loaded = await loadLoopPackDirectory(location);
+    let trust = this.artifactTrust.get(key);
+    if (!trust) {
+      const source = (await this.listCatalogSources()).find((candidate) => {
+        if (candidate.type === "hosted") return false;
+        return isWithin(resolveSourceRoot(candidate), location!);
+      });
+      if (source) {
+        trust = { requireSignature: source.trustPolicy === "signed", trustedPublisherKeys: source.trustedPublisherKeys };
+        this.artifactTrust.set(key, trust);
+      }
+    }
+    const loaded = await loadLoopPackDirectory(location, trust);
     if (loaded.artifact.digest !== appVersion.digest) throw new Error("Cached artifact digest does not match immutable marketplace version");
     return loaded;
   }
@@ -229,7 +284,7 @@ export class LocalAppMarketplace {
       official ? "Publisher is the bundled verified Loopgraph publisher." : "Publisher is not the bundled Loopgraph publisher."
     ];
     return {
-      verified: digestMatches && (signaturePresent || official),
+      verified: digestMatches && appVersion.provenanceVerified && (signaturePresent || official),
       digestMatches,
       sourceType: loaded.artifact.provenance.sourceType,
       signaturePresent,
@@ -355,4 +410,9 @@ async function pathExists(candidate: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
 }
