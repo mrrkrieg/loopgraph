@@ -126,6 +126,7 @@ export function compileAppLoopDefinition(definition: AppLoopDefinition, loaded: 
       description: definition.metadata.description,
       labels: {
         appId: loaded.manifest.metadata.id,
+        appName: loaded.manifest.metadata.name,
         appVersion: loaded.manifest.metadata.version,
         appDigest: loaded.artifact.digest,
         lifecycleStatus: "draft"
@@ -280,4 +281,3 @@ function departmentLabel(value: string): string {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
-

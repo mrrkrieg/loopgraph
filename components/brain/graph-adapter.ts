@@ -470,6 +470,10 @@ function capWorkflowNodesByDepartment(
   const countsByDepartment = new Map<string, number>();
 
   for (const node of workflowNodes) {
+    if (node.metadata?.appNode === true) {
+      if (capped.length < MAX_DEFAULT_WORKFLOW_LOOPS) capped.push(node);
+      continue;
+    }
     const department = node.department ?? node.parentId ?? "unassigned";
     const count = countsByDepartment.get(department) ?? 0;
 
@@ -507,9 +511,10 @@ function mapTopologyNode(
     return null;
   }
   const baseStyle = nodeTypeStyles[type];
+  const appNode = node.metadata?.appNode === true;
   const departmentStroke = type === "workflow_loop" ? nodeColorForDepartment(node.department) : undefined;
   const status = mapStatus(node.status);
-  const stroke = statusStroke[status] ?? departmentStroke ?? baseStyle.stroke;
+  const stroke = statusStroke[status] ?? (appNode ? "#f97316" : departmentStroke) ?? baseStyle.stroke;
   const source = typeof node.metadata?.source === "string" ? node.metadata.source : undefined;
   const runtimeLevel = typeof node.metadata?.runtimeLevel === "string" ? node.metadata.runtimeLevel : undefined;
   const isDemoCatalog = source === "demo_catalog";
@@ -529,8 +534,8 @@ function mapTopologyNode(
     openReviews: numberFromMetadata(node.metadata?.openReviews),
     missingData: missingDataCount(node),
     undefinedMetrics: node.type === "metric" && status === "needs_attention" ? 1 : 0,
-    radius: radiusForNode(type, node.weight),
-    color: type === "workflow_loop" ? "#ffffff" : baseStyle.color,
+    radius: appNode ? 36 : radiusForNode(type, node.weight),
+    color: appNode ? "#fff7ed" : type === "workflow_loop" ? "#ffffff" : baseStyle.color,
     stroke,
     metadata: {
       ...node.metadata,
@@ -804,8 +809,12 @@ function addRollupMetadata(nodes: BrainGraphNode[], edges: BrainGraphEdge[]) {
       managedCount: childCounts.get(node.id) ?? 0
     };
     if (node.type === "department_loop") {
-      const childWorkflowCount = edges.filter((edge) => edge.source === node.id).length;
-      node.subtitle = `${childWorkflowCount} workflow loops`;
+      const children = edges.filter((edge) => edge.source === node.id).map((edge) => nodesById.get(edge.target));
+      const appCount = children.filter((child) => child?.metadata?.appNode === true).length;
+      const childWorkflowCount = children.length;
+      node.subtitle = appCount > 0
+        ? `${appCount} installed app${appCount === 1 ? "" : "s"} · ${childWorkflowCount} direct workflows`
+        : `${childWorkflowCount} workflow loops`;
     }
     if (node.type === "management_loop") {
       const departmentCount = edges.filter((edge) => edge.source === node.id).length;

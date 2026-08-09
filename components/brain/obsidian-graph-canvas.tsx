@@ -255,6 +255,7 @@ export function ObsidianGraphCanvas({
             const selected = node.id === selectedId;
             const focused = neighborIds.size === 0 || neighborIds.has(node.id);
             const showFullLabel = showLabels && (focused || ["company_brain", "management_loop", "department_loop", "workflow_loop"].includes(node.type));
+            const appNode = node.metadata?.appNode === true;
             const lines = compactLabel(node.label, node.radius);
             return (
               <g
@@ -283,7 +284,7 @@ export function ObsidianGraphCanvas({
                   fill={node.color}
                   r={node.radius}
                   stroke={selected ? "#111111" : node.stroke}
-                  strokeWidth={selected ? 4 : node.type === "workflow_loop" ? 2.5 : 2}
+                  strokeWidth={selected ? 4 : appNode ? 3 : node.type === "workflow_loop" ? 2.5 : 2}
                 />
                 {node.status === "blocked" || node.status === "needs_attention" ? (
                   <circle fill="none" r={node.radius + 5} stroke={node.status === "blocked" ? "#dc2626" : "#f97316"} strokeWidth="2" />
