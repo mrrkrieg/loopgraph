@@ -363,12 +363,21 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(91);
+    expect(listLoopgraphMcpTools()).toHaveLength(100);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
       "loopgraph_hermes_execution_event_ingest",
-      "loopgraph_agent_operations_get"
+      "loopgraph_agent_operations_get",
+      "loopgraph_marketplace_search",
+      "loopgraph_app_get",
+      "loopgraph_app_install_plan",
+      "loopgraph_app_install_apply",
+      "loopgraph_app_install_status",
+      "loopgraph_app_test",
+      "loopgraph_app_activate",
+      "loopgraph_app_pause",
+      "loopgraph_app_resume"
     ]));
     const graphApply = listLoopgraphMcpTools()
       .find((tool) => tool.name === "loopgraph_graph_change_apply");
@@ -541,6 +550,45 @@ describe("Loopgraph MCP server", () => {
         code: -32002,
         message: "Resource not found",
         data: expect.stringContaining("unavailable for webhook_router exposure")
+      }
+    });
+  });
+
+  it("exposes app discovery and lifecycle only through the governed admin surface", async () => {
+    const { projectRoot } = await createRoutingProject();
+    const appToolNames = [
+      "loopgraph_marketplace_search",
+      "loopgraph_app_get",
+      "loopgraph_app_install_plan",
+      "loopgraph_app_install_apply",
+      "loopgraph_app_install_status",
+      "loopgraph_app_test",
+      "loopgraph_app_activate",
+      "loopgraph_app_pause",
+      "loopgraph_app_resume"
+    ];
+    const adminNames = listLoopgraphMcpTools().map((tool) => tool.name);
+    const webhookNames = listLoopgraphMcpTools({ exposure: "webhook_router" }).map((tool) => tool.name);
+    const lifecycleNames = listLoopgraphMcpTools({ exposure: "lifecycle_router" }).map((tool) => tool.name);
+    expect(adminNames).toEqual(expect.arrayContaining(appToolNames));
+    expect(webhookNames).not.toEqual(expect.arrayContaining(appToolNames));
+    expect(lifecycleNames).not.toEqual(expect.arrayContaining(appToolNames));
+
+    const response = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "marketplace-search",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_marketplace_search",
+        arguments: { query: "inbound leads" }
+      }
+    }, { projectRoot });
+    expect(response).toMatchObject({
+      result: {
+        structuredContent: {
+          schemaVersion: "loopgraph-marketplace-search/v1alpha1",
+          count: 1
+        }
       }
     });
   });

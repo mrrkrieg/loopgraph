@@ -64,6 +64,7 @@ import { LOOPGRAPH_ROUTING_TOOL_NAMES } from "./routing-tools";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
+import { LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 
 export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha8" as const;
 export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.7.0" as const;
@@ -120,7 +121,8 @@ export const HERMES_LOOPGRAPH_MCP_TOOL_NAMES = [
   ...LOOPGRAPH_ROUTING_OPS_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_EVALUATION_TOOL_NAMES,
   ...LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES,
-  ...LOOPGRAPH_HERMES_OPERATIONS_TOOL_NAMES
+  ...LOOPGRAPH_HERMES_OPERATIONS_TOOL_NAMES,
+  ...LOOPGRAPH_APP_TOOL_NAMES
 ] as const;
 
 export type HermesInstallScope = "project";

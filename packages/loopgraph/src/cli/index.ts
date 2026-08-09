@@ -71,6 +71,10 @@ import {
 import { PROVIDER_ONBOARDING_CATALOG, prepareProviderInstallation } from "../runtime/provider-onboarding";
 import { normalizeProviderEvent } from "../runtime/provider-normalizers";
 import { providerIdSchema } from "../core/provider-onboarding";
+import {
+  callLoopgraphAppTool,
+  type LoopgraphAppToolName
+} from "../runtime/app-tools";
 
 const HERO_TEMPLATES = [
   {
@@ -166,6 +170,120 @@ const graphChange = graph.command("change").description("Approve and apply add, 
 const graphPromotion = graph.command("promotion").description("Approve and apply ordered loop activation-mode promotions");
 const graphLifecycle = graph.command("lifecycle").description("Approve and apply loop pause or resume transactions");
 const graphRollback = graph.command("rollback").description("Approve and apply exact graph transaction rollback");
+const apps = program.command("apps").description("Discover, install, test, and operate Loopgraph Apps through the shared Hermes service");
+
+apps
+  .command("search")
+  .description("Search the local-first app marketplace by outcome, department, or capability")
+  .argument("[query]", "Business outcome or app terms")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--department <department>", "Filter by department")
+  .option("--capability <capability>", "Filter by required logical capability")
+  .option("--limit <count>", "Maximum results", "20")
+  .action(async (query: string | undefined, options: { project: string; department?: string; capability?: string; limit: string }) => {
+    await printAppTool("loopgraph_marketplace_search", {
+      projectRoot: options.project,
+      query,
+      department: options.department,
+      capability: options.capability,
+      limit: parsePositiveInteger(options.limit, "Marketplace result limit")
+    });
+  });
+
+apps
+  .command("get")
+  .description("Inspect one app version, its permissions, presets, modules, and provenance")
+  .argument("<app-id>", "Marketplace app ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--version <version>", "Exact version")
+  .action(async (appId: string, options: { project: string; version?: string }) => {
+    await printAppTool("loopgraph_app_get", { projectRoot: options.project, appId, version: options.version });
+  });
+
+apps
+  .command("plan")
+  .description("Create a read-only exact install plan; missing connections, mappings, and answers are returned as blockers")
+  .argument("<app-id>", "Marketplace app ID")
+  .requiredOption("--preset <preset>", "Provider preset ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--version <range>", "Semantic version or range", "latest")
+  .option("--config <path>", "JSON object with confirmed installation answers")
+  .option("--mapping <ids...>", "Confirmed field mapping IDs")
+  .option("--module <ids...>", "Selected optional module IDs")
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .option("--actor <id>", "Accountable planner identity", "cli")
+  .action(async (appId: string, options: { project: string; preset: string; version: string; config?: string; mapping?: string[]; module?: string[]; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_install_plan", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      versionRange: options.version,
+      presetId: options.preset,
+      selectedModules: options.module,
+      configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : {},
+      fieldMappingIds: options.mapping ?? [],
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("install")
+  .description("Atomically apply an exact unexpired plan JSON produced by apps plan")
+  .requiredOption("--plan <path>", "Install plan JSON file")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable installer identity", "cli")
+  .action(async (options: { plan: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_install_apply", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      plan: await readJsonRecord(path.resolve(options.plan)),
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("status")
+  .description("Inspect installed apps, evidence-derived readiness, evaluations, and exact lockfile")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--installation <id>", "One installation ID")
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (options: { project: string; installation?: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_install_status", { projectRoot: options.project, installationId: options.installation, workspaceId: options.workspace, companyId: options.company });
+  });
+
+for (const action of ["test", "pause", "resume"] as const) {
+  apps
+    .command(action)
+    .description(action === "test" ? "Run write-blocked synthetic app conformance" : `${action === "pause" ? "Pause" : "Resume"} an installed app without deleting shared company assets`)
+    .argument("<installation-id>", "Installed app ID")
+    .option("--project <root>", "Explicit project root", process.cwd())
+    .option("--workspace <id>", "Workspace ID")
+    .option("--company <id>", "Company ID")
+    .option("--actor <id>", "Accountable actor identity", "cli")
+    .action(async (installationId: string, options: { project: string; workspace?: string; company?: string; actor: string }) => {
+      const tool = action === "test" ? "loopgraph_app_test" : action === "pause" ? "loopgraph_app_pause" : "loopgraph_app_resume";
+      await printAppTool(tool, { projectRoot: options.project, installationId, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
+    });
+}
+
+apps
+  .command("activate")
+  .description("Promote a tested app to shadow, recommend, or execute-with-approval")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--mode <mode>", "shadow, recommend, or execute_with_approval")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable actor identity", "cli")
+  .action(async (installationId: string, options: { mode: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_activate", { projectRoot: options.project, installationId, mode: options.mode, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
+  });
 
 measurementBindings
   .command("set")
@@ -1642,6 +1760,18 @@ async function printConnectionTool(
   projectRoot: string
 ): Promise<void> {
   const result = await callLoopgraphConnectionTool(name, {
+    ...input,
+    projectRoot: path.resolve(projectRoot)
+  });
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function printAppTool(
+  name: LoopgraphAppToolName,
+  input: Record<string, unknown>
+): Promise<void> {
+  const projectRoot = typeof input.projectRoot === "string" ? input.projectRoot : process.cwd();
+  const result = await callLoopgraphAppTool(name, {
     ...input,
     projectRoot: path.resolve(projectRoot)
   });
