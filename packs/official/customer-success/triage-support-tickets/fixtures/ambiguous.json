@@ -1,0 +1,1 @@
+{"id":"support-ticket-ambiguous","eventType":"support.ticket_created","subject":{"type":"support_ticket","id":"ticket-205"},"normalizedPayload":{"ticketId":"205","summary":"Shared-domain user cannot log in","priority":"medium","candidateSubjectIds":["account-a","account-b"],"confidence":0.93},"evidenceRefs":["support:ticket:205"]}

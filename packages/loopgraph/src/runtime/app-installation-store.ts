@@ -6,6 +6,7 @@ import {
   APP_INSTALL_SCHEMA_VERSION,
   appAssetOwnershipSchema,
   appEvalRunSchema,
+  appLifecycleReceiptSchema,
   appInstallationLockSchema,
   workspaceAppInstallationSchema,
   type AppInstallationLock
@@ -18,6 +19,7 @@ const appInstallationRegistrySchema = z.object({
   installations: z.array(workspaceAppInstallationSchema),
   assets: z.array(appAssetOwnershipSchema),
   evaluations: z.array(appEvalRunSchema),
+  lifecycleReceipts: z.array(appLifecycleReceiptSchema).default([]),
   updatedAt: z.string().datetime()
 }).strict();
 
@@ -58,6 +60,7 @@ export class FileAppInstallationStore {
         installations: [],
         assets: [],
         evaluations: [],
+        lifecycleReceipts: [],
         updatedAt: new Date(0).toISOString()
       };
     }

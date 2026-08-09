@@ -1,0 +1,26 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: zendesk-salesforce-slack
+providerId: zendesk
+providerFamily: zendesk
+displayName: Zendesk + Salesforce + Slack
+capabilities:
+  - { logicalCapability: support.ticket.read, providerOperation: zendesk.tickets.read, minimumScopes: [tickets:read], authority: read, risk: low }
+  - { logicalCapability: crm.account.read, providerOperation: salesforce.accounts.read, minimumScopes: [api, refresh_token], authority: read, risk: low }
+  - { logicalCapability: incident.record.read, providerOperation: statuspage.incidents.read, minimumScopes: [incidents:read], authority: read, risk: medium }
+  - { logicalCapability: project.issue.create, providerOperation: jira.issues.create, minimumScopes: [write:jira-work], authority: approve, risk: medium }
+  - { logicalCapability: messaging.channel.post, providerOperation: slack.chat.postMessage, minimumScopes: [chat:write], authority: approve, risk: medium }
+  - { logicalCapability: support.message.draft, providerOperation: zendesk.comments.draft, minimumScopes: [tickets:write], authority: draft, risk: high }
+eventSources:
+  - { eventFamily: account.risk_detected, providerEvent: zendesk.ticket.created, transport: webhook, normalizationTransformer: zendesk.ticket-to-account-risk.v1, signatureStrategy: zendesk-hmac-sha256, replayProtection: true, fallbackPollMinutes: 10 }
+fieldMappings:
+  - objectType: support_ticket
+    requiredLogicalFields: [ticket.id, ticket.accountId, ticket.severity]
+    optionalLogicalFields: [ticket.status, ticket.requesterId, ticket.incidentId, ticket.businessImpact]
+  - objectType: account
+    requiredLogicalFields: [account.id, account.tier, account.renewalDate]
+    optionalLogicalFields: [account.owner, account.executiveSponsor, account.arr, account.health]
+healthCheck:
+  capability: support.ticket.read
+  sampleQuery: { status: open, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

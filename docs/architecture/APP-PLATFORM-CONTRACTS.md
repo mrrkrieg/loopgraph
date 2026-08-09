@@ -83,9 +83,15 @@ Every resolved value retains its winning layer and provenance. Hermes should inf
 
 Published artifacts are immutable. Company changes are typed overlay operations. Updates use a three-way merge between the original base, the company overlay, and the new base. Permission changes and graph changes are visible before apply. Unresolved conflicts block the update. Rollback restores the previous pinned version and digest.
 
+Every configure, overlay, repair, duplicate, detach, update, rollback, and uninstall mutation records a versioned lifecycle receipt with the previous and resulting registry revisions, artifact digests, accountable actor, retained-evidence flag, removed assets, and preserved shared assets. Mutations use optimistic content bindings so stale CLI, Hermes, or browser clients cannot overwrite a newer configuration, overlay, or artifact.
+
+Private duplication namespaces every generated LoopSpec and installation-owned asset, so a derived app can coexist with its upstream installation without overwriting active routes. Detach copies the exact verified LoopPack bytes into a confined workspace snapshot, records the snapshot path, and disables future upstream updates. It does not rewrite the original marketplace artifact.
+
 ## Removal and shared assets
 
 Every generated asset records owner installation IDs and a reference count. Uninstall removes only assets exclusively owned by the target installation. Shared connections, field mappings, company context, entity identities, and historical evidence remain available to other installations.
+
+The runtime LoopSpec registry supports content-bound writes and removals in one revision. App uninstall removes the target installation's active generated LoopSpecs, releases its asset references, detaches—but does not delete—shared mapping and context consumer references, preserves evaluation history, and writes a final uninstall receipt.
 
 ## Public contracts
 

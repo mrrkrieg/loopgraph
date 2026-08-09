@@ -1,0 +1,7 @@
+id: zendesk-salesforce-slack
+providers: { support: zendesk, crm: salesforce, incident: statuspage, messaging: slack }
+recipe: zendesk-salesforce-slack
+defaults:
+  recoveryActionPolicy: approval_required
+  customerCommunicationPolicy: draft_only
+  internalNotificationPolicy: approval_required

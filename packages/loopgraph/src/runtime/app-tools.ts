@@ -4,11 +4,14 @@ import YAML from "yaml";
 import { z } from "zod";
 import {
   APP_EVAL_SCHEMA_VERSION,
+  appOverlayOperationSchema,
   appEvalSuiteSchema,
   appHistoricalReplayRequestSchema,
   historicalReplayEventSchema,
   appInstallPlanSchema,
   appRolloutModeSchema,
+  appUpdatePlanSchema,
+  artifactDigestSchema,
   appSetupDefinitionSchema
 } from "../core";
 import { AppInstallationService } from "./app-installation-service";
@@ -28,6 +31,16 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_historical_replay",
   "loopgraph_app_evaluation_label",
   "loopgraph_app_promotion_recommendation",
+  "loopgraph_app_configure",
+  "loopgraph_app_overlay_apply",
+  "loopgraph_app_repair",
+  "loopgraph_app_duplicate",
+  "loopgraph_app_diff",
+  "loopgraph_app_update_plan",
+  "loopgraph_app_update_apply",
+  "loopgraph_app_rollback",
+  "loopgraph_app_detach",
+  "loopgraph_app_uninstall",
   "loopgraph_app_activate",
   "loopgraph_app_pause",
   "loopgraph_app_resume"
@@ -101,6 +114,38 @@ export const appEvaluationLabelInputSchema = projectSchema.extend({
   actor: z.string().min(1).default("hermes")
 }).strict();
 export const appPromotionRecommendationInputSchema = appInstallationActionInputSchema.omit({ actor: true }).strict();
+export const appConfigureInputSchema = appInstallationActionInputSchema.extend({
+  values: z.record(z.unknown()),
+  expectedConfigurationDigest: artifactDigestSchema
+}).strict();
+export const appOverlayApplyInputSchema = appInstallationActionInputSchema.extend({
+  operations: z.array(appOverlayOperationSchema).max(100),
+  expectedArtifactDigest: artifactDigestSchema,
+  expectedOverlayRevision: z.number().int().nonnegative().default(0)
+}).strict();
+export const appRepairInputSchema = appInstallationActionInputSchema;
+export const appDuplicateInputSchema = appInstallationActionInputSchema.extend({
+  derivedAppId: z.string().min(3).max(160),
+  overlayOperations: z.array(appOverlayOperationSchema).max(100).default([])
+}).strict();
+export const appDiffInputSchema = appInstallationActionInputSchema.omit({ actor: true }).strict();
+export const appUpdatePlanInputSchema = appInstallationActionInputSchema.extend({
+  versionRange: z.string().min(1).max(100).default("latest")
+}).strict();
+export const appUpdateApplyInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  plan: appUpdatePlanSchema,
+  approvedPermissionCapabilities: z.array(z.string().min(1)).default([]),
+  actor: z.string().min(1).default("hermes")
+}).strict();
+export const appRollbackInputSchema = appInstallationActionInputSchema.extend({ expectedArtifactDigest: artifactDigestSchema }).strict();
+export const appDetachInputSchema = appRollbackInputSchema;
+export const appUninstallInputSchema = appInstallationActionInputSchema.extend({
+  expectedArtifactDigest: artifactDigestSchema,
+  reason: z.string().min(1).max(2000),
+  confirmed: z.literal(true)
+}).strict();
 export const appPauseInputSchema = appInstallationActionInputSchema;
 export const appResumeInputSchema = appInstallationActionInputSchema;
 export const appActivateInputSchema = appInstallationActionInputSchema.extend({
@@ -119,6 +164,16 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_historical_replay", description: "Evaluate a bounded historical event set through installed routing contracts with provider writes blocked and replay evidence recorded.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_evaluation_label", description: "Record an accountable correct, incomplete, or false-positive judgment and review burden for one replay decision.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_promotion_recommendation", description: "Derive a non-activating promotion recommendation from conformance, historical replay, human labels, and review burden.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_configure", description: "Apply confirmed company configuration against an exact prior configuration digest and reset the app to write-blocked testing.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_overlay_apply", description: "Store version-bound workspace customization without mutating the immutable base artifact.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_repair", description: "Recompile the exact pinned artifact, restore owned generated assets, and require fresh conformance.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_duplicate", description: "Create a private derived installation with namespaced loops and an independent workspace overlay.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_diff", description: "Inspect immutable base, effective configuration, overlay, derivation, history, and update availability.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_update_plan", description: "Create a content-bound three-way update plan with graph, overlay-conflict, and permission diffs.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_update_apply", description: "Apply an unexpired reviewed update plan, preserving overlays and requiring fresh evidence.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_rollback", description: "Restore the exact prior installed revision and return to write-blocked conformance.", readOnly: false, idempotent: false, destructive: true },
+  { name: "loopgraph_app_detach", description: "Pin a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app.", readOnly: false, idempotent: false, destructive: true },
+  { name: "loopgraph_app_uninstall", description: "Remove only installation-owned runtime assets while retaining shared company resources and evidence.", readOnly: false, idempotent: false, destructive: true },
   { name: "loopgraph_app_activate", description: "Promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_pause", description: "Pause an installed app without deleting shared connectors, mappings, context, entities, or evidence.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_resume", description: "Resume a paused app at its last safe non-live rollout mode.", readOnly: false, idempotent: true, destructive: false }
@@ -228,13 +283,24 @@ export async function callLoopgraphAppTool(
       installation,
       app: await marketplace.getApp(installation.appId)
     })))).filter((entry) => Boolean(entry.app));
+    const workspace = await inspectLoopgraphWorkspace({ projectRoot, createIfMissing: true });
+    const installedLoops = installations.map((installation) => ({
+      installationId: installation.id,
+      loops: workspace.registry.registeredSpecs.filter((entry) => entry.path.split(/[\\/]/).includes(installation.id)).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        path: entry.path
+      }))
+    }));
     return {
       schemaVersion: "loopgraph-installed-apps/v1alpha1",
       revision: registry.revision,
       installations,
       applications,
+      installedLoops,
       readiness,
       evaluations: registry.evaluations,
+      lifecycleReceipts: registry.lifecycleReceipts,
       lock: await store.readLockfile()
     };
   }
@@ -268,6 +334,83 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_promotion_recommendation") {
     const parsed = appPromotionRecommendationInputSchema.parse({ ...raw, projectRoot, ...identity });
     return service.promotionRecommendation(parsed.installationId, options.now);
+  }
+  if (name === "loopgraph_app_configure") {
+    const parsed = appConfigureInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.configure({
+      installationId: parsed.installationId,
+      values: parsed.values,
+      expectedConfigurationDigest: parsed.expectedConfigurationDigest,
+      actor: parsed.actor,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_overlay_apply") {
+    const parsed = appOverlayApplyInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.applyOverlay({
+      installationId: parsed.installationId,
+      operations: parsed.operations,
+      expectedArtifactDigest: parsed.expectedArtifactDigest,
+      expectedOverlayRevision: parsed.expectedOverlayRevision,
+      actor: parsed.actor,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_repair") {
+    const parsed = appRepairInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.repair(parsed.installationId, parsed.actor, options.now);
+  }
+  if (name === "loopgraph_app_duplicate") {
+    const parsed = appDuplicateInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.duplicate({
+      installationId: parsed.installationId,
+      derivedAppId: parsed.derivedAppId,
+      overlayOperations: parsed.overlayOperations,
+      actor: parsed.actor,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_diff") {
+    const parsed = appDiffInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.diff(parsed.installationId);
+  }
+  if (name === "loopgraph_app_update_plan") {
+    const parsed = appUpdatePlanInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.planUpdate({
+      installationId: parsed.installationId,
+      versionRange: parsed.versionRange,
+      connections: await readConnectionInstances(projectRoot),
+      actor: parsed.actor,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_update_apply") {
+    const parsed = appUpdateApplyInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.applyUpdate({
+      plan: parsed.plan,
+      approvedPermissionCapabilities: parsed.approvedPermissionCapabilities,
+      actor: parsed.actor,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_rollback") {
+    const parsed = appRollbackInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.rollback(parsed.installationId, parsed.expectedArtifactDigest, parsed.actor, options.now);
+  }
+  if (name === "loopgraph_app_detach") {
+    const parsed = appDetachInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.detach(parsed.installationId, parsed.expectedArtifactDigest, parsed.actor, options.now);
+  }
+  if (name === "loopgraph_app_uninstall") {
+    const parsed = appUninstallInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.uninstall({
+      installationId: parsed.installationId,
+      expectedArtifactDigest: parsed.expectedArtifactDigest,
+      actor: parsed.actor,
+      reason: parsed.reason,
+      confirmed: parsed.confirmed,
+      now: options.now
+    });
   }
   const parsed = appInstallationActionInputSchema.parse({ ...raw, projectRoot, ...identity });
   if (name === "loopgraph_app_test") return service.test(parsed.installationId, parsed.actor, options.now);

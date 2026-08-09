@@ -1,0 +1,1 @@
+{"id":"strategic-risk-happy","eventType":"account.risk_detected","subject":{"type":"account","id":"account-301"},"normalizedPayload":{"ticketId":"301","accountId":"account-301","severity":"P1","renewalDaysRemaining":45,"confidence":0.97},"evidenceRefs":["support:ticket:301","crm:account:301","incident:88"]}

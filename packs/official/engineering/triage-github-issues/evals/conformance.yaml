@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: github-issue-triage-conformance
+appId: loopgraph.engineering.triage-github-issues
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: true, notes: A complete issue is classified and all provider mutations remain approval-bound. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: false, notes: Missing issue content is requested rather than invented. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Explicit repository exclusions do not create normal triage work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: false, notes: Duplicate issues and deliveries append evidence instead of creating work. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: false, notes: Hermes abstains when one repository issue identity cannot be proven. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: false, notes: A possible security report below the confidence floor requires a human. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: engineering-github-issue-triage, connectorState: unavailable, expectedApproval: false, notes: Provider unavailability never causes an issue mutation. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: false, notes: Required provider fields are requested explicitly. }
+  - { id: human-approval, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: true, notes: Proposed issue changes remain approval-bound. }
+  - { id: customer-facing-action, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: true, notes: Public issue actions require separate review. }
+  - { id: missing-outcome, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: true, notes: Missing resolution evidence is not interpreted as a negative outcome. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: engineering-github-issue-triage, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate triage runs or value. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission changes require explicit review and preserve rollback. }

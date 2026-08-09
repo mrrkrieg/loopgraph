@@ -1,0 +1,1 @@
+{"id":"github-issue-duplicate","eventType":"github.issue_opened","subject":{"type":"repository_issue","id":"issue-104"},"normalizedPayload":{"issueId":"104","title":"Duplicate crash report","body":"Same stack trace as the existing issue.","matchedProblemId":"issue-41","confidence":0.96},"evidenceRefs":["github:issue:104","github:issue:41"]}

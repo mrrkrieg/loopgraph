@@ -1,0 +1,56 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.customer-success.triage-support-tickets
+  name: Triage and Escalate Support Tickets
+  version: 1.0.0
+  summary: Classify support demand, prepare replies, and escalate customer risk with explicit approval.
+  description: An installable Customer Success application derived from the original Support Ticket Triage template. Hermes joins ticket and account evidence, identifies urgency and risk, prepares bounded internal and customer-facing work, and learns from resolution and reviewer corrections.
+  department: customer_success
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [customer-success, support, triage, escalation, service]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: governed-response
+    name: Governed response
+    description: Prepare a customer response while keeping sending separately reviewable and disabled by default.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/support-ticket-triage.yaml, skills/support-risk-triage.yaml]
+presets:
+  - id: intercom-hubspot-slack
+    name: Intercom + HubSpot + Slack
+    description: Read Intercom conversations and account context, prepare reviewed updates, and notify the support channel.
+    path: presets/intercom-hubspot-slack.yaml
+    providerFamily: intercom
+permissions:
+  - { capability: support.ticket.read, authority: read, mode: required, risk: low, purpose: "Read ticket content, status, priority, and requester identity.", customerFacing: false, defaultPolicy: allowed, dataClasses: [support_content, business_contact] }
+  - { capability: crm.account.read, authority: read, mode: optional, risk: low, purpose: "Read account tier, owner, renewal context, and customer status.", customerFacing: false, defaultPolicy: allowed, dataClasses: [business_account] }
+  - { capability: support.ticket.update, authority: approve, mode: optional, risk: high, purpose: "Apply an exact approved priority, queue, owner, or internal note.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [support_content] }
+  - { capability: support.message.draft, authority: draft, mode: optional, risk: medium, purpose: Prepare a customer-facing response draft for review., customerFacing: true, defaultPolicy: allowed, dataClasses: [support_content, communication] }
+  - { capability: messaging.channel.post, authority: approve, mode: optional, risk: medium, purpose: Notify an accountable support or escalation channel., customerFacing: false, defaultPolicy: approval_required, dataClasses: [support_content, business_account] }
+requiredCapabilities: [support.ticket.read]
+optionalCapabilities: [crm.account.read, support.ticket.update, support.message.draft, messaging.channel.post]
+entrypoints:
+  loops: [loops/support-ticket-triage.yaml]
+  skills: [skills/support-risk-triage.yaml]
+  connectors: [connectors/intercom-hubspot-slack.yaml]
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: support_queue_owner
+  reviewRoles: [support_lead, customer_success_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

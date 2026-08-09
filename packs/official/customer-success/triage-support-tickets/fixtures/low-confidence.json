@@ -1,0 +1,1 @@
+{"id":"support-ticket-low-confidence","eventType":"support.ticket_created","subject":{"type":"support_ticket","id":"ticket-206"},"normalizedPayload":{"ticketId":"206","summary":"Maybe urgent but impact is unclear","priority":"high","confidence":0.35},"evidenceRefs":["support:ticket:206"]}

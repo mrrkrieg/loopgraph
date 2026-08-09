@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { connectionInstanceSchema } from "../core";
+import YAML from "yaml";
+import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchema } from "../core";
 import { FileConnectorFieldMappingStore } from "./app-connector-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
@@ -55,7 +56,7 @@ async function harness() {
     readPolicy: "read_only",
     writePolicy: "not_allowed"
   });
-  return { projectRoot, service, connection, mappingIds: mappings.map((mapping) => mapping.id) };
+  return { projectRoot, service, marketplace, mappingStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
 }
 
 const installValues = {
@@ -67,6 +68,49 @@ const installValues = {
   followUpSlaMinutes: 30,
   customerFacingPolicy: "draft_only"
 };
+
+async function installSalesApp(input: Awaited<ReturnType<typeof harness>>, now = new Date("2026-08-08T12:00:00.000Z")) {
+  const plan = await input.service.plan({
+    projectRoot: input.projectRoot,
+    workspaceId: "acme",
+    companyId: "acme-company",
+    appId: "loopgraph.sales.qualify-route-inbound-leads",
+    versionRange: "1.0.0",
+    presetId: "hubspot-gmail-slack",
+    connections: [input.connection],
+    installValues,
+    fieldMappingIds: input.mappingIds,
+    actor: "admin-1",
+    now
+  });
+  return input.service.apply(plan, "admin-1", new Date(now.getTime() + 60_000));
+}
+
+async function addUpdateCatalog(input: Awaited<ReturnType<typeof harness>>): Promise<void> {
+  const catalogRoot = path.join(input.projectRoot, "update-catalog");
+  const sourcePack = path.join(packsRoot, "official", "sales", "qualify-route-inbound-leads");
+  const v1 = path.join(catalogRoot, "sales", "v1");
+  const v2 = path.join(catalogRoot, "sales", "v2");
+  await cp(sourcePack, v1, { recursive: true });
+  await cp(sourcePack, v2, { recursive: true });
+  const manifestPath = path.join(v2, "loopgraph.pack.yaml");
+  const manifest = YAML.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  const metadata = manifest.metadata as Record<string, unknown>;
+  metadata.version = "1.1.0";
+  const permissions = manifest.permissions as Array<Record<string, unknown>>;
+  const crmUpdate = permissions.find((permission) => permission.capability === "crm.lead.update")!;
+  crmUpdate.risk = "critical";
+  await writeFile(manifestPath, YAML.stringify(manifest), "utf8");
+  await input.marketplace.addCatalogSource({
+    schemaVersion: MARKETPLACE_SCHEMA_VERSION,
+    id: "test-updates",
+    type: "filesystem",
+    uri: catalogRoot,
+    enabled: true,
+    trustPolicy: "explicit_local"
+  });
+  await input.marketplace.refreshCatalogSource("test-updates");
+}
 
 describe("atomic app installation lifecycle", () => {
   it("plans, installs, tests, and activates the Sales app without enabling writes", async () => {
@@ -247,5 +291,117 @@ describe("atomic app installation lifecycle", () => {
     expect(recommendation.requiredApprovals).toEqual(["app_owner", "promotion_approver"]);
     const registry = await new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(registry.installations[0].state).toBe("simulation_passed");
+  });
+
+  it("configures, overlays, repairs, duplicates, detaches, and ownership-safely uninstalls apps", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    const configured = await input.service.configure({
+      installationId: applied.installation.id,
+      values: { followUpSlaMinutes: 45 },
+      expectedConfigurationDigest: canonicalAppDigest(applied.installation.configuration),
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:02:00.000Z")
+    });
+    expect(configured.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
+    expect(configured.installation?.configuration.values.followUpSlaMinutes).toBe(45);
+
+    const overlaid = await input.service.applyOverlay({
+      installationId: applied.installation.id,
+      operations: [{ op: "set", path: "/values/qualificationThreshold", value: { qualified: 90, reviewMin: 70 } }],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedOverlayRevision: 0,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    expect(overlaid.installation?.overlay?.revision).toBe(1);
+    expect(overlaid.receipt.action).toBe("overlay");
+
+    const repaired = await input.service.repair(applied.installation.id, "sales-admin", new Date("2026-08-08T12:04:00.000Z"));
+    expect(repaired.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
+    expect(repaired.receipt.action).toBe("repair");
+
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.acme-lead-qualification",
+      overlayOperations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 15 }],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    expect(duplicated.installation?.id).not.toBe(applied.installation.id);
+    expect(duplicated.installation?.derivation).toMatchObject({
+      derivedAppId: "private.sales.acme-lead-qualification",
+      parentInstallationId: applied.installation.id
+    });
+    expect(duplicated.installation?.ownedAssets.every((asset) => asset.ownerInstallationIds.includes(duplicated.installation!.id))).toBe(true);
+
+    const detached = await input.service.detach(
+      duplicated.installation!.id,
+      duplicated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:06:00.000Z")
+    );
+    expect(detached.installation?.derivation?.snapshotPath).toContain("private-snapshots");
+    expect(detached.installation?.derivation?.detachedAt).toBe("2026-08-08T12:06:00.000Z");
+
+    const uninstalled = await input.service.uninstall({
+      installationId: applied.installation.id,
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      actor: "sales-admin",
+      reason: "Replace the upstream installation with the reviewed private variant.",
+      confirmed: true,
+      now: new Date("2026-08-08T12:07:00.000Z")
+    });
+    expect(uninstalled.installation).toBeUndefined();
+    expect(uninstalled.receipt).toMatchObject({ action: "uninstall", evidenceRetained: true, reversible: false });
+    const registry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(registry.installations.map((installation) => installation.id)).toEqual([duplicated.installation!.id]);
+    expect(registry.lifecycleReceipts.map((receipt) => receipt.action)).toEqual(expect.arrayContaining([
+      "configure", "overlay", "repair", "duplicate", "detach", "uninstall"
+    ]));
+    expect(await input.mappingStore.list()).toHaveLength(input.mappingIds.length);
+  });
+
+  it("plans permission-aware updates, requires review, and restores the exact prior revision", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:02:00.000Z")
+    });
+    expect(updatePlan).toMatchObject({ fromVersion: "1.0.0", toVersion: "1.1.0", permissionReviewRequired: true });
+    expect(updatePlan.permissionChanges).toContainEqual(expect.objectContaining({
+      capability: "crm.lead.update",
+      change: "risk_increased",
+      requiresReview: true
+    }));
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/explicit review/i);
+
+    const updated = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    expect(updated.installation).toMatchObject({ version: "1.1.0", state: "ready_to_test", mode: "simulation" });
+    expect(updated.installation?.history.at(-1)).toMatchObject({ version: "1.0.0", reason: "update" });
+
+    const rolledBack = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+    expect(rolledBack.installation).toMatchObject({ version: "1.0.0", state: "rolled_back", mode: "simulation" });
+    const conformance = await input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T12:05:00.000Z"));
+    expect(conformance.status).toBe("passed");
   });
 });
