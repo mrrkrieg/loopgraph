@@ -51,5 +51,17 @@ describe("local app marketplace", () => {
       trustPolicy: "signed"
     })).rejects.toThrow(/pin/i);
   });
-});
 
+  it("coalesces concurrent refreshes for the same local marketplace", async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-marketplace-"));
+    temporaryDirectories.push(stateRoot);
+    const first = new LocalAppMarketplace(stateRoot, packsRoot);
+    const second = new LocalAppMarketplace(stateRoot, packsRoot);
+    const [left, right] = await Promise.all([
+      first.refreshAllCatalogSources(),
+      second.refreshAllCatalogSources()
+    ]);
+    expect(left.map((app) => app.id)).toEqual(right.map((app) => app.id));
+    expect(left.map((app) => app.id)).toContain("loopgraph.sales.qualify-route-inbound-leads");
+  });
+});

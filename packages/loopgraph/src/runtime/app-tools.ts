@@ -1,9 +1,17 @@
+import { readFile } from "node:fs/promises";
 import path from "node:path";
+import YAML from "yaml";
 import { z } from "zod";
-import { appInstallPlanSchema, appRolloutModeSchema } from "../core";
+import {
+  appEvalSuiteSchema,
+  appInstallPlanSchema,
+  appRolloutModeSchema,
+  appSetupDefinitionSchema
+} from "../core";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
+import { compileLoopPack } from "./app-pack-compiler";
 import { readConnectionInstances } from "./connector-registry";
 import { inspectLoopgraphWorkspace } from "./workspace";
 
@@ -121,7 +129,38 @@ export async function callLoopgraphAppTool(
     if (!version) throw new Error(`Marketplace app version not found: ${parsed.appId}@${parsed.version}`);
     const provenance = await marketplace.verifyAppProvenance(app.id, version.version);
     const loaded = await marketplace.getAppArtifact(app.id, version.version, version.digest);
-    return { schemaVersion: "loopgraph-app-detail/v1alpha1", app, selectedVersion: version, manifest: loaded.manifest, provenance };
+    const compiled = await compileLoopPack(loaded);
+    const [setup, evaluations] = await Promise.all([
+      Promise.all(loaded.manifest.entrypoints.setup.map(async (entry) =>
+        appSetupDefinitionSchema.parse(await readPackDocument(loaded.root, entry))
+      )),
+      Promise.all(loaded.manifest.entrypoints.evals.map(async (entry) =>
+        appEvalSuiteSchema.parse(await readPackDocument(loaded.root, entry))
+      ))
+    ]);
+    return {
+      schemaVersion: "loopgraph-app-detail/v1alpha1",
+      app,
+      selectedVersion: version,
+      manifest: loaded.manifest,
+      provenance,
+      graphPreview: compiled.graph,
+      loops: compiled.loopSpecs.map((spec) => ({
+        id: spec.metadata.id,
+        name: spec.metadata.name,
+        description: spec.metadata.description,
+        owner: spec.metadata.owner?.role,
+        trigger: `${spec.trigger.source}:${spec.trigger.event}`,
+        outcomes: Array.isArray(spec.studioExtension?.outcomes) ? spec.studioExtension.outcomes : []
+      })),
+      skills: compiled.skills,
+      setupQuestions: setup.flatMap((definition) => definition.questions),
+      evaluationSummary: {
+        suites: evaluations.length,
+        scenarios: evaluations.reduce((count, suite) => count + suite.scenarios.length, 0),
+        scenarioIds: evaluations.flatMap((suite) => suite.scenarios.map((scenario) => scenario.id))
+      }
+    };
   }
 
   const planWorkspaceId = name === "loopgraph_app_install_apply" && isRecord(raw.plan)
@@ -159,7 +198,19 @@ export async function callLoopgraphAppTool(
       : registry.installations;
     if (parsed.installationId && installations.length === 0) throw new Error(`App installation not found: ${parsed.installationId}`);
     const readiness = await Promise.all(installations.map((installation) => service.readiness(installation.id, options.now)));
-    return { schemaVersion: "loopgraph-installed-apps/v1alpha1", revision: registry.revision, installations, readiness, evaluations: registry.evaluations, lock: await store.readLockfile() };
+    const applications = (await Promise.all(installations.map(async (installation) => ({
+      installation,
+      app: await marketplace.getApp(installation.appId)
+    })))).filter((entry) => Boolean(entry.app));
+    return {
+      schemaVersion: "loopgraph-installed-apps/v1alpha1",
+      revision: registry.revision,
+      installations,
+      applications,
+      readiness,
+      evaluations: registry.evaluations,
+      lock: await store.readLockfile()
+    };
   }
   const parsed = appInstallationActionInputSchema.parse({ ...raw, projectRoot, ...identity });
   if (name === "loopgraph_app_test") return service.test(parsed.installationId, parsed.actor, options.now);
@@ -178,4 +229,9 @@ async function resolveIdentity(projectRoot: string, workspaceInput: unknown, com
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+async function readPackDocument(root: string, relativePath: string): Promise<unknown> {
+  const text = await readFile(path.join(root, relativePath), "utf8");
+  return relativePath.endsWith(".json") ? JSON.parse(text) : YAML.parse(text);
 }

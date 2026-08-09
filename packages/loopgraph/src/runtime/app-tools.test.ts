@@ -39,11 +39,25 @@ describe("shared Loopgraph App tools", () => {
     const detail = await callLoopgraphAppTool("loopgraph_app_get", {
       projectRoot,
       appId: "loopgraph.sales.qualify-route-inbound-leads"
-    }) as { selectedVersion: { version: string; digest: string }; provenance: { verified: boolean }; manifest: { metadata: { id: string } } };
+    }) as {
+      selectedVersion: { version: string; digest: string };
+      provenance: { verified: boolean };
+      manifest: { metadata: { id: string } };
+      loops: unknown[];
+      skills: unknown[];
+      setupQuestions: unknown[];
+      evaluationSummary: { scenarios: number };
+      graphPreview: { nodes: Array<{ type: string }> };
+    };
     expect(detail.manifest.metadata.id).toBe("loopgraph.sales.qualify-route-inbound-leads");
     expect(detail.selectedVersion.version).toBe("1.0.0");
     expect(detail.selectedVersion.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(detail.provenance.verified).toBe(true);
+    expect(detail.loops).toHaveLength(6);
+    expect(detail.skills).toHaveLength(4);
+    expect(detail.setupQuestions).toHaveLength(10);
+    expect(detail.evaluationSummary.scenarios).toBe(12);
+    expect(detail.graphPreview.nodes.some((node) => node.type === "app")).toBe(true);
   });
 
   it("keeps a clean local workspace empty until an exact plan is installed", async () => {
