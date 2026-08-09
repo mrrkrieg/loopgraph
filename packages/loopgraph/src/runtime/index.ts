@@ -99,3 +99,7 @@ export * from "./studio";
 export * from "./app-pack-loader";
 export * from "./app-pack-compiler";
 export * from "./app-marketplace";
+export * from "./company-context-service";
+export * from "./app-connector-service";
+export * from "./app-installation-store";
+export * from "./app-installation-service";
