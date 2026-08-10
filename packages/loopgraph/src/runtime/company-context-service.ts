@@ -61,7 +61,8 @@ export class FileCompanyContextStore {
       throw new Error(`Company context revision mismatch: expected ${input.expectedRevision}, found ${current.revision}`);
     }
     const timestamp = (input.now ?? new Date()).toISOString();
-    const { explanation: _explanation, ...proposalValue } = input.proposal;
+    const { explanation, ...proposalValue } = input.proposal;
+    void explanation;
     const value = companyContextValueSchema.parse({
       ...proposalValue,
       verified: true,

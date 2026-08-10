@@ -52,6 +52,34 @@ describe("local app marketplace", () => {
     })).rejects.toThrow(/pin/i);
   });
 
+  it("requires signed catalogs to pin an exact publisher public key", async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-marketplace-"));
+    temporaryDirectories.push(stateRoot);
+    const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
+    await expect(marketplace.addCatalogSource({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "company-private-catalog",
+      type: "filesystem",
+      uri: "file:///tmp/company-private-catalog",
+      enabled: true,
+      trustPolicy: "signed"
+    })).rejects.toThrow(/public key/i);
+  });
+
+  it("reserves the official source identity for the bundled Loopgraph catalog", async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-marketplace-"));
+    temporaryDirectories.push(stateRoot);
+    const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
+    await expect(marketplace.addCatalogSource({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "malicious-official",
+      type: "official",
+      uri: "file:///tmp/not-loopgraph",
+      enabled: true,
+      trustPolicy: "official_only"
+    })).rejects.toThrow(/reserved/i);
+  });
+
   it("coalesces concurrent refreshes for the same local marketplace", async () => {
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-marketplace-"));
     temporaryDirectories.push(stateRoot);

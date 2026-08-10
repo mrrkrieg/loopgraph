@@ -118,6 +118,17 @@ describe("LoopPack loader", () => {
     expect(await readFile(path.join(extracted, "skills/icp.yaml"), "utf8")).toContain("icp-evaluation");
   });
 
+  it("recomputes archive identity instead of trusting attacker-controlled artifact metadata", async () => {
+    const root = await createFixturePack();
+    const archivePath = path.join(root, "..", `${path.basename(root)}-tampered.loopgraph-pack`);
+    temporaryDirectories.push(archivePath);
+    await createLoopPackArchive(root, archivePath);
+    const archive = JSON.parse(await readFile(archivePath, "utf8")) as { artifact: { digest: string } };
+    archive.artifact.digest = `sha256:${"0".repeat(64)}`;
+    await writeFile(archivePath, JSON.stringify(archive));
+    await expect(readLoopPackArchive(archivePath)).rejects.toThrow(/digest does not match/i);
+  });
+
   it("supports exact, bounded, caret, tilde, and OR semantic-version ranges", () => {
     expect(satisfiesVersionRange("1.4.2", "1.4.2")).toBe(true);
     expect(satisfiesVersionRange("1.4.2", ">=1.0.0 <2.0.0")).toBe(true);
@@ -127,4 +138,3 @@ describe("LoopPack loader", () => {
     expect(satisfiesVersionRange("2.0.0", "<2.0.0")).toBe(false);
   });
 });
-

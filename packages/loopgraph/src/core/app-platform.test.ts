@@ -11,6 +11,8 @@ import {
   appPlatformJsonSchemas,
   assertSafeInitialRollout,
   canonicalAppDigest,
+  loopPackSignatureSchema,
+  marketplaceCatalogSourceSchema,
   loopPackManifestSchema
 } from "./app-platform";
 
@@ -109,6 +111,36 @@ describe("Loopgraph App Platform contracts", () => {
   it("produces order-independent canonical digests", () => {
     expect(canonicalAppDigest({ a: 1, b: 2 })).toBe(canonicalAppDigest({ b: 2, a: 1 }));
     expect(canonicalAppDigest({ a: 1 })).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it("requires signed catalogs to carry exact publisher trust material instead of a key label alone", () => {
+    const signature = loopPackSignatureSchema.parse({
+      schemaVersion: "loopgraph-pack-signature/v1alpha1",
+      publisherId: "acme",
+      digest: digest("pack"),
+      algorithm: "ed25519",
+      keyId: "acme.release.primary",
+      publicKey: "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA000000000000000000000000000000000000000=\n-----END PUBLIC KEY-----",
+      value: "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+      signedAt: now
+    });
+    expect(signature.keyId).toBe("acme.release.primary");
+    const source = marketplaceCatalogSourceSchema.parse({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "acme.private",
+      type: "filesystem",
+      uri: "file:///catalog",
+      enabled: true,
+      trustPolicy: "signed",
+      trustedPublisherKeys: [{
+        publisherId: signature.publisherId,
+        keyId: signature.keyId,
+        algorithm: signature.algorithm,
+        publicKey: signature.publicKey
+      }]
+    });
+    expect(source.trustedPublisherKeys[0]).toMatchObject({ publisherId: "acme", keyId: "acme.release.primary" });
+    expect(source).not.toHaveProperty("trustedKeyIds");
   });
 
   it("binds an install plan to its exact content and rejects direct execution", () => {

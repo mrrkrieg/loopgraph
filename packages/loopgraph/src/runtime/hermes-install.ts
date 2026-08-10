@@ -1074,7 +1074,13 @@ Use Loopgraph Apps when the user wants a complete installable business capabilit
 10. Call \`loopgraph_app_update_plan\` before any update. Explain graph additions/removals, every permission change, overlay conflicts, and rollback target. Call \`loopgraph_app_update_apply\` only with the exact unexpired plan and explicit approval for every permission increase. Fresh conformance is mandatory afterward.
 11. Call \`loopgraph_app_rollback\` only against the current artifact digest after an accountable user chooses the exact prior revision. The restored app remains write-blocked until retested.
 12. Call \`loopgraph_app_uninstall\` only with the current artifact digest, a reason, and explicit confirmation. Verify from the receipt that exclusive assets were removed while shared connections, mappings, context, identities, and evidence were retained.
-13. Never expose install, configure, overlay, repair, duplicate, update, rollback, detach, uninstall, activation, or evaluation-label tools to webhook-router or lifecycle-router turns.
+13. When a user wants to build a reusable app, call \`loopgraph_app_init\` for a complete private starter or \`loopgraph_app_capture\` for an installed app. Capture returns configuration key names and overlay paths for parameterization but never copies configuration or credential values.
+14. Call \`loopgraph_app_validate\` before packing or signing. A publishable pack must compile and pass secret scanning plus the complete write-blocked conformance contract. Explain failed scenarios; do not weaken fixtures to make a failing route appear safe.
+15. Generate publisher trust material with \`loopgraph_app_publisher_key_generate\` only in a trusted admin turn. Return the public key and fingerprint; never read, print, or copy its project-confined private key.
+16. Call \`loopgraph_app_sign\` only after validation passes. Call \`loopgraph_app_publish\` only for a signed exact version. Private catalogs pin the publisher ID, signature algorithm, key ID, and exact public key; matching a key label alone is never trusted.
+17. Use \`loopgraph_marketplace_sources_get\` to explain catalog trust. Add or refresh sources only after an operator supplies the explicit source contract. Signed sources without a pinned publisher public key must be rejected.
+18. Deprecate or revoke an exact release with \`loopgraph_app_release_status\` only after an accountable operator supplies the catalog, app, version, status, and explanation. Revoked and deprecated releases cannot resolve as install candidates.
+19. Never expose install, configure, overlay, repair, duplicate, update, rollback, detach, uninstall, activation, evaluation-label, publisher-key, capture, signing, publishing, release-status, or catalog-source mutation tools to webhook-router or lifecycle-router turns.
 
 ## Supporting References
 

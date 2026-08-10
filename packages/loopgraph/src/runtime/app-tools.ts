@@ -12,12 +12,14 @@ import {
   appRolloutModeSchema,
   appUpdatePlanSchema,
   artifactDigestSchema,
-  appSetupDefinitionSchema
+  appSetupDefinitionSchema,
+  marketplaceCatalogSourceSchema
 } from "../core";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { compileLoopPack } from "./app-pack-compiler";
+import { LoopgraphAppPublisher } from "./app-publisher";
 import { readConnectionInstances } from "./connector-registry";
 import { inspectLoopgraphWorkspace } from "./workspace";
 
@@ -43,8 +45,35 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_uninstall",
   "loopgraph_app_activate",
   "loopgraph_app_pause",
-  "loopgraph_app_resume"
+  "loopgraph_app_resume",
+  "loopgraph_app_publisher_key_generate",
+  "loopgraph_app_publisher_keys_get",
+  "loopgraph_app_init",
+  "loopgraph_app_capture",
+  "loopgraph_app_validate",
+  "loopgraph_app_pack",
+  "loopgraph_app_sign",
+  "loopgraph_app_publish",
+  "loopgraph_app_release_status",
+  "loopgraph_marketplace_sources_get",
+  "loopgraph_marketplace_source_add",
+  "loopgraph_marketplace_source_refresh"
 ] as const;
+
+const APP_PUBLISHER_TOOL_NAMES = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_publisher_key_generate",
+  "loopgraph_app_publisher_keys_get",
+  "loopgraph_app_init",
+  "loopgraph_app_capture",
+  "loopgraph_app_validate",
+  "loopgraph_app_pack",
+  "loopgraph_app_sign",
+  "loopgraph_app_publish",
+  "loopgraph_app_release_status",
+  "loopgraph_marketplace_sources_get",
+  "loopgraph_marketplace_source_add",
+  "loopgraph_marketplace_source_refresh"
+]);
 
 export type LoopgraphAppToolName = (typeof LOOPGRAPH_APP_TOOL_NAMES)[number];
 
@@ -153,6 +182,44 @@ export const appActivateInputSchema = appInstallationActionInputSchema.extend({
     message: "MCP activation supports shadow, recommend, or execute_with_approval; live requires a separate promotion receipt"
   })
 }).strict();
+export const appPublisherKeyGenerateInputSchema = projectSchema.extend({
+  publisherId: z.string().min(3).max(160),
+  keyId: z.string().min(3).max(160).optional()
+}).strict();
+export const appPublisherKeysGetInputSchema = projectSchema;
+export const appInitInputSchema = projectSchema.extend({
+  destination: z.string().min(1),
+  appId: z.string().min(3).max(160),
+  name: z.string().min(1).max(120),
+  department: z.enum(["management", "marketing", "sales", "product", "customer_success", "engineering", "ops_finance", "hr_talent", "legal_compliance", "custom"]),
+  publisherId: z.string().min(3).max(160),
+  publisherName: z.string().min(1).max(120).optional(),
+  summary: z.string().min(1).max(180).optional()
+}).strict();
+export const appCaptureInputSchema = projectSchema.extend({
+  installationId: z.string().min(1),
+  derivedAppId: z.string().min(3).max(160),
+  name: z.string().min(1).max(120),
+  publisherId: z.string().min(3).max(160),
+  publisherName: z.string().min(1).max(120).optional(),
+  destination: z.string().min(1),
+  workspaceId: z.string().min(1).optional(),
+  version: z.string().min(1).optional()
+}).strict();
+export const appValidateInputSchema = projectSchema.extend({ packRoot: z.string().min(1) }).strict();
+export const appPackInputSchema = appValidateInputSchema.extend({ destination: z.string().min(1) }).strict();
+export const appSignInputSchema = appValidateInputSchema.extend({ keyId: z.string().min(3).max(160) }).strict();
+export const appPublishInputSchema = appValidateInputSchema.extend({ catalogId: z.string().min(3).max(160) }).strict();
+export const appReleaseStatusInputSchema = projectSchema.extend({
+  catalogId: z.string().min(3).max(160),
+  appId: z.string().min(3).max(160),
+  version: z.string().min(1),
+  status: z.enum(["deprecated", "revoked"]),
+  message: z.string().min(1).max(2000)
+}).strict();
+export const marketplaceSourcesGetInputSchema = projectSchema;
+export const marketplaceSourceAddInputSchema = projectSchema.extend({ source: marketplaceCatalogSourceSchema }).strict();
+export const marketplaceSourceRefreshInputSchema = projectSchema.extend({ sourceId: z.string().min(3).max(160) }).strict();
 
 export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_marketplace_search", description: "Search available Loopgraph Apps by business outcome, department, capability, or maturity.", readOnly: true, idempotent: true, destructive: false },
@@ -176,7 +243,19 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_uninstall", description: "Remove only installation-owned runtime assets while retaining shared company resources and evidence.", readOnly: false, idempotent: false, destructive: true },
   { name: "loopgraph_app_activate", description: "Promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_pause", description: "Pause an installed app without deleting shared connectors, mappings, context, entities, or evidence.", readOnly: false, idempotent: true, destructive: false },
-  { name: "loopgraph_app_resume", description: "Resume a paused app at its last safe non-live rollout mode.", readOnly: false, idempotent: true, destructive: false }
+  { name: "loopgraph_app_resume", description: "Resume a paused app at its last safe non-live rollout mode.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_publisher_key_generate", description: "Generate a project-confined Ed25519 publisher key; return only the public trust material and keep the private key mode-0600.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_publisher_keys_get", description: "List public publisher trust material and private-key availability without returning private keys.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_init", description: "Scaffold a complete private Loopgraph App with routing, setup, connector, policy, outcome, and 13-case conformance contracts.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_capture", description: "Capture an installed app as a private parameterized pack without copying credential or configuration values.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_validate", description: "Validate, compile, secret-scan, and run deterministic write-blocked conformance for a LoopPack.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_pack", description: "Create a content-addressed verified LoopPack archive after publisher validation passes.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_sign", description: "Create and verify a detached Ed25519 signature over the exact immutable pack digest.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_publish", description: "Publish a signed immutable version into a trusted project-local private catalog and refresh marketplace metadata.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_release_status", description: "Deprecate or revoke an exact published app version and propagate that status into marketplace resolution.", readOnly: false, idempotent: true, destructive: true },
+  { name: "loopgraph_marketplace_sources_get", description: "List configured official, local, and private signed marketplace sources and their trust policy.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_marketplace_source_add", description: "Register an explicit catalog source; signed sources must pin exact publisher public keys.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_marketplace_source_refresh", description: "Revalidate and refresh one configured catalog source into the local marketplace index.", readOnly: false, idempotent: true, destructive: false }
 ] as const satisfies ReadonlyArray<{
   name: LoopgraphAppToolName;
   description: string;
@@ -193,7 +272,7 @@ export async function callLoopgraphAppTool(
   const raw = isRecord(input) ? input : {};
   const projectRoot = path.resolve(typeof raw.projectRoot === "string" ? raw.projectRoot : options.projectRoot ?? process.cwd());
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "apps", "marketplace"));
-  await marketplace.refreshAllCatalogSources();
+  if (!APP_PUBLISHER_TOOL_NAMES.has(name)) await marketplace.refreshAllCatalogSources();
 
   if (name === "loopgraph_marketplace_search") {
     const parsed = marketplaceSearchInputSchema.parse({ ...raw, projectRoot });
@@ -242,6 +321,57 @@ export async function callLoopgraphAppTool(
         scenarioIds: evaluations.flatMap((suite) => suite.scenarios.map((scenario) => scenario.id))
       }
     };
+  }
+
+  const publisher = new LoopgraphAppPublisher(projectRoot);
+  if (name === "loopgraph_app_publisher_key_generate") {
+    const parsed = appPublisherKeyGenerateInputSchema.parse({ ...raw, projectRoot });
+    return publisher.generatePublisherKey({ ...parsed, now: options.now });
+  }
+  if (name === "loopgraph_app_publisher_keys_get") {
+    appPublisherKeysGetInputSchema.parse({ ...raw, projectRoot });
+    return { schemaVersion: "loopgraph-publisher-keys/v1alpha1", keys: await publisher.listPublisherKeys() };
+  }
+  if (name === "loopgraph_app_init") {
+    const parsed = appInitInputSchema.parse({ ...raw, projectRoot });
+    return publisher.initializeApp(parsed);
+  }
+  if (name === "loopgraph_app_capture") {
+    const parsed = appCaptureInputSchema.parse({ ...raw, projectRoot });
+    return publisher.captureInstallation(parsed);
+  }
+  if (name === "loopgraph_app_validate") {
+    const parsed = appValidateInputSchema.parse({ ...raw, projectRoot });
+    return publisher.validateApp(parsed.packRoot);
+  }
+  if (name === "loopgraph_app_pack") {
+    const parsed = appPackInputSchema.parse({ ...raw, projectRoot });
+    return publisher.packApp(parsed);
+  }
+  if (name === "loopgraph_app_sign") {
+    const parsed = appSignInputSchema.parse({ ...raw, projectRoot });
+    return publisher.signApp({ ...parsed, now: options.now });
+  }
+  if (name === "loopgraph_app_publish") {
+    const parsed = appPublishInputSchema.parse({ ...raw, projectRoot });
+    return publisher.publishApp({ ...parsed, now: options.now });
+  }
+  if (name === "loopgraph_app_release_status") {
+    const parsed = appReleaseStatusInputSchema.parse({ ...raw, projectRoot });
+    return publisher.setReleaseStatus({ ...parsed, now: options.now });
+  }
+  if (name === "loopgraph_marketplace_sources_get") {
+    marketplaceSourcesGetInputSchema.parse({ ...raw, projectRoot });
+    await marketplace.initialize();
+    return { schemaVersion: "loopgraph-marketplace-sources/v1alpha1", sources: await marketplace.listCatalogSources() };
+  }
+  if (name === "loopgraph_marketplace_source_add") {
+    const parsed = marketplaceSourceAddInputSchema.parse({ ...raw, projectRoot });
+    return marketplace.addCatalogSource(parsed.source);
+  }
+  if (name === "loopgraph_marketplace_source_refresh") {
+    const parsed = marketplaceSourceRefreshInputSchema.parse({ ...raw, projectRoot });
+    return { schemaVersion: "loopgraph-marketplace-refresh/v1alpha1", apps: await marketplace.refreshCatalogSource(parsed.sourceId) };
   }
 
   const planWorkspaceId = name === "loopgraph_app_install_apply" && isRecord(raw.plan)

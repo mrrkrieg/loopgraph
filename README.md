@@ -257,6 +257,43 @@ npm run loopgraph -- apps uninstall <installation-id> --expected <artifact-diges
 
 Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach pins a local immutable snapshot. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence.
 
+### Build and share a private App
+
+The publisher workflow uses the same service through Hermes, MCP, and the CLI. A new app is scaffolded with a Hermes routing contract, setup questions, connector recipe, approval policy, outcome metrics, fixtures, and all 13 required safety cases—so authors begin from a runnable contract rather than an empty folder.
+
+```bash
+# `app` is an alias for `apps`
+npm run loopgraph -- app init apps/customer-risk \
+  --id acme.customer-success.customer-risk \
+  --name "Customer Risk" \
+  --department customer_success \
+  --publisher acme
+
+npm run loopgraph -- app validate apps/customer-risk
+npm run loopgraph -- app keygen acme --id acme.release.primary
+npm run loopgraph -- app sign apps/customer-risk --key acme.release.primary
+npm run loopgraph -- app pack apps/customer-risk dist/customer-risk.loopgraph-pack
+npm run loopgraph -- app publish apps/customer-risk --catalog acme.private
+```
+
+`app capture` turns an existing installation into a namespaced private pack, but it copies no configuration values, tokens, credentials, or private provider payloads. It returns only configuration key names and overlay paths that the author must deliberately parameterize.
+
+Publisher keys are Ed25519 keys stored under the project-ignored `.loopgraph/` directory with private files restricted to mode `0600`. Signed catalogs pin the publisher ID, algorithm, key ID, and exact public key. Key names alone do not establish trust. Published `appId@version` content is immutable: publishing the same digest is idempotent, a different digest is rejected, and exact releases can be deprecated or revoked.
+
+```bash
+npm run loopgraph -- app capture <installation-id> apps/private-variant \
+  --id acme.sales.private-qualification \
+  --name "Private Qualification" \
+  --publisher acme
+
+npm run loopgraph -- app sources
+npm run loopgraph -- app deprecate acme.customer-success.customer-risk \
+  --version 0.1.0 --catalog acme.private \
+  --message "Use the reviewed v2 contract."
+```
+
+The private catalog implementation is local-first and project-confined. It is appropriate for development and customer-controlled filesystem synchronization; the hosted multi-tenant marketplace, organization identity, remote key custody, billing, and enterprise retention plane remain separate deployment work.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

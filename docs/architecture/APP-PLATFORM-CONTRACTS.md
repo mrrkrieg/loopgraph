@@ -96,3 +96,24 @@ The runtime LoopSpec registry supports content-bound writes and removals in one 
 ## Public contracts
 
 The strict Zod schemas and generated JSON Schemas live in `packages/loopgraph/src/core/app-platform.ts`. They are exported from `loopgraph/core` and must be reused by runtime services, CLI, MCP, and browser APIs. A client-specific shadow schema is not allowed.
+
+## Publisher and catalog trust
+
+The local-first publisher is a project-confined service shared by Hermes, MCP, and the CLI. `app init` creates a complete private starter and `app capture` derives a pack from an exact installed artifact. Capture never copies installation configuration values, secrets, credentials, or provider payloads; it reports only key names and overlay paths that require deliberate parameterization.
+
+Before signing, the service performs strict pack validation, generated LoopSpec compilation, connector/setup/evaluation parsing, secret scanning, and the complete deterministic conformance suite with provider writes blocked. Third-party packs cannot mark their publisher verified or claim official visibility.
+
+Pack signatures use a detached `loopgraph.pack.signature.json` sidecar over the canonical artifact digest. Project-local Ed25519 private keys are mode `0600` and excluded from Git through `.loopgraph/`. APIs return only the public key and its fingerprint. The detached signature is excluded from the content digest so a pack has one stable content identity, but archive and directory readers still verify the signature bytes and provenance.
+
+A signed catalog trust policy pins all four trust attributes:
+
+```text
+publisher ID
++ signature algorithm
++ key ID
++ exact normalized public key
+```
+
+Key-ID equality alone is insufficient and is explicitly rejected. Marketplace refresh cryptographically verifies every signed pack against the source's pinned keys, and cached artifact reads reapply the same trust policy. Published `appId@version` content is immutable: the same digest is idempotent, while a different digest for the same version is rejected. Catalog release metadata can mark an exact digest deprecated or revoked; neither status is eligible for new resolution.
+
+Private filesystem catalogs are the current distribution boundary. Hosted organization catalogs require authenticated tenant isolation, remote signing or customer-managed key custody, replicated immutable object storage, audit retention, and marketplace control-plane operations before being described as production hosted publishing.

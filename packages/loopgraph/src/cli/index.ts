@@ -170,7 +170,7 @@ const graphChange = graph.command("change").description("Approve and apply add, 
 const graphPromotion = graph.command("promotion").description("Approve and apply ordered loop activation-mode promotions");
 const graphLifecycle = graph.command("lifecycle").description("Approve and apply loop pause or resume transactions");
 const graphRollback = graph.command("rollback").description("Approve and apply exact graph transaction rollback");
-const apps = program.command("apps").description("Discover, install, test, and operate Loopgraph Apps through the shared Hermes service");
+const apps = program.command("apps").alias("app").description("Discover, build, publish, install, test, and operate Loopgraph Apps through the shared Hermes service");
 
 apps
   .command("search")
@@ -489,6 +489,165 @@ apps
       confirmed: true,
       actor: options.actor
     });
+  });
+
+apps
+  .command("keygen")
+  .description("Generate a project-confined Ed25519 publisher key and print only its public trust material")
+  .argument("<publisher-id>", "Stable publisher ID")
+  .option("--id <key-id>", "Stable publisher key ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (publisherId: string, options: { id?: string; project: string }) => {
+    await printAppTool("loopgraph_app_publisher_key_generate", { projectRoot: options.project, publisherId, keyId: options.id });
+  });
+
+apps
+  .command("keys")
+  .description("List publisher public keys and private-key availability without printing private key material")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    await printAppTool("loopgraph_app_publisher_keys_get", { projectRoot: options.project });
+  });
+
+apps
+  .command("init")
+  .description("Scaffold a complete private app with Hermes routing, setup, policy, connector, outcomes, and conformance")
+  .argument("<destination>", "Project-confined destination directory")
+  .requiredOption("--id <app-id>", "Stable app ID")
+  .requiredOption("--name <name>", "Human-readable app name")
+  .requiredOption("--department <department>", "Department type")
+  .requiredOption("--publisher <publisher-id>", "Stable publisher ID")
+  .option("--publisher-name <name>", "Human-readable publisher name")
+  .option("--summary <text>", "Short business outcome summary")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (destination: string, options: { id: string; name: string; department: string; publisher: string; publisherName?: string; summary?: string; project: string }) => {
+    await printAppTool("loopgraph_app_init", {
+      projectRoot: options.project,
+      destination,
+      appId: options.id,
+      name: options.name,
+      department: options.department,
+      publisherId: options.publisher,
+      publisherName: options.publisherName,
+      summary: options.summary
+    });
+  });
+
+apps
+  .command("capture")
+  .description("Capture an installed app as a parameterized private pack without configuration or credential values")
+  .argument("<installation-id>", "Installed app ID")
+  .argument("<destination>", "Project-confined destination directory")
+  .requiredOption("--id <app-id>", "New private app ID")
+  .requiredOption("--name <name>", "Human-readable app name")
+  .requiredOption("--publisher <publisher-id>", "Stable publisher ID")
+  .option("--publisher-name <name>", "Human-readable publisher name")
+  .option("--version <version>", "Initial exact semantic version", "0.1.0")
+  .option("--workspace <id>", "Workspace ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (installationId: string, destination: string, options: { id: string; name: string; publisher: string; publisherName?: string; version: string; workspace?: string; project: string }) => {
+    await printAppTool("loopgraph_app_capture", {
+      projectRoot: options.project,
+      installationId,
+      destination,
+      derivedAppId: options.id,
+      name: options.name,
+      publisherId: options.publisher,
+      publisherName: options.publisherName,
+      version: options.version,
+      workspaceId: options.workspace
+    });
+  });
+
+apps
+  .command("validate")
+  .description("Validate, compile, secret-scan, and run the write-blocked publisher conformance suite")
+  .argument("<pack-root>", "LoopPack directory")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (packRoot: string, options: { project: string }) => {
+    const result = await callLoopgraphAppTool("loopgraph_app_validate", { projectRoot: path.resolve(options.project), packRoot });
+    console.log(JSON.stringify(result, null, 2));
+    if (isRecord(result) && result.ok === false) process.exitCode = 1;
+  });
+
+apps
+  .command("pack")
+  .description("Create a verified content-addressed LoopPack archive")
+  .argument("<pack-root>", "LoopPack directory")
+  .argument("<destination>", "Project-confined archive path")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (packRoot: string, destination: string, options: { project: string }) => {
+    await printAppTool("loopgraph_app_pack", { projectRoot: options.project, packRoot, destination });
+  });
+
+apps
+  .command("sign")
+  .description("Sign the exact immutable pack digest with a project-confined publisher key")
+  .argument("<pack-root>", "LoopPack directory")
+  .requiredOption("--key <key-id>", "Publisher key ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (packRoot: string, options: { key: string; project: string }) => {
+    await printAppTool("loopgraph_app_sign", { projectRoot: options.project, packRoot, keyId: options.key });
+  });
+
+apps
+  .command("publish")
+  .description("Publish a signed immutable version to a trusted project-local private catalog")
+  .argument("<pack-root>", "LoopPack directory")
+  .requiredOption("--catalog <catalog-id>", "Private catalog ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (packRoot: string, options: { catalog: string; project: string }) => {
+    await printAppTool("loopgraph_app_publish", { projectRoot: options.project, packRoot, catalogId: options.catalog });
+  });
+
+for (const releaseAction of ["deprecate", "revoke"] as const) {
+  apps
+    .command(releaseAction)
+    .description(`${releaseAction === "deprecate" ? "Deprecate" : "Revoke"} an exact published app version`)
+    .argument("<app-id>", "Published app ID")
+    .requiredOption("--version <version>", "Exact published version")
+    .requiredOption("--catalog <catalog-id>", "Private catalog ID")
+    .requiredOption("--message <text>", "Accountable status explanation")
+    .option("--project <root>", "Explicit project root", process.cwd())
+    .action(async (appId: string, options: { version: string; catalog: string; message: string; project: string }) => {
+      await printAppTool("loopgraph_app_release_status", {
+        projectRoot: options.project,
+        catalogId: options.catalog,
+        appId,
+        version: options.version,
+        status: releaseAction === "deprecate" ? "deprecated" : "revoked",
+        message: options.message
+      });
+    });
+}
+
+apps
+  .command("sources")
+  .description("List official, local, and private signed marketplace sources")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    await printAppTool("loopgraph_marketplace_sources_get", { projectRoot: options.project });
+  });
+
+apps
+  .command("source-add")
+  .description("Register a catalog source from a JSON contract; signed sources must pin exact public keys")
+  .requiredOption("--file <path>", "Marketplace catalog source JSON")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { file: string; project: string }) => {
+    await printAppTool("loopgraph_marketplace_source_add", {
+      projectRoot: options.project,
+      source: await readJsonRecord(path.resolve(options.file))
+    });
+  });
+
+apps
+  .command("source-refresh")
+  .description("Revalidate and refresh one marketplace source")
+  .argument("<source-id>", "Marketplace source ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (sourceId: string, options: { project: string }) => {
+    await printAppTool("loopgraph_marketplace_source_refresh", { projectRoot: options.project, sourceId });
   });
 
 measurementBindings
