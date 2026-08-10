@@ -210,6 +210,18 @@ function verifyProviderSignature(input: {
       "quickbooks:intuit-signature"
     );
   }
+  if (input.providerId === "outlook" || input.providerId === "teams") {
+    const notifications = readMicrosoftGraphNotifications(input.rawBody);
+    const verified = notifications.length > 0 && notifications.every((notification) =>
+      typeof notification.clientState === "string" && constantTimeEqual(notification.clientState, input.webhookSecret)
+    );
+    return result(
+      verified,
+      verified ? hash(input.rawBody) : "",
+      `${input.providerId}:microsoft-graph-client-state`,
+      verified ? undefined : "invalid_client_state"
+    );
+  }
   return result(false, "", `${input.providerId}:unsupported`, "provider_signature_strategy_unimplemented");
 }
 
@@ -257,6 +269,17 @@ function readJsonId(body: string) {
     return typeof value.id === "string" ? value.id : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function readMicrosoftGraphNotifications(body: string): Array<Record<string, unknown>> {
+  try {
+    const value = JSON.parse(body) as Record<string, unknown>;
+    return Array.isArray(value.value)
+      ? value.value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      : [];
+  } catch {
+    return [];
   }
 }
 

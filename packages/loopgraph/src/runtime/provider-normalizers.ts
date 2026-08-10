@@ -88,6 +88,26 @@ function providerFields(provider: ProviderId, event: Record<string, unknown>): P
     const campaign = asRecord(event.campaign);
     return fields(string(event.eventType ?? event.type, "campaign.performance_anomaly"), "campaign", string(campaign.id ?? event.campaignId ?? event.id, "unknown"), event, occurredAt, []);
   }
+  if (provider === "gmail") {
+    const message = asRecord(event.message);
+    return fields(string(event.type, "mail.thread.changed"), "communication_thread", string(event.threadId ?? message.threadId ?? message.id ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.subject", "normalizedPayload.snippet", "normalizedPayload.body"]);
+  }
+  if (provider === "google_calendar") {
+    const calendarEvent = asRecord(event.event);
+    return fields(string(event.type, "calendar.event.changed"), "calendar_commitment", string(calendarEvent.id ?? event.eventId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.event.summary", "normalizedPayload.event.description", "normalizedPayload.event.attendees"]);
+  }
+  if (provider === "outlook") {
+    const resource = asRecord(event.resourceData);
+    const isCalendar = string(event.type ?? event.changeType, "").includes("calendar") || string(event.resource, "").includes("events");
+    return fields(string(event.type ?? event.changeType, isCalendar ? "calendar.event.changed" : "mail.message.changed"), isCalendar ? "calendar_commitment" : "communication_thread", string(resource.id ?? event.conversationId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.subject", "normalizedPayload.bodyPreview", "normalizedPayload.resourceData"]);
+  }
+  if (provider === "teams") {
+    const resource = asRecord(event.resourceData);
+    return fields(string(event.type ?? event.changeType, "teams.channel.message.created"), "conversation", string(resource.id ?? event.messageId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.body", "normalizedPayload.resourceData"]);
+  }
+  if (provider === "posthog" || provider === "amplitude") {
+    return fields(string(event.type, "metric.threshold_crossed"), "metric", string(event.insightId ?? event.chartId ?? event.metricId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.breakdown", "normalizedPayload.sample"]);
+  }
   if (["zendesk", "intercom"].includes(provider)) {
     const ticket = asRecord(event.ticket);
     const conversation = asRecord(event.conversation);

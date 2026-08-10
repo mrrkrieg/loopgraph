@@ -6,6 +6,10 @@ const migrationPath = path.join(
   process.cwd(),
   "supabase/migrations/202608010001_enterprise_connector_broker.sql"
 );
+const providerExpansionMigrationPath = path.join(
+  process.cwd(),
+  "supabase/migrations/202608100001_expand_connector_broker_providers.sql"
+);
 
 describe("enterprise connector broker migration", () => {
   it("persists only non-secret control-plane, replay, receipt, and revocation state", async () => {
@@ -70,5 +74,14 @@ describe("enterprise connector broker migration", () => {
     expect(sql).toContain("refresh_lease_until");
     expect(sql).toContain("token_replayed");
     expect(sql).toContain("set status = 'revoked'");
+  });
+
+  it("keeps expanded providers behind an explicit reviewed database allowlist", async () => {
+    const sql = await readFile(providerExpansionMigrationPath, "utf8");
+    expect(sql).toContain("drop constraint if exists connector_installations_provider_check");
+    for (const providerId of ["gmail", "google_calendar", "outlook", "teams", "posthog", "amplitude"]) {
+      expect(sql).toContain(`'${providerId}'`);
+    }
+    expect(sql).toContain("adding a provider requires schema, onboarding, capability, operation, normalization, fixture, and migration coverage");
   });
 });

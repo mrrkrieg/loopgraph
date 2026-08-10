@@ -346,7 +346,7 @@ function connectionGrantsScope(connection: ConnectionInstance, providerId: strin
   if (providerId === "stripe" && requiredScope.toLowerCase().endsWith(":read")) {
     return connection.grantedScopes.some((scope) => scope === "read_only" || scope === "read_write");
   }
-  const brokerReadOnlyProviders = new Set(["zendesk", "workday", "netsuite"]);
+  const brokerReadOnlyProviders = new Set(["zendesk", "workday", "netsuite", "quickbooks", "posthog", "amplitude"]);
   return connection.source === "hermes_connector_broker"
     && brokerReadOnlyProviders.has(providerId)
     && connection.brokerCapabilities.includes("provider.data.read")

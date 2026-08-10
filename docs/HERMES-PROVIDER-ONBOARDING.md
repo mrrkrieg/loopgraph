@@ -19,6 +19,12 @@ The Hermes Connector Broker owns authorization, signing secrets, webhook/stream 
 | Greenhouse | OAuth 2.0 + PKCE | Webhook API |
 | NetSuite | Admin-managed connected app | Enterprise event route |
 | QuickBooks | Admin-managed connected app | Provider-console webhook |
+| Gmail | OAuth 2.0 + PKCE | Scheduled thread detector |
+| Google Calendar | OAuth 2.0 + PKCE | Scheduled event detector |
+| Microsoft Outlook | Microsoft identity OAuth 2.0 + PKCE | Microsoft Graph change notifications |
+| Microsoft Teams | Microsoft identity OAuth 2.0 + PKCE | Microsoft Graph change notifications |
+| PostHog | Admin-managed project API key | Scheduled saved-insight detector |
+| Amplitude | Admin-managed project API + secret key | Scheduled event-metric detector |
 
 The executable source of truth is `PROVIDER_ONBOARDING_CATALOG`; the matching synthetic payloads are `PROVIDER_GOLDEN_FIXTURES`.
 
@@ -36,6 +42,8 @@ The executable source of truth is `PROVIDER_ONBOARDING_CATALOG`; the matching sy
    provider capability and connection it needs. Use the hierarchical kill-switch panel for incident containment.
 
 Provider application registration, admin consent, callback-domain verification, and live subscription calls require credentials in the operator's provider tenant. The repository provides the executable contract and tests; it cannot manufacture those external grants.
+
+Default Gmail and Microsoft consent is read-only. Compose, send, or channel-post scopes require a separate capability escalation and are never inferred from installing an app. Google classifies broad server-side Gmail read and compose scopes as restricted, so a hosted public deployment must complete Google's applicable verification and security assessment before enabling them. Microsoft Graph notifications are accepted only when every notification in the batch contains the installation's secret `clientState`; endpoint validation echoes an opaque validation token only for an existing Outlook or Teams installation in a subscription-capable lifecycle state. PostHog reads saved insight IDs rather than accepting arbitrary HogQL, and Amplitude uses its fixed event-segmentation endpoint with a project-scoped API/secret-key pair.
 
 ## Security invariants
 

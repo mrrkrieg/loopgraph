@@ -323,6 +323,78 @@ export const DEFAULT_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     notes: ["Accounting writes require approved execution authority and remain fingerprint-bound."]
   }),
   manifest({
+    id: "gmail",
+    label: "Gmail",
+    category: "email",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("mail.thread.read", "Read a bounded Gmail thread and metadata", ["https://www.googleapis.com/auth/gmail.readonly"], "Provide a redacted email-thread export."),
+      draftCapability("mail.message.draft", "Prepare an email draft without sending it", ["https://www.googleapis.com/auth/gmail.compose"], "Create the draft in a local review artifact."),
+      approvedWriteCapability("mail.message.send", "Send an exact fingerprint-approved email", ["https://www.googleapis.com/auth/gmail.send"], "Send the approved email manually.")
+    ],
+    notes: ["Gmail read and compose scopes are restricted Google scopes; deployments must complete the applicable verification and security-assessment requirements."]
+  }),
+  manifest({
+    id: "google_calendar",
+    label: "Google Calendar",
+    category: "calendar",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("calendar.event.read", "Read bounded calendar commitments", ["https://www.googleapis.com/auth/calendar.events.readonly"], "Provide a redacted calendar export.")
+    ],
+    notes: ["The default connector is read-only and returns only the configured event window."]
+  }),
+  manifest({
+    id: "outlook",
+    label: "Microsoft Outlook",
+    category: "email",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("mail.thread.read", "Read a bounded Outlook conversation", ["Mail.Read"], "Provide a redacted conversation export."),
+      readCapability("calendar.event.read", "Read bounded Outlook calendar commitments", ["Calendars.Read"], "Provide a redacted calendar export."),
+      draftCapability("mail.message.draft", "Prepare an Outlook email draft without sending it", ["Mail.ReadWrite"], "Create the draft in a local review artifact."),
+      approvedWriteCapability("mail.message.send", "Send an exact fingerprint-approved Outlook email", ["Mail.Send"], "Send the approved email manually.")
+    ],
+    notes: ["Delegated permissions are requested per connected user; sending remains separately approval-gated."]
+  }),
+  manifest({
+    id: "teams",
+    label: "Microsoft Teams",
+    category: "messaging",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      draftCapability("collaboration.message.draft", "Prepare a Teams message without posting it", ["ChannelMessage.Send"], "Create the draft in a local review artifact."),
+      approvedWriteCapability("messaging.channel.post", "Post an exact fingerprint-approved Teams message", ["ChannelMessage.Send"], "Post the approved message manually.")
+    ],
+    notes: ["Channel posting remains blocked until the exact prepared message fingerprint and destination are approved."]
+  }),
+  manifest({
+    id: "posthog",
+    label: "PostHog",
+    category: "analytics",
+    transport: "http_api",
+    authType: "api_key",
+    capabilities: [
+      readCapability("analytics.event.query", "Read a bounded saved PostHog insight", ["query:read"], "Provide a redacted PostHog insight export.")
+    ],
+    notes: ["The connector reads saved insight IDs; it does not expose arbitrary HogQL or an HTTP proxy."]
+  }),
+  manifest({
+    id: "amplitude",
+    label: "Amplitude",
+    category: "analytics",
+    transport: "http_api",
+    authType: "api_key",
+    capabilities: [
+      readCapability("analytics.event.query", "Run a bounded Amplitude event-segmentation query", ["analytics:read"], "Provide a redacted Amplitude chart export.")
+    ],
+    notes: ["The connector uses project-scoped API and secret keys and a fixed event-segmentation endpoint."]
+  }),
+  manifest({
     id: "manual_file",
     label: "Manual File Import",
     category: "manual",

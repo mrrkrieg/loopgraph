@@ -23,5 +23,11 @@ export const PROVIDER_GOLDEN_FIXTURES: ProviderGoldenFixture[] = [
   { providerId: "workday", deliveryId: "workday-1", payload: { id: "wd-1", type: "worker.changed", employeeId: "worker-1" }, expectedEventType: "worker.changed", expectedSubjectType: "employee" },
   { providerId: "greenhouse", deliveryId: "greenhouse-1", payload: { id: "gh-hr-1", type: "candidate.stage_changed", candidateId: "candidate-1" }, expectedEventType: "candidate.stage_changed", expectedSubjectType: "candidate" },
   { providerId: "netsuite", deliveryId: "netsuite-1", payload: { id: "ns-1", type: "invoice.changed", invoiceId: "invoice-1" }, expectedEventType: "invoice.changed", expectedSubjectType: "invoice" },
-  { providerId: "quickbooks", deliveryId: "quickbooks-1", payload: { id: "qb-1", type: "payment.updated", accountId: "account-1" }, expectedEventType: "payment.updated", expectedSubjectType: "account" }
+  { providerId: "quickbooks", deliveryId: "quickbooks-1", payload: { id: "qb-1", type: "payment.updated", accountId: "account-1" }, expectedEventType: "payment.updated", expectedSubjectType: "account" },
+  { providerId: "gmail", deliveryId: "gmail-1", payload: { id: "gmail-1", type: "mail.thread.changed", threadId: "thread-1", historyId: "101" }, expectedEventType: "mail.thread.changed", expectedSubjectType: "communication_thread" },
+  { providerId: "google_calendar", deliveryId: "google-calendar-1", payload: { id: "calendar-1", type: "calendar.event.changed", event: { id: "event-1", status: "confirmed" } }, expectedEventType: "calendar.event.changed", expectedSubjectType: "calendar_commitment" },
+  { providerId: "outlook", deliveryId: "outlook-1", payload: { id: "outlook-1", type: "mail.message.changed", conversationId: "conversation-1", resourceData: { id: "message-1" } }, expectedEventType: "mail.message.changed", expectedSubjectType: "communication_thread" },
+  { providerId: "teams", deliveryId: "teams-1", payload: { id: "teams-1", type: "teams.channel.message.created", resourceData: { id: "message-1" } }, expectedEventType: "teams.channel.message.created", expectedSubjectType: "conversation" },
+  { providerId: "posthog", deliveryId: "posthog-1", payload: { id: "posthog-1", type: "metric.threshold_crossed", insightId: "insight-1" }, expectedEventType: "metric.threshold_crossed", expectedSubjectType: "metric" },
+  { providerId: "amplitude", deliveryId: "amplitude-1", payload: { id: "amplitude-1", type: "metric.threshold_crossed", chartId: "chart-1" }, expectedEventType: "metric.threshold_crossed", expectedSubjectType: "metric" }
 ];
