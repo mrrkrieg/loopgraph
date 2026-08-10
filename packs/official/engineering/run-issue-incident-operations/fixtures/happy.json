@@ -1,0 +1,1 @@
+{"id":"engineering-issue-happy","eventType":"engineering.issue_received","subject":{"type":"issue","id":"issue-501"},"normalizedPayload":{"issueId":"501","repository":"api","title":"Export worker retries can duplicate jobs","confidence":0.98},"evidenceRefs":["github:issue:501","linear:search:duplicate-check"]}

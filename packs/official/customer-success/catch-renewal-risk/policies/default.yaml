@@ -1,0 +1,4 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules: { account.read: allowed, support.read: allowed, billing.read: allowed, analytics.query: allowed, account.update: approval_required, collaboration.draft: approval_required, mail.draft: approval_required, mail.send: forbidden, commercial.change: forbidden, roadmap.promise: forbidden }
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

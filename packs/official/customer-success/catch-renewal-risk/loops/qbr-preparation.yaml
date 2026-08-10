@@ -1,0 +1,40 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: cs-qbr-preparation, name: QBR Preparation, version: 1.0.0, description: "Prepare an evidence-backed account review with outcomes, risks, decisions, and open questions.", department: customer_success, ownerRole: csm, tags: [qbr, executive, review] }
+trigger: { type: event, source: "*", event: cs.qbr_window_open }
+input: { requiredFields: [normalizedPayload.accountId, normalizedPayload.ownerId, normalizedPayload.reviewWindow], subjectTypes: [account, qbr], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble review evidence, actor: system, type: observe, description: "Join goals, adoption, support, outcomes, renewal, risks, decisions, and open work." }
+  - { id: assess, name: Assess account narrative, actor: agent, type: assess, description: "Separate verified outcomes, gaps, uncertainty, customer goals, and internal actions." }
+  - { id: prepare, name: Prepare QBR brief, actor: agent, type: prepare, description: "Draft an executive review and optional customer-facing material with evidence links." }
+  - { id: verify, name: Require review, actor: human, type: verify, description: "Require accountable approval for claims, audience, commitments, and next steps." }
+capabilities:
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read account goals and ownership., customerFacing: false }
+  - { key: support.ticket.read, authority: read, risk: high, required: true, purpose: Read support outcomes., customerFacing: false }
+  - { key: billing.subscription.read, authority: read, risk: high, required: true, purpose: Read contract and renewal evidence., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read adoption and outcome evidence., customerFacing: false }
+  - { key: mail.message.draft, authority: approve, risk: high, required: false, purpose: Prepare exact approved customer review material., customerFacing: true }
+skills: [cs-account-assessment, cs-executive-brief]
+outcomes: [{ metric: qbr_preparation_hours, description: Human preparation time for an evidence-complete account review., direction: decrease, sourceCapability: crm.account.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer_success.qbr_preparation]
+  accepts: [{ sourcePattern: "*", eventTypePattern: cs.qbr_window_open, subjectTypes: [account, qbr], requiredFields: [normalizedPayload.accountId, normalizedPayload.ownerId, normalizedPayload.reviewWindow], reason: A scheduled review has account identity and ownership. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: cs.account_snapshot_changed, subjectTypes: [], fields: [], reason: Health changes cannot directly create customer-facing review content. }]
+  inputMapping: { accountId: normalizedPayload.accountId, ownerId: normalizedPayload.ownerId, reviewWindow: normalizedPayload.reviewWindow }
+  priority: 80
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 30, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
+  examples: { shouldRoute: ["A scheduled QBR has one resolved account."], shouldNotRoute: ["Customer goals are missing."] }
+policy:
+  forbiddenActions: [{ capability: mail.message.draft, reason: Customer-facing review material requires exact approval and this app never sends it. }]
+  escalationOwner: csm
+  escalationSla: 3d
+  separateCustomerFacingApproval: true

@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: salesforce-zendesk-billing-teams
+providerId: salesforce
+providerFamily: salesforce
+displayName: Salesforce + Zendesk + Billing + Teams
+capabilities:
+  - { logicalCapability: crm.account.read, providerOperation: salesforce.accounts.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: support.ticket.read, providerOperation: zendesk.tickets.read, minimumScopes: [tickets:read], authority: read, risk: high }
+  - { logicalCapability: billing.subscription.read, providerOperation: billing.subscriptions.read, minimumScopes: [subscriptions:read], authority: read, risk: high }
+  - { logicalCapability: analytics.event.query, providerOperation: product-analytics.account-health.query, minimumScopes: [analytics:read], authority: read, risk: medium }
+  - { logicalCapability: crm.account.update, providerOperation: salesforce.accounts.update, minimumScopes: [api], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: teams.messages.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: outlook.drafts.create, minimumScopes: [Mail.ReadWrite], authority: approve, risk: high }
+eventSources:
+  - { eventFamily: cs.account_snapshot_changed, providerEvent: AccountChangeEvent, transport: webhook, normalizationTransformer: salesforce.account-to-health-snapshot.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: cs.support_risk_detected, providerEvent: ticket.updated, transport: webhook, normalizationTransformer: zendesk.ticket-to-support-risk.v1, signatureStrategy: zendesk-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
+fieldMappings:
+  - { objectType: account, requiredLogicalFields: [account.id, account.ownerId, account.tier, account.lifecycleStage], optionalLogicalFields: [account.renewalAt, account.healthStatus, account.executiveSponsor] }
+  - { objectType: subscription, requiredLogicalFields: [subscription.id, subscription.accountId, subscription.status], optionalLogicalFields: [subscription.renewalAt, subscription.arr, subscription.paymentStatus] }
+healthCheck: { capability: crm.account.read, sampleQuery: { state: active, limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

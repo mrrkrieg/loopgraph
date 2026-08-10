@@ -1,0 +1,1 @@
+{"id":"cs-health-duplicate","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-604"},"normalizedPayload":{"accountId":"604","ownerId":"csm-10","tier":"enterprise","matchedProblemId":"account-risk-604","confidence":0.99},"evidenceRefs":["loopgraph:problem:account-risk-604"]}

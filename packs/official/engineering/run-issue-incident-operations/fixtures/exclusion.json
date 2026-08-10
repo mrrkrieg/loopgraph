@@ -1,0 +1,1 @@
+{"id":"engineering-issue-excluded","eventType":"engineering.issue_received","subject":{"type":"issue","id":"issue-503"},"normalizedPayload":{"issueId":"503","repository":"sandbox","title":"Internal test issue","excluded":true,"confidence":1},"evidenceRefs":["policy:test-repository"]}

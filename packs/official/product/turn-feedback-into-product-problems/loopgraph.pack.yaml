@@ -57,6 +57,21 @@ permissions:
   - { capability: product.release.read, authority: read, mode: optional, risk: low, purpose: "Read release scope and dates needed for outcome learning.", customerFacing: false, defaultPolicy: allowed, dataClasses: [project_data] }
 requiredCapabilities: [support.feedback.read, analytics.event.query, project.issue.read]
 optionalCapabilities: [project.issue.create, project.issue.update, product.release.read]
+topology:
+  objects:
+    - { id: customer-feedback, objectType: customer_feedback, label: Customer feedback, description: "Durable feedback items joined to customer, workflow, segment, and provider identity.", shared: true, identityKeys: [feedbackId, accountId, productArea] }
+    - { id: feedback-cluster, objectType: feedback_cluster, label: Feedback cluster, description: "A recurring theme with source evidence, affected segments, and an observation window.", shared: true, identityKeys: [clusterId, productArea, observationWindow] }
+    - { id: product-problem, objectType: product_problem, label: Validated product problem, description: "A bounded problem statement with impact, counter-evidence, owner, and success metric.", shared: true, identityKeys: [problemId, productArea] }
+    - { id: release-outcome, objectType: release_outcome, label: Release outcome, description: "Post-release adoption, support, defect, and rollback evidence tied to the original problem.", shared: true, identityKeys: [releaseId, problemId, measurementWindow] }
+  flows:
+    - { id: feedback-enters-clustering, source: { kind: object, id: customer-feedback }, target: { kind: loop, id: product-feedback-clustering }, type: evidence_in, reason: Hermes sends durable feedback evidence to clustering only after source and subject identity resolve. }
+    - { id: clustering-produces-cluster, source: { kind: loop, id: product-feedback-clustering }, target: { kind: object, id: feedback-cluster }, type: produces, reason: The loop emits one traceable cluster rather than an ungrounded theme. }
+    - { id: cluster-enters-validation, source: { kind: object, id: feedback-cluster }, target: { kind: loop, id: product-problem-validation }, type: evidence_in, reason: Validation begins only from a stable cluster with affected workflow and segment evidence. }
+    - { id: validation-produces-problem, source: { kind: loop, id: product-problem-validation }, target: { kind: object, id: product-problem }, type: produces, reason: A validated problem becomes a reusable company object for roadmap and engineering work. }
+    - { id: problem-enters-roadmap, source: { kind: object, id: product-problem }, target: { kind: loop, id: product-roadmap-evidence }, type: evidence_in, reason: Roadmap evidence consumes a validated problem but cannot set priority autonomously. }
+    - { id: problem-enters-release-learning, source: { kind: object, id: product-problem }, target: { kind: loop, id: product-release-learning }, type: evidence_in, reason: Release learning keeps the original problem and success criteria attached to the shipped change. }
+    - { id: release-produces-outcome, source: { kind: loop, id: product-release-learning }, target: { kind: object, id: release-outcome }, type: produces, reason: Observed release effects become durable evidence rather than a one-time report. }
+    - { id: release-learning-returns-to-validation, source: { kind: loop, id: product-release-learning }, target: { kind: loop, id: product-problem-validation }, type: learning_return, reason: "Outcome evidence improves future validation thresholds and distinguishes product, onboarding, support, and defect problems." }
 entrypoints:
   loops:
     - loops/feedback-clustering.yaml

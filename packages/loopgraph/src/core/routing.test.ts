@@ -192,6 +192,66 @@ describe("Hermes routing core", () => {
     expect(card?.department).toBe("ops_finance");
   });
 
+  it("allows supporting routes only when the primary loop topology declares them", () => {
+    const sharedRouting = {
+      schemaVersion: "routing-contract/v1alpha1" as const,
+      problemTypes: ["engineering.incident_response"],
+      accepts: [{
+        sourcePattern: "incident_system",
+        eventTypePattern: "incident.customer_impact_detected",
+        subjectTypes: ["incident"],
+        requiredFields: ["incidentId"]
+      }],
+      fanoutPolicy: { mode: "declared_ordered" as const, maxRoutes: 2, requiresIndependentProblems: false },
+      minimumConfidence: 0.85,
+      activationMode: "shadow" as const
+    };
+    const primary = compileRoutingCardFromLoopSpec(loopWithRouting({
+      id: "engineering-incident-response",
+      name: "Incident Response",
+      department: "engineering",
+      description: "Own the primary incident problem.",
+      routing: { ...sharedRouting, permittedSupportingLoopIds: ["engineering-customer-impact"] }
+    }), { catalogVersion: "catalog_topology", currentReadiness: "ready" })!;
+    const supporting = compileRoutingCardFromLoopSpec(loopWithRouting({
+      id: "engineering-customer-impact",
+      name: "Customer Impact",
+      department: "engineering",
+      description: "Own independently evidenced customer impact.",
+      routing: sharedRouting
+    }), { catalogVersion: "catalog_topology", currentReadiness: "ready" })!;
+    const event = eventEnvelope({
+      source: "incident_system",
+      sourceDeliveryId: "incident_delivery_1",
+      eventType: "incident.customer_impact_detected",
+      subject: { type: "incident", id: "incident_123" },
+      normalizedPayload: { incidentId: "incident_123" }
+    });
+    const decision = {
+      schemaVersion: "routing-decision/v1alpha1" as const,
+      eventId: event.id,
+      catalogVersion: "catalog_topology",
+      action: "route" as const,
+      selectedRoutes: [
+        { loopId: primary.loopId, role: "primary" as const, confidence: 0.95, reasonSummary: "Primary incident owner.", evidenceRefs: [], inputMapping: {}, priority: 100 },
+        { loopId: supporting.loopId, role: "supporting" as const, confidence: 0.92, reasonSummary: "Verified customer impact.", evidenceRefs: [], inputMapping: {}, priority: 90 }
+      ],
+      alternatives: [],
+      modelMetadata: {},
+      policyVersion: "routing-policy/v1alpha1"
+    };
+
+    expect(validateRoutingDecisionForEvent({ event, routingCards: [primary, supporting], catalogVersion: "catalog_topology", decision }).valid).toBe(true);
+    const blocked = validateRoutingDecisionForEvent({
+      event,
+      routingCards: [{ ...primary, permittedSupportingLoopIds: [] }, supporting],
+      catalogVersion: "catalog_topology",
+      decision
+    });
+    expect(blocked.valid).toBe(false);
+    expect(blocked.errors).toContain('Primary loop "engineering-incident-response" does not permit supporting route "engineering-customer-impact"');
+  });
+
   it("returns only structurally eligible cards for an ads anomaly", () => {
     const event = eventEnvelope({
       source: "google_ads_detector",

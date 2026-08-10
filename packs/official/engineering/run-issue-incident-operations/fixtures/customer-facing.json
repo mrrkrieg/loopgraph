@@ -1,0 +1,1 @@
+{"id":"engineering-customer-impact","eventType":"engineering.customer_impact_ready","subject":{"type":"customer_impact","id":"incident-508-impact"},"normalizedPayload":{"incidentId":"508","impactEvidenceRefs":["incident:508","accounts:affected:508"],"owner":"incident-commander-2","confidence":0.99},"evidenceRefs":["linear:incident:508","support:affected-accounts:508"]}

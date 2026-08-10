@@ -106,6 +106,7 @@ export const loopRoutingContractSchema = z.object({
     maxRoutes: z.number().int().min(1).default(1),
     requiresIndependentProblems: z.boolean().default(true)
   }).default({ mode: "none", maxRoutes: 1, requiresIndependentProblems: true }),
+  permittedSupportingLoopIds: z.array(z.string().min(1)).default([]),
   cooldown: z.object({
     seconds: z.number().int().min(0).default(0),
     dedupeWindowSeconds: z.number().int().min(0).default(0)
@@ -144,6 +145,7 @@ export const routingCardSchema = z.object({
   ambiguityPolicy: loopRoutingContractSchema.shape.ambiguityPolicy,
   noMatchPolicy: loopRoutingContractSchema.shape.noMatchPolicy,
   fanoutPolicy: loopRoutingContractSchema.shape.fanoutPolicy,
+  permittedSupportingLoopIds: loopRoutingContractSchema.shape.permittedSupportingLoopIds,
   cooldown: loopRoutingContractSchema.shape.cooldown,
   concurrency: loopRoutingContractSchema.shape.concurrency,
   inputMapping: loopInputMappingSchema.default({}),
@@ -498,6 +500,7 @@ export function compileRoutingCardFromLoopSpec(
     ambiguityPolicy: routing.ambiguityPolicy,
     noMatchPolicy: routing.noMatchPolicy,
     fanoutPolicy: routing.fanoutPolicy,
+    permittedSupportingLoopIds: routing.permittedSupportingLoopIds,
     cooldown: routing.cooldown,
     concurrency: routing.concurrency,
     inputMapping: routing.inputMapping,
@@ -623,6 +626,13 @@ export function validateRoutingDecisionForEvent(input: {
     }
   }
 
+  if (input.decision.action === "route") {
+    const primaryRoutes = input.decision.selectedRoutes.filter((route) => route.role === "primary");
+    if (primaryRoutes.length !== 1) {
+      errors.push("A routed business problem requires exactly one primary loop");
+    }
+  }
+
   if (selectedCards.length > 1) {
     const maxAllowedRoutes = Math.min(...selectedCards.map((card) => card.fanoutPolicy.maxRoutes));
     if (selectedCards.length > maxAllowedRoutes) {
@@ -631,6 +641,15 @@ export function validateRoutingDecisionForEvent(input: {
     for (const card of selectedCards) {
       if (card.fanoutPolicy.mode === "none") {
         errors.push(`Selected loop "${card.loopId}" does not allow fan-out`);
+      }
+    }
+    const primaryRoute = input.decision.selectedRoutes.find((route) => route.role === "primary");
+    const primaryCard = primaryRoute ? cardsById.get(primaryRoute.loopId) : undefined;
+    if (primaryCard) {
+      for (const supportingRoute of input.decision.selectedRoutes.filter((route) => route.role === "supporting")) {
+        if (!primaryCard.permittedSupportingLoopIds.includes(supportingRoute.loopId)) {
+          errors.push(`Primary loop "${primaryCard.loopId}" does not permit supporting route "${supportingRoute.loopId}"`);
+        }
       }
     }
   }

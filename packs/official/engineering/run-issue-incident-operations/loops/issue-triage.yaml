@@ -1,0 +1,35 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: engineering-issue-triage, name: Engineering Issue Triage, version: 1.0.0, description: "Classify repository issues, resolve ownership, and select an accountable engineering route.", department: engineering, ownerRole: engineering_operations, tags: [issues, triage, ownership] }
+trigger: { type: event, source: "*", event: engineering.issue_received }
+input: { requiredFields: [normalizedPayload.issueId, normalizedPayload.repository, normalizedPayload.title], subjectTypes: [issue], fixtures: [{ id: issue, path: fixtures/happy.json }] }
+routine:
+  - { id: normalize, name: Normalize issue, actor: system, type: observe, description: "Preserve repository, issue, author, content, label, and delivery identity." }
+  - { id: assess, name: Assess issue, actor: agent, type: assess, description: "Classify defect, request, question, security sensitivity, duplicate evidence, and missing context." }
+  - { id: decide, name: Select owner and route, actor: agent, type: decide, description: "Choose one accountable route or abstain when ownership, severity, or identity is ambiguous." }
+  - { id: learn, name: Learn from triage, actor: system, type: learn, description: "Return corrections, duplicate disposition, plan linkage, and resolution evidence." }
+capabilities:
+  - { key: repo.issue.read, authority: read, risk: low, required: true, purpose: Read source issue and repository ownership evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Match existing work and duplicates., customerFacing: false }
+skills: [engineering-technical-triage, engineering-severity-classification]
+outcomes:
+  - { metric: issue_triage_latency_minutes, description: Time to an accountable issue disposition., direction: decrease, sourceCapability: repo.issue.read }
+  - { metric: issue_triage_correction_rate, description: Triage decisions corrected by reviewers., direction: decrease, sourceCapability: project.issue.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [engineering.issue_triage]
+  accepts: [{ sourcePattern: "*", eventTypePattern: engineering.issue_received, subjectTypes: [issue], requiredFields: [normalizedPayload.issueId, normalizedPayload.repository, normalizedPayload.title], reason: A repository issue has enough identity for bounded triage. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle events update existing work. }]
+  inputMapping: { issueId: normalizedPayload.issueId, repository: normalizedPayload.repository, title: normalizedPayload.title }
+  priority: 100
+  minimumConfidence: 0.86
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 100, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [repo.issue.read, project.issue.read]
+  examples: { shouldRoute: ["A verified repository issue has title and identity."], shouldNotRoute: ["A duplicate delivery arrives.", "Security sensitivity is unresolved."] }
+policy: { forbiddenActions: [], escalationOwner: engineering_operations, escalationSla: 1h, separateCustomerFacingApproval: true }

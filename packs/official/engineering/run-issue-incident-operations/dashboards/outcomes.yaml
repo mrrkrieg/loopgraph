@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: engineering-operations-outcomes
+metrics:
+  - { id: issue_triage_latency_minutes, direction: decrease, description: Time to accountable issue disposition. }
+  - { id: implementation_plan_acceptance_rate, direction: increase, description: Plans accepted without material rework. }
+  - { id: incident_acknowledgement_minutes, direction: decrease, description: Detection to accountable acknowledgement. }
+  - { id: incident_resolution_minutes, direction: decrease, description: Detection to verified recovery. }
+  - { id: customer_impact_correction_rate, direction: decrease, description: Impact statements corrected after review. }
+  - { id: post_release_regression_rate, direction: decrease, description: Releases followed by material regression. }
+  - { id: incident_recurrence_rate, direction: decrease, description: Incident classes recurring after corrective work. }

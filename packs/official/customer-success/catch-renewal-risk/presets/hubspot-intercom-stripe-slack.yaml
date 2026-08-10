@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: hubspot-intercom-stripe-slack
+name: HubSpot + Intercom + Stripe + Slack
+description: Configure customer and renewal risk for a HubSpot-centered stack.
+connectorRecipe: connectors/hubspot-intercom-stripe-slack.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 90, rolloutMode: shadow }
+requiredCompanyFields: [customerSuccess.accountTiers, customerSuccess.renewalWindows, customerSuccess.riskThresholds, customerSuccess.ownerMapping]

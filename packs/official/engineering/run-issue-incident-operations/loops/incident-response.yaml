@@ -1,0 +1,36 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: engineering-incident-response, name: Incident Response, version: 1.0.0, description: "Establish severity, ownership, evidence, and accountable response for a production incident.", department: engineering, ownerRole: incident_commander, tags: [incident, severity, response] }
+trigger: { type: event, source: "*", event: engineering.incident_detected }
+input: { requiredFields: [normalizedPayload.incidentId, normalizedPayload.service, normalizedPayload.detectedAt], subjectTypes: [incident, service], fixtures: [] }
+routine:
+  - { id: normalize, name: Normalize incident, actor: system, type: observe, description: "Preserve detection, service, deployment, symptom, and source identity." }
+  - { id: classify, name: Classify severity, actor: agent, type: assess, description: "Apply company severity and escalation policy to observed impact." }
+  - { id: decide, name: Establish response, actor: agent, type: decide, description: "Select one incident owner and supporting routes only when topology permits." }
+  - { id: learn, name: Track response, actor: system, type: learn, description: "Return acknowledgement, mitigation, resolution, customer impact, and recurrence evidence." }
+capabilities:
+  - { key: incident.record.read, authority: read, risk: high, required: true, purpose: Read incident timeline and impact evidence., customerFacing: false }
+  - { key: deployment.release.read, authority: read, risk: medium, required: true, purpose: Correlate recent deployments and rollback evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Read service ownership and active response work., customerFacing: false }
+skills: [engineering-severity-classification, engineering-incident-synthesis]
+outcomes:
+  - { metric: incident_acknowledgement_minutes, description: Detection to accountable acknowledgement., direction: decrease, sourceCapability: incident.record.read }
+  - { metric: incident_resolution_minutes, description: Detection to verified service recovery., direction: decrease, sourceCapability: incident.record.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [engineering.incident_response]
+  accepts: [{ sourcePattern: "*", eventTypePattern: engineering.incident_detected, subjectTypes: [incident, service], requiredFields: [normalizedPayload.incidentId, normalizedPayload.service, normalizedPayload.detectedAt], reason: A production incident has enough identity for response. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: engineering.issue_received, subjectTypes: [], fields: [], reason: Ordinary issues cannot enter incident response without incident evidence. }]
+  inputMapping: { incidentId: normalizedPayload.incidentId, service: normalizedPayload.service, detectedAt: normalizedPayload.detectedAt }
+  priority: 110
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: independent_only, maxRoutes: 2, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [incident.record.read, deployment.release.read, project.issue.read]
+  examples: { shouldRoute: ["A production incident identifies one service."], shouldNotRoute: ["The signal is a test alert."] }
+policy: { forbiddenActions: [], escalationOwner: incident_commander, escalationSla: 15m, separateCustomerFacingApproval: true }

@@ -1,0 +1,1 @@
+{"id":"cs-health-ambiguous","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-605"},"normalizedPayload":{"accountId":"605","ownerId":"csm-11","tier":"enterprise","candidateSubjectIds":["account-605-crm","account-605-billing"],"confidence":0.97},"evidenceRefs":["crm:account:605","billing:account:605"]}

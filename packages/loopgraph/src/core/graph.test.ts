@@ -144,6 +144,50 @@ describe("semantic loop topology", () => {
     expect(topology.warnings.some((warning) => warning.nodeId === "app:loopgraph.sales.qualify-route-inbound-leads")).toBe(false);
   });
 
+  it("materializes pack-defined company objects and evidence flows into the company graph", () => {
+    const primary = loopSpec({ id: "engineering-incident-response", department: "engineering" });
+    const supporting = loopSpec({ id: "engineering-customer-impact", department: "engineering" });
+    for (const spec of [primary, supporting]) {
+      spec.metadata.labels = {
+        appId: "loopgraph.engineering.incident-operations",
+        appName: "Incident Operations",
+        appVersion: "1.0.0"
+      };
+      spec.studioExtension = {
+        appTopology: {
+          objects: [{
+            id: "incident",
+            objectType: "incident",
+            label: "Production incident",
+            description: "A durable incident identity.",
+            shared: true,
+            identityKeys: ["incidentId"]
+          }],
+          flows: [
+            { id: "incident-input", source: { kind: "object", id: "incident" }, target: { kind: "loop", id: primary.metadata.id }, type: "evidence_in", reason: "Incident evidence enters Hermes routing." },
+            { id: "impact-support", source: { kind: "loop", id: primary.metadata.id }, target: { kind: "loop", id: supporting.metadata.id }, type: "supports", reason: "Customer impact is separately evidenced.", condition: "Affected account identity is verified." }
+          ]
+        }
+      };
+    }
+
+    const topology = buildSemanticTopology({
+      loopSpecs: [primary, supporting],
+      options: { brainLabel: "Hermes Brain", hierarchyMode: "hermes_brain" }
+    });
+
+    expect(topology.nodes.find((node) => node.id === "company-object:incident")).toMatchObject({
+      type: "memory",
+      label: "Production incident",
+      layer: "data",
+      metadata: { companyObject: true, shared: true }
+    });
+    expect(topology.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "company-object:incident", target: "loop:engineering-incident-response", kind: "observes" }),
+      expect.objectContaining({ source: "loop:engineering-incident-response", target: "loop:engineering-customer-impact", kind: "calls", executable: true })
+    ]));
+  });
+
   it("adds local runtime metadata for Hermes graph run controls", () => {
     const spec = loopSpec({ id: "marketing-ads", department: "marketing" });
     spec.metadata.labels = {
@@ -172,6 +216,7 @@ describe("semantic loop topology", () => {
       ambiguityPolicy: "request_human",
       noMatchPolicy: "unhandled",
       fanoutPolicy: { mode: "none", maxRoutes: 1, requiresIndependentProblems: true },
+      permittedSupportingLoopIds: [],
       cooldown: { seconds: 0, dedupeWindowSeconds: 3600 },
       concurrency: { maxActive: 1, strategy: "append_evidence" },
       activationMode: "shadow",

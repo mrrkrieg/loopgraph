@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: engineering-severity-classification
+name: Severity Classification
+description: Apply company severity and escalation policy to observed technical and customer impact.
+department: engineering
+goal: Produce an evidence-backed severity recommendation and escalation route.
+inputs: [incident signal, service policy, observed impact, customer evidence, deployment evidence]
+outputs: [severity recommendation, evidence, uncertainty, escalation owner]
+instructions: [Apply the versioned company severity policy., Separate observed impact from possible exposure., Prefer the highest evidenced dimension without inventing impact., Re-evaluate when new evidence arrives., Preserve accountable human severity authority.]
+boundaries: [Do not declare or change severity autonomously., Do not infer affected customers., Do not publish incident communication.]
+requiredCapabilities: [incident.record.read, deployment.release.read, project.issue.read]
