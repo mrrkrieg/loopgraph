@@ -627,10 +627,11 @@ describe("Loopgraph MCP server", () => {
       result: {
         structuredContent: {
           schemaVersion: "loopgraph-marketplace-search/v1alpha1",
-          count: 1
+          count: expect.any(Number)
         }
       }
     });
+    expect(JSON.stringify(response)).toContain("loopgraph.sales.qualify-route-inbound-leads");
   });
 
   it("exposes semantic graph history only to trusted admin turns", async () => {

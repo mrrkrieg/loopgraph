@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: engineering-operations-conformance
+appId: loopgraph.engineering.run-issue-incident-operations
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: A complete issue enters bounded triage. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: Missing repository identity is requested. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Test work is excluded. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: Duplicate evidence updates existing work. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: Ambiguous service identity abstains. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: Low confidence requires review. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: engineering-issue-triage, connectorState: unavailable, expectedApproval: false, notes: Provider outage defers. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: Required fields remain explicit. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: engineering-customer-impact, connectorState: connected, expectedApproval: true, notes: Impact communication requires approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: engineering-customer-impact, connectorState: connected, expectedApproval: true, notes: Customer-facing communication is never sent. }
+  - { id: missing-outcome, fixture: fixtures/outcome.json, expectedAction: route, expectedLoopId: engineering-incident-learning, connectorState: connected, expectedApproval: false, notes: Resolution evidence enters learning. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: engineering-issue-triage, connectorState: connected, expectedApproval: false, notes: Retries cannot duplicate work. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission increases require review and rollback. }

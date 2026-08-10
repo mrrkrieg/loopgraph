@@ -1,0 +1,35 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: cs-support-escalation, name: Support Escalation, version: 1.0.0, description: "Connect material support evidence to one accountable account and escalation route.", department: customer_success, ownerRole: customer_success_lead, tags: [support, escalation, account] }
+trigger: { type: event, source: "*", event: cs.support_risk_detected }
+input: { requiredFields: [normalizedPayload.ticketId, normalizedPayload.accountId, normalizedPayload.severity], subjectTypes: [support_ticket, account], fixtures: [] }
+routine:
+  - { id: resolve, name: Resolve support impact, actor: system, type: observe, description: "Join ticket, account, product, incident, owner, and renewal evidence." }
+  - { id: assess, name: Assess escalation, actor: agent, type: assess, description: "Apply severity, recurrence, SLA, strategic-account, and renewal-risk policy." }
+  - { id: decide, name: Select escalation route, actor: agent, type: decide, description: "Choose support ownership or an independent strategic-account problem when topology permits." }
+  - { id: learn, name: Learn resolution, actor: system, type: learn, description: "Return time-to-resolution, recurrence, account recovery, and review corrections." }
+capabilities:
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read account tier and owner., customerFacing: false }
+  - { key: support.ticket.read, authority: read, risk: high, required: true, purpose: Read support severity and recurrence., customerFacing: false }
+  - { key: billing.subscription.read, authority: read, risk: high, required: true, purpose: Read renewal and commercial exposure., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read affected workflow evidence., customerFacing: false }
+skills: [cs-risk-synthesis, cs-recovery-plan]
+outcomes: [{ metric: support_escalation_resolution_hours, description: Time to verified resolution of material account support risk., direction: decrease, sourceCapability: support.ticket.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer_success.support_escalation]
+  accepts: [{ sourcePattern: "*", eventTypePattern: cs.support_risk_detected, subjectTypes: [support_ticket, account], requiredFields: [normalizedPayload.ticketId, normalizedPayload.accountId, normalizedPayload.severity], reason: A material support signal has account and severity identity. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: cs.account_snapshot_changed, subjectTypes: [], fields: [], reason: General health changes do not create support escalations. }]
+  inputMapping: { ticketId: normalizedPayload.ticketId, accountId: normalizedPayload.accountId, severity: normalizedPayload.severity }
+  priority: 105
+  minimumConfidence: 0.92
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: independent_only, maxRoutes: 2, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
+  examples: { shouldRoute: ["A severe support issue links to one account."], shouldNotRoute: ["Account identity is ambiguous."] }
+policy: { forbiddenActions: [], escalationOwner: customer_success_lead, escalationSla: 1h, separateCustomerFacingApproval: true }

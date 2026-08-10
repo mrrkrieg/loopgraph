@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: marketing-qualified-pipeline-conformance
+appId: loopgraph.marketing.learn-qualified-pipeline
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: A complete campaign window enters downstream business learning. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: Missing spend evidence is requested rather than estimated. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Internal test campaigns cannot create allocation work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: Repeated evidence updates one durable campaign problem. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: Hermes abstains when provider campaign identities do not resolve. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: Low-confidence attribution requires human judgment. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: marketing-campaign-learning, connectorState: unavailable, expectedApproval: false, notes: Provider outage cannot produce campaign decisions. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: Required campaign cost evidence remains explicit. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: marketing-icp-message-learning, connectorState: connected, expectedApproval: true, notes: Creative work remains bound to exact approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: marketing-icp-message-learning, connectorState: connected, expectedApproval: true, notes: Customer-facing claims are separately reviewed and never published by this app. }
+  - { id: missing-outcome, fixture: fixtures/outcome.json, expectedAction: route, expectedLoopId: marketing-campaign-pipeline-outcome, connectorState: connected, expectedApproval: false, notes: Outcome learning records observed downstream evidence separately from missing outcomes. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: marketing-campaign-learning, connectorState: connected, expectedApproval: false, notes: "Retries cannot double-count spend, pipeline, or value." }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission increases require explicit review and preserve rollback. }

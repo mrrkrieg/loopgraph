@@ -1,0 +1,11 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: google-ads-hubspot-posthog
+name: Google Ads + HubSpot + PostHog
+description: Configure campaign-to-qualified-pipeline learning for a Google Ads and HubSpot stack.
+connectorRecipe: connectors/google-ads-hubspot-posthog.yaml
+defaults:
+  attributionModel: company_overlay
+  allocationMode: prepare_for_approval
+  historicalReplayDays: 90
+  rolloutMode: shadow
+requiredCompanyFields: [marketing.qualificationDefinition, marketing.attributionWindow, product.activationMetric, sales.pipelineStages]

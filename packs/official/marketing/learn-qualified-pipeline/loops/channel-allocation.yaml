@@ -1,0 +1,53 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: marketing-channel-allocation
+  name: Channel Allocation
+  version: 1.0.0
+  description: Prepare evidence-backed campaign and channel allocation changes for exact approval.
+  department: marketing
+  ownerRole: growth_lead
+  tags: [allocation, budget, approval]
+trigger: { type: event, source: hermes, event: marketing.campaign_outcome_ready }
+input: { requiredFields: [normalizedPayload.campaignId, normalizedPayload.outcomeWindow, normalizedPayload.evidenceRefs], subjectTypes: [campaign, campaign_cohort], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble comparable cohorts, actor: system, type: observe, description: "Load spend, quality, activation, pipeline, guardrail, and uncertainty evidence." }
+  - { id: compare, name: Compare allocation evidence, actor: agent, type: assess, description: "Compare like-for-like cohorts and expose attribution, lag, and sample limitations." }
+  - { id: decide, name: Prepare allocation proposal, actor: agent, type: decide, description: "Recommend hold, reduce, increase, pause-review, or extend measurement within configured bounds." }
+  - { id: approve, name: Verify exact change, actor: human, type: verify, description: "Require exact campaign, field, prior value, proposed value, and expiry approval." }
+  - { id: learn, name: Learn allocation impact, actor: system, type: learn, description: "Return applied changes and subsequent qualified-pipeline outcomes." }
+capabilities:
+  - { key: ads.campaign.read, authority: read, risk: low, required: true, purpose: Read comparable campaign and spend evidence., customerFacing: false }
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read qualification evidence., customerFacing: false }
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read pipeline outcomes., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read activation and guardrail evidence., customerFacing: false }
+  - { key: ads.campaign.update, authority: approve, risk: high, required: false, purpose: Apply the exact approved campaign change., customerFacing: false }
+  - { key: collaboration.message.draft, authority: approve, risk: medium, required: false, purpose: Prepare the approved internal allocation brief., customerFacing: false }
+skills: [marketing-campaign-analysis, marketing-cohort-evaluation]
+outcomes:
+  - { metric: allocation_qualified_pipeline_lift, description: Qualified-pipeline change after an approved allocation decision., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: allocation_reversal_rate, description: Approved allocation changes reverted after outcome review., direction: decrease, sourceCapability: ads.campaign.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [marketing.channel_allocation]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: marketing.campaign_outcome_ready, subjectTypes: [campaign, campaign_cohort], requiredFields: [normalizedPayload.campaignId, normalizedPayload.outcomeWindow, normalizedPayload.evidenceRefs], reason: A reviewed campaign outcome is ready for governed allocation analysis. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: marketing.campaign_window_closed, subjectTypes: [], fields: [], reason: Delivery metrics alone cannot justify an allocation change. }]
+  inputMapping: { campaignId: normalizedPayload.campaignId, outcomeWindow: normalizedPayload.outcomeWindow }
+  priority: 80
+  minimumConfidence: 0.94
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
+  examples: { shouldRoute: ["A complete reviewed outcome window supports one bounded campaign decision."], shouldNotRoute: ["Only clicks are available.", "The proposed change exceeds approved budget bounds."] }
+policy:
+  forbiddenActions:
+    - { capability: ads.campaign.update, reason: "Budget, bid, status, and targeting changes require exact prepared-action approval." }
+    - { capability: collaboration.message.draft, reason: Internal distribution requires destination and content approval. }
+  escalationOwner: growth_lead
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

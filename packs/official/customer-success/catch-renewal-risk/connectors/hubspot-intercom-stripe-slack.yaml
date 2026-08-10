@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: hubspot-intercom-stripe-slack
+providerId: hubspot
+providerFamily: hubspot
+displayName: HubSpot + Intercom + Stripe + Slack
+capabilities:
+  - { logicalCapability: crm.account.read, providerOperation: hubspot.companies.read, minimumScopes: [crm.objects.companies.read], authority: read, risk: low }
+  - { logicalCapability: support.ticket.read, providerOperation: intercom.conversations.read, minimumScopes: [conversations:read], authority: read, risk: high }
+  - { logicalCapability: billing.subscription.read, providerOperation: stripe.subscriptions.read, minimumScopes: [subscriptions:read], authority: read, risk: high }
+  - { logicalCapability: analytics.event.query, providerOperation: product-analytics.account-health.query, minimumScopes: [analytics:read], authority: read, risk: medium }
+  - { logicalCapability: crm.account.update, providerOperation: hubspot.companies.update, minimumScopes: [crm.objects.companies.write], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: slack.messages.draft, minimumScopes: [chat:write], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: hubspot.email.draft, minimumScopes: [sales-email-read], authority: approve, risk: high }
+eventSources:
+  - { eventFamily: cs.account_snapshot_changed, providerEvent: company.propertyChange, transport: webhook, normalizationTransformer: hubspot.account-to-health-snapshot.v1, signatureStrategy: hubspot-v3-signature, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: cs.support_risk_detected, providerEvent: conversation.admin.replied, transport: webhook, normalizationTransformer: intercom.conversation-to-support-risk.v1, signatureStrategy: intercom-hmac-sha1, replayProtection: true, fallbackPollMinutes: 15 }
+fieldMappings:
+  - { objectType: account, requiredLogicalFields: [account.id, account.ownerId, account.tier, account.lifecycleStage], optionalLogicalFields: [account.renewalAt, account.healthStatus, account.executiveSponsor] }
+  - { objectType: subscription, requiredLogicalFields: [subscription.id, subscription.accountId, subscription.status], optionalLogicalFields: [subscription.renewalAt, subscription.arr, subscription.paymentStatus] }
+healthCheck: { capability: crm.account.read, sampleQuery: { state: active, limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

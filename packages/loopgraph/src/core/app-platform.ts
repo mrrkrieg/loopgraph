@@ -191,6 +191,76 @@ const packPresetSchema = z.object({
   providerFamily: z.string().min(1).optional()
 }).strict();
 
+const packTopologyEndpointSchema = z.object({
+  kind: z.enum(["loop", "object"]),
+  id: appIdSchema
+}).strict();
+
+const packTopologyObjectSchema = z.object({
+  id: appIdSchema,
+  objectType: z.string().min(1).max(80).regex(idPattern),
+  label: z.string().min(1).max(120),
+  description: z.string().min(1).max(500),
+  shared: z.boolean().default(true),
+  identityKeys: z.array(z.string().min(1).max(120)).min(1)
+}).strict();
+
+const packTopologyFlowSchema = z.object({
+  id: appIdSchema,
+  source: packTopologyEndpointSchema,
+  target: packTopologyEndpointSchema,
+  type: z.enum(["evidence_in", "supports", "produces", "learning_return"]),
+  reason: z.string().min(1).max(500),
+  condition: z.string().min(1).max(500).optional()
+}).strict().superRefine((flow, ctx) => {
+  const expectedKinds = flow.type === "evidence_in"
+    ? ["object", "loop"]
+    : flow.type === "produces"
+      ? ["loop", "object"]
+      : ["loop", "loop"];
+  if (flow.source.kind !== expectedKinds[0] || flow.target.kind !== expectedKinds[1]) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `${flow.type} flows require ${expectedKinds[0]} -> ${expectedKinds[1]}`
+    });
+  }
+  if (flow.type === "supports" && !flow.condition) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["condition"],
+      message: "Supporting-loop fan-out requires an explicit evidence condition"
+    });
+  }
+});
+
+const packTopologySchema = z.object({
+  objects: z.array(packTopologyObjectSchema).default([]),
+  flows: z.array(packTopologyFlowSchema).default([])
+}).strict().superRefine((topology, ctx) => {
+  const objectIds = new Set(topology.objects.map((object) => object.id));
+  if (objectIds.size !== topology.objects.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["objects"], message: "Topology object IDs must be unique" });
+  }
+  const flowIds = new Set(topology.flows.map((flow) => flow.id));
+  if (flowIds.size !== topology.flows.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["flows"], message: "Topology flow IDs must be unique" });
+  }
+  for (const [index, flow] of topology.flows.entries()) {
+    for (const [side, endpoint] of [["source", flow.source], ["target", flow.target]] as const) {
+      if (endpoint.kind === "object" && !objectIds.has(endpoint.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["flows", index, side, "id"],
+          message: `Topology flow references unknown object ${endpoint.id}`
+        });
+      }
+    }
+    if (flow.source.kind === flow.target.kind && flow.source.id === flow.target.id) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["flows", index], message: "Topology flows cannot point to themselves" });
+    }
+  }
+});
+
 const packEntryPointsSchema = z.object({
   loops: z.array(packRelativePathSchema).min(1),
   skills: z.array(packRelativePathSchema).default([]),
@@ -227,6 +297,7 @@ export const loopPackManifestSchema = z.object({
   permissions: z.array(packPermissionSchema).min(1),
   requiredCapabilities: z.array(logicalCapabilitySchema).min(1),
   optionalCapabilities: z.array(logicalCapabilitySchema).default([]),
+  topology: packTopologySchema.default({ objects: [], flows: [] }),
   entrypoints: packEntryPointsSchema,
   ownership: z.object({
     defaultOwnerRole: z.string().min(1),

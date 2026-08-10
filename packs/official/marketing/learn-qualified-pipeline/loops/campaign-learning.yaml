@@ -1,0 +1,52 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: marketing-campaign-learning
+  name: Campaign Learning
+  version: 1.0.0
+  description: Open one durable learning problem for a campaign cohort and connect spend to downstream evidence.
+  department: marketing
+  ownerRole: growth_operations
+  tags: [campaigns, cohorts, attribution]
+trigger: { type: event, source: "*", event: marketing.campaign_window_closed }
+input:
+  requiredFields: [normalizedPayload.campaignId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.spend]
+  subjectTypes: [campaign, campaign_cohort]
+  fixtures: [{ id: campaign-window, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize campaign cohort, actor: system, type: observe, description: "Preserve campaign, audience, message, channel, spend, and observation-window identity." }
+  - { id: resolve, name: Resolve attributed objects, actor: system, type: observe, description: "Join durable leads, accounts, opportunities, and product identities without changing attribution." }
+  - { id: assess, name: Diagnose funnel evidence, actor: agent, type: assess, description: "Compare spend, leads, qualification, activation, pipeline, and outcome completeness." }
+  - { id: decide, name: Select learning route, actor: agent, type: decide, description: "Create or update one campaign-cohort problem, or abstain when identity or attribution is ambiguous." }
+  - { id: learn, name: Return cohort disposition, actor: system, type: learn, description: "Return attribution corrections, review decisions, downstream outcomes, and confidence." }
+capabilities:
+  - { key: ads.campaign.read, authority: read, risk: low, required: true, purpose: Read campaign spend and delivery evidence., customerFacing: false }
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read attributed leads and qualification evidence., customerFacing: false }
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read downstream opportunity evidence., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Query bounded activation evidence for the cohort., customerFacing: false }
+skills: [marketing-funnel-diagnosis, marketing-cohort-evaluation]
+outcomes:
+  - { metric: campaign_evidence_completeness, description: Campaign cohorts with complete spend and downstream observation evidence., direction: increase, sourceCapability: ads.campaign.read }
+  - { metric: campaign_routing_correction_rate, description: Campaign learning routes corrected by accountable reviewers., direction: decrease, sourceCapability: crm.lead.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [marketing.campaign_learning]
+  accepts: [{ sourcePattern: "*", eventTypePattern: marketing.campaign_window_closed, subjectTypes: [campaign, campaign_cohort], requiredFields: [normalizedPayload.campaignId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.spend], reason: A bounded campaign window has enough identity and cost evidence to begin downstream learning. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle callbacks are evidence and cannot create duplicate campaign work. }]
+  inputMapping: { campaignId: normalizedPayload.campaignId, windowStart: normalizedPayload.windowStart, windowEnd: normalizedPayload.windowEnd, spend: normalizedPayload.spend }
+  priority: 100
+  minimumConfidence: 0.86
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 100, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
+  examples: { shouldRoute: ["A completed campaign window has durable cost and identity evidence."], shouldNotRoute: ["The campaign is an internal test.", "Multiple campaign identities match the cohort."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: growth_operations
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

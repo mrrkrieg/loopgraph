@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: github-linear-slack
+name: GitHub + Linear + Slack
+description: Configure issue and incident operations for GitHub, Linear, and Slack.
+connectorRecipe: connectors/github-linear-slack.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 90, rolloutMode: shadow }
+requiredCompanyFields: [engineering.repositoryOwnership, engineering.severityPolicy, engineering.releasePolicy, engineering.escalationPaths]

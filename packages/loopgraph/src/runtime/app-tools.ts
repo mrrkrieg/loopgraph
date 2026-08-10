@@ -101,7 +101,7 @@ export const appInstallPlanInputSchema = projectSchema.extend({
   presetId: z.string().min(1),
   selectedModules: z.array(z.string().min(1)).optional(),
   configuration: z.record(z.unknown()).default({}),
-  fieldMappingIds: z.array(z.string().min(1)).default([]),
+  fieldMappingIds: z.array(z.string().min(1)).optional(),
   actor: z.string().min(1).default("hermes")
 }).strict();
 

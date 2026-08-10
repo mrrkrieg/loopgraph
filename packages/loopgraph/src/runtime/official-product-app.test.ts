@@ -40,6 +40,9 @@ describe("official Turn Customer Feedback Into Validated Product Problems app", 
     expect(connectors).toHaveLength(2);
     expect(compiled.graph.nodes.filter((node) => node.type === "app")).toHaveLength(1);
     expect(compiled.graph.nodes.filter((node) => node.type === "loop")).toHaveLength(5);
+    expect(compiled.graph.nodes.filter((node) => node.type === "company_object")).toHaveLength(4);
+    expect(compiled.graph.edges.filter((edge) => edge.type === "evidence_in")).toHaveLength(4);
+    expect(compiled.graph.edges.some((edge) => edge.type === "learning_return")).toBe(true);
     expect(compiled.loopSpecs.every((loop) => loop.routing?.activationMode === "shadow")).toBe(true);
   });
 

@@ -1,0 +1,1 @@
+{"id":"engineering-issue-low-confidence","eventType":"engineering.issue_received","subject":{"type":"issue","id":"issue-506"},"normalizedPayload":{"issueId":"506","repository":"web","title":"Maybe slow","confidence":0.35},"evidenceRefs":["github:issue:506"]}

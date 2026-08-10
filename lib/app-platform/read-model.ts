@@ -37,16 +37,22 @@ export type MarketplaceViewData = {
 export type AppGraphPreview = {
   nodes: Array<{
     id: string;
-    type: "hermes_brain" | "department" | "app" | "loop";
+    type: "hermes_brain" | "department" | "app" | "loop" | "company_object";
     label: string;
     parentId?: string;
     installationScoped: boolean;
+    shared?: boolean;
+    description?: string;
+    objectType?: string;
+    identityKeys?: string[];
   }>;
   edges: Array<{
     id: string;
     source: string;
     target: string;
-    type: "routes" | "owns" | "contains";
+    type: "routes" | "owns" | "contains" | "evidence_in" | "supports" | "produces" | "learning_return";
+    reason?: string;
+    condition?: string;
   }>;
 };
 
@@ -178,7 +184,6 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
       versionRange: "latest",
       presetId,
       configuration: {},
-      fieldMappingIds: [],
       actor: "loopgraph-browser"
     }) as Promise<AppInstallPlan>
   ]);

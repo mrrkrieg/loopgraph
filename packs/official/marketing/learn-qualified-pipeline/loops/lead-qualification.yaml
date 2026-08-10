@@ -1,0 +1,49 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: marketing-campaign-lead-qualification
+  name: Campaign Lead Qualification
+  version: 1.0.0
+  description: Evaluate attributed campaign leads using the company qualification contract and durable account evidence.
+  department: marketing
+  ownerRole: revenue_operations
+  tags: [qualification, icp, attribution]
+trigger: { type: event, source: hermes, event: marketing.campaign_cohort_ready }
+input: { requiredFields: [normalizedPayload.campaignId, normalizedPayload.cohortId, normalizedPayload.leadIds], subjectTypes: [campaign_cohort, lead_cohort], fixtures: [] }
+routine:
+  - { id: resolve, name: Resolve cohort identities, actor: system, type: observe, description: "Join each lead to one campaign, account, segment, and qualification record." }
+  - { id: assess, name: Evaluate qualification, actor: agent, type: assess, description: "Apply company ICP, disqualifier, fit, intent, and evidence rules consistently." }
+  - { id: aggregate, name: Aggregate cohort quality, actor: system, type: assess, description: "Measure qualified share and missing evidence without hiding individual dispositions." }
+  - { id: decide, name: Prepare qualification finding, actor: agent, type: decide, description: "Explain cohort quality or request the smallest missing identity or qualification fact." }
+  - { id: learn, name: Return sales outcomes, actor: system, type: learn, description: "Return owner corrections, accepted leads, rejected leads, and downstream opportunity evidence." }
+capabilities:
+  - { key: ads.campaign.read, authority: read, risk: low, required: true, purpose: Read campaign cohort identity., customerFacing: false }
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read qualification and durable account evidence., customerFacing: false }
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read opportunity creation and progression., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Query activation evidence for attributed leads., customerFacing: false }
+skills: [marketing-cohort-evaluation, marketing-funnel-diagnosis]
+outcomes:
+  - { metric: campaign_qualified_lead_rate, description: Attributed leads satisfying the company qualification definition., direction: increase, sourceCapability: crm.lead.read }
+  - { metric: campaign_to_opportunity_rate, description: Attributed cohort members creating qualified opportunities., direction: increase, sourceCapability: crm.opportunity.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [marketing.campaign_lead_quality]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: marketing.campaign_cohort_ready, subjectTypes: [campaign_cohort, lead_cohort], requiredFields: [normalizedPayload.campaignId, normalizedPayload.cohortId, normalizedPayload.leadIds], reason: A resolved campaign cohort is ready for company-specific qualification. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: marketing.campaign_window_closed, subjectTypes: [], fields: [], reason: Raw campaign evidence must resolve cohort identity first. }]
+  inputMapping: { campaignId: normalizedPayload.campaignId, cohortId: normalizedPayload.cohortId, leadIds: normalizedPayload.leadIds }
+  priority: 90
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
+  examples: { shouldRoute: ["One campaign cohort has resolved lead and account identities."], shouldNotRoute: ["Lead identity is missing.", "The company qualification definition is undefined."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: revenue_operations
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

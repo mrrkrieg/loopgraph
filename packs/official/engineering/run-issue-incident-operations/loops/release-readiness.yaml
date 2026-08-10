@@ -1,0 +1,34 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: engineering-release-readiness, name: Release Readiness, version: 1.0.0, description: "Verify required evidence, tests, ownership, rollout, and rollback before a release decision.", department: engineering, ownerRole: release_manager, tags: [release, readiness, verification] }
+trigger: { type: event, source: hermes, event: engineering.release_candidate_ready }
+input: { requiredFields: [normalizedPayload.releaseId, normalizedPayload.changeRefs, normalizedPayload.verifierRefs], subjectTypes: [release, deployment], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble release evidence, actor: system, type: observe, description: "Load changes, tests, approvals, dependencies, rollout, rollback, and incident risk." }
+  - { id: verify, name: Verify readiness gates, actor: agent, type: verify, description: "Evaluate explicit company release gates without waiving missing evidence." }
+  - { id: decide, name: Prepare release decision, actor: agent, type: decide, description: "Recommend ready, hold, or human exception review without deploying." }
+  - { id: learn, name: Learn from release, actor: system, type: learn, description: "Return deployment, rollback, regression, and outcome evidence." }
+capabilities:
+  - { key: deployment.release.read, authority: read, risk: medium, required: true, purpose: "Read release, verifier, and deployment evidence.", customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Read linked work and approvals., customerFacing: false }
+  - { key: incident.record.read, authority: read, risk: high, required: true, purpose: Read open incident and recent regression evidence., customerFacing: false }
+skills: [engineering-implementation-planning, engineering-severity-classification]
+outcomes: [{ metric: post_release_regression_rate, description: Releases followed by verified material regression., direction: decrease, sourceCapability: incident.record.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [engineering.release_readiness]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: engineering.release_candidate_ready, subjectTypes: [release, deployment], requiredFields: [normalizedPayload.releaseId, normalizedPayload.changeRefs, normalizedPayload.verifierRefs], reason: A release candidate has explicit change and verifier evidence. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: engineering.issue_received, subjectTypes: [], fields: [], reason: Unplanned issues cannot become release candidates. }]
+  inputMapping: { releaseId: normalizedPayload.releaseId }
+  priority: 85
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [deployment.release.read, project.issue.read, incident.record.read]
+  examples: { shouldRoute: ["A release has required verifier evidence."], shouldNotRoute: ["Rollback evidence is missing."] }
+policy: { forbiddenActions: [], escalationOwner: release_manager, escalationSla: 4h, separateCustomerFacingApproval: true }
