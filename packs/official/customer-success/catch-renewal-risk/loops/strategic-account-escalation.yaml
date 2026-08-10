@@ -1,0 +1,45 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: cs-strategic-account-escalation, name: Strategic Account Escalation, version: 1.0.0, description: "Prepare cross-department recovery for a material strategic-account problem.", department: customer_success, ownerRole: customer_success_lead, tags: [strategic-account, escalation, recovery] }
+trigger: { type: event, source: hermes, event: cs.strategic_account_risk_ready }
+input: { requiredFields: [normalizedPayload.accountId, normalizedPayload.ownerId, normalizedPayload.riskEvidenceRefs], subjectTypes: [account, account_risk], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble strategic risk, actor: system, type: observe, description: "Join health, renewal, support, incident, relationship, and ownership evidence." }
+  - { id: synthesize, name: Synthesize business risk, actor: agent, type: assess, description: "Separate verified facts, uncertainty, independent problems, and accountable owners." }
+  - { id: prepare, name: Prepare recovery plan, actor: agent, type: prepare, description: "Draft exact internal actions and optional customer communication for review." }
+  - { id: verify, name: Require exact approval, actor: human, type: verify, description: "Approve each provider action, owner, audience, and customer-facing commitment separately." }
+capabilities:
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read account and ownership evidence., customerFacing: false }
+  - { key: support.ticket.read, authority: read, risk: high, required: true, purpose: Read support evidence., customerFacing: false }
+  - { key: billing.subscription.read, authority: read, risk: high, required: true, purpose: Read renewal and exposure evidence., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read adoption evidence., customerFacing: false }
+  - { key: crm.account.update, authority: approve, risk: high, required: false, purpose: Apply the exact approved risk or next-step update., customerFacing: false }
+  - { key: collaboration.message.draft, authority: approve, risk: high, required: false, purpose: Prepare the exact approved internal brief., customerFacing: false }
+  - { key: mail.message.draft, authority: approve, risk: high, required: false, purpose: Prepare exact approved customer communication., customerFacing: true }
+skills: [cs-risk-synthesis, cs-recovery-plan, cs-executive-brief]
+outcomes: [{ metric: strategic_risk_recovery_rate, description: Material strategic risks returning to an accountable healthy state., direction: increase, sourceCapability: crm.account.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer_success.strategic_account_risk]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: cs.strategic_account_risk_ready, subjectTypes: [account, account_risk], requiredFields: [normalizedPayload.accountId, normalizedPayload.ownerId, normalizedPayload.riskEvidenceRefs], reason: A material risk has strategic-account identity and ownership. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: cs.account_snapshot_changed, subjectTypes: [], fields: [], reason: Raw health signals cannot directly create executive escalation. }]
+  inputMapping: { accountId: normalizedPayload.accountId, ownerId: normalizedPayload.ownerId }
+  priority: 110
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: declared_ordered, maxRoutes: 3, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
+  examples: { shouldRoute: ["A strategic account has material verified risk."], shouldNotRoute: ["Only one weak sentiment signal exists."] }
+policy:
+  forbiddenActions:
+    - { capability: crm.account.update, reason: Account changes require exact approval. }
+    - { capability: collaboration.message.draft, reason: Internal escalation distribution requires approval. }
+    - { capability: mail.message.draft, reason: Customer communication requires exact approval and this app never sends it. }
+  escalationOwner: customer_success_lead
+  escalationSla: 1h
+  separateCustomerFacingApproval: true

@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: cs-account-assessment
+name: Account Assessment
+description: Assess one customer account from product, support, billing, relationship, and lifecycle evidence.
+department: customer_success
+goal: Explain account health and evidence gaps without collapsing independent risks into one score.
+inputs: [account identity, tier, ownership, adoption, support, subscription, relationship evidence]
+outputs: [health dimensions, risks, evidence gaps, alternative explanations, confidence]
+instructions: [Resolve one durable account identity., Evaluate each health dimension separately., Apply tier-specific thresholds., Preserve unavailable and contradictory evidence., Link every claim to provider evidence.]
+boundaries: [Do not invent customer sentiment or intent., Do not change health status autonomously., Do not expose account data beyond approved scope.]
+requiredCapabilities: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]

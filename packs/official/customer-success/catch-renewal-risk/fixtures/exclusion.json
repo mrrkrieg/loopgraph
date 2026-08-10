@@ -1,0 +1,1 @@
+{"id":"cs-health-excluded","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-603"},"normalizedPayload":{"accountId":"603","ownerId":"csm-test","tier":"internal","excluded":true,"confidence":1},"evidenceRefs":["policy:internal-account"]}

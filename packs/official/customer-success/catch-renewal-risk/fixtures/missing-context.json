@@ -1,0 +1,1 @@
+{"id":"cs-health-missing","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-602"},"normalizedPayload":{"accountId":"602","ownerId":"csm-9","confidence":0.96},"evidenceRefs":["salesforce:account:602"]}

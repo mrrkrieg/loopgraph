@@ -58,6 +58,20 @@ permissions:
   - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: medium, purpose: "Prepare an internal deal-risk brief for the approved owner channel.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [crm_data, email_content] }
 requiredCapabilities: [crm.opportunity.read, mail.thread.read, calendar.event.read]
 optionalCapabilities: [crm.contact.read, crm.opportunity.update, mail.message.draft, collaboration.message.draft]
+topology:
+  objects:
+    - { id: opportunity, objectType: opportunity, label: Sales opportunity, description: A shared opportunity identity with account stage owner activity and forecast evidence., shared: true, identityKeys: [opportunityId, accountId] }
+    - { id: deal-risk, objectType: deal_risk, label: Deal risk, description: A bounded risk diagnosis with evidence confidence owner and recovery options., shared: true, identityKeys: [opportunityId, riskWindow] }
+    - { id: recovery-action, objectType: deal_recovery_action, label: Recovery action, description: An exact reviewed follow-up or stakeholder action tied to one deal-risk diagnosis., shared: false, identityKeys: [opportunityId, actionId] }
+    - { id: deal-pipeline-outcome, objectType: pipeline_outcome, label: Deal pipeline outcome, description: Observed opportunity progress loss win or no-change evidence after intervention., shared: true, identityKeys: [opportunityId, observationWindow] }
+  flows:
+    - { id: opportunity-enters-risk, source: { kind: object, id: opportunity }, target: { kind: loop, id: sales-deal-risk-detection }, type: evidence_in, reason: Hermes evaluates one resolved opportunity before choosing a risk route. }
+    - { id: risk-produces-diagnosis, source: { kind: loop, id: sales-deal-risk-detection }, target: { kind: object, id: deal-risk }, type: produces, reason: The risk diagnosis is durable evidence not an automatic CRM mutation. }
+    - { id: risk-enters-stakeholder-analysis, source: { kind: object, id: deal-risk }, target: { kind: loop, id: sales-stakeholder-analysis }, type: evidence_in, reason: Stakeholder analysis consumes a verified deal-risk diagnosis with activity and relationship evidence. }
+    - { id: risk-enters-follow-up, source: { kind: object, id: deal-risk }, target: { kind: loop, id: sales-deal-follow-up }, type: evidence_in, reason: Follow-up preparation requires a named owner exact evidence and explicit review boundaries. }
+    - { id: follow-up-produces-action, source: { kind: loop, id: sales-deal-follow-up }, target: { kind: object, id: recovery-action }, type: produces, reason: Customer-facing work remains a prepared action until the configured owner approves it. }
+    - { id: outcome-produces-pipeline-evidence, source: { kind: loop, id: sales-pipeline-outcome }, target: { kind: object, id: deal-pipeline-outcome }, type: produces, reason: The app records whether the intervention changed progression forecast win or loss. }
+    - { id: pipeline-returns-to-risk, source: { kind: loop, id: sales-pipeline-outcome }, target: { kind: loop, id: sales-deal-risk-detection }, type: learning_return, reason: Observed outcomes improve future risk detection and expose ineffective recovery patterns. }
 entrypoints:
   loops:
     - loops/deal-risk-detection.yaml

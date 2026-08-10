@@ -1,0 +1,1 @@
+{"id":"cs-health-happy","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-601"},"normalizedPayload":{"accountId":"601","ownerId":"csm-9","tier":"strategic","renewalAt":"2026-10-01","confidence":0.98},"evidenceRefs":["hubspot:company:601","intercom:account:601","stripe:subscription:601","analytics:account:601"]}
