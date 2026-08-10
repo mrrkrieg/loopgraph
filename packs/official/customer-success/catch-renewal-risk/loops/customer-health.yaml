@@ -1,0 +1,37 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: cs-customer-health, name: Customer Health, version: 1.0.0, description: "Evaluate account health from product, support, billing, relationship, and lifecycle evidence.", department: customer_success, ownerRole: csm, tags: [health, adoption, account] }
+trigger: { type: event, source: "*", event: cs.account_snapshot_changed }
+input: { requiredFields: [normalizedPayload.accountId, normalizedPayload.ownerId, normalizedPayload.tier], subjectTypes: [account], fixtures: [{ id: account-risk, path: fixtures/happy.json }] }
+routine:
+  - { id: resolve, name: Resolve account identity, actor: system, type: observe, description: "Join one account across CRM, support, billing, product, and ownership evidence." }
+  - { id: assess, name: Assess health, actor: agent, type: assess, description: "Compare adoption, support, payment, relationship, lifecycle, and configured tier thresholds." }
+  - { id: decide, name: Select health route, actor: agent, type: decide, description: "Open or update one health problem, or abstain when evidence or ownership is ambiguous." }
+  - { id: learn, name: Learn from outcome, actor: system, type: learn, description: "Return review corrections, recovery, renewal, expansion, churn, and missing evidence." }
+capabilities:
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read account tier and ownership., customerFacing: false }
+  - { key: support.ticket.read, authority: read, risk: high, required: true, purpose: Read bounded support evidence., customerFacing: false }
+  - { key: billing.subscription.read, authority: read, risk: high, required: true, purpose: Read subscription and renewal evidence., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Query bounded adoption evidence., customerFacing: false }
+skills: [cs-account-assessment, cs-risk-synthesis]
+outcomes:
+  - { metric: customer_health_risk_precision, description: Flagged account risks confirmed by accountable reviewers., direction: increase, sourceCapability: crm.account.read }
+  - { metric: customer_health_recovery_rate, description: Flagged accounts returning above configured health thresholds., direction: increase, sourceCapability: analytics.event.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer_success.health_risk]
+  accepts: [{ sourcePattern: "*", eventTypePattern: cs.account_snapshot_changed, subjectTypes: [account], requiredFields: [normalizedPayload.accountId, normalizedPayload.ownerId, normalizedPayload.tier], reason: An account snapshot has durable identity and ownership. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle events update existing work. }]
+  inputMapping: { accountId: normalizedPayload.accountId, ownerId: normalizedPayload.ownerId, tier: normalizedPayload.tier }
+  priority: 100
+  minimumConfidence: 0.88
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 100, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
+  examples: { shouldRoute: ["One active account has complete owner and tier identity."], shouldNotRoute: ["Multiple accounts match.", "The account is an internal test."] }
+policy: { forbiddenActions: [], escalationOwner: csm, escalationSla: 1d, separateCustomerFacingApproval: true }

@@ -1,0 +1,1 @@
+{"id":"cs-permission-change","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-607"},"normalizedPayload":{"accountId":"607","ownerId":"csm-12","tier":"strategic","permissionChange":"mail.message.draft: approve -> execute","confidence":1},"evidenceRefs":["fixture:permission-review"]}

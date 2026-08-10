@@ -1,0 +1,9 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: customer-success-risk-outcomes
+metrics:
+  - { id: customer_health_risk_precision, direction: increase, description: Flagged risks confirmed by reviewers. }
+  - { id: customer_health_recovery_rate, direction: increase, description: Flagged accounts recovering above thresholds. }
+  - { id: at_risk_renewal_recovery_rate, direction: increase, description: At-risk renewals retained without unapproved promises. }
+  - { id: support_escalation_resolution_hours, direction: decrease, description: Time to verified escalation resolution. }
+  - { id: strategic_risk_recovery_rate, direction: increase, description: Material strategic risks returning healthy. }
+  - { id: qbr_preparation_hours, direction: decrease, description: Human preparation time for evidence-complete reviews. }
