@@ -8,6 +8,7 @@ import {
   connectorManifestSchema,
   type ConnectionInstance,
   type ConnectorCapability,
+  type ConnectorInstallationView,
   type ConnectorManifest
 } from "../core";
 import { getLoopgraphRoot } from "./storage-resolver";
@@ -220,6 +221,108 @@ export const DEFAULT_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     notes: ["Initial mode should log notifications until owners approve a real messaging channel."]
   }),
   manifest({
+    id: "salesforce",
+    label: "Salesforce",
+    category: "crm",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("crm.read", "Read leads, contacts, accounts, opportunities, and cases", ["api"], "Provide a redacted Salesforce export."),
+      eventCapability("crm.events", "Receive Salesforce change events through Hermes"),
+      approvedWriteCapability("crm.approved_write", "Apply an exact fingerprint-approved Salesforce record update", ["api"], "Apply the approved CRM update manually.")
+    ],
+    notes: ["Salesforce writes remain blocked unless the broker grants approved execution and the exact action fingerprint is approved."]
+  }),
+  manifest({
+    id: "stripe",
+    label: "Stripe",
+    category: "billing",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("billing.read", "Read customers, subscriptions, invoices, payments, and disputes", ["read_only"], "Provide a redacted Stripe export."),
+      eventCapability("billing.events", "Receive verified Stripe events through Hermes"),
+      approvedWriteCapability("billing.approved_write", "Apply an exact fingerprint-approved billing action", [], "Apply the approved billing action manually.")
+    ],
+    notes: ["Financial mutations require a separate broker action capability and fingerprint-bound human approval."]
+  }),
+  manifest({
+    id: "zendesk",
+    label: "Zendesk",
+    category: "support",
+    transport: "http_api",
+    authType: "api_key",
+    capabilities: [
+      readCapability("support.read", "Read bounded ticket, requester, priority, and satisfaction evidence", [], "Provide a redacted Zendesk export."),
+      eventCapability("support.events", "Receive verified Zendesk ticket events through Hermes"),
+      draftCapability("support.draft_write", "Prepare a support reply draft without sending it", [], "Create the draft in a local review artifact.")
+    ],
+    notes: ["Use a dedicated least-privilege integration identity; customer replies stay review-gated."]
+  }),
+  manifest({
+    id: "intercom",
+    label: "Intercom",
+    category: "support",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("support.read", "Read bounded conversations, contacts, and support evidence", ["read_conversations"], "Provide a redacted Intercom export."),
+      eventCapability("support.events", "Receive verified Intercom conversation events through Hermes"),
+      draftCapability("support.draft_write", "Prepare a conversation reply draft without sending it", [], "Create the draft in a local review artifact.")
+    ],
+    notes: ["Customer-facing replies stay as prepared drafts until an accountable owner approves them."]
+  }),
+  manifest({
+    id: "workday",
+    label: "Workday",
+    category: "hris",
+    transport: "http_api",
+    authType: "provider_app",
+    capabilities: [
+      readCapability("hris.read", "Read bounded worker, job, and onboarding evidence", [], "Provide a redacted Workday report."),
+      eventCapability("hris.events", "Receive verified Workday worker events through Hermes")
+    ],
+    notes: ["Protected attributes must be excluded from routing and model context unless explicitly required and approved."]
+  }),
+  manifest({
+    id: "greenhouse",
+    label: "Greenhouse",
+    category: "ats",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("ats.read", "Read bounded candidate, application, job, and stage evidence", ["candidates:read"], "Provide a redacted Greenhouse export."),
+      eventCapability("ats.events", "Receive verified Greenhouse recruiting events through Hermes")
+    ],
+    notes: ["Candidate data is restricted; protected attributes are excluded from default field mappings."]
+  }),
+  manifest({
+    id: "netsuite",
+    label: "NetSuite",
+    category: "finance",
+    transport: "http_api",
+    authType: "provider_app",
+    capabilities: [
+      readCapability("finance.read", "Read bounded ledger, receivable, vendor, approval, and forecast evidence", [], "Provide a redacted NetSuite export."),
+      eventCapability("finance.events", "Receive verified NetSuite finance events through Hermes"),
+      approvedWriteCapability("finance.approved_write", "Apply an exact fingerprint-approved finance record update", [], "Apply the approved record update manually.")
+    ],
+    notes: ["Finance writes require approved execution authority and remain fingerprint-bound."]
+  }),
+  manifest({
+    id: "quickbooks",
+    label: "QuickBooks",
+    category: "finance",
+    transport: "http_api",
+    authType: "provider_app",
+    capabilities: [
+      readCapability("finance.read", "Read bounded accounting, receivable, vendor, and cash evidence", ["com.intuit.quickbooks.accounting"], "Provide a redacted QuickBooks export."),
+      eventCapability("finance.events", "Receive verified QuickBooks accounting events through Hermes"),
+      approvedWriteCapability("finance.approved_write", "Apply an exact fingerprint-approved accounting record update", ["com.intuit.quickbooks.accounting"], "Apply the approved accounting update manually.")
+    ],
+    notes: ["Accounting writes require approved execution authority and remain fingerprint-bound."]
+  }),
+  manifest({
     id: "manual_file",
     label: "Manual File Import",
     category: "manual",
@@ -267,9 +370,71 @@ export async function readConnectionInstances(projectRoot: string): Promise<Conn
   }
 }
 
+export function connectionInstanceFromBrokerInstallation(
+  installation: ConnectorInstallationView,
+  manifests: ConnectorManifest[] = DEFAULT_CONNECTOR_MANIFESTS
+): ConnectionInstance {
+  const connector = manifests.find((candidate) => candidate.id === installation.providerId);
+  if (!connector) throw new Error(`No App Platform connector manifest exists for broker provider: ${installation.providerId}`);
+  const allowed = new Set(installation.allowedCapabilities);
+  const canRead = allowed.has("provider.data.read");
+  const canDraft = allowed.has("provider.draft.write");
+  const canExecute = allowed.has("provider.action.execute");
+  const canReceiveEvents = allowed.has("provider.webhooks.verify") || allowed.has("provider.webhooks.subscribe");
+  const capabilityKeys = connector.capabilities
+    .filter((capability) => {
+      if (capability.direction === "read") return canRead;
+      if (capability.direction === "event") return canReceiveEvents;
+      if (capability.direction === "draft_write") return canDraft;
+      return canExecute;
+    })
+    .map((capability) => capability.key);
+  const status = brokerConnectionStatus(installation.status);
+  const healthStatus = status === "connected" ? "connected" : status === "degraded" ? "degraded" : "missing";
+  return connectionInstanceSchema.parse({
+    schemaVersion: CONNECTION_INSTANCE_SCHEMA_VERSION,
+    id: installation.id,
+    manifestId: installation.providerId,
+    source: "hermes_connector_broker",
+    externalInstallationId: installation.id,
+    brokerCapabilities: installation.allowedCapabilities,
+    accountLabel: installation.displayName,
+    capabilityKeys,
+    grantedScopes: installation.grantedScopes,
+    status,
+    statusReason: status === "connected" ? undefined : `Hermes Connector Broker installation is ${installation.status}.`,
+    environment: installation.environment === "production" ? "live" : "sandbox",
+    readPolicy: canRead ? "read_only" : "not_allowed",
+    writePolicy: canExecute ? "approved_only" : canDraft ? "draft_only" : "not_allowed",
+    lastHealthCheckAt: installation.lastHealthCheckAt,
+    health: installation.lastHealthCheckAt ? {
+      status: healthStatus,
+      checkedAt: installation.lastHealthCheckAt,
+      checkedBy: "hermes_connector_broker",
+      evidenceRefs: [`broker-installation:${installation.id}`]
+    } : undefined
+  });
+}
+
+export function mergeConnectionInstances(
+  local: ConnectionInstance[],
+  projected: ConnectionInstance[]
+): ConnectionInstance[] {
+  const byId = new Map(local.map((connection) => [connection.id, connection]));
+  for (const connection of projected) byId.set(connection.id, connection);
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function brokerConnectionStatus(status: ConnectorInstallationView["status"]): ConnectionInstance["status"] {
+  if (status === "active" || status === "connected") return "connected";
+  if (status === "degraded" || status === "subscription_pending" || status === "rotating") return "degraded";
+  return "missing";
+}
+
 export async function upsertConnectionInstance(
   projectRoot: string,
-  input: Omit<ConnectionInstance, "schemaVersion">
+  input: Omit<ConnectionInstance, "schemaVersion" | "source" | "brokerCapabilities"> &
+    Partial<Pick<ConnectionInstance, "source" | "brokerCapabilities">>
 ): Promise<ConnectionInstance> {
   const manifest = defaultConnectorManifests().find((candidate) => candidate.id === input.manifestId);
   if (!manifest) throw new Error(`Unknown connector manifest: ${input.manifestId}`);

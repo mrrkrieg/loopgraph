@@ -220,6 +220,8 @@ Or open **Marketplace** in the browser. The guided installer lets an operator ch
 
 Field mappings are connection-bound and reusable. An authenticated Hermes connector may record a short-lived, redacted-only provider schema snapshot; Loopgraph then explains its logical-field suggestions and shows bounded sample values. An operator must confirm the exact mappings before they can satisfy installation readiness. Loopgraph never treats name similarity as approval and never stores a provider credential in the mapping registry.
 
+In a hosted workspace, the installer reads eligible connections directly from the Hermes Connector Broker through a server-only, secret-free projection. App Platform receives only the installation identity, provider, environment, health, granted scopes, and broker-authorized capabilities—not access tokens, refresh tokens, or vault references. It resolves each app's logical capability against that bounded authority, deep-links operators into supported provider onboarding when a connection is missing, and labels providers outside the current broker catalog as **Custom connector required** instead of implying one-click support.
+
 The same application service is available through the CLI:
 
 ```bash

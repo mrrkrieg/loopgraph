@@ -15,7 +15,8 @@ import {
   artifactDigestSchema,
   appSetupDefinitionSchema,
   marketplaceCatalogSourceSchema,
-  providerSchemaFieldSchema
+  providerSchemaFieldSchema,
+  type ConnectionInstance
 } from "../core";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
@@ -27,12 +28,14 @@ import {
   FileConnectorFieldMappingStore,
   FileProviderSchemaSnapshotStore,
   loadConnectorRecipes,
+  normalizeConnectorProviderId,
   providerIdForCapability,
   resolveConnectorCapabilities,
   suggestFieldMappings,
   validateFieldMappingCoverage
 } from "./app-connector-service";
 import { inspectLoopgraphWorkspace } from "./workspace";
+import { PROVIDER_ONBOARDING_CATALOG } from "./provider-onboarding";
 
 export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_marketplace_search",
@@ -322,7 +325,7 @@ export const loopgraphAppToolDefinitions = [
 export async function callLoopgraphAppTool(
   name: LoopgraphAppToolName,
   input: unknown,
-  options: { projectRoot?: string; now?: Date } = {}
+  options: { projectRoot?: string; now?: Date; connections?: ConnectionInstance[] } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
   const projectRoot = path.resolve(typeof raw.projectRoot === "string" ? raw.projectRoot : options.projectRoot ?? process.cwd());
@@ -436,7 +439,7 @@ export async function callLoopgraphAppTool(
   const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
   if (name === "loopgraph_connector_schema_record") {
     const parsed = connectorSchemaRecordInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const connections = await readConnectionInstances(projectRoot);
+    const connections = await appConnections(projectRoot, options.connections);
     const connection = connections.find((candidate) => candidate.id === parsed.connectionId);
     if (!connection) throw new Error(`Connection not found: ${parsed.connectionId}`);
     if (!providerMatchesConnection(parsed.providerId, connection.manifestId)) {
@@ -465,11 +468,11 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_field_mappings_get") {
     const parsed = appFieldMappingsGetInputSchema.parse({ ...raw, projectRoot, ...identity });
-    return buildAppFieldMappingPlan({ marketplace, projectRoot, workspaceId: identity.workspaceId, ...parsed, now: options.now });
+    return buildAppFieldMappingPlan({ marketplace, projectRoot, workspaceId: identity.workspaceId, connections: await appConnections(projectRoot, options.connections), ...parsed, now: options.now });
   }
   if (name === "loopgraph_app_field_mapping_confirm") {
     const parsed = appFieldMappingConfirmInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const connections = await readConnectionInstances(projectRoot);
+    const connections = await appConnections(projectRoot, options.connections);
     if (!connections.some((connection) => connection.id === parsed.connectionId)) {
       throw new Error(`Connection not found: ${parsed.connectionId}`);
     }
@@ -509,7 +512,7 @@ export async function callLoopgraphAppTool(
       versionRange: parsed.versionRange,
       presetId: parsed.presetId,
       selectedModules: parsed.selectedModules,
-      connections: await readConnectionInstances(projectRoot),
+      connections: await appConnections(projectRoot, options.connections),
       installValues: parsed.configuration,
       fieldMappingIds: parsed.fieldMappingIds,
       actor: parsed.actor,
@@ -629,7 +632,7 @@ export async function callLoopgraphAppTool(
     return service.planUpdate({
       installationId: parsed.installationId,
       versionRange: parsed.versionRange,
-      connections: await readConnectionInstances(projectRoot),
+      connections: await appConnections(projectRoot, options.connections),
       actor: parsed.actor,
       now: options.now
     });
@@ -696,6 +699,7 @@ async function buildAppFieldMappingPlan(input: {
   appId: string;
   version?: string;
   presetId: string;
+  connections: ConnectionInstance[];
   now?: Date;
 }): Promise<unknown> {
   const version = input.version
@@ -711,12 +715,11 @@ async function buildAppFieldMappingPlan(input: {
   const recipes = await loadConnectorRecipes(loaded);
   const recipe = recipes.find((candidate) => candidate.id === selectedRecipeId);
   if (!recipe) throw new Error(`Connector recipe not found: ${selectedRecipeId}`);
-  const connections = await readConnectionInstances(input.projectRoot);
   const capabilityResolutions = resolveConnectorCapabilities({
     requiredCapabilities: loaded.manifest.requiredCapabilities,
     optionalCapabilities: loaded.manifest.optionalCapabilities,
     recipes,
-    connections,
+    connections: input.connections,
     selectedRecipeId
   });
   const appsRoot = path.join(input.projectRoot, ".loopgraph", "apps");
@@ -725,7 +728,7 @@ async function buildAppFieldMappingPlan(input: {
   const confirmedMappings = await mappingStore.list();
   const requirements = [];
   for (const requirement of recipe.fieldMappings) {
-    const providerId = requirement.providerId ?? recipe.providerId;
+    const providerId = normalizeConnectorProviderId(requirement.providerId ?? recipe.providerId);
     const providerCapabilities = new Set(recipe.capabilities
       .filter((binding) => providerIdForCapability(recipe, binding) === providerId)
       .map((binding) => binding.logicalCapability));
@@ -762,6 +765,7 @@ async function buildAppFieldMappingPlan(input: {
     requirements.push({
       recipeId: recipe.id,
       providerId,
+      connectorOnboarding: PROVIDER_ONBOARDING_CATALOG.some((provider) => provider.providerId === providerId) ? "available" : "custom_required",
       connectionId,
       objectType: requirement.objectType,
       requiredLogicalFields: requirement.requiredLogicalFields,
@@ -784,6 +788,14 @@ async function buildAppFieldMappingPlan(input: {
     complete: requirements.every((requirement) => Boolean(requirement.connectionId) && requirement.missingRequiredFields.length === 0 && requirement.unverifiedRequiredFields.length === 0),
     requirements
   });
+}
+
+async function appConnections(projectRoot: string, trustedConnections: ConnectionInstance[] | undefined): Promise<ConnectionInstance[]> {
+  const local = await readConnectionInstances(projectRoot);
+  if (!trustedConnections || trustedConnections.length === 0) return local;
+  const byId = new Map(local.map((connection) => [connection.id, connection]));
+  for (const connection of trustedConnections) byId.set(connection.id, connection);
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function connectorMetadataFields(providerId: string, logicalFields: string[]) {
@@ -823,5 +835,7 @@ function providerFieldHint(providerId: string, logicalField: string): string {
 }
 
 function providerMatchesConnection(providerId: string, manifestId: string): boolean {
-  return manifestId === providerId || manifestId.startsWith(`${providerId}.`) || manifestId.startsWith(`${providerId}-`);
+  const expected = normalizeConnectorProviderId(providerId);
+  const actual = normalizeConnectorProviderId(manifestId);
+  return actual === expected || actual.startsWith(`${expected}.`) || actual.startsWith(`${expected}-`);
 }

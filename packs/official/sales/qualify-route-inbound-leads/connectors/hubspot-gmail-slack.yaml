@@ -20,9 +20,11 @@ eventSources:
     fallbackPollMinutes: 15
 fieldMappings:
   - objectType: lead
+    providerId: hubspot
     requiredLogicalFields: [lead.id, lead.email, lead.company, lead.lifecycleStage]
     optionalLogicalFields: [lead.source, lead.title, lead.employeeCount, lead.revenue, lead.country]
   - objectType: account
+    providerId: hubspot
     requiredLogicalFields: [account.id, account.domain, account.customerStatus]
     optionalLogicalFields: [account.industry, account.employeeCount, account.revenue, account.territory]
 healthCheck:
@@ -30,4 +32,3 @@ healthCheck:
   sampleQuery: { limit: 1, properties: [email, company, lifecyclestage] }
   timeoutMs: 10000
 supportsBoundedSamples: true
-

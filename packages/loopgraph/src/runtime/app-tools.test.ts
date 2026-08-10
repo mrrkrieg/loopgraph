@@ -2,8 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { connectorInstallationViewSchema } from "../core";
 import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
+import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
 
 const temporaryDirectories: string[] = [];
 
@@ -147,6 +149,37 @@ describe("shared Loopgraph App tools", () => {
 
     const unchanged = await callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as { installations: unknown[] };
     expect(unchanged.installations).toEqual([]);
+  });
+
+  it("accepts a trusted, secret-free Hermes Broker projection for install planning", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-tools-broker-"));
+    temporaryDirectories.push(projectRoot);
+    const connection = connectionInstanceFromBrokerInstallation(connectorInstallationViewSchema.parse({
+      id: "provider_hubspot_main",
+      tenant: { organizationId: "org-acme", projectKey: "main" },
+      providerId: "hubspot",
+      displayName: "Acme HubSpot",
+      environment: "production",
+      status: "active",
+      grantedScopes: ["crm.objects.companies.read", "crm.objects.contacts.read", "crm.objects.deals.read"],
+      allowedCapabilities: ["provider.data.read", "provider.health.read", "provider.webhooks.verify"],
+      webhookStatus: "active",
+      customerManagedKeyConfigured: true,
+      createdAt: "2026-08-10T09:00:00.000Z",
+      updatedAt: "2026-08-10T10:00:00.000Z"
+    }));
+    const plan = await callLoopgraphAppTool("loopgraph_app_install_plan", {
+      projectRoot,
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      presetId: "hubspot-gmail-slack",
+      configuration: {}
+    }, { connections: [connection] }) as {
+      capabilityResolutions: Array<{ capability: string; required: boolean; status: string; connectionId?: string }>;
+    };
+    expect(plan.capabilityResolutions.filter((resolution) => resolution.required)).toEqual([
+      expect.objectContaining({ capability: "crm.lead.read", status: "reusable", connectionId: "provider_hubspot_main" }),
+      expect.objectContaining({ capability: "crm.account.read", status: "reusable", connectionId: "provider_hubspot_main" })
+    ]);
   });
 
   it("records a provider schema, suggests mappings, and requires explicit confirmation before install readiness", async () => {

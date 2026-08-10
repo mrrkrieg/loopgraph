@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { AppInstallPlan } from "loopgraph/core";
 import { requireHostedPermission } from "@/lib/auth/hosted-access";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
-import { callLoopgraphAppTool } from "@/lib/loopgraph-runtime/app-tools";
+import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import {
   configurationFromInstallForm,
   type InstallWizardState

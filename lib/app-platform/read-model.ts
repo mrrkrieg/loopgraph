@@ -16,7 +16,7 @@ import type {
   MarketplaceAppVersion,
   WorkspaceAppInstallation
 } from "loopgraph/core";
-import { callLoopgraphAppTool } from "@/lib/loopgraph-runtime/app-tools";
+import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export type MarketplaceSearchEntry = {

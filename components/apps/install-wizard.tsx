@@ -138,8 +138,8 @@ function FieldMappingRequirement({
     return (
       <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
         <div className="text-sm font-semibold capitalize">{requirement.providerId} · {requirement.objectType.replace(/_/g, " ")}</div>
-        <p className="mt-1 text-sm leading-6 text-ink/60">Connect this provider first. Hermes will then inspect its bounded object schema and suggest exact mappings.</p>
-        <Link className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white" href="/settings/integrations">Connect {requirement.providerId}</Link>
+        <p className="mt-1 text-sm leading-6 text-ink/60">{requirement.connectorOnboarding === "available" ? "Connect this provider through the Hermes Connector Broker first. Hermes will then inspect its bounded object schema and suggest exact mappings." : "This provider is part of the preset but does not yet have a built-in Connector Broker onboarding profile. Register a capability-scoped custom connector or choose another preset."}</p>
+        {requirement.connectorOnboarding === "available" ? <Link className="mt-3 inline-flex rounded-md bg-ink px-3 py-2 text-sm font-semibold text-white" href={`/settings/integrations?provider=${encodeURIComponent(requirement.providerId)}`}>Connect {requirement.providerId}</Link> : <span className="mt-3 inline-flex rounded-full border border-orange-300 px-3 py-1.5 text-xs font-semibold text-orange-800">Custom connector required</span>}
       </div>
     );
   }

@@ -11,8 +11,16 @@ import { IntegrationAdmin } from "./integration-admin";
 
 export const dynamic = "force-dynamic";
 
-export default async function IntegrationsSettingsPage() {
+export default async function IntegrationsSettingsPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ provider?: string }>;
+}) {
   const database = await getWorkspaceDatabase("integrations.read");
+  const requestedProvider = (await searchParams)?.provider;
+  const initialProviderId = PROVIDER_ONBOARDING_CATALOG.some((provider) => provider.providerId === requestedProvider)
+    ? requestedProvider
+    : undefined;
   const [installations, workloadIdentities, killSwitches] = await Promise.all([
     listConnectorInstallations(database),
     listWorkloadIdentities(database),
@@ -30,6 +38,7 @@ export default async function IntegrationsSettingsPage() {
         initialWorkloadIdentities={workloadIdentities}
         initialKillSwitches={killSwitches}
         providers={PROVIDER_ONBOARDING_CATALOG}
+        initialProviderId={initialProviderId}
         brokerConfigured={Boolean(getExternalConnectorBrokerClient())}
       />
     </>
