@@ -28,6 +28,11 @@ describe("local app marketplace", () => {
     expect(byFinanceOutcome[0]?.app.id).toBe("loopgraph.ops-finance.manage-forecast-controls");
     const byFinanceCapability = await marketplace.searchApps({ capability: "finance.forecast.read" });
     expect(byFinanceCapability.map((result) => result.app.id)).toContain("loopgraph.ops-finance.manage-forecast-controls");
+
+    const byHrOutcome = await marketplace.searchApps({ query: "operate fair people workflows" });
+    expect(byHrOutcome[0]?.app.id).toBe("loopgraph.hr-talent.operate-people-workflows");
+    const byHrCapability = await marketplace.searchApps({ capability: "hris.employee.read" });
+    expect(byHrCapability.map((result) => result.app.id)).toContain("loopgraph.hr-talent.operate-people-workflows");
   });
 
   it("resolves immutable versions and verifies the cached artifact", async () => {

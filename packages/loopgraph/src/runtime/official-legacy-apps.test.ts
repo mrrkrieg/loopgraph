@@ -92,8 +92,9 @@ describe("official apps migrated from legacy templates", () => {
       "loopgraph.engineering.run-issue-incident-operations",
       "loopgraph.customer-success.catch-renewal-risk",
       "loopgraph.ops-finance.manage-forecast-controls",
+      "loopgraph.hr-talent.operate-people-workflows",
       ...migratedApps.map((app) => app.appId)
     ]));
-    expect(apps.length).toBeGreaterThanOrEqual(10);
+    expect(apps.length).toBeGreaterThanOrEqual(11);
   });
 });

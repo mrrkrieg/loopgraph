@@ -2,7 +2,7 @@
 
 export const GENERATED_OFFICIAL_APP_CATALOG = {
   "schemaVersion": "loopgraph-generated-app-catalog/v1alpha1",
-  "sourceDigest": "sha256:84456cda465a7e61845e60f53f02d27d98141256d4b3c8ae0f302025553042d5",
+  "sourceDigest": "sha256:cde5459bc243248b884f97c5dd0be3165cc38fcc65172b238eb2555180720289",
   "entries": [
     {
       "app": {
@@ -1630,6 +1630,671 @@ export const GENERATED_OFFICIAL_APP_CATALOG = {
         "fixturePaths": [
           "packs/official/engineering/triage-github-issues/fixtures/happy.json",
           "packs/official/engineering/triage-github-issues/fixtures/missing-context.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.hr-talent.operate-people-workflows",
+        "name": "Operate Fair and Accountable People Workflows",
+        "version": "1.0.0",
+        "department": "hr_talent",
+        "summary": "Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment.",
+        "sourcePath": "packs/official/hr-talent/operate-people-workflows"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "hr-candidate-pipeline",
+        "departmentType": "hr_talent",
+        "problemTypes": [
+          "talent.candidate_pipeline"
+        ],
+        "eventTypes": [
+          "talent.candidate_stage_stalled",
+          "talent.interview_feedback_missing"
+        ],
+        "subjectTypes": [
+          "candidate",
+          "candidate_process"
+        ],
+        "requiredContext": [
+          "normalizedPayload.candidateId",
+          "normalizedPayload.requisitionId",
+          "normalizedPayload.stage",
+          "normalizedPayload.ownerId",
+          "normalizedPayload.stalledSince",
+          "normalizedPayload.missingFeedbackIds"
+        ],
+        "requiredConnections": [
+          "ats.candidate.read",
+          "calendar.schedule.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "talent.candidate_decision_requested",
+            "fields": [],
+            "reason": "Hiring, rejection, and ranking decisions are always human-owned."
+          },
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Lifecycle events update existing work and cannot open a duplicate candidate problem."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 100,
+        "minimumConfidence": 0.95,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Candidate Stage Latency Hours: Time a candidate process remains stalled before accountable resolution.",
+          "Candidate Process Correction Rate: Hermes process diagnoses materially corrected by recruiting reviewers."
+        ],
+        "learningConsumers": [
+          "hr_talent",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "An identified candidate process has missing interviewer feedback and an accountable recruiting owner."
+        ],
+        "shouldNotRouteExamples": [
+          "A user asks Hermes whether to hire or reject a candidate.",
+          "Candidate identity or consent boundaries are unresolved."
+        ]
+      },
+      "template": {
+        "id": "hr-candidate-pipeline",
+        "department": "hr",
+        "loopType": "candidate",
+        "name": "Candidate Pipeline",
+        "description": "Diagnose an evidenced hiring-process stall and prepare an accountable next action without ranking or deciding on a candidate.",
+        "runtimeLevel": "runnable",
+        "goal": "Diagnose an evidenced hiring-process stall and prepare an accountable next action without ranking or deciding on a candidate.",
+        "businessOutcome": "Time a candidate process remains stalled before accountable resolution.",
+        "primaryMetric": "Candidate Stage Latency Hours",
+        "secondaryMetrics": [
+          "Candidate Process Correction Rate",
+          "Onboarding Completion Rate",
+          "Onboarding Dependency Delay Hours",
+          "Manager Review Preparation Minutes"
+        ],
+        "observes": [
+          "Candidate",
+          "Candidate Process",
+          "NormalizedPayload CandidateId",
+          "NormalizedPayload RequisitionId",
+          "NormalizedPayload Stage",
+          "NormalizedPayload OwnerId",
+          "NormalizedPayload StalledSince",
+          "NormalizedPayload MissingFeedbackIds"
+        ],
+        "requiredDataSources": [
+          "Ats Candidate Read",
+          "Calendar Schedule Read",
+          "Hris Employee Read",
+          "Onboarding Plan Read",
+          "Survey Response Read",
+          "Performance Goal Read",
+          "Project Task Read"
+        ],
+        "routine": [
+          "Resolve candidate, requisition, stage, owner, consent, scheduling state, and delivery identity while excluding protected attributes.",
+          "Identify missing feedback, scheduling, approval, or ownership evidence without evaluating candidate quality.",
+          "Prepare a bounded process-remediation task or reviewer packet for the recruiting owner.",
+          "Confirm no protected data, ranking, rejection recommendation, or unsupported inference entered the output.",
+          "Return stage latency, corrections, candidate-experience outcome, and accountable completion evidence."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.candidateId, normalizedPayload.requisitionId, normalizedPayload.stage, normalizedPayload.ownerId, normalizedPayload.stalledSince, normalizedPayload.missingFeedbackIds.",
+          "Evidence must remain traceable to the affected candidate, candidate_process.",
+          "Confirm no protected data, ranking, rejection recommendation, or unsupported inference entered the output.",
+          "Hermes must never rank candidates.",
+          "Rejection is an accountable human employment decision.",
+          "Candidate communication requires exact human approval and a separate send control."
+        ],
+        "escalation": [
+          "Escalate to Recruiting Lead within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Hermes must never rank candidates.",
+          "Rejection is an accountable human employment decision.",
+          "Candidate communication requires exact human approval and a separate send control.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/hr-talent/operate-people-workflows",
+        "fixturePaths": [
+          "packs/official/hr-talent/operate-people-workflows/fixtures/happy.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.hr-talent.operate-people-workflows",
+        "name": "Operate Fair and Accountable People Workflows",
+        "version": "1.0.0",
+        "department": "hr_talent",
+        "summary": "Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment.",
+        "sourcePath": "packs/official/hr-talent/operate-people-workflows"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "hr-onboarding-progress",
+        "departmentType": "hr_talent",
+        "problemTypes": [
+          "talent.onboarding_gap"
+        ],
+        "eventTypes": [
+          "talent.onboarding_task_overdue",
+          "talent.onboarding_progress_changed"
+        ],
+        "subjectTypes": [
+          "employee_onboarding",
+          "onboarding_plan"
+        ],
+        "requiredContext": [
+          "normalizedPayload.employeeId",
+          "normalizedPayload.planId",
+          "normalizedPayload.version",
+          "normalizedPayload.missingTaskIds",
+          "normalizedPayload.managerId",
+          "normalizedPayload.changedTaskIds"
+        ],
+        "requiredConnections": [
+          "hris.employee.read",
+          "onboarding.plan.read",
+          "project.task.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "talent.performance_concern_reported",
+            "fields": [],
+            "reason": "Onboarding workflow evidence cannot be repurposed into a performance judgment."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 95,
+        "minimumConfidence": 0.95,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Onboarding Completion Rate: Required onboarding-plan tasks completed within the approved window.",
+          "Onboarding Dependency Delay Hours: Delay caused by unresolved task, access, equipment, or owner dependencies."
+        ],
+        "learningConsumers": [
+          "hr_talent",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A versioned onboarding plan lists overdue access and training tasks with accountable owners."
+        ],
+        "shouldNotRouteExamples": [
+          "A manager wants Hermes to decide whether the employee is performing well."
+        ]
+      },
+      "template": {
+        "id": "hr-onboarding-progress",
+        "department": "hr",
+        "loopType": "onboarding",
+        "name": "Onboarding Progress",
+        "description": "Resolve missing onboarding tasks and dependencies from a versioned plan while keeping manager and employment judgment human-owned.",
+        "runtimeLevel": "runnable",
+        "goal": "Resolve missing onboarding tasks and dependencies from a versioned plan while keeping manager and employment judgment human-owned.",
+        "businessOutcome": "Required onboarding-plan tasks completed within the approved window.",
+        "primaryMetric": "Onboarding Completion Rate",
+        "secondaryMetrics": [
+          "Onboarding Dependency Delay Hours",
+          "Candidate Stage Latency Hours",
+          "Candidate Process Correction Rate",
+          "Manager Review Preparation Minutes"
+        ],
+        "observes": [
+          "Employee Onboarding",
+          "Onboarding Plan",
+          "NormalizedPayload EmployeeId",
+          "NormalizedPayload PlanId",
+          "NormalizedPayload Version",
+          "NormalizedPayload MissingTaskIds",
+          "NormalizedPayload ManagerId",
+          "NormalizedPayload ChangedTaskIds"
+        ],
+        "requiredDataSources": [
+          "Hris Employee Read",
+          "Onboarding Plan Read",
+          "Project Task Read",
+          "Ats Candidate Read",
+          "Calendar Schedule Read",
+          "Survey Response Read",
+          "Performance Goal Read"
+        ],
+        "routine": [
+          "Resolve employee, plan, version, role, manager, task, dependency, and due-date identity using minimum necessary fields.",
+          "Separate incomplete tasks from blocked dependencies, stale data, unavailable access, and ownership gaps.",
+          "Prepare accountable task and dependency actions without judging employee performance.",
+          "Check evidence provenance, task owners, restricted-field minimization, and prohibited inference boundaries.",
+          "Return completion, latency, dependency recurrence, reviewer correction, and employee-experience evidence."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.employeeId, normalizedPayload.planId, normalizedPayload.version, normalizedPayload.missingTaskIds, normalizedPayload.managerId, normalizedPayload.changedTaskIds.",
+          "Evidence must remain traceable to the affected employee_onboarding, onboarding_plan.",
+          "Check evidence provenance, task owners, restricted-field minimization, and prohibited inference boundaries.",
+          "An onboarding loop cannot alter employment state or terms.",
+          "Workflow progress cannot become an automated performance rating.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to People Operations within 8h.",
+          "Customer-facing actions require a separate exact approval.",
+          "An onboarding loop cannot alter employment state or terms.",
+          "Workflow progress cannot become an automated performance rating.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/hr-talent/operate-people-workflows",
+        "fixturePaths": [
+          "packs/official/hr-talent/operate-people-workflows/fixtures/outcome.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.hr-talent.operate-people-workflows",
+        "name": "Operate Fair and Accountable People Workflows",
+        "version": "1.0.0",
+        "department": "hr_talent",
+        "summary": "Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment.",
+        "sourcePath": "packs/official/hr-talent/operate-people-workflows"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "hr-manager-coaching",
+        "departmentType": "hr_talent",
+        "problemTypes": [
+          "talent.manager_coaching"
+        ],
+        "eventTypes": [
+          "talent.manager_coaching_review_due"
+        ],
+        "subjectTypes": [
+          "manager",
+          "team",
+          "manager_review_window"
+        ],
+        "requiredContext": [
+          "normalizedPayload.managerId",
+          "normalizedPayload.teamId",
+          "normalizedPayload.reviewWindow",
+          "normalizedPayload.approvedSignalIds"
+        ],
+        "requiredConnections": [
+          "hris.employee.read",
+          "survey.response.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "talent.manager_score_requested",
+            "fields": [],
+            "reason": "Hermes does not score managers or employees."
+          },
+          {
+            "eventTypePattern": "talent.disciplinary_action_requested",
+            "fields": [],
+            "reason": "Discipline is a sensitive human-owned employment process outside this loop."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 90,
+        "minimumConfidence": 0.97,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Manager Review Preparation Minutes: Human time required to assemble a complete and fair manager-support packet.",
+          "Manager Packet Correction Rate: Material fairness, privacy, or evidence corrections made by people partners."
+        ],
+        "learningConsumers": [
+          "hr_talent",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A people partner requests a review of approved aggregate workflow signals for one manager and period."
+        ],
+        "shouldNotRouteExamples": [
+          "A request asks Hermes to infer personality, protected traits, or employee sentiment from private messages."
+        ]
+      },
+      "template": {
+        "id": "hr-manager-coaching",
+        "department": "hr",
+        "loopType": "manager",
+        "name": "Manager Coaching Preparation",
+        "description": "Prepare a human-reviewed manager coaching packet from approved evidence while exposing limitations and forbidding employee scoring.",
+        "runtimeLevel": "runnable",
+        "goal": "Prepare a human-reviewed manager coaching packet from approved evidence while exposing limitations and forbidding employee scoring.",
+        "businessOutcome": "Human time required to assemble a complete and fair manager-support packet.",
+        "primaryMetric": "Manager Review Preparation Minutes",
+        "secondaryMetrics": [
+          "Manager Packet Correction Rate",
+          "Candidate Stage Latency Hours",
+          "Candidate Process Correction Rate",
+          "Onboarding Completion Rate"
+        ],
+        "observes": [
+          "Manager",
+          "Team",
+          "Manager Review Window",
+          "NormalizedPayload ManagerId",
+          "NormalizedPayload TeamId",
+          "NormalizedPayload ReviewWindow",
+          "NormalizedPayload ApprovedSignalIds"
+        ],
+        "requiredDataSources": [
+          "Hris Employee Read",
+          "Survey Response Read",
+          "Collaboration Message Draft",
+          "Ats Candidate Read",
+          "Calendar Schedule Read",
+          "Onboarding Plan Read",
+          "Performance Goal Read",
+          "Project Task Read"
+        ],
+        "routine": [
+          "Resolve manager, team, review window, approved signal set, consent, aggregation, and source identity.",
+          "Summarize observable process patterns, source limitations, and conflicting evidence without psychological or protected-trait inference.",
+          "Prepare questions, observable examples, limitations, and follow-up measures for a people partner and manager.",
+          "A people partner reviews fairness, privacy, evidence quality, wording, and appropriate ownership before use.",
+          "Return reviewer corrections and approved follow-through evidence without creating a hidden manager or employee score."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.managerId, normalizedPayload.teamId, normalizedPayload.reviewWindow, normalizedPayload.approvedSignalIds.",
+          "Evidence must remain traceable to the affected manager, team, manager_review_window.",
+          "A people partner reviews fairness, privacy, evidence quality, wording, and appropriate ownership before use.",
+          "Hidden or explicit people scoring is prohibited.",
+          "Coaching preparation cannot alter employment records or terms.",
+          "Sensitive people communication requires separate exact approval and sending authority."
+        ],
+        "escalation": [
+          "Escalate to People Partner within 1bd.",
+          "Customer-facing actions require a separate exact approval.",
+          "Hidden or explicit people scoring is prohibited.",
+          "Coaching preparation cannot alter employment records or terms.",
+          "Sensitive people communication requires separate exact approval and sending authority.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/hr-talent/operate-people-workflows",
+        "fixturePaths": [
+          "packs/official/hr-talent/operate-people-workflows/fixtures/customer-facing.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.hr-talent.operate-people-workflows",
+        "name": "Operate Fair and Accountable People Workflows",
+        "version": "1.0.0",
+        "department": "hr_talent",
+        "summary": "Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment.",
+        "sourcePath": "packs/official/hr-talent/operate-people-workflows"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "hr-retention-review",
+        "departmentType": "hr_talent",
+        "problemTypes": [
+          "talent.retention_risk"
+        ],
+        "eventTypes": [
+          "talent.retention_review_due"
+        ],
+        "subjectTypes": [
+          "employee",
+          "team",
+          "retention_review_case"
+        ],
+        "requiredContext": [
+          "normalizedPayload.reviewId",
+          "normalizedPayload.subjectScope",
+          "normalizedPayload.reviewWindow",
+          "normalizedPayload.approvedSignalIds",
+          "normalizedPayload.humanOwnerId"
+        ],
+        "requiredConnections": [
+          "hris.employee.read",
+          "survey.response.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "talent.attrition_prediction_requested",
+            "fields": [],
+            "reason": "Individual attrition prediction and scoring are prohibited."
+          },
+          {
+            "eventTypePattern": "talent.compensation_decision_requested",
+            "fields": [],
+            "reason": "Compensation decisions are always human-owned and outside this loop."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 85,
+        "minimumConfidence": 0.98,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Retention Review Evidence Completeness: Human review cases with source, consent, limitation, and ownership evidence present.",
+          "Retention Review Boundary Violation Rate: Cases blocked for prohibited inference, access, consent, or action-boundary violations."
+        ],
+        "learningConsumers": [
+          "hr_talent",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A people partner opens a policy-approved retention review with a bounded signal allowlist."
+        ],
+        "shouldNotRouteExamples": [
+          "A manager asks for an attrition probability or a recommendation about whom to retain."
+        ]
+      },
+      "template": {
+        "id": "hr-retention-review",
+        "department": "hr",
+        "loopType": "retention",
+        "name": "Retention Signal Review",
+        "description": "Assemble a human-owned review packet from explicitly approved retention signals without predicting attrition or recommending employment action.",
+        "runtimeLevel": "runnable",
+        "goal": "Assemble a human-owned review packet from explicitly approved retention signals without predicting attrition or recommending employment action.",
+        "businessOutcome": "Human review cases with source, consent, limitation, and ownership evidence present.",
+        "primaryMetric": "Retention Review Evidence Completeness",
+        "secondaryMetrics": [
+          "Retention Review Boundary Violation Rate",
+          "Candidate Stage Latency Hours",
+          "Candidate Process Correction Rate",
+          "Onboarding Completion Rate"
+        ],
+        "observes": [
+          "Employee",
+          "Team",
+          "Retention Review Case",
+          "NormalizedPayload ReviewId",
+          "NormalizedPayload SubjectScope",
+          "NormalizedPayload ReviewWindow",
+          "NormalizedPayload ApprovedSignalIds",
+          "NormalizedPayload HumanOwnerId"
+        ],
+        "requiredDataSources": [
+          "Hris Employee Read",
+          "Survey Response Read",
+          "Ats Candidate Read",
+          "Calendar Schedule Read",
+          "Onboarding Plan Read",
+          "Performance Goal Read",
+          "Project Task Read"
+        ],
+        "routine": [
+          "Resolve review identity, subject scope, owner, window, signal allowlist, provenance, consent, and access policy.",
+          "Present approved observable evidence, conflicts, missing context, and forbidden inferences without generating attrition probability.",
+          "Prepare neutral questions and policy-approved process options for the accountable people partner.",
+          "A qualified reviewer verifies data minimization, consent, fairness, language, ownership, and whether the case should proceed.",
+          "Record reviewer corrections and process outcomes without storing a hidden employee risk score."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.reviewId, normalizedPayload.subjectScope, normalizedPayload.reviewWindow, normalizedPayload.approvedSignalIds, normalizedPayload.humanOwnerId.",
+          "Evidence must remain traceable to the affected employee, team, retention_review_case.",
+          "A qualified reviewer verifies data minimization, consent, fairness, language, ownership, and whether the case should proceed.",
+          "Individual attrition prediction can create hidden employment judgments.",
+          "People scoring is prohibited.",
+          "Compensation remains an accountable human decision with separate controls."
+        ],
+        "escalation": [
+          "Escalate to People Partner within 1bd.",
+          "Customer-facing actions require a separate exact approval.",
+          "Individual attrition prediction can create hidden employment judgments.",
+          "People scoring is prohibited.",
+          "Compensation remains an accountable human decision with separate controls.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/hr-talent/operate-people-workflows",
+        "fixturePaths": [
+          "packs/official/hr-talent/operate-people-workflows/fixtures/low-confidence.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.hr-talent.operate-people-workflows",
+        "name": "Operate Fair and Accountable People Workflows",
+        "version": "1.0.0",
+        "department": "hr_talent",
+        "summary": "Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment.",
+        "sourcePath": "packs/official/hr-talent/operate-people-workflows"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "hr-performance-review-preparation",
+        "departmentType": "hr_talent",
+        "problemTypes": [
+          "talent.performance_review"
+        ],
+        "eventTypes": [
+          "talent.performance_review_due"
+        ],
+        "subjectTypes": [
+          "employee",
+          "performance_review_period"
+        ],
+        "requiredContext": [
+          "normalizedPayload.employeeId",
+          "normalizedPayload.managerId",
+          "normalizedPayload.reviewPeriod",
+          "normalizedPayload.policyVersion",
+          "normalizedPayload.goalEvidenceIds"
+        ],
+        "requiredConnections": [
+          "hris.employee.read",
+          "performance.goal.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "talent.performance_rating_requested",
+            "fields": [],
+            "reason": "Hermes cannot create or recommend a performance rating."
+          },
+          {
+            "eventTypePattern": "talent.disciplinary_action_requested",
+            "fields": [],
+            "reason": "Discipline is a qualified human process outside this app."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 90,
+        "minimumConfidence": 0.98,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Performance Review Evidence Coverage: Declared goals supported by current, attributable, reviewable evidence or explicit gaps.",
+          "Performance Packet Correction Rate: Material evidence or fairness corrections made during accountable review."
+        ],
+        "learningConsumers": [
+          "hr_talent",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "An identified review period contains declared goals and attributable authored evidence for manager review."
+        ],
+        "shouldNotRouteExamples": [
+          "A manager asks Hermes to generate an employee rating or disciplinary recommendation."
+        ]
+      },
+      "template": {
+        "id": "hr-performance-review-preparation",
+        "department": "hr",
+        "loopType": "performance",
+        "name": "Performance Review Preparation",
+        "description": "Reconcile declared goals and authored evidence for a bounded review period while leaving ratings and employment judgment to accountable humans.",
+        "runtimeLevel": "runnable",
+        "goal": "Reconcile declared goals and authored evidence for a bounded review period while leaving ratings and employment judgment to accountable humans.",
+        "businessOutcome": "Declared goals supported by current, attributable, reviewable evidence or explicit gaps.",
+        "primaryMetric": "Performance Review Evidence Coverage",
+        "secondaryMetrics": [
+          "Performance Packet Correction Rate",
+          "Candidate Stage Latency Hours",
+          "Candidate Process Correction Rate",
+          "Onboarding Completion Rate"
+        ],
+        "observes": [
+          "Employee",
+          "Performance Review Period",
+          "NormalizedPayload EmployeeId",
+          "NormalizedPayload ManagerId",
+          "NormalizedPayload ReviewPeriod",
+          "NormalizedPayload PolicyVersion",
+          "NormalizedPayload GoalEvidenceIds"
+        ],
+        "requiredDataSources": [
+          "Hris Employee Read",
+          "Performance Goal Read",
+          "Ats Candidate Read",
+          "Calendar Schedule Read",
+          "Onboarding Plan Read",
+          "Survey Response Read",
+          "Project Task Read"
+        ],
+        "routine": [
+          "Resolve employee, manager, period, policy version, declared goals, authored evidence, and access boundary.",
+          "Map authored evidence to declared goals, identify missing context, and expose conflicts without generating a rating.",
+          "Prepare a balanced evidence packet, source citations, gaps, and reviewer questions for the manager.",
+          "The manager and configured reviewer verify evidence, fairness, policy alignment, and wording before any review decision.",
+          "Return source gaps, manager corrections, review completion, and process outcomes without retaining an agent-created score."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.employeeId, normalizedPayload.managerId, normalizedPayload.reviewPeriod, normalizedPayload.policyVersion, normalizedPayload.goalEvidenceIds.",
+          "Evidence must remain traceable to the affected employee, performance_review_period.",
+          "The manager and configured reviewer verify evidence, fairness, policy alignment, and wording before any review decision.",
+          "Performance ratings are accountable human judgments.",
+          "Review preparation cannot alter employment state or terms.",
+          "Compensation changes require separate accountable controls."
+        ],
+        "escalation": [
+          "Escalate to People Partner within 1bd.",
+          "Customer-facing actions require a separate exact approval.",
+          "Performance ratings are accountable human judgments.",
+          "Review preparation cannot alter employment state or terms.",
+          "Compensation changes require separate accountable controls.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/hr-talent/operate-people-workflows",
+        "fixturePaths": [
+          "packs/official/hr-talent/operate-people-workflows/fixtures/permission-change.json"
         ]
       }
     },

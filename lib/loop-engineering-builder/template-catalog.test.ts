@@ -72,6 +72,15 @@ describe("Loopgraph template catalog", () => {
         supportingLoopTemplateIds: ["ops-finance-approval-bottleneck", "ops-finance-resource-allocation"]
       })
     });
+
+    const hrTemplates = getDepartmentTemplates().find((department) => department.key === "hr")!.commonLoops;
+    expect(hrTemplates).toHaveLength(5);
+    expect(hrTemplates.find((template) => template.id === "hr-performance_review_prep")).toBeUndefined();
+    expect(hrTemplates.find((template) => template.id === "hr-performance-review-preparation")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/hr-talent/operate-people-workflows",
+      routingDefinition: expect.objectContaining({ problemTypes: ["talent.performance_review"] })
+    });
   });
 
   it("generates valid v1alpha1 starter specs for spec-stub templates", () => {

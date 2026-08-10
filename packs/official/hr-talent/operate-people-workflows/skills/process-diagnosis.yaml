@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: hr-process-diagnosis
+name: HR Process Diagnosis
+description: Diagnose accountable people-workflow friction without converting process evidence into a judgment about a person.
+department: hr_talent
+goal: Explain what workflow stalled, which approved object is affected, what evidence is missing, and which bounded process action requires a human owner.
+inputs: [canonical candidate or onboarding identity, workflow state, accountable owner, due dates, dependencies, scheduling evidence, policy boundaries]
+outputs: [process diagnosis, missing-context list, accountable next-action packet, prohibited-inference check, outcome measurement plan]
+instructions:
+  - Resolve the candidate, requisition, employee, plan, stage, task, manager, and policy version before diagnosing work.
+  - Separate scheduling, missing feedback, access, dependency, stale-data, approval, and ownership problems.
+  - Discuss the workflow, never candidate or employee quality, personality, intent, health, protected traits, or future behavior.
+  - Prepare the minimum reversible process action and route it to the accountable recruiting or people owner.
+  - Return latency, completion, reviewer correction, and experience outcomes to improve the workflow rather than score a person.
+boundaries:
+  - Never rank, hire, reject, compensate, rate, discipline, terminate, or recommend an employment decision.
+  - Never use protected attributes, private messages, inferred sentiment, health data, or unapproved behavioral telemetry.
+  - Missing identity, consent, ownership, policy, or source provenance requires abstention.
+requiredCapabilities: [ats.candidate.read, hris.employee.read, onboarding.plan.read]

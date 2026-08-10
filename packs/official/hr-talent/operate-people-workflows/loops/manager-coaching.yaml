@@ -1,0 +1,56 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: hr-manager-coaching
+  name: Manager Coaching Preparation
+  version: 1.0.0
+  description: Prepare a human-reviewed manager coaching packet from approved evidence while exposing limitations and forbidding employee scoring.
+  department: hr_talent
+  ownerRole: people_partner
+  tags: [manager, coaching, review, privacy]
+trigger: { type: event, source: "*", event: talent.manager_coaching_review_due }
+input:
+  requiredFields: [normalizedPayload.managerId, normalizedPayload.teamId, normalizedPayload.reviewWindow, normalizedPayload.approvedSignalIds]
+  subjectTypes: [manager, team, manager_review_window]
+  fixtures: [{ id: manager-coaching-review, path: fixtures/customer-facing.json }]
+routine:
+  - { id: normalize, name: Normalize review scope, actor: system, type: observe, description: "Resolve manager, team, review window, approved signal set, consent, aggregation, and source identity." }
+  - { id: assess, name: Assess workflow evidence, actor: agent, type: assess, description: "Summarize observable process patterns, source limitations, and conflicting evidence without psychological or protected-trait inference." }
+  - { id: prepare, name: Prepare coaching packet, actor: agent, type: prepare, description: "Prepare questions, observable examples, limitations, and follow-up measures for a people partner and manager." }
+  - { id: verify, name: Verify human ownership, actor: human, type: verify, description: "A people partner reviews fairness, privacy, evidence quality, wording, and appropriate ownership before use." }
+  - { id: learn, name: Return reviewed outcome, actor: system, type: learn, description: Return reviewer corrections and approved follow-through evidence without creating a hidden manager or employee score. }
+capabilities:
+  - { key: hris.employee.read, authority: read, risk: critical, required: true, purpose: Resolve manager and team identity with the minimum necessary HRIS fields., customerFacing: false }
+  - { key: survey.response.read, authority: read, risk: critical, required: true, purpose: Read only approved aggregate or explicitly consented signals for the bounded window., customerFacing: false }
+  - { key: collaboration.message.draft, authority: approve, risk: critical, required: false, purpose: Prepare the exact reviewed internal coaching message., customerFacing: true }
+skills: [hr-manager-review-preparation, hr-evidence-minimization, hr-fairness-and-boundary-review]
+outcomes:
+  - { metric: manager_review_preparation_minutes, description: Human time required to assemble a complete and fair manager-support packet., direction: decrease, sourceCapability: hris.employee.read }
+  - { metric: manager_packet_correction_rate, description: "Material fairness, privacy, or evidence corrections made by people partners.", direction: decrease, sourceCapability: survey.response.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [talent.manager_coaching]
+  accepts: [{ sourcePattern: "*", eventTypePattern: talent.manager_coaching_review_due, subjectTypes: [manager, team, manager_review_window], requiredFields: [normalizedPayload.managerId, normalizedPayload.teamId, normalizedPayload.reviewWindow, normalizedPayload.approvedSignalIds], reason: An accountable people partner requested a bounded manager-support review using approved evidence. }]
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: talent.manager_score_requested, subjectTypes: [manager], fields: [], reason: Hermes does not score managers or employees. }
+    - { sourcePattern: "*", eventTypePattern: talent.disciplinary_action_requested, subjectTypes: [employee, manager], fields: [], reason: Discipline is a sensitive human-owned employment process outside this loop. }
+  inputMapping: { managerId: normalizedPayload.managerId, teamId: normalizedPayload.teamId, reviewWindow: normalizedPayload.reviewWindow, approvedSignalIds: normalizedPayload.approvedSignalIds }
+  priority: 90
+  minimumConfidence: 0.97
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 10, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [hris.employee.read, survey.response.read]
+  examples: { shouldRoute: ["A people partner requests a review of approved aggregate workflow signals for one manager and period."], shouldNotRoute: ["A request asks Hermes to infer personality, protected traits, or employee sentiment from private messages."] }
+policy:
+  forbiddenActions:
+    - { capability: people.person.score, reason: Hidden or explicit people scoring is prohibited. }
+    - { capability: hris.employment.update, reason: Coaching preparation cannot alter employment records or terms. }
+    - { capability: collaboration.message.send, reason: Sensitive people communication requires separate exact approval and sending authority. }
+  escalationOwner: people_partner
+  escalationSla: 1bd
+  separateCustomerFacingApproval: true

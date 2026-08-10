@@ -239,7 +239,12 @@ export const LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES: Record<string, string> = {
   "operations_finance-vendor_review": "ops-finance-vendor-review",
   "operations_finance-close_readiness": "ops-finance-close-readiness",
   "operations_finance-cash_collection": "ops-finance-cash-collection",
-  "operations_finance-resource_allocation": "ops-finance-resource-allocation"
+  "operations_finance-resource_allocation": "ops-finance-resource-allocation",
+  "hr-candidate_pipeline": "hr-candidate-pipeline",
+  "hr-onboarding_progress": "hr-onboarding-progress",
+  "hr-manager_coaching": "hr-manager-coaching",
+  "hr-retention_signal": "hr-retention-review",
+  "hr-performance_review_prep": "hr-performance-review-preparation"
 };
 
 const replacedLegacyTemplateIds = new Set(Object.keys(LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES));

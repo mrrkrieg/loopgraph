@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: workday-greenhouse-slack
+name: Workday + Greenhouse + Slack
+description: Configure accountable people workflows around Workday, Greenhouse, bounded calendar and survey evidence, project tasks, and governed Slack drafts.
+connectorRecipe: connectors/workday-greenhouse-slack.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 30, rolloutMode: shadow, retentionReviewEnabled: false, aggregateSurveyEvidenceOnly: true }
+requiredCompanyFields: [people.dataPolicy, people.decisionBoundaries, people.candidateProcessPolicy, people.onboardingPolicy, people.reviewPolicy, people.escalationOwners]
