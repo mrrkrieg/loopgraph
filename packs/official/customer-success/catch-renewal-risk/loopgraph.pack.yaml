@@ -32,6 +32,23 @@ permissions:
   - { capability: mail.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare exact approved customer communication without sending.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [email_content, crm_data] }
 requiredCapabilities: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
 optionalCapabilities: [crm.account.update, collaboration.message.draft, mail.message.draft]
+topology:
+  objects:
+    - { id: account, objectType: account, label: Customer account, description: The shared commercial and relationship identity used across CRM billing support and product systems., shared: true, identityKeys: [accountId, crmAccountId] }
+    - { id: account-health, objectType: account_health, label: Account health, description: Time-bounded adoption support billing sentiment goal and owner evidence for one account., shared: true, identityKeys: [accountId, observationWindow] }
+    - { id: renewal-risk, objectType: renewal_risk, label: Renewal risk, description: A renewal-specific problem with contract timing risk drivers owner and recovery evidence., shared: true, identityKeys: [accountId, subscriptionId, renewalDate] }
+    - { id: strategic-risk, objectType: strategic_account_risk, label: Strategic account risk, description: Material relationship or business-impact evidence requiring cross-department ownership., shared: true, identityKeys: [accountId, riskWindow] }
+    - { id: recovery-outcome, objectType: customer_recovery_outcome, label: Recovery outcome, description: Observed health renewal support and relationship effects after an intervention., shared: true, identityKeys: [accountId, interventionId, measurementWindow] }
+  flows:
+    - { id: account-enters-health, source: { kind: object, id: account }, target: { kind: loop, id: cs-customer-health }, type: evidence_in, reason: Hermes joins account evidence before deciding whether the problem is health support renewal or strategic risk. }
+    - { id: health-produces-state, source: { kind: loop, id: cs-customer-health }, target: { kind: object, id: account-health }, type: produces, reason: Health becomes a traceable evidence object rather than an opaque score. }
+    - { id: health-enters-renewal, source: { kind: object, id: account-health }, target: { kind: loop, id: cs-renewal-risk }, type: evidence_in, reason: Renewal work requires contract timing plus current account-health evidence. }
+    - { id: renewal-produces-risk, source: { kind: loop, id: cs-renewal-risk }, target: { kind: object, id: renewal-risk }, type: produces, reason: The risk diagnosis owner save plan and outcome window share one durable identity. }
+    - { id: support-may-support-strategic, source: { kind: loop, id: cs-support-escalation }, target: { kind: loop, id: cs-strategic-account-escalation }, type: supports, reason: Material support impact can create a separate strategic problem only when business risk is independently evidenced., condition: The account is strategic and verified business impact exceeds the configured threshold. }
+    - { id: strategic-produces-risk, source: { kind: loop, id: cs-strategic-account-escalation }, target: { kind: object, id: strategic-risk }, type: produces, reason: Cross-department recovery work remains tied to accountable owners and verified account impact. }
+    - { id: strategic-may-support-qbr, source: { kind: loop, id: cs-strategic-account-escalation }, target: { kind: loop, id: cs-qbr-preparation }, type: supports, reason: Executive review preparation is supporting work and cannot replace the primary recovery problem., condition: An approved executive review is scheduled inside the risk window. }
+    - { id: strategic-returns-health, source: { kind: loop, id: cs-strategic-account-escalation }, target: { kind: loop, id: cs-customer-health }, type: learning_return, reason: Intervention and relationship outcomes update future health reasoning. }
+    - { id: health-produces-recovery, source: { kind: loop, id: cs-customer-health }, target: { kind: object, id: recovery-outcome }, type: produces, reason: Health recovery is observed after the configured measurement window and returned to Hermes. }
 entrypoints:
   loops: [loops/customer-health.yaml, loops/renewal-risk.yaml, loops/support-escalation.yaml, loops/strategic-account-escalation.yaml, loops/qbr-preparation.yaml]
   skills: [skills/account-assessment.yaml, skills/risk-synthesis.yaml, skills/executive-brief.yaml, skills/recovery-plan.yaml]

@@ -185,6 +185,8 @@ For event rehearsal, workers, outcome measurements, controllers, and hosted depl
 
 Loopgraph Apps package one or more cooperating loops, Hermes skills, connector requirements, setup questions, policies, fixtures, metrics, and graph relationships into one immutable, inspectable release.
 
+Opinionated apps also declare a typed evidence topology in the signed pack: shared company objects, evidence inputs, produced evidence, learning returns, and the exact supporting-loop edges Hermes may use. A loop allowing multiple routes is not enough on its own—Hermes must select exactly one primary route, every supporting route must be eligible, and the primary loop must explicitly permit that supporting loop. The Marketplace preview and installed company graph are compiled from this same contract.
+
 | Official app | Department | Business result |
 |---|---|---|
 | [Turn Customer Feedback Into Validated Product Problems](packs/official/product/turn-feedback-into-product-problems) | Product | Join feedback, usage, issue, and release evidence into validated problems and measurable release learning |

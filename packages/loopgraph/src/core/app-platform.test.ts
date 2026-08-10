@@ -108,6 +108,41 @@ describe("Loopgraph App Platform contracts", () => {
     })).toThrow(/cannot be enabled/i);
   });
 
+  it("requires topology references and supporting fan-out to be explicit", () => {
+    const input = manifestInput();
+    const topology = {
+      objects: [{
+        id: "lead",
+        objectType: "lead",
+        label: "Lead",
+        description: "A resolved lead identity.",
+        shared: true,
+        identityKeys: ["leadId"]
+      }],
+      flows: [{
+        id: "lead-enters-intake",
+        source: { kind: "object", id: "lead" },
+        target: { kind: "loop", id: "sales-inbound-lead-intake" },
+        type: "evidence_in",
+        reason: "A resolved lead can enter intake."
+      }]
+    } as const;
+    expect(loopPackManifestSchema.parse({ ...input, topology }).topology.flows).toHaveLength(1);
+    expect(() => loopPackManifestSchema.parse({
+      ...input,
+      topology: {
+        objects: topology.objects,
+        flows: [{
+          id: "unsafe-fanout",
+          source: { kind: "loop", id: "sales-inbound-lead-intake" },
+          target: { kind: "loop", id: "sales-inbound-lead-routing" },
+          type: "supports",
+          reason: "Fan out without proving when it is safe."
+        }]
+      }
+    })).toThrow(/evidence condition/i);
+  });
+
   it("produces order-independent canonical digests", () => {
     expect(canonicalAppDigest({ a: 1, b: 2 })).toBe(canonicalAppDigest({ b: 2, a: 1 }));
     expect(canonicalAppDigest({ a: 1 })).toMatch(/^sha256:[a-f0-9]{64}$/);

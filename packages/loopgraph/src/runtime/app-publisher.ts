@@ -626,6 +626,19 @@ async function rewriteCapturedIdentifiers(
     if (Array.isArray(document.skills)) document.skills = document.skills.map((id) => typeof id === "string" ? skillIds.get(id) ?? id : id);
     await atomicWriteText(path.join(root, relativePath), YAML.stringify(document));
   }
+  const manifestPath = path.join(root, "loopgraph.pack.yaml");
+  const manifest = await readDocument(root, "loopgraph.pack.yaml") as Record<string, unknown>;
+  if (isRecord(manifest.topology) && Array.isArray(manifest.topology.flows)) {
+    manifest.topology.flows = manifest.topology.flows.map((flow) => {
+      if (!isRecord(flow)) return flow;
+      return {
+        ...flow,
+        source: rewriteTopologyLoopEndpoint(flow.source, loopIds),
+        target: rewriteTopologyLoopEndpoint(flow.target, loopIds)
+      };
+    });
+    await atomicWriteText(manifestPath, YAML.stringify(manifest));
+  }
   for (const relativePath of evalPaths) {
     const document = await readDocument(root, relativePath) as Record<string, unknown>;
     document.appId = derivedAppId;
@@ -637,6 +650,11 @@ async function rewriteCapturedIdentifiers(
     }
     await atomicWriteText(path.join(root, relativePath), YAML.stringify(document));
   }
+}
+
+function rewriteTopologyLoopEndpoint(endpoint: unknown, loopIds: Map<string, string>): unknown {
+  if (!isRecord(endpoint) || endpoint.kind !== "loop" || typeof endpoint.id !== "string") return endpoint;
+  return { ...endpoint, id: loopIds.get(endpoint.id) ?? endpoint.id };
 }
 
 function publisherTrustKey(key: PublisherKeyRecord): PublisherTrustKey {
