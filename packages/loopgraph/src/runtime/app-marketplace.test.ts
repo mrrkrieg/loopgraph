@@ -38,6 +38,11 @@ describe("local app marketplace", () => {
     expect(byLegalOutcome[0]?.app.id).toBe("loopgraph.legal-compliance.govern-evidence-and-exceptions");
     const byLegalCapability = await marketplace.searchApps({ capability: "policy.control.read" });
     expect(byLegalCapability.map((result) => result.app.id)).toContain("loopgraph.legal-compliance.govern-evidence-and-exceptions");
+
+    const byManagementOutcome = await marketplace.searchApps({ query: "run company operating system" });
+    expect(byManagementOutcome[0]?.app.id).toBe("loopgraph.management.run-company-operating-system");
+    const byManagementCapability = await marketplace.searchApps({ capability: "loopgraph.topology.read" });
+    expect(byManagementCapability.map((result) => result.app.id)).toContain("loopgraph.management.run-company-operating-system");
   });
 
   it("resolves immutable versions and verifies the cached artifact", async () => {

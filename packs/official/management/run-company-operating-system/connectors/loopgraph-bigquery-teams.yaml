@@ -1,0 +1,26 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: loopgraph-bigquery-teams
+providerId: loopgraph
+providerFamily: loopgraph
+displayName: Loopgraph + BigQuery + Teams
+capabilities:
+  - { logicalCapability: loopgraph.topology.read, providerOperation: loopgraph.graph.read, minimumScopes: [graph:read], authority: read, risk: high }
+  - { logicalCapability: loopgraph.routing.read, providerOperation: loopgraph.routing-decisions.read, minimumScopes: [routing:read], authority: read, risk: high }
+  - { logicalCapability: loopgraph.outcome.read, providerOperation: loopgraph.outcomes-value.read, minimumScopes: [outcomes:read], authority: read, risk: high }
+  - { logicalCapability: analytics.metric.query, providerOperation: bigquery.company-metrics.query, minimumScopes: [bigquery.readsessions.create], authority: read, risk: high }
+  - { logicalCapability: finance.forecast.read, providerOperation: bigquery.finance-forecast.query, minimumScopes: [bigquery.readsessions.create], authority: read, risk: critical }
+  - { logicalCapability: capacity.plan.read, providerOperation: bigquery.capacity-plan.query, minimumScopes: [bigquery.readsessions.create], authority: read, risk: critical }
+  - { logicalCapability: project.task.read, providerOperation: project.tasks.read, minimumScopes: [tasks:read], authority: read, risk: medium }
+  - { logicalCapability: collaboration.message.draft, providerOperation: microsoft-graph.teams-message.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: high }
+  - { logicalCapability: project.task.create, providerOperation: project.tasks.create, minimumScopes: [tasks:write], authority: approve, risk: high }
+  - { logicalCapability: loopgraph.graph.change.propose, providerOperation: loopgraph.graph-change.propose, minimumScopes: [graph:propose], authority: approve, risk: critical }
+eventSources:
+  - { eventFamily: management.review_due, providerEvent: loopgraph.management-review.due, transport: poll, normalizationTransformer: loopgraph.review-to-operating-window.v1, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: management.company_metric_anomaly, providerEvent: bigquery.company-metric.material-anomaly, transport: poll, normalizationTransformer: bigquery.metric-to-company-anomaly.v1, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: management.loop_health_degraded, providerEvent: loopgraph.loop-health.degraded, transport: stream, normalizationTransformer: loopgraph.health-to-review-window.v1, replayProtection: true }
+fieldMappings:
+  - { objectType: operating_review_window, requiredLogicalFields: [review.id, review.windowStart, review.windowEnd, review.departmentIds, review.executiveOwnerId], optionalLogicalFields: [review.evidenceCutoff, review.priorDecisionIds] }
+  - { objectType: company_metric_anomaly, requiredLogicalFields: [metric.id, metric.observationWindow, metric.baseline, metric.current, metric.materialityThreshold], optionalLogicalFields: [metric.dimensions, metric.ownerId, metric.definitionVersion] }
+  - { objectType: loop_health_window, requiredLogicalFields: [loop.id, health.windowStart, health.windowEnd, health.signals, loop.ownerId], optionalLogicalFields: [loop.version, loop.mode, loop.connectionIds] }
+healthCheck: { capability: loopgraph.topology.read, sampleQuery: { fields: [graphVersion], limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

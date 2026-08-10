@@ -720,9 +720,9 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "legal-policy-control-drift",
     "legal-privileged-access-review",
     "legal-incident-evidence",
-    "management-review",
-    "management-decision_memo",
-    "management-resource_allocation"
+    "management-operating-review",
+    "management-decision-memo",
+    "management-resource-allocation"
   ].map(resolveCompanyLoopTemplateId));
   const improvementTemplateIds = new Set([
     "marketing-channel_allocation",
@@ -736,8 +736,8 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "operations_finance-vendor_review",
     "hr-manager_coaching",
     "legal-security-questionnaire",
-    "management-department_loop_review",
-    "management-improvement"
+    "management-loop-health-review",
+    "management-system-improvement"
   ].map(resolveCompanyLoopTemplateId));
   const attentionTemplateIds = new Set([
     "customer_success-renewal_risk",
@@ -745,7 +745,7 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "operations_finance-forecast_variance",
     "hr-retention_signal",
     "legal-policy-control-drift",
-    "management-department_loop_review"
+    "management-loop-health-review"
   ].map(resolveCompanyLoopTemplateId));
 
   return {
