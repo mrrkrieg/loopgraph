@@ -716,10 +716,10 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "operations_finance-forecast_variance",
     "hr-retention_signal",
     "hr-performance_review_prep",
-    "legal_security-contract_triage",
-    "legal_security-policy_drift",
-    "legal_security-access_review",
-    "legal_security-incident_evidence",
+    "legal-contract-exception-triage",
+    "legal-policy-control-drift",
+    "legal-privileged-access-review",
+    "legal-incident-evidence",
     "management-review",
     "management-decision_memo",
     "management-resource_allocation"
@@ -735,7 +735,7 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "engineering-incident_learning",
     "operations_finance-vendor_review",
     "hr-manager_coaching",
-    "legal_security-security_questionnaire",
+    "legal-security-questionnaire",
     "management-department_loop_review",
     "management-improvement"
   ].map(resolveCompanyLoopTemplateId));
@@ -744,7 +744,7 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "engineering-release_readiness",
     "operations_finance-forecast_variance",
     "hr-retention_signal",
-    "legal_security-policy_drift",
+    "legal-policy-control-drift",
     "management-department_loop_review"
   ].map(resolveCompanyLoopTemplateId));
 
@@ -765,7 +765,7 @@ function catalogLoopId(templateId: string) {
     "engineering-qa_checklist": "loop_demo_engineering_quality",
     "ops-finance-approval-bottleneck": "loop_demo_ops_efficiency",
     "hr-manager_coaching": "loop_demo_people_engagement",
-    "legal_security-policy_drift": "loop_demo_risk_compliance"
+    "legal-policy-control-drift": "loop_demo_risk_compliance"
   };
   return legacyIds[resolveCompanyLoopTemplateId(templateId)] ?? `catalog_${slug(templateId)}`;
 }

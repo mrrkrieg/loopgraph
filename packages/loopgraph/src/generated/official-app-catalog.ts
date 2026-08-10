@@ -2,7 +2,7 @@
 
 export const GENERATED_OFFICIAL_APP_CATALOG = {
   "schemaVersion": "loopgraph-generated-app-catalog/v1alpha1",
-  "sourceDigest": "sha256:cde5459bc243248b884f97c5dd0be3165cc38fcc65172b238eb2555180720289",
+  "sourceDigest": "sha256:ef05c0383dad9eae8f61986763857d9fecae399e0fe278fc2063e8c54aed1f19",
   "entries": [
     {
       "app": {
@@ -2295,6 +2295,829 @@ export const GENERATED_OFFICIAL_APP_CATALOG = {
         "examplePath": "packs/official/hr-talent/operate-people-workflows",
         "fixturePaths": [
           "packs/official/hr-talent/operate-people-workflows/fixtures/permission-change.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+        "name": "Govern Legal, Security, and Compliance Evidence",
+        "version": "1.0.0",
+        "department": "legal_compliance",
+        "summary": "Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.",
+        "sourcePath": "packs/official/legal-compliance/govern-evidence-and-exceptions"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "legal-contract-exception-triage",
+        "departmentType": "legal_compliance",
+        "problemTypes": [
+          "legal.contract_exception"
+        ],
+        "eventTypes": [
+          "legal.contract_redline_received",
+          "legal.contract_review_requested"
+        ],
+        "subjectTypes": [
+          "contract",
+          "contract_review"
+        ],
+        "requiredContext": [
+          "normalizedPayload.contractId",
+          "normalizedPayload.version",
+          "normalizedPayload.clauseIds",
+          "normalizedPayload.playbookVersion",
+          "normalizedPayload.legalOwnerId"
+        ],
+        "requiredConnections": [
+          "contract.record.read",
+          "legal.playbook.read",
+          "crm.account.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "legal.legal_conclusion_requested",
+            "fields": [],
+            "reason": "Hermes cannot issue a legal conclusion."
+          },
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Lifecycle events update existing work and cannot open a duplicate legal problem."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "declared_ordered",
+          "maxRoutes": 2,
+          "requiresIndependentProblems": false
+        },
+        "priority": 100,
+        "minimumConfidence": 0.98,
+        "supportingLoopTemplateIds": [
+          "legal-policy-control-drift"
+        ],
+        "learningOutputs": [
+          "Contract Exception Review Hours: Time from a complete redline packet to qualified legal disposition.",
+          "Contract Triage Correction Rate: Hermes clause extraction or playbook comparisons materially corrected by counsel."
+        ],
+        "learningConsumers": [
+          "legal_compliance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "An exact redline contains identified clauses and a current approved playbook version."
+        ],
+        "shouldNotRouteExamples": [
+          "The contract version or qualified legal owner is missing.",
+          "A user asks Hermes to decide whether a clause is legally enforceable."
+        ]
+      },
+      "template": {
+        "id": "legal-contract-exception-triage",
+        "department": "legal_security",
+        "loopType": "contract",
+        "name": "Contract Exception Triage",
+        "description": "Extract and compare contract clauses against an exact approved playbook while queuing every exception for qualified legal judgment.",
+        "runtimeLevel": "runnable",
+        "goal": "Extract and compare contract clauses against an exact approved playbook while queuing every exception for qualified legal judgment.",
+        "businessOutcome": "Time from a complete redline packet to qualified legal disposition.",
+        "primaryMetric": "Contract Exception Review Hours",
+        "secondaryMetrics": [
+          "Contract Triage Correction Rate",
+          "Control Drift Resolution Hours",
+          "Repeated Control Exception Rate",
+          "Privileged Access Review Hours"
+        ],
+        "observes": [
+          "Contract",
+          "Contract Review",
+          "NormalizedPayload ContractId",
+          "NormalizedPayload Version",
+          "NormalizedPayload ClauseIds",
+          "NormalizedPayload PlaybookVersion",
+          "NormalizedPayload LegalOwnerId"
+        ],
+        "requiredDataSources": [
+          "Contract Record Read",
+          "Legal Playbook Read",
+          "Crm Account Read",
+          "Policy Control Read",
+          "Change Record Read",
+          "Identity Access Read",
+          "Hris Employee Read",
+          "Access Log Read",
+          "Incident Record Read",
+          "Siem Event Read",
+          "Security Knowledge Read",
+          "Audit Evidence Read"
+        ],
+        "routine": [
+          "Resolve contract, version, parties, clause identifiers, playbook version, jurisdiction scope, owner, and delivery identity.",
+          "Extract exact text and compare it to current approved positions, fallbacks, conditions, and citations without interpreting law.",
+          "Classify standard, fallback, exception, unsupported, and missing-context cases for qualified legal review.",
+          "Qualified counsel verifies clause text, playbook version, jurisdiction, commercial context, and legal disposition.",
+          "Return approved clauses, exceptions, reviewer corrections, cycle time, and explicit answer-reuse limits."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.contractId, normalizedPayload.version, normalizedPayload.clauseIds, normalizedPayload.playbookVersion, normalizedPayload.legalOwnerId.",
+          "Evidence must remain traceable to the affected contract, contract_review.",
+          "Qualified counsel verifies clause text, playbook version, jurisdiction, commercial context, and legal disposition.",
+          "Hermes cannot change a contract.",
+          "Only qualified counsel may make legal judgments.",
+          "External legal communication requires separate exact approval and send authority."
+        ],
+        "escalation": [
+          "Escalate to Legal Counsel within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Hermes cannot change a contract.",
+          "Only qualified counsel may make legal judgments.",
+          "External legal communication requires separate exact approval and send authority.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/legal-compliance/govern-evidence-and-exceptions",
+        "fixturePaths": [
+          "packs/official/legal-compliance/govern-evidence-and-exceptions/fixtures/happy.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+        "name": "Govern Legal, Security, and Compliance Evidence",
+        "version": "1.0.0",
+        "department": "legal_compliance",
+        "summary": "Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.",
+        "sourcePath": "packs/official/legal-compliance/govern-evidence-and-exceptions"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "legal-policy-control-drift",
+        "departmentType": "legal_compliance",
+        "problemTypes": [
+          "compliance.policy_drift"
+        ],
+        "eventTypes": [
+          "compliance.control_changed",
+          "compliance.policy_review_triggered"
+        ],
+        "subjectTypes": [
+          "control",
+          "policy",
+          "policy_control_state"
+        ],
+        "requiredContext": [
+          "normalizedPayload.controlId",
+          "normalizedPayload.policyVersion",
+          "normalizedPayload.changeId",
+          "normalizedPayload.effectiveAt",
+          "normalizedPayload.ownerId",
+          "normalizedPayload.triggerId"
+        ],
+        "requiredConnections": [
+          "policy.control.read",
+          "change.record.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "compliance.exception_approval_requested",
+            "fields": [],
+            "reason": "Risk acceptance and policy exceptions require qualified accountable approval."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 95,
+        "minimumConfidence": 0.98,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Control Drift Resolution Hours: Time from qualified drift confirmation to verified remediation or approved exception.",
+          "Repeated Control Exception Rate: Approved control exceptions that recur without durable remediation."
+        ],
+        "learningConsumers": [
+          "legal_compliance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A named control change can be compared to a current policy version and owner."
+        ],
+        "shouldNotRouteExamples": [
+          "A user asks Hermes to accept risk or approve a policy exception."
+        ]
+      },
+      "template": {
+        "id": "legal-policy-control-drift",
+        "department": "legal_security",
+        "loopType": "policy",
+        "name": "Policy and Control Drift",
+        "description": "Reconcile a versioned policy and control implementation into a source-cited drift finding and owned remediation queue.",
+        "runtimeLevel": "runnable",
+        "goal": "Reconcile a versioned policy and control implementation into a source-cited drift finding and owned remediation queue.",
+        "businessOutcome": "Time from qualified drift confirmation to verified remediation or approved exception.",
+        "primaryMetric": "Control Drift Resolution Hours",
+        "secondaryMetrics": [
+          "Repeated Control Exception Rate",
+          "Contract Exception Review Hours",
+          "Contract Triage Correction Rate",
+          "Privileged Access Review Hours"
+        ],
+        "observes": [
+          "Control",
+          "Policy",
+          "Policy Control State",
+          "NormalizedPayload ControlId",
+          "NormalizedPayload PolicyVersion",
+          "NormalizedPayload ChangeId",
+          "NormalizedPayload EffectiveAt",
+          "NormalizedPayload OwnerId",
+          "NormalizedPayload TriggerId"
+        ],
+        "requiredDataSources": [
+          "Policy Control Read",
+          "Change Record Read",
+          "Contract Record Read",
+          "Legal Playbook Read",
+          "Crm Account Read",
+          "Identity Access Read",
+          "Hris Employee Read",
+          "Access Log Read",
+          "Incident Record Read",
+          "Siem Event Read",
+          "Security Knowledge Read",
+          "Audit Evidence Read"
+        ],
+        "routine": [
+          "Resolve control, policy version, implementation, test, exception, change, effective date, and owner identity.",
+          "Compare current implementation and evidence to the exact approved policy and control definition.",
+          "Prepare a source-cited finding with affected scope, evidence gaps, owner, severity inputs, and remediation questions.",
+          "A qualified compliance or security owner determines drift, exception, severity, and remediation.",
+          "Return approved findings, corrections, remediation evidence, recurrence, and residual gaps."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.controlId, normalizedPayload.policyVersion, normalizedPayload.changeId, normalizedPayload.effectiveAt, normalizedPayload.ownerId, normalizedPayload.triggerId.",
+          "Evidence must remain traceable to the affected control, policy, policy_control_state.",
+          "A qualified compliance or security owner determines drift, exception, severity, and remediation.",
+          "Risk acceptance and exceptions remain qualified human decisions.",
+          "Hermes cannot publish or change policy.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Compliance Owner within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Risk acceptance and exceptions remain qualified human decisions.",
+          "Hermes cannot publish or change policy.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/legal-compliance/govern-evidence-and-exceptions",
+        "fixturePaths": [
+          "packs/official/legal-compliance/govern-evidence-and-exceptions/fixtures/outcome.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+        "name": "Govern Legal, Security, and Compliance Evidence",
+        "version": "1.0.0",
+        "department": "legal_compliance",
+        "summary": "Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.",
+        "sourcePath": "packs/official/legal-compliance/govern-evidence-and-exceptions"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "legal-privileged-access-review",
+        "departmentType": "legal_compliance",
+        "problemTypes": [
+          "security.access_exception"
+        ],
+        "eventTypes": [
+          "security.access_review_due",
+          "security.privilege_exception_detected"
+        ],
+        "subjectTypes": [
+          "access_grant",
+          "identity",
+          "access_review"
+        ],
+        "requiredContext": [
+          "normalizedPayload.principalId",
+          "normalizedPayload.systemId",
+          "normalizedPayload.grantId",
+          "normalizedPayload.roleId",
+          "normalizedPayload.ownerId",
+          "normalizedPayload.exceptionId"
+        ],
+        "requiredConnections": [
+          "identity.access.read",
+          "hris.employee.read",
+          "access.log.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "security.access_change_requested",
+            "fields": [],
+            "reason": "A requested access mutation cannot bypass evidence review and independent approval."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 100,
+        "minimumConfidence": 0.99,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Privileged Access Review Hours: Time from complete review evidence to accountable access disposition.",
+          "Standing Privilege Reduction: Approved reduction in unnecessary standing privileged access."
+        ],
+        "learningConsumers": [
+          "legal_compliance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "An exact grant, principal, role, system, and accountable owner are available."
+        ],
+        "shouldNotRouteExamples": [
+          "Principal identity is ambiguous or a user asks Hermes to revoke access directly."
+        ]
+      },
+      "template": {
+        "id": "legal-privileged-access-review",
+        "department": "legal_security",
+        "loopType": "identity",
+        "name": "Privileged Access Review",
+        "description": "Prepare least-privilege evidence for one identified grant while keeping the access decision and execution independently human-owned.",
+        "runtimeLevel": "runnable",
+        "goal": "Prepare least-privilege evidence for one identified grant while keeping the access decision and execution independently human-owned.",
+        "businessOutcome": "Time from complete review evidence to accountable access disposition.",
+        "primaryMetric": "Privileged Access Review Hours",
+        "secondaryMetrics": [
+          "Standing Privilege Reduction",
+          "Contract Exception Review Hours",
+          "Contract Triage Correction Rate",
+          "Control Drift Resolution Hours"
+        ],
+        "observes": [
+          "Access Grant",
+          "Identity",
+          "Access Review",
+          "NormalizedPayload PrincipalId",
+          "NormalizedPayload SystemId",
+          "NormalizedPayload GrantId",
+          "NormalizedPayload RoleId",
+          "NormalizedPayload OwnerId",
+          "NormalizedPayload ExceptionId"
+        ],
+        "requiredDataSources": [
+          "Identity Access Read",
+          "Hris Employee Read",
+          "Access Log Read",
+          "Identity Access Change",
+          "Contract Record Read",
+          "Legal Playbook Read",
+          "Crm Account Read",
+          "Policy Control Read",
+          "Change Record Read",
+          "Incident Record Read",
+          "Siem Event Read",
+          "Security Knowledge Read",
+          "Audit Evidence Read"
+        ],
+        "routine": [
+          "Resolve principal, system, role, scope, grant, expiry, prior approval, owner, employment status, and review window.",
+          "Summarize declared need, bounded usage, toxic combinations, expiry, and missing evidence without deciding access.",
+          "Prepare retain, reduce, revoke, time-bound, or investigate options with exact evidence and execution fingerprints.",
+          "The system and identity owners make the access decision under separation-of-duties policy.",
+          "Return approved decision, execution receipt, correction, least-privilege result, and recurrence evidence."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.principalId, normalizedPayload.systemId, normalizedPayload.grantId, normalizedPayload.roleId, normalizedPayload.ownerId, normalizedPayload.exceptionId.",
+          "Evidence must remain traceable to the affected access_grant, identity, access_review.",
+          "The system and identity owners make the access decision under separation-of-duties policy.",
+          "Access execution must be independent from analysis and approval.",
+          "Hermes cannot override identity or separation-of-duties policy.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Identity Owner within 2h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Access execution must be independent from analysis and approval.",
+          "Hermes cannot override identity or separation-of-duties policy.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/legal-compliance/govern-evidence-and-exceptions",
+        "fixturePaths": []
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+        "name": "Govern Legal, Security, and Compliance Evidence",
+        "version": "1.0.0",
+        "department": "legal_compliance",
+        "summary": "Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.",
+        "sourcePath": "packs/official/legal-compliance/govern-evidence-and-exceptions"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "legal-incident-evidence",
+        "departmentType": "legal_compliance",
+        "problemTypes": [
+          "security.incident_evidence"
+        ],
+        "eventTypes": [
+          "security.incident_evidence_requested",
+          "security.incident_opened"
+        ],
+        "subjectTypes": [
+          "incident",
+          "incident_evidence_window"
+        ],
+        "requiredContext": [
+          "normalizedPayload.incidentId",
+          "normalizedPayload.windowStart",
+          "normalizedPayload.windowEnd",
+          "normalizedPayload.systemIds",
+          "normalizedPayload.securityOwnerId"
+        ],
+        "requiredConnections": [
+          "incident.record.read",
+          "siem.event.read",
+          "access.log.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "security.breach_decision_requested",
+            "fields": [],
+            "reason": "Breach and notification decisions require qualified legal, privacy, and security owners."
+          },
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Lifecycle events update existing incident work."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "declared_ordered",
+          "maxRoutes": 2,
+          "requiresIndependentProblems": false
+        },
+        "priority": 100,
+        "minimumConfidence": 0.99,
+        "supportingLoopTemplateIds": [
+          "legal-compliance-evidence-gap"
+        ],
+        "learningOutputs": [
+          "Incident Timeline Evidence Coverage: Approved timeline facts with current source citations and custody evidence.",
+          "Incident Evidence Gap Hours: Time required to resolve a named material incident-evidence gap."
+        ],
+        "learningConsumers": [
+          "legal_compliance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A security owner requests evidence for named systems and an authorized incident window."
+        ],
+        "shouldNotRouteExamples": [
+          "The requested time window is broad or no collection authorization exists.",
+          "A user asks Hermes to decide whether a reportable breach occurred."
+        ]
+      },
+      "template": {
+        "id": "legal-incident-evidence",
+        "department": "legal_security",
+        "loopType": "incident",
+        "name": "Incident Evidence",
+        "description": "Assemble a time-bounded source-cited incident record with chain-of-custody and explicit evidence gaps.",
+        "runtimeLevel": "runnable",
+        "goal": "Assemble a time-bounded source-cited incident record with chain-of-custody and explicit evidence gaps.",
+        "businessOutcome": "Approved timeline facts with current source citations and custody evidence.",
+        "primaryMetric": "Incident Timeline Evidence Coverage",
+        "secondaryMetrics": [
+          "Incident Evidence Gap Hours",
+          "Contract Exception Review Hours",
+          "Contract Triage Correction Rate",
+          "Control Drift Resolution Hours"
+        ],
+        "observes": [
+          "Incident",
+          "Incident Evidence Window",
+          "NormalizedPayload IncidentId",
+          "NormalizedPayload WindowStart",
+          "NormalizedPayload WindowEnd",
+          "NormalizedPayload SystemIds",
+          "NormalizedPayload SecurityOwnerId"
+        ],
+        "requiredDataSources": [
+          "Incident Record Read",
+          "Siem Event Read",
+          "Access Log Read",
+          "Contract Record Read",
+          "Legal Playbook Read",
+          "Crm Account Read",
+          "Policy Control Read",
+          "Change Record Read",
+          "Identity Access Read",
+          "Hris Employee Read",
+          "Security Knowledge Read",
+          "Audit Evidence Read"
+        ],
+        "routine": [
+          "Resolve incident, approved systems, start and end time, requestor, owner, legal-hold status, and collection authorization.",
+          "Join immutable source references into a chronological timeline while preserving timestamps, hashes, collectors, and gaps.",
+          "Prepare approved facts, disputed facts, missing sources, custody events, control mappings, and reviewer questions.",
+          "Security, privacy, and legal owners verify scope, custody, privilege, retention, disclosure, and breach-decision boundaries.",
+          "Return approved timeline corrections, gap closure, custody quality, and control evidence without deciding breach status."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.incidentId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.systemIds, normalizedPayload.securityOwnerId.",
+          "Evidence must remain traceable to the affected incident, incident_evidence_window.",
+          "Security, privacy, and legal owners verify scope, custody, privilege, retention, disclosure, and breach-decision boundaries.",
+          "Breach determination is a qualified expert decision.",
+          "Evidence deletion cannot occur inside incident analysis.",
+          "Incident communication requires approved facts and separate authority."
+        ],
+        "escalation": [
+          "Escalate to Security Owner within 1h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Breach determination is a qualified expert decision.",
+          "Evidence deletion cannot occur inside incident analysis.",
+          "Incident communication requires approved facts and separate authority.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/legal-compliance/govern-evidence-and-exceptions",
+        "fixturePaths": []
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+        "name": "Govern Legal, Security, and Compliance Evidence",
+        "version": "1.0.0",
+        "department": "legal_compliance",
+        "summary": "Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.",
+        "sourcePath": "packs/official/legal-compliance/govern-evidence-and-exceptions"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "legal-security-questionnaire",
+        "departmentType": "legal_compliance",
+        "problemTypes": [
+          "security.questionnaire"
+        ],
+        "eventTypes": [
+          "security.questionnaire_received"
+        ],
+        "subjectTypes": [
+          "questionnaire",
+          "account",
+          "security_questionnaire"
+        ],
+        "requiredContext": [
+          "normalizedPayload.questionnaireId",
+          "normalizedPayload.version",
+          "normalizedPayload.accountId",
+          "normalizedPayload.questionIds",
+          "normalizedPayload.securityOwnerId"
+        ],
+        "requiredConnections": [
+          "security.knowledge.read",
+          "policy.control.read",
+          "crm.account.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "security.claim_approval_requested",
+            "fields": [],
+            "reason": "Hermes cannot approve its own external security claim."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 95,
+        "minimumConfidence": 0.99,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Security Questionnaire Cycle Hours: Time from complete questionnaire intake to expert-approved response.",
+          "Unsupported Security Claim Rate: Draft claims blocked for missing, stale, inapplicable, or contradictory evidence."
+        ],
+        "learningConsumers": [
+          "legal_compliance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A versioned questionnaire has identified questions, customer scope, and qualified security owner."
+        ],
+        "shouldNotRouteExamples": [
+          "Current control evidence is absent or the requested answer would overstate scope."
+        ]
+      },
+      "template": {
+        "id": "legal-security-questionnaire",
+        "department": "legal_security",
+        "loopType": "security",
+        "name": "Security Questionnaire",
+        "description": "Prepare current source-cited security answers while flagging unsupported claims and requiring qualified external-claim approval.",
+        "runtimeLevel": "runnable",
+        "goal": "Prepare current source-cited security answers while flagging unsupported claims and requiring qualified external-claim approval.",
+        "businessOutcome": "Time from complete questionnaire intake to expert-approved response.",
+        "primaryMetric": "Security Questionnaire Cycle Hours",
+        "secondaryMetrics": [
+          "Unsupported Security Claim Rate",
+          "Contract Exception Review Hours",
+          "Contract Triage Correction Rate",
+          "Control Drift Resolution Hours"
+        ],
+        "observes": [
+          "Questionnaire",
+          "Account",
+          "Security Questionnaire",
+          "NormalizedPayload QuestionnaireId",
+          "NormalizedPayload Version",
+          "NormalizedPayload AccountId",
+          "NormalizedPayload QuestionIds",
+          "NormalizedPayload SecurityOwnerId"
+        ],
+        "requiredDataSources": [
+          "Security Knowledge Read",
+          "Policy Control Read",
+          "Crm Account Read",
+          "Security Answer Draft",
+          "Contract Record Read",
+          "Legal Playbook Read",
+          "Change Record Read",
+          "Identity Access Read",
+          "Hris Employee Read",
+          "Access Log Read",
+          "Incident Record Read",
+          "Siem Event Read",
+          "Audit Evidence Read"
+        ],
+        "routine": [
+          "Resolve questionnaire, version, customer account, question set, due date, approved library version, and expert owner.",
+          "Map each question to current approved answers, exact controls, artifacts, freshness, scope, and unsupported-claim flags.",
+          "Prepare source-cited answers and explicit unknown, partial, conditional, stale, or expert-judgment states.",
+          "Qualified security and legal owners verify every claim, scope, confidentiality boundary, attachment, and customer commitment.",
+          "Return approved reusable answers, scope limits, reviewer corrections, stale sources, and control-documentation gaps."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.questionnaireId, normalizedPayload.version, normalizedPayload.accountId, normalizedPayload.questionIds, normalizedPayload.securityOwnerId.",
+          "Evidence must remain traceable to the affected questionnaire, account, security_questionnaire.",
+          "Qualified security and legal owners verify every claim, scope, confidentiality boundary, attachment, and customer commitment.",
+          "External claims require separate approved send authority.",
+          "Hermes cannot approve its own security claim.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Security Owner within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "External claims require separate approved send authority.",
+          "Hermes cannot approve its own security claim.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/legal-compliance/govern-evidence-and-exceptions",
+        "fixturePaths": [
+          "packs/official/legal-compliance/govern-evidence-and-exceptions/fixtures/customer-facing.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+        "name": "Govern Legal, Security, and Compliance Evidence",
+        "version": "1.0.0",
+        "department": "legal_compliance",
+        "summary": "Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.",
+        "sourcePath": "packs/official/legal-compliance/govern-evidence-and-exceptions"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "legal-compliance-evidence-gap",
+        "departmentType": "legal_compliance",
+        "problemTypes": [
+          "compliance.evidence_gap"
+        ],
+        "eventTypes": [
+          "compliance.evidence_gap_detected",
+          "compliance.audit_request_received"
+        ],
+        "subjectTypes": [
+          "control",
+          "audit_request",
+          "audit_evidence_request"
+        ],
+        "requiredContext": [
+          "normalizedPayload.requestId",
+          "normalizedPayload.controlId",
+          "normalizedPayload.evidenceWindow",
+          "normalizedPayload.requiredArtifactIds",
+          "normalizedPayload.ownerId"
+        ],
+        "requiredConnections": [
+          "policy.control.read",
+          "audit.evidence.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "compliance.attestation_requested",
+            "fields": [],
+            "reason": "Hermes cannot attest control effectiveness or compliance."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 95,
+        "minimumConfidence": 0.99,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Compliance Evidence Gap Hours: Time from a named evidence gap to accepted evidence or approved remediation.",
+          "Audit Evidence Reuse Rate: Approved evidence reused only when control, scope, period, freshness, and disclosure rules remain applicable."
+        ],
+        "learningConsumers": [
+          "legal_compliance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A control-specific request names the evidence window, required artifacts, and accountable owner."
+        ],
+        "shouldNotRouteExamples": [
+          "A user asks Hermes to attest that the company is compliant."
+        ]
+      },
+      "template": {
+        "id": "legal-compliance-evidence-gap",
+        "department": "legal_security",
+        "loopType": "compliance",
+        "name": "Compliance Evidence Gap",
+        "description": "Assemble exact control-period evidence, identify missing artifacts, and prepare an accountable gap register for expert review.",
+        "runtimeLevel": "runnable",
+        "goal": "Assemble exact control-period evidence, identify missing artifacts, and prepare an accountable gap register for expert review.",
+        "businessOutcome": "Time from a named evidence gap to accepted evidence or approved remediation.",
+        "primaryMetric": "Compliance Evidence Gap Hours",
+        "secondaryMetrics": [
+          "Audit Evidence Reuse Rate",
+          "Contract Exception Review Hours",
+          "Contract Triage Correction Rate",
+          "Control Drift Resolution Hours"
+        ],
+        "observes": [
+          "Control",
+          "Audit Request",
+          "Audit Evidence Request",
+          "NormalizedPayload RequestId",
+          "NormalizedPayload ControlId",
+          "NormalizedPayload EvidenceWindow",
+          "NormalizedPayload RequiredArtifactIds",
+          "NormalizedPayload OwnerId"
+        ],
+        "requiredDataSources": [
+          "Policy Control Read",
+          "Audit Evidence Read",
+          "Contract Record Read",
+          "Legal Playbook Read",
+          "Crm Account Read",
+          "Change Record Read",
+          "Identity Access Read",
+          "Hris Employee Read",
+          "Access Log Read",
+          "Incident Record Read",
+          "Siem Event Read",
+          "Security Knowledge Read"
+        ],
+        "routine": [
+          "Resolve request, control, framework mapping, period, required artifacts, requestor, owner, and freshness policy.",
+          "Map artifacts to exact control assertions and periods while exposing gaps, stale evidence, conflicts, and provenance.",
+          "Prepare evidence packet, gap register, owners, due dates, collection limits, and reviewer questions.",
+          "A qualified compliance owner verifies sufficiency, applicability, exceptions, remediation, and external disclosure.",
+          "Return accepted artifacts, reviewer corrections, gap closure, recurrence, audit result, and reuse limits."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.requestId, normalizedPayload.controlId, normalizedPayload.evidenceWindow, normalizedPayload.requiredArtifactIds, normalizedPayload.ownerId.",
+          "Evidence must remain traceable to the affected control, audit_request, audit_evidence_request.",
+          "A qualified compliance owner verifies sufficiency, applicability, exceptions, remediation, and external disclosure.",
+          "Only qualified accountable parties may attest compliance.",
+          "Missing evidence must remain a visible gap.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Compliance Owner within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Only qualified accountable parties may attest compliance.",
+          "Missing evidence must remain a visible gap.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/legal-compliance/govern-evidence-and-exceptions",
+        "fixturePaths": [
+          "packs/official/legal-compliance/govern-evidence-and-exceptions/fixtures/outcome.json"
         ]
       }
     },

@@ -1,0 +1,47 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: legal-compliance-evidence-gap, name: Compliance Evidence Gap, version: 1.0.0, description: "Assemble exact control-period evidence, identify missing artifacts, and prepare an accountable gap register for expert review.", department: legal_compliance, ownerRole: compliance_owner, tags: [compliance, audit, evidence, controls] }
+trigger: { type: event, source: "*", event: compliance.evidence_gap_detected }
+input:
+  requiredFields: [normalizedPayload.requestId, normalizedPayload.controlId, normalizedPayload.evidenceWindow, normalizedPayload.requiredArtifactIds, normalizedPayload.ownerId]
+  subjectTypes: [control, audit_request, audit_evidence_request]
+  fixtures: [{ id: evidence-gap, path: fixtures/outcome.json }]
+routine:
+  - { id: normalize, name: Normalize evidence request, actor: system, type: observe, description: "Resolve request, control, framework mapping, period, required artifacts, requestor, owner, and freshness policy." }
+  - { id: reconcile, name: Reconcile available evidence, actor: agent, type: assess, description: "Map artifacts to exact control assertions and periods while exposing gaps, stale evidence, conflicts, and provenance." }
+  - { id: prepare, name: Prepare gap register, actor: agent, type: prepare, description: "Prepare evidence packet, gap register, owners, due dates, collection limits, and reviewer questions." }
+  - { id: verify, name: Verify compliance judgment, actor: human, type: verify, description: "A qualified compliance owner verifies sufficiency, applicability, exceptions, remediation, and external disclosure." }
+  - { id: learn, name: Return evidence outcome, actor: system, type: learn, description: "Return accepted artifacts, reviewer corrections, gap closure, recurrence, audit result, and reuse limits." }
+capabilities:
+  - { key: policy.control.read, authority: read, risk: critical, required: true, purpose: "Read exact control assertions, mappings, tests, exceptions, and ownership.", customerFacing: false }
+  - { key: audit.evidence.read, authority: read, risk: critical, required: true, purpose: "Read bounded evidence artifacts, periods, provenance, gaps, and review receipts.", customerFacing: false }
+skills: [legal-source-citation-and-freshness, legal-security-control-evidence]
+outcomes:
+  - { metric: compliance_evidence_gap_hours, description: Time from a named evidence gap to accepted evidence or approved remediation., direction: decrease, sourceCapability: audit.evidence.read }
+  - { metric: audit_evidence_reuse_rate, description: "Approved evidence reused only when control, scope, period, freshness, and disclosure rules remain applicable.", direction: increase, sourceCapability: policy.control.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [compliance.evidence_gap]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: compliance.evidence_gap_detected, subjectTypes: [control, audit_request, audit_evidence_request], requiredFields: [normalizedPayload.requestId, normalizedPayload.controlId, normalizedPayload.evidenceWindow, normalizedPayload.requiredArtifactIds, normalizedPayload.ownerId], reason: "A named control and evidence window have explicit missing artifacts and accountable ownership." }
+    - { sourcePattern: "*", eventTypePattern: compliance.audit_request_received, subjectTypes: [control, audit_request, audit_evidence_request], requiredFields: [normalizedPayload.requestId, normalizedPayload.controlId, normalizedPayload.evidenceWindow, normalizedPayload.requiredArtifactIds, normalizedPayload.ownerId], reason: "An exact audit request identifies the control, window, artifacts, and owner." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: compliance.attestation_requested, subjectTypes: [control], fields: [], reason: "Hermes cannot attest control effectiveness or compliance." }]
+  inputMapping: { requestId: normalizedPayload.requestId, controlId: normalizedPayload.controlId, evidenceWindow: normalizedPayload.evidenceWindow, requiredArtifactIds: normalizedPayload.requiredArtifactIds, ownerId: normalizedPayload.ownerId }
+  priority: 95
+  minimumConfidence: 0.99
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [policy.control.read, audit.evidence.read]
+  examples: { shouldRoute: ["A control-specific request names the evidence window, required artifacts, and accountable owner."], shouldNotRoute: ["A user asks Hermes to attest that the company is compliant."] }
+policy:
+  forbiddenActions:
+    - { capability: compliance.attestation.issue, reason: "Only qualified accountable parties may attest compliance." }
+    - { capability: audit.evidence.fabricate, reason: "Missing evidence must remain a visible gap." }
+  escalationOwner: compliance_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

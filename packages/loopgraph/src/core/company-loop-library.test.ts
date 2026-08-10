@@ -49,7 +49,7 @@ describe("prebuilt company loop library", () => {
 
   it("uses the generated official LoopPack catalog for migrated departments", () => {
     expect(OFFICIAL_APP_CATALOG_SOURCE_DIGEST).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(PACK_DERIVED_COMPANY_LOOPS).toHaveLength(46);
+    expect(PACK_DERIVED_COMPANY_LOOPS).toHaveLength(52);
     expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "product-feedback_to_problem")).toBeUndefined();
     expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "product-feedback-clustering")).toMatchObject({
       departmentType: "product",
@@ -72,5 +72,13 @@ describe("prebuilt company loop library", () => {
     });
     expect(resolveCompanyLoopTemplateId("hr-performance_review_prep")).toBe("hr-performance-review-preparation");
     expect(getPrebuiltLoopDefinition("hr-performance_review_prep")?.templateId).toBe("hr-performance-review-preparation");
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "legal_security-contract_triage")).toBeUndefined();
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "legal-contract-exception-triage")).toMatchObject({
+      departmentType: "legal_compliance",
+      problemTypes: ["legal.contract_exception"],
+      supportingLoopTemplateIds: ["legal-policy-control-drift"]
+    });
+    expect(resolveCompanyLoopTemplateId("legal_security-security_questionnaire")).toBe("legal-security-questionnaire");
+    expect(getPrebuiltLoopDefinition("legal_security-security_questionnaire")?.templateId).toBe("legal-security-questionnaire");
   });
 });

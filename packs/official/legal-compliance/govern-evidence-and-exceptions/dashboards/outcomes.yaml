@@ -1,0 +1,15 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: legal-compliance-evidence-outcomes
+metrics:
+  - { id: contract_exception_review_hours, direction: decrease, description: Time from complete redline evidence to qualified legal disposition. }
+  - { id: contract_triage_correction_rate, direction: decrease, description: Clause extraction or playbook comparison materially corrected by counsel. }
+  - { id: control_drift_resolution_hours, direction: decrease, description: Time from qualified drift finding to remediation or approved exception. }
+  - { id: repeated_control_exception_rate, direction: decrease, description: Approved exceptions recurring without durable remediation. }
+  - { id: privileged_access_review_hours, direction: decrease, description: Time from complete access evidence to accountable disposition. }
+  - { id: standing_privilege_reduction, direction: increase, description: Approved reduction in unnecessary standing privilege. }
+  - { id: incident_timeline_evidence_coverage, direction: increase, description: Approved incident facts with current source and custody evidence. }
+  - { id: security_questionnaire_cycle_hours, direction: decrease, description: Time from complete intake to expert-approved customer response. }
+  - { id: unsupported_security_claim_rate, direction: decrease, description: Draft claims blocked for missing, stale, contradictory, or inapplicable evidence. }
+  - { id: compliance_evidence_gap_hours, direction: decrease, description: Time from a named control gap to accepted evidence or remediation. }
+  - { id: expert_review_minutes_per_case, direction: decrease, description: Qualified legal, security, privacy, identity, or compliance review burden per case. }
+  - { id: source_freshness_violation_rate, direction: decrease, description: Evidence or claims blocked for violating approved freshness policy. }
