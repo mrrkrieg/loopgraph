@@ -509,6 +509,8 @@ export function buildSemanticTopology(input: {
     });
   }
 
+  addInstalledAppTopologies(nodeMap, edgeMap, loopSpecs);
+
   for (const spec of loopSpecs) {
     addLoopInternals(nodeMap, edgeMap, spec, Boolean(options.includeInternalsByDefault));
   }
@@ -952,6 +954,111 @@ function ensureInstalledAppNode(input: {
     label: "installed app"
   });
   return nodeId;
+}
+
+function addInstalledAppTopologies(
+  nodeMap: Map<string, TopologyNode>,
+  edgeMap: Map<string, TopologyEdge>,
+  specs: LoopSpec[]
+): void {
+  const handledApps = new Set<string>();
+  for (const spec of specs) {
+    const appId = spec.metadata.labels?.appId;
+    if (!appId || handledApps.has(appId)) continue;
+    const extension = spec.studioExtension as Record<string, unknown> | undefined;
+    if (!isRecord(extension?.appTopology)) continue;
+    handledApps.add(appId);
+    const loopNodeIds = topologyLoopNodeIds(appId, specs);
+
+    const rawObjects = Array.isArray(extension.appTopology.objects) ? extension.appTopology.objects : [];
+    const objectNodeIds = new Map<string, string>();
+    for (const rawObject of rawObjects) {
+      if (!isRecord(rawObject) || typeof rawObject.id !== "string" || typeof rawObject.label !== "string") continue;
+      const shared = rawObject.shared !== false;
+      const nodeId = shared ? `company-object:${rawObject.id}` : `app-object:${appId}:${rawObject.id}`;
+      objectNodeIds.set(rawObject.id, nodeId);
+      addNode(nodeMap, {
+        id: nodeId,
+        type: "memory",
+        label: rawObject.label,
+        subtitle: typeof rawObject.objectType === "string" ? titleize(rawObject.objectType) : "Company object",
+        description: typeof rawObject.description === "string" ? rawObject.description : undefined,
+        refId: rawObject.id,
+        refType: "memory",
+        department: departmentForSpec(spec),
+        layer: "data",
+        status: "ready",
+        weight: 2.6,
+        visibleByDefault: false,
+        isExpandable: true,
+        metadata: {
+          appId,
+          companyObject: true,
+          objectType: rawObject.objectType,
+          shared,
+          identityKeys: Array.isArray(rawObject.identityKeys) ? rawObject.identityKeys : []
+        }
+      });
+    }
+
+    const rawFlows = Array.isArray(extension.appTopology.flows) ? extension.appTopology.flows : [];
+    for (const rawFlow of rawFlows) {
+      if (!isRecord(rawFlow) || typeof rawFlow.type !== "string") continue;
+      const source = appTopologyEndpointNodeId(rawFlow.source, objectNodeIds, loopNodeIds);
+      const target = appTopologyEndpointNodeId(rawFlow.target, objectNodeIds, loopNodeIds);
+      if (!source || !target) continue;
+      addEdge(edgeMap, nodeMap, {
+        source,
+        target,
+        kind: appTopologyEdgeKind(rawFlow.type),
+        label: appTopologyFlowLabel(rawFlow.type),
+        semantic: true,
+        executable: rawFlow.type === "supports",
+        metadata: {
+          appId,
+          appFlow: true,
+          flowId: rawFlow.id,
+          flowType: rawFlow.type,
+          reason: rawFlow.reason,
+          condition: rawFlow.condition
+        }
+      });
+    }
+  }
+}
+
+function topologyLoopNodeIds(appId: string, specs: LoopSpec[]): Map<string, string> {
+  const result = new Map<string, string>();
+  const appSpecs = specs.filter((spec) => spec.metadata.labels?.appId === appId);
+  for (const spec of appSpecs) result.set(spec.metadata.id, loopNodeId(spec.metadata.id));
+  for (const spec of appSpecs) {
+    const upstreamLoopId = spec.metadata.labels?.upstreamLoopId;
+    if (upstreamLoopId && !result.has(upstreamLoopId)) result.set(upstreamLoopId, loopNodeId(spec.metadata.id));
+  }
+  return result;
+}
+
+function appTopologyEndpointNodeId(
+  endpoint: unknown,
+  objectNodeIds: Map<string, string>,
+  loopNodeIds: Map<string, string>
+): string | undefined {
+  if (!isRecord(endpoint) || typeof endpoint.kind !== "string" || typeof endpoint.id !== "string") return undefined;
+  return endpoint.kind === "loop" ? loopNodeIds.get(endpoint.id) : objectNodeIds.get(endpoint.id);
+}
+
+function appTopologyEdgeKind(flowType: string): TopologyEdgeKind {
+  if (flowType === "evidence_in") return "observes";
+  if (flowType === "supports") return "calls";
+  if (flowType === "produces") return "writes_memory";
+  return "learns_from";
+}
+
+function appTopologyFlowLabel(flowType: string): string {
+  if (flowType === "evidence_in") return "evidence enters";
+  if (flowType === "supports") return "may support";
+  if (flowType === "produces") return "produces evidence";
+  return "returns learning";
 }
 
 function loopNodeFromSpec(

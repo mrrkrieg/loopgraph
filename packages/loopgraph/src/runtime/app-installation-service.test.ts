@@ -133,6 +133,7 @@ describe("atomic app installation lifecycle", () => {
     expect(plan.initialMode).toBe("shadow");
     expect(plan.permissions.find((permission) => permission.capability === "mail.message.send")?.decision).toBe("forbid");
     expect(plan.graphDiff.nodesAdded).toContain("app.loopgraph.sales.qualify-route-inbound-leads");
+    expect(plan.graphDiff.nodesAdded).toContain("object.inbound-lead");
 
     const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T12:05:00.000Z"));
     expect(applied.created).toBe(true);
@@ -155,6 +156,12 @@ describe("atomic app installation lifecycle", () => {
     const registry = await new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(registry.installations).toHaveLength(1);
     expect(registry.installations[0].ownedAssets.every((asset) => asset.refCount === 1)).toBe(true);
+    expect(registry.assets).toContainEqual(expect.objectContaining({
+      assetId: "graph-node.object.inbound-lead",
+      kind: "graph_node",
+      shared: true,
+      refCount: 1
+    }));
     const browserStyleStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
       projectRoot,
       installationId: applied.installation.id

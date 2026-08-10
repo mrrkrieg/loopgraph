@@ -55,8 +55,8 @@ export default async function MarketplaceAppPage({ params }: { params: Promise<{
             </div>
           </SectionCard>
 
-          <SectionCard title="Company graph preview" description="Installation adds one app boundary between the department and its loops. Hermes remains the event router.">
-            <GraphPreview nodes={data.graphPreview.nodes} />
+          <SectionCard title="Company graph preview" description="The signed pack defines the company objects, permitted supporting routes, and learning returns. Hermes remains the event router and may fan out only across declared supporting edges.">
+            <GraphPreview edges={data.graphPreview.edges} nodes={data.graphPreview.nodes} />
           </SectionCard>
 
           <SectionCard title="Company information Hermes needs" description="Approved company context is reused. Hermes asks only for values that are missing, uncertain, or important enough to confirm.">
@@ -123,26 +123,58 @@ function HeroFact({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-white/15 bg-white/5 p-4"><div className="text-2xl font-semibold">{value}</div><div className="mt-1 text-xs uppercase tracking-[0.12em] text-white/50">{label}</div></div>;
 }
 
-function GraphPreview({ nodes }: { nodes: Array<{ id: string; type: string; label: string; parentId?: string }> }) {
+function GraphPreview({
+  nodes,
+  edges
+}: {
+  nodes: Array<{ id: string; type: string; label: string; parentId?: string; description?: string }>;
+  edges: Array<{ id: string; source: string; target: string; type: string; reason?: string; condition?: string }>;
+}) {
   const root = nodes.find((node) => node.type === "hermes_brain");
   const department = nodes.find((node) => node.type === "department");
   const app = nodes.find((node) => node.type === "app");
   const loops = nodes.filter((node) => node.type === "loop");
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const semanticFlows = edges.filter((edge) => !["routes", "owns", "contains"].includes(edge.type));
   return (
-    <div className="overflow-x-auto py-3">
-      <div className="flex min-w-[46rem] items-center gap-3">
-        <GraphNode label={root?.label ?? "Hermes Brain"} tone="dark" />
-        <Arrow />
-        <GraphNode label={department?.label ?? "Department"} />
-        <Arrow />
-        <GraphNode label={app?.label ?? "Installed App"} tone="app" />
-        <Arrow />
-        <div className="grid gap-2 sm:grid-cols-2">
-          {loops.map((loop) => <GraphNode key={loop.id} label={loop.label} compact />)}
+    <div className="space-y-5 py-3">
+      <div className="overflow-x-auto">
+        <div className="flex min-w-[46rem] items-center gap-3">
+          <GraphNode label={root?.label ?? "Hermes Brain"} tone="dark" />
+          <Arrow />
+          <GraphNode label={department?.label ?? "Department"} />
+          <Arrow />
+          <GraphNode label={app?.label ?? "Installed App"} tone="app" />
+          <Arrow />
+          <div className="grid gap-2 sm:grid-cols-2">
+            {loops.map((loop) => <GraphNode key={loop.id} label={loop.label} compact />)}
+          </div>
         </div>
       </div>
+      {semanticFlows.length > 0 ? (
+        <div>
+          <h3 className="text-sm font-semibold">Evidence and routing contract</h3>
+          <ol className="mt-3 space-y-2">
+            {semanticFlows.map((edge) => (
+              <li className="grid gap-2 rounded-lg border border-line bg-paper/30 p-3 text-sm sm:grid-cols-[minmax(0,1fr)_8rem_minmax(0,1fr)] sm:items-center" key={edge.id}>
+                <span className="font-semibold">{nodeById.get(edge.source)?.label ?? edge.source}</span>
+                <span className="text-xs font-semibold uppercase tracking-[0.08em] text-signal sm:text-center">{flowLabel(edge.type)}</span>
+                <span className="font-semibold sm:text-right">{nodeById.get(edge.target)?.label ?? edge.target}</span>
+                <span className="text-xs leading-5 text-ink/50 sm:col-span-3">{edge.reason}{edge.condition ? ` Condition: ${edge.condition}` : ""}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function flowLabel(type: string): string {
+  if (type === "evidence_in") return "evidence enters";
+  if (type === "supports") return "may support";
+  if (type === "produces") return "produces";
+  return "learning returns";
 }
 
 function GraphNode({ label, tone = "light", compact = false }: { label: string; tone?: "light" | "dark" | "app"; compact?: boolean }) {

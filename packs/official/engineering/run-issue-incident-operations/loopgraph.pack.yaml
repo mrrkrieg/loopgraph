@@ -32,6 +32,23 @@ permissions:
   - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare exact internal or customer-impact communication for review.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [incident_data, business_contact] }
 requiredCapabilities: [repo.issue.read, project.issue.read, incident.record.read, deployment.release.read]
 optionalCapabilities: [project.issue.create, project.issue.update, collaboration.message.draft]
+topology:
+  objects:
+    - { id: engineering-issue, objectType: engineering_issue, label: Engineering issue, description: A repository or project issue with source identity ownership risk and linked evidence., shared: true, identityKeys: [repositoryId, issueId] }
+    - { id: implementation-plan, objectType: implementation_plan, label: Implementation plan, description: A bounded plan with scope dependencies tests rollout rollback and unresolved questions., shared: true, identityKeys: [issueId, planVersion] }
+    - { id: incident, objectType: incident, label: Production incident, description: One durable incident identity with service severity timeline owner and affected-company evidence., shared: true, identityKeys: [incidentId, serviceId] }
+    - { id: customer-impact, objectType: customer_impact, label: Customer impact, description: Verified affected-account and communication evidence tied to one incident., shared: true, identityKeys: [incidentId, accountId] }
+    - { id: incident-learning, objectType: incident_learning, label: Incident learning, description: Root cause response quality corrective work release and recurrence evidence., shared: true, identityKeys: [incidentId, learningVersion] }
+  flows:
+    - { id: issue-enters-triage, source: { kind: object, id: engineering-issue }, target: { kind: loop, id: engineering-issue-triage }, type: evidence_in, reason: Hermes routes a normalized issue only after repository and issue identity resolve. }
+    - { id: triage-returns-to-planning, source: { kind: loop, id: engineering-issue-triage }, target: { kind: loop, id: engineering-issue-to-plan }, type: learning_return, reason: Accepted triage evidence becomes planning input without bypassing ownership or risk review. }
+    - { id: planning-produces-plan, source: { kind: loop, id: engineering-issue-to-plan }, target: { kind: object, id: implementation-plan }, type: produces, reason: The plan remains a reviewable object and never implies merge or deployment authority. }
+    - { id: incident-enters-response, source: { kind: object, id: incident }, target: { kind: loop, id: engineering-incident-response }, type: evidence_in, reason: Incident response is the primary route for one resolved incident identity. }
+    - { id: response-may-support-impact, source: { kind: loop, id: engineering-incident-response }, target: { kind: loop, id: engineering-customer-impact }, type: supports, reason: Customer impact is a separate supporting problem not an automatic side effect of every incident., condition: Verified affected-account evidence and an accountable communication owner are present. }
+    - { id: impact-produces-customer-evidence, source: { kind: loop, id: engineering-customer-impact }, target: { kind: object, id: customer-impact }, type: produces, reason: Customer statements and approvals stay attached to the incident and affected account. }
+    - { id: response-returns-to-learning, source: { kind: loop, id: engineering-incident-response }, target: { kind: loop, id: engineering-incident-learning }, type: learning_return, reason: Resolution and response traces become prevention evidence after the incident closes. }
+    - { id: incident-learning-produces-memory, source: { kind: loop, id: engineering-incident-learning }, target: { kind: object, id: incident-learning }, type: produces, reason: Corrective work and recurrence measurements remain durable shared company evidence. }
+    - { id: learning-returns-release-readiness, source: { kind: loop, id: engineering-incident-learning }, target: { kind: loop, id: engineering-release-readiness }, type: learning_return, reason: Repeated causes and escaped-defect evidence strengthen future release checks. }
 entrypoints:
   loops: [loops/issue-triage.yaml, loops/issue-to-plan.yaml, loops/incident-response.yaml, loops/customer-impact.yaml, loops/release-readiness.yaml, loops/incident-learning.yaml]
   skills: [skills/technical-triage.yaml, skills/severity-classification.yaml, skills/implementation-planning.yaml, skills/incident-synthesis.yaml]

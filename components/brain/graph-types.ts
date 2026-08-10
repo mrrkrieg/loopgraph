@@ -51,6 +51,8 @@ export type BrainEdgeType =
   | "department_contains_loop"
   | "loop_observes_data"
   | "loop_updates_metric"
+  | "loop_supports_loop"
+  | "loop_returns_evidence"
   | "loop_requires_review"
   | "loop_learns_from_trace";
 

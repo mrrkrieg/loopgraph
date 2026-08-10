@@ -58,6 +58,21 @@ permissions:
   - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: medium, purpose: "Prepare an internal campaign learning brief for an approved channel.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [advertising_data, crm_data] }
 requiredCapabilities: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
 optionalCapabilities: [ads.campaign.update, marketing.content.draft, collaboration.message.draft]
+topology:
+  objects:
+    - { id: campaign-cohort, objectType: campaign_cohort, label: Campaign cohort, description: "A campaign observation window joined to spend, creative, audience, and durable lead identity.", shared: true, identityKeys: [campaignId, cohortId, windowStart, windowEnd] }
+    - { id: qualified-cohort, objectType: qualified_cohort, label: Qualified cohort, description: Campaign-attributed leads evaluated against the company qualification definition., shared: true, identityKeys: [campaignId, cohortId, qualificationVersion] }
+    - { id: campaign-pipeline-outcome, objectType: pipeline_outcome, label: Campaign pipeline outcome, description: "Opportunity, activation, revenue, and customer-quality evidence for one campaign cohort.", shared: true, identityKeys: [campaignId, cohortId, observationWindow] }
+    - { id: campaign-decision, objectType: campaign_decision, label: Governed campaign decision, description: An approved or rejected allocation or message decision with its measurement window., shared: false, identityKeys: [decisionId, campaignId] }
+  flows:
+    - { id: campaign-enters-learning, source: { kind: object, id: campaign-cohort }, target: { kind: loop, id: marketing-campaign-learning }, type: evidence_in, reason: "Hermes begins learning from a bounded cohort, not a surface-metric alert alone." }
+    - { id: campaign-learning-returns-qualification, source: { kind: loop, id: marketing-campaign-learning }, target: { kind: loop, id: marketing-campaign-lead-qualification }, type: learning_return, reason: Resolved campaign identity and cohort membership become evidence for qualification. }
+    - { id: qualification-produces-cohort, source: { kind: loop, id: marketing-campaign-lead-qualification }, target: { kind: object, id: qualified-cohort }, type: produces, reason: Qualification produces a durable cohort linked to the company definition and reviewer corrections. }
+    - { id: qualified-cohort-enters-outcome, source: { kind: object, id: qualified-cohort }, target: { kind: loop, id: marketing-campaign-pipeline-outcome }, type: evidence_in, reason: Pipeline learning waits for resolved qualification identity and a completed observation window. }
+    - { id: pipeline-produces-outcome, source: { kind: loop, id: marketing-campaign-pipeline-outcome }, target: { kind: object, id: campaign-pipeline-outcome }, type: produces, reason: Downstream activation and revenue become reusable campaign evidence. }
+    - { id: outcome-returns-allocation, source: { kind: loop, id: marketing-campaign-pipeline-outcome }, target: { kind: loop, id: marketing-channel-allocation }, type: learning_return, reason: Allocation decisions use qualified downstream outcomes instead of clicks or raw lead volume. }
+    - { id: outcome-returns-messaging, source: { kind: loop, id: marketing-campaign-pipeline-outcome }, target: { kind: loop, id: marketing-icp-message-learning }, type: learning_return, reason: "Message learning receives segment, objection, qualification, activation, and pipeline evidence." }
+    - { id: allocation-produces-decision, source: { kind: loop, id: marketing-channel-allocation }, target: { kind: object, id: campaign-decision }, type: produces, reason: Budget changes remain exact governed decisions with approval and outcome identity. }
 entrypoints:
   loops:
     - loops/campaign-learning.yaml

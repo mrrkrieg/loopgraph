@@ -204,6 +204,15 @@ export class AppInstallationService {
     const expiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
     const installationId = installationIdFor(input.workspaceId, input.appId);
     const assets = compilePlannedAssets(compiled, installationId);
+    const existingRegistry = await this.installationStore.read();
+    const existingAssetById = new Map(existingRegistry.assets.map((asset) => [asset.assetId, asset]));
+    for (const asset of assets.filter((candidate) => candidate.kind === "graph_node" && candidate.shared)) {
+      const existing = existingAssetById.get(asset.id);
+      if (existing && existing.digest !== asset.digest) {
+        throw new Error(`Shared company object conflict: ${asset.id} has a different installed contract`);
+      }
+    }
+    const installationScopedGraphNodes = compiled.graph.nodes.filter((node) => node.installationScoped);
     const permissions = loaded.manifest.permissions.map((permission) => ({
       capability: permission.capability,
       authority: permission.authority,
@@ -241,8 +250,13 @@ export class AppInstallationService {
       permissions,
       assets,
       graphDiff: {
-        nodesAdded: compiled.graph.nodes.filter((node) => node.installationScoped).map((node) => node.id),
-        nodesReused: compiled.graph.nodes.filter((node) => !node.installationScoped).map((node) => node.id),
+        nodesAdded: installationScopedGraphNodes
+          .filter((node) => !existingAssetById.has(`graph-node.${node.id}`))
+          .map((node) => node.id),
+        nodesReused: [
+          ...compiled.graph.nodes.filter((node) => !node.installationScoped),
+          ...installationScopedGraphNodes.filter((node) => existingAssetById.has(`graph-node.${node.id}`))
+        ].map((node) => node.id),
         edgesAdded: compiled.graph.edges.map((edge) => edge.id),
         edgesRemoved: []
       },
@@ -1420,7 +1434,7 @@ function compilePlannedAssets(compiled: Awaited<ReturnType<typeof compileLoopPac
     ...compiled.loopSpecs.map((spec) => ({ id: `loop.${spec.metadata.id}`, kind: "loop_spec" as const, action: "create" as const, digest: canonicalAppDigest(spec), shared: false, sourcePath: `loops/${spec.metadata.id}.yaml`, dependencies: [] })),
     ...compiled.skills.map((skill) => ({ id: `skill.${skill.id}`, kind: "hermes_skill" as const, action: "create" as const, digest: canonicalAppDigest(skill), shared: false, dependencies: [] })),
     ...compiled.routingCards.map((card) => ({ id: `routing.${card.loopId}`, kind: "routing_card" as const, action: "create" as const, digest: canonicalAppDigest(card), shared: false, dependencies: [`loop.${card.loopId}`] })),
-    ...compiled.graph.nodes.filter((node) => node.installationScoped).map((node) => ({ id: `graph-node.${node.id}`, kind: "graph_node" as const, action: "create" as const, digest: canonicalAppDigest(node), shared: false, dependencies: node.parentId ? [`graph-node.${node.parentId}`] : [] })),
+    ...compiled.graph.nodes.filter((node) => node.installationScoped).map((node) => ({ id: `graph-node.${node.id}`, kind: "graph_node" as const, action: "create" as const, digest: canonicalAppDigest(node), shared: node.shared ?? false, dependencies: node.parentId ? [`graph-node.${node.parentId}`] : [] })),
     ...compiled.graph.edges.map((edge) => ({ id: `graph-edge.${edge.id}`, kind: "graph_edge" as const, action: "create" as const, digest: canonicalAppDigest(edge), shared: false, dependencies: [`graph-node.${edge.source}`, `graph-node.${edge.target}`] })),
     { id: `receipt.${installationId}`, kind: "event_contract" as const, action: "create" as const, digest: canonicalAppDigest({ installationId, compiled: compiled.artifactDigest }), shared: false, dependencies: [] }
   ];
