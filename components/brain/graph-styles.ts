@@ -39,6 +39,8 @@ export const edgeTypeStyles: Record<BrainEdgeType, { color: string; width: numbe
   department_contains_loop: { color: "#57534e", width: 1.65, opacity: 0.52 },
   loop_observes_data: { color: "#2563eb", width: 1.25, opacity: 0.36 },
   loop_updates_metric: { color: "#16a34a", width: 1.25, opacity: 0.42 },
+  loop_supports_loop: { color: "#0f766e", width: 1.4, opacity: 0.52, dashed: true },
+  loop_returns_evidence: { color: "#7c3aed", width: 1.25, opacity: 0.42, dashed: true },
   loop_requires_review: { color: "#f97316", width: 1.35, opacity: 0.48, dashed: true },
   loop_learns_from_trace: { color: "#7c3aed", width: 1.2, opacity: 0.36, dashed: true }
 };

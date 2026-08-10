@@ -18,17 +18,23 @@ import type { LoopPackLoadResult } from "./app-pack-loader";
 
 export type CompiledAppGraphNode = {
   id: string;
-  type: "hermes_brain" | "department" | "app" | "loop";
+  type: "hermes_brain" | "department" | "app" | "loop" | "company_object";
   label: string;
   parentId?: string;
   installationScoped: boolean;
+  shared?: boolean;
+  description?: string;
+  objectType?: string;
+  identityKeys?: string[];
 };
 
 export type CompiledAppGraphEdge = {
   id: string;
   source: string;
   target: string;
-  type: "routes" | "owns" | "contains";
+  type: "routes" | "owns" | "contains" | "evidence_in" | "supports" | "produces" | "learning_return";
+  reason?: string;
+  condition?: string;
 };
 
 export type CompiledLoopPack = {
@@ -78,6 +84,7 @@ export async function compileLoopPack(loaded: LoopPackLoadResult): Promise<Compi
   if (new Set(loopIds).size !== loopIds.length) {
     throw new Error("LoopPack contains duplicate loop IDs");
   }
+  validateAppTopologyLoopReferences(loaded, loopIds);
 
   return {
     appId: loaded.manifest.metadata.id,
@@ -223,6 +230,7 @@ export function compileAppLoopDefinition(definition: AppLoopDefinition, loaded: 
     },
     routing: {
       ...definition.routing,
+      permittedSupportingLoopIds: supportingLoopIdsFor(loaded, definition.metadata.id),
       activationMode: "shadow"
     },
     studioExtension: {
@@ -230,7 +238,8 @@ export function compileAppLoopDefinition(definition: AppLoopDefinition, loaded: 
       appVersion: loaded.manifest.metadata.version,
       artifactDigest: loaded.artifact.digest,
       skills: definition.skills,
-      outcomes: definition.outcomes
+      outcomes: definition.outcomes,
+      appTopology: loaded.manifest.topology
     }
   };
   return validateLoopSpec(spec);
@@ -245,7 +254,17 @@ function compileAppGraph(loaded: LoopPackLoadResult, specs: LoopSpec[]): Compile
     { id: brainId, type: "hermes_brain", label: "Hermes Brain", installationScoped: false },
     { id: departmentId, type: "department", label: departmentLabel(department), parentId: brainId, installationScoped: false },
     { id: appNodeId, type: "app", label: loaded.manifest.metadata.name, parentId: departmentId, installationScoped: true },
-    ...specs.map((spec) => ({ id: `loop.${spec.metadata.id}`, type: "loop" as const, label: spec.metadata.name, parentId: appNodeId, installationScoped: true }))
+    ...specs.map((spec) => ({ id: `loop.${spec.metadata.id}`, type: "loop" as const, label: spec.metadata.name, parentId: appNodeId, installationScoped: true })),
+    ...loaded.manifest.topology.objects.map((object) => ({
+      id: graphObjectId(loaded.manifest.metadata.id, object.id, object.shared),
+      type: "company_object" as const,
+      label: object.label,
+      installationScoped: true,
+      shared: object.shared,
+      description: object.description,
+      objectType: object.objectType,
+      identityKeys: object.identityKeys
+    }))
   ];
   const edges: CompiledAppGraphEdge[] = [
     { id: `edge.${brainId}.${departmentId}`, source: brainId, target: departmentId, type: "routes" },
@@ -255,9 +274,45 @@ function compileAppGraph(loaded: LoopPackLoadResult, specs: LoopSpec[]): Compile
       source: appNodeId,
       target: `loop.${spec.metadata.id}`,
       type: "contains" as const
+    })),
+    ...loaded.manifest.topology.flows.map((flow) => ({
+      id: `edge.${loaded.manifest.metadata.id}.${flow.id}`,
+      source: graphEndpointId(loaded, flow.source),
+      target: graphEndpointId(loaded, flow.target),
+      type: flow.type,
+      reason: flow.reason,
+      condition: flow.condition
     }))
   ];
   return { nodes, edges };
+}
+
+function supportingLoopIdsFor(loaded: LoopPackLoadResult, loopId: string): string[] {
+  return loaded.manifest.topology.flows
+    .filter((flow) => flow.type === "supports" && flow.source.kind === "loop" && flow.source.id === loopId)
+    .map((flow) => flow.target.id)
+    .sort();
+}
+
+function validateAppTopologyLoopReferences(loaded: LoopPackLoadResult, loopIds: string[]): void {
+  const knownLoopIds = new Set(loopIds);
+  const unknown = loaded.manifest.topology.flows.flatMap((flow) => [flow.source, flow.target])
+    .filter((endpoint) => endpoint.kind === "loop" && !knownLoopIds.has(endpoint.id))
+    .map((endpoint) => endpoint.id);
+  if (unknown.length > 0) {
+    throw new Error(`LoopPack topology references unknown loop IDs: ${Array.from(new Set(unknown)).sort().join(", ")}`);
+  }
+}
+
+function graphEndpointId(loaded: LoopPackLoadResult, endpoint: { kind: "loop" | "object"; id: string }): string {
+  if (endpoint.kind === "loop") return `loop.${endpoint.id}`;
+  const object = loaded.manifest.topology.objects.find((candidate) => candidate.id === endpoint.id);
+  if (!object) throw new Error(`LoopPack topology references unknown object ${endpoint.id}`);
+  return graphObjectId(loaded.manifest.metadata.id, object.id, object.shared);
+}
+
+function graphObjectId(appId: string, objectId: string, shared: boolean): string {
+  return shared ? `object.${objectId}` : `object.${appId}.${objectId}`;
 }
 
 async function readPackDocument(root: string, relativePath: string): Promise<unknown> {

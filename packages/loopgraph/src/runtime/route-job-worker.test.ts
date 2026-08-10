@@ -652,6 +652,7 @@ function loopSpec(requiresApproval: boolean, activationMode: "simulate" | "execu
         maxRoutes: 1,
         requiresIndependentProblems: true
       },
+      permittedSupportingLoopIds: [],
       cooldown: {
         seconds: 0,
         dedupeWindowSeconds: 0

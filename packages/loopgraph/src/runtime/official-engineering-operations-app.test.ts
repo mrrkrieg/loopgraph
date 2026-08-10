@@ -24,6 +24,11 @@ describe("official Run Engineering Issue and Incident Operations app", () => {
     expect(compiled.routingCards).toHaveLength(6);
     expect(await loadConnectorRecipes(loaded)).toHaveLength(2);
     expect(compiled.graph.nodes.filter((node) => node.type === "loop")).toHaveLength(6);
+    expect(compiled.graph.nodes.filter((node) => node.type === "company_object")).toHaveLength(5);
+    expect(compiled.graph.edges.some((edge) => edge.type === "supports" && edge.target === "loop.engineering-customer-impact")).toBe(true);
+    expect(compiled.routingCards.find((card) => card.loopId === "engineering-incident-response")?.permittedSupportingLoopIds).toEqual([
+      "engineering-customer-impact"
+    ]);
     expect(compiled.loopSpecs.every((loop) => loop.routing?.activationMode === "shadow")).toBe(true);
   });
 

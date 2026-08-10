@@ -765,6 +765,8 @@ function mapEdgeType(edge: TopologyEdge): BrainEdgeType | null {
   if (edge.kind === "contains" && edge.source === "loop:management") return "management_calls_department";
   if (edge.kind === "contains") return "department_contains_loop";
   if (edge.kind === "observes" || edge.kind === "reads_memory") return "loop_observes_data";
+  if (edge.kind === "calls") return "loop_supports_loop";
+  if (edge.kind === "writes_memory") return "loop_returns_evidence";
   if (edge.kind === "updates_metric") return "loop_updates_metric";
   if (edge.kind === "requires_approval" || edge.kind === "owned_by" || edge.kind === "escalates_to") {
     return "loop_requires_review";
