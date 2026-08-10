@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: engineering-implementation-planning
+name: Implementation Planning
+description: Produce bounded implementation, verification, rollout, and rollback plans from approved engineering evidence.
+department: engineering
+goal: Make the proposed engineering change reviewable before provider work or code changes.
+inputs: [triaged issue, repository context, dependencies, constraints, release policy]
+outputs: [change plan, test plan, rollout, rollback, unknowns, approval packet]
+instructions: [Define affected surfaces and non-goals., Link every assumption to evidence., Specify tests and verifier results., Define rollout and rollback triggers., Expose unknowns and accountable reviewers.]
+boundaries: [Do not write code or merge changes., Do not create provider work without approval., Do not waive release gates.]
+requiredCapabilities: [repo.issue.read, project.issue.read]

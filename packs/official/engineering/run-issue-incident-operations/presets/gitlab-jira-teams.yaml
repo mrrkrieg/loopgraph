@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: gitlab-jira-teams
+name: GitLab + Jira + Teams
+description: Configure issue and incident operations for GitLab, Jira, and Teams.
+connectorRecipe: connectors/gitlab-jira-teams.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 90, rolloutMode: shadow }
+requiredCompanyFields: [engineering.repositoryOwnership, engineering.severityPolicy, engineering.releasePolicy, engineering.escalationPaths]

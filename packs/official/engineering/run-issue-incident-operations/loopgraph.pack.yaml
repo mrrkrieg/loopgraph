@@ -1,0 +1,46 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.engineering.run-issue-incident-operations
+  name: Run Engineering Issue and Incident Operations
+  version: 1.0.0
+  summary: Route engineering issues and incidents through planning, customer impact, release readiness, and prevention learning.
+  description: Hermes joins repository, project, incident, deployment, and customer-impact evidence; selects the correct engineering loop; governs issue and communication actions; and learns from resolution, release, and recurrence outcomes.
+  department: engineering
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [engineering, issues, incidents, releases, learning]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility: { loopgraph: ">=0.2.0 <1.0.0", hermes: ">=1.0.0", platforms: [darwin, linux, win32] }
+dependencies: []
+modules:
+  - { id: issue-planning, name: Issue planning, description: Convert triaged issues into evidence-backed implementation plans., defaultEnabled: true, dependsOn: [], assets: [loops/issue-to-plan.yaml, skills/implementation-planning.yaml] }
+  - { id: incident-operations, name: Incident operations, description: "Coordinate severity, customer impact, and accountable response.", defaultEnabled: true, dependsOn: [], assets: [loops/incident-response.yaml, loops/customer-impact.yaml, skills/incident-synthesis.yaml] }
+  - { id: release-learning, name: Release and incident learning, description: Verify readiness and learn from resolution and recurrence evidence., defaultEnabled: true, dependsOn: [issue-planning, incident-operations], assets: [loops/release-readiness.yaml, loops/incident-learning.yaml] }
+presets:
+  - { id: github-linear-slack, name: GitHub + Linear + Slack, description: Govern GitHub issues and incidents through Linear and Slack., path: presets/github-linear-slack.yaml, providerFamily: github }
+  - { id: gitlab-jira-teams, name: GitLab + Jira + Teams, description: Govern GitLab issues and incidents through Jira and Teams., path: presets/gitlab-jira-teams.yaml, providerFamily: gitlab }
+permissions:
+  - { capability: repo.issue.read, authority: read, mode: required, risk: low, purpose: "Read repository issues, labels, ownership, and linked code evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [source_code, project_data] }
+  - { capability: project.issue.read, authority: read, mode: required, risk: low, purpose: "Read project work, plans, owners, and release links.", customerFacing: false, defaultPolicy: allowed, dataClasses: [project_data] }
+  - { capability: incident.record.read, authority: read, mode: required, risk: high, purpose: "Read incident, severity, service, and timeline evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [incident_data, operational_data] }
+  - { capability: deployment.release.read, authority: read, mode: required, risk: medium, purpose: "Read deployment, release, verifier, and rollback evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [deployment_data] }
+  - { capability: project.issue.create, authority: approve, mode: optional, risk: high, purpose: "Create the exact approved engineering work item.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [project_data, incident_data] }
+  - { capability: project.issue.update, authority: approve, mode: optional, risk: high, purpose: "Apply the exact approved project or incident update.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [project_data, incident_data] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare exact internal or customer-impact communication for review.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [incident_data, business_contact] }
+requiredCapabilities: [repo.issue.read, project.issue.read, incident.record.read, deployment.release.read]
+optionalCapabilities: [project.issue.create, project.issue.update, collaboration.message.draft]
+entrypoints:
+  loops: [loops/issue-triage.yaml, loops/issue-to-plan.yaml, loops/incident-response.yaml, loops/customer-impact.yaml, loops/release-readiness.yaml, loops/incident-learning.yaml]
+  skills: [skills/technical-triage.yaml, skills/severity-classification.yaml, skills/implementation-planning.yaml, skills/incident-synthesis.yaml]
+  connectors: [connectors/github-linear-slack.yaml, connectors/gitlab-jira-teams.yaml]
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json, fixtures/customer-facing.json, fixtures/outcome.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership: { defaultOwnerRole: engineering_operations, reviewRoles: [engineering_manager, incident_commander, release_manager, security_owner], supportUrl: https://github.com/mrrkrieg/loopgraph/issues }
+defaultRolloutMode: shadow

@@ -1,0 +1,1 @@
+{"id":"engineering-permission-change","eventType":"engineering.issue_received","subject":{"type":"issue","id":"issue-507"},"normalizedPayload":{"issueId":"507","repository":"api","title":"Permission review fixture","permissionChange":"project.issue.create: approve -> execute","confidence":1},"evidenceRefs":["fixture:permission-review"]}

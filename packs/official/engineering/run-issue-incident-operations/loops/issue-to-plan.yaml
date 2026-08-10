@@ -1,0 +1,38 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: engineering-issue-to-plan, name: Issue to Implementation Plan, version: 1.0.0, description: "Convert a triaged issue into a reviewable implementation and verification plan.", department: engineering, ownerRole: engineering_manager, tags: [planning, implementation, verification] }
+trigger: { type: event, source: hermes, event: engineering.issue_triaged }
+input: { requiredFields: [normalizedPayload.issueId, normalizedPayload.repository, normalizedPayload.owner], subjectTypes: [issue, engineering_problem], fixtures: [] }
+routine:
+  - { id: inspect, name: Inspect code and work context, actor: system, type: observe, description: "Join issue, ownership, related work, affected surfaces, and constraints." }
+  - { id: plan, name: Design implementation plan, actor: agent, type: prepare, description: "Define bounded changes, dependencies, tests, rollout, rollback, and unknowns." }
+  - { id: verify, name: Review plan evidence, actor: human, type: verify, description: "Require accountable engineering review before creating provider work." }
+  - { id: learn, name: Learn from implementation, actor: system, type: learn, description: "Return plan changes, delivery evidence, verifier results, and outcome." }
+capabilities:
+  - { key: repo.issue.read, authority: read, risk: low, required: true, purpose: Read issue and linked repository evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Read related work and dependencies., customerFacing: false }
+  - { key: project.issue.create, authority: approve, risk: high, required: false, purpose: Create the exact approved implementation work item., customerFacing: false }
+skills: [engineering-implementation-planning, engineering-technical-triage]
+outcomes: [{ metric: implementation_plan_acceptance_rate, description: Plans accepted without material evidence rework., direction: increase, sourceCapability: project.issue.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [engineering.issue_planning]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: engineering.issue_triaged, subjectTypes: [issue, engineering_problem], requiredFields: [normalizedPayload.issueId, normalizedPayload.repository, normalizedPayload.owner], reason: A triaged issue has accountable ownership for planning. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: engineering.issue_received, subjectTypes: [], fields: [], reason: Raw issues must be triaged first. }]
+  inputMapping: { issueId: normalizedPayload.issueId, repository: normalizedPayload.repository, owner: normalizedPayload.owner }
+  priority: 90
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [repo.issue.read, project.issue.read]
+  examples: { shouldRoute: ["A triaged issue has repository ownership."], shouldNotRoute: ["The affected service remains ambiguous."] }
+policy:
+  forbiddenActions: [{ capability: project.issue.create, reason: Creating engineering work requires exact plan approval. }]
+  escalationOwner: engineering_manager
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

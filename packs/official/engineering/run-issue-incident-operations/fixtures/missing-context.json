@@ -1,0 +1,1 @@
+{"id":"engineering-issue-missing","eventType":"engineering.issue_received","subject":{"type":"issue","id":"issue-502"},"normalizedPayload":{"issueId":"502","title":"Worker failure","confidence":0.97},"evidenceRefs":["gitlab:issue:502"]}
