@@ -5,7 +5,12 @@ import type {
   QuestionDefinition,
   QuestionSection
 } from "../types";
-import { getPrebuiltLoopDefinition } from "loopgraph/core";
+import {
+  LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES,
+  getPrebuiltLoopDefinition,
+  resolveCompanyLoopTemplateId
+} from "loopgraph/core";
+import { GENERATED_OFFICIAL_APP_CATALOG } from "../../../packages/loopgraph/src/generated/official-app-catalog";
 
 const q = (
   section: QuestionSection,
@@ -1091,10 +1096,34 @@ const hiddenLaborDefaults: Record<DepartmentKey, LoopTemplate["defaultHiddenLabo
   custom: { baselineMinutes: 300, loopExecutionMinutes: 144, reviewMinutes: 36, reworkMinutes: 24, botsittingMinutes: 18, escalationMinutes: 20, governanceMinutes: 12, relationshipRedeploymentMinutes: 48, qualityScore: 80 }
 };
 
-export const departmentTemplates: DepartmentTemplate[] = departments.map((department) => ({
-  ...department,
-  commonLoops: department.commonLoops.map((template) => enrichTemplate(department, template))
-}));
+const packTemplatesByDepartment = new Map<DepartmentKey, LoopTemplate[]>();
+for (const entry of GENERATED_OFFICIAL_APP_CATALOG.entries) {
+  const template = entry.template;
+  const department = template.department as DepartmentKey;
+  const existing = packTemplatesByDepartment.get(department) ?? [];
+  existing.push({
+    ...template,
+    secondaryMetrics: [...template.secondaryMetrics],
+    observes: [...template.observes],
+    requiredDataSources: [...template.requiredDataSources],
+    routine: [...template.routine],
+    verification: [...template.verification],
+    escalation: [...template.escalation],
+    fixturePaths: [...template.fixturePaths]
+  });
+  packTemplatesByDepartment.set(department, existing);
+}
+
+export const departmentTemplates: DepartmentTemplate[] = departments.map((department) => {
+  const packTemplates = packTemplatesByDepartment.get(department.key);
+  const unmatchedLegacyTemplates = department.commonLoops.filter((template) =>
+    !(template.id in LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES));
+  return {
+    ...department,
+    commonLoops: [...(packTemplates ?? []), ...unmatchedLegacyTemplates]
+      .map((template) => enrichTemplate(department, template))
+  };
+});
 
 export function getTemplateCatalog() {
   return departmentTemplates.flatMap((department) => department.commonLoops);
@@ -1109,7 +1138,8 @@ export function getDepartmentTemplate(department: DepartmentKey) {
 }
 
 export function getTemplateById(templateId: string) {
-  return getTemplateCatalog().find((template) => template.id === templateId);
+  const canonicalId = resolveCompanyLoopTemplateId(templateId);
+  return getTemplateCatalog().find((template) => template.id === canonicalId);
 }
 
 export function getTemplatesForDepartment(department: DepartmentKey) {
@@ -1121,10 +1151,11 @@ function enrichTemplate(department: DepartmentTemplate, template: LoopTemplate):
     ...(templateDetailsById[template.id] ?? {}),
     ...template
   };
-  const metrics = detailedTemplate.defaultMetrics ?? [
+  const metrics = detailedTemplate.defaultMetrics ?? Array.from(new Set([
     detailedTemplate.primaryMetric ?? department.commonMetrics[0] ?? "Quality-adjusted output",
-    ...(detailedTemplate.secondaryMetrics ?? department.commonMetrics.slice(1, 3))
-  ];
+    ...(detailedTemplate.secondaryMetrics ?? []),
+    ...department.commonMetrics
+  ])).slice(0, 5);
   const owners = detailedTemplate.defaultOwners ?? departmentOwners[department.key];
   const dataSources = detailedTemplate.requiredDataSources ?? department.commonDataSources;
 

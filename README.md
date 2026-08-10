@@ -201,6 +201,8 @@ Opinionated apps also declare a typed evidence topology in the signed pack: shar
 
 The three original runnable examples remain available for low-level LoopSpec teaching, but LoopPacks are now the marketplace source of truth for new installations. Every official app is indexed from its pack files and includes the complete deterministic safety contract.
 
+Official pack loop contracts also generate the Hermes candidate library and Design Studio template cards. Update the pack manifest, loop YAML, topology, fixtures, or outcome dashboard, then run `npm run generate:app-catalog`; CI runs `npm run check:app-catalog` and rejects drift. Older code-defined entries remain only as an explicit fallback where no official pack successor exists, and legacy template IDs resolve to their canonical pack loop when a successor is available.
+
 Ask Hermes:
 
 ```text

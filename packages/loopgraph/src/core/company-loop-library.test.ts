@@ -3,7 +3,11 @@ import {
   CROSS_DEPARTMENT_PLAYBOOKS,
   DEPARTMENT_OPERATING_SKILLS,
   HERMES_ROUTER_EVALUATION_QUESTIONS,
-  PREBUILT_COMPANY_LOOPS
+  OFFICIAL_APP_CATALOG_SOURCE_DIGEST,
+  PACK_DERIVED_COMPANY_LOOPS,
+  PREBUILT_COMPANY_LOOPS,
+  getPrebuiltLoopDefinition,
+  resolveCompanyLoopTemplateId
 } from "./company-loop-library";
 
 describe("prebuilt company loop library", () => {
@@ -36,10 +40,23 @@ describe("prebuilt company loop library", () => {
       expect(loop.fanoutPolicy.maxRoutes).toBeLessThanOrEqual(4);
     }
     expect(CROSS_DEPARTMENT_PLAYBOOKS.find((item) => item.id === "incident-to-company-learning")?.orderedLoopTemplateIds).toEqual([
-      "engineering-incident_response",
-      "strategic-account-escalation",
-      "customer_success-customer_communication_review",
-      "engineering-incident_learning"
+      "engineering-incident-response",
+      "cs-strategic-account-escalation",
+      "engineering-customer-impact",
+      "engineering-incident-learning"
     ]);
+  });
+
+  it("uses the generated official LoopPack catalog for migrated departments", () => {
+    expect(OFFICIAL_APP_CATALOG_SOURCE_DIGEST).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(PACK_DERIVED_COMPANY_LOOPS).toHaveLength(35);
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "product-feedback_to_problem")).toBeUndefined();
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "product-feedback-clustering")).toMatchObject({
+      departmentType: "product",
+      problemTypes: ["product.recurring_feedback"]
+    });
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "operations_finance-forecast_variance")).toBeDefined();
+    expect(resolveCompanyLoopTemplateId("marketing-campaign_learning")).toBe("marketing-campaign-learning");
+    expect(getPrebuiltLoopDefinition("marketing-campaign_learning")?.templateId).toBe("marketing-campaign-learning");
   });
 });
