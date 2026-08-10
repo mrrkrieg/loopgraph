@@ -1,0 +1,1 @@
+{"id":"product-feedback-excluded","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-203"},"normalizedPayload":{"feedbackId":"203","text":"Internal test feedback","productArea":"sandbox","excluded":true,"confidence":1},"evidenceRefs":["policy:test-traffic"]}

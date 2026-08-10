@@ -1,0 +1,7 @@
+id: zendesk-amplitude-jira
+providers: { feedback: zendesk, analytics: amplitude, project: jira }
+recipe: zendesk-amplitude-jira
+defaults:
+  issueMutationPolicy: approval_required
+  roadmapCommitmentPolicy: forbidden
+  initialMode: shadow

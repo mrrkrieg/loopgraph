@@ -1,0 +1,92 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.product.turn-feedback-into-product-problems
+  name: Turn Customer Feedback Into Validated Product Problems
+  version: 1.0.0
+  summary: Convert recurring customer and usage evidence into validated product problems and measurable release learning.
+  description: Hermes joins feedback, support, product analytics, issue, and release evidence; separates anecdotes from recurring problems; routes defects independently; prepares governed roadmap evidence; and learns whether shipped work changed adoption or support burden.
+  department: product
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [product, feedback, discovery, bugs, roadmap, release-learning]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: bug-clustering
+    name: Bug clustering
+    description: Separate recurring defects from broader usability and onboarding problems.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/bug-clustering.yaml, skills/evidence-quality.yaml]
+  - id: roadmap-evidence
+    name: Roadmap evidence
+    description: Prepare governed evidence briefs and issue proposals without changing roadmap priority.
+    defaultEnabled: true
+    dependsOn: [bug-clustering]
+    assets: [loops/roadmap-evidence.yaml, skills/product-problem-framing.yaml]
+  - id: release-learning
+    name: Release learning
+    description: Compare observed product and support outcomes with the original problem hypothesis.
+    defaultEnabled: true
+    dependsOn: [roadmap-evidence]
+    assets: [loops/release-learning.yaml, skills/release-evaluation.yaml]
+presets:
+  - id: intercom-posthog-linear
+    name: Intercom + PostHog + Linear
+    description: Join Intercom feedback with PostHog behavior and prepare governed Linear issue work.
+    path: presets/intercom-posthog-linear.yaml
+    providerFamily: intercom
+  - id: zendesk-amplitude-jira
+    name: Zendesk + Amplitude + Jira
+    description: Join Zendesk feedback with Amplitude behavior and prepare governed Jira issue work.
+    path: presets/zendesk-amplitude-jira.yaml
+    providerFamily: zendesk
+permissions:
+  - { capability: support.feedback.read, authority: read, mode: required, risk: low, purpose: "Read normalized customer feedback and durable source identity.", customerFacing: false, defaultPolicy: allowed, dataClasses: [support_content, business_contact] }
+  - { capability: analytics.event.query, authority: read, mode: required, risk: medium, purpose: "Query bounded product behavior evidence for affected workflows and segments.", customerFacing: false, defaultPolicy: allowed, dataClasses: [product_usage] }
+  - { capability: project.issue.read, authority: read, mode: required, risk: low, purpose: "Read existing product issues and detect duplicate or already-planned work.", customerFacing: false, defaultPolicy: allowed, dataClasses: [project_data] }
+  - { capability: project.issue.create, authority: approve, mode: optional, risk: high, purpose: "Create the exact approved product-problem or defect issue.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [support_content, product_usage, project_data] }
+  - { capability: project.issue.update, authority: approve, mode: optional, risk: high, purpose: "Append approved evidence to an existing product issue.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [support_content, product_usage, project_data] }
+  - { capability: product.release.read, authority: read, mode: optional, risk: low, purpose: "Read release scope and dates needed for outcome learning.", customerFacing: false, defaultPolicy: allowed, dataClasses: [project_data] }
+requiredCapabilities: [support.feedback.read, analytics.event.query, project.issue.read]
+optionalCapabilities: [project.issue.create, project.issue.update, product.release.read]
+entrypoints:
+  loops:
+    - loops/feedback-clustering.yaml
+    - loops/product-problem-validation.yaml
+    - loops/bug-clustering.yaml
+    - loops/roadmap-evidence.yaml
+    - loops/release-learning.yaml
+  skills:
+    - skills/feedback-synthesis.yaml
+    - skills/evidence-quality.yaml
+    - skills/product-problem-framing.yaml
+    - skills/release-evaluation.yaml
+  connectors:
+    - connectors/intercom-posthog-linear.yaml
+    - connectors/zendesk-amplitude-jira.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/happy.json
+    - fixtures/missing-context.json
+    - fixtures/exclusion.json
+    - fixtures/duplicate.json
+    - fixtures/ambiguous.json
+    - fixtures/low-confidence.json
+    - fixtures/permission-change.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: product_operations
+  reviewRoles: [product_manager, product_lead, engineering_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

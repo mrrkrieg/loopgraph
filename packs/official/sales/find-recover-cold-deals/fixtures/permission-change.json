@@ -1,0 +1,1 @@
+{"id":"deal-risk-permission-change","eventType":"sales.opportunity_changed","subject":{"type":"opportunity","id":"deal-307"},"normalizedPayload":{"opportunityId":"307","stage":"evaluation","lastActivityAt":"2026-07-01T10:00:00.000Z","permissionChange":"mail.message.draft: approve -> execute","confidence":1},"evidenceRefs":["fixture:permission-review"]}

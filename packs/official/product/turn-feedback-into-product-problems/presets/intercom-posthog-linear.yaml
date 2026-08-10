@@ -1,0 +1,7 @@
+id: intercom-posthog-linear
+providers: { feedback: intercom, analytics: posthog, project: linear }
+recipe: intercom-posthog-linear
+defaults:
+  issueMutationPolicy: approval_required
+  roadmapCommitmentPolicy: forbidden
+  initialMode: shadow

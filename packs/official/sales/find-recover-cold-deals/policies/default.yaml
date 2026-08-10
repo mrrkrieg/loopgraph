@@ -1,0 +1,14 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  opportunity.read: allowed
+  mail.thread.read: allowed
+  calendar.event.read: allowed
+  contact.read: allowed
+  opportunity.update: approval_required
+  mail.draft: approval_required
+  collaboration.draft: approval_required
+  mail.send: forbidden
+  forecast.change: forbidden
+  ambiguous.identity: request_human
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }
