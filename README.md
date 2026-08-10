@@ -218,12 +218,19 @@ Install it, test it, and keep it in shadow mode.
 
 Or open **Marketplace** in the browser. The guided installer lets an operator choose a provider preset and optional modules, answer typed company questions, resolve connection blockers, review the exact graph/permission/test transaction, and install it atomically—without editing YAML. The install button stays disabled until required context, connections, mappings, confirmations, and permissions are resolved. Provider writes remain blocked after installation.
 
+Field mappings are connection-bound and reusable. An authenticated Hermes connector may record a short-lived, redacted-only provider schema snapshot; Loopgraph then explains its logical-field suggestions and shows bounded sample values. An operator must confirm the exact mappings before they can satisfy installation readiness. Loopgraph never treats name similarity as approval and never stores a provider credential in the mapping registry.
+
 The same application service is available through the CLI:
 
 ```bash
 # Discover and inspect without changing the workspace
 npm run loopgraph -- apps search "qualify inbound leads"
 npm run loopgraph -- apps get loopgraph.sales.qualify-route-inbound-leads
+
+# After Hermes connects the stack, inspect and confirm provider fields
+npm run loopgraph -- apps mappings loopgraph.sales.qualify-route-inbound-leads \
+  --preset hubspot-gmail-slack
+npm run loopgraph -- apps mapping-confirm --file reviewed-field-mappings.json
 
 # Review an exact, read-only plan before installation
 npm run --silent loopgraph -- apps plan loopgraph.sales.qualify-route-inbound-leads \

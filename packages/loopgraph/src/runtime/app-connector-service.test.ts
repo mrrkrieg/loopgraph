@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { connectionInstanceSchema } from "../core";
 import {
   FileConnectorFieldMappingStore,
+  FileProviderSchemaSnapshotStore,
   loadConnectorRecipes,
   resolveConnectorCapabilities,
   suggestFieldMappings,
@@ -45,6 +46,35 @@ describe("logical connector and field mapping service", () => {
     expect(resolutions.find((resolution) => resolution.capability === "mail.message.draft")?.status).toBe("missing");
   });
 
+  it("resolves every capability against its own provider in a multi-provider recipe", async () => {
+    const loaded = await loadLoopPackDirectory(packRoot);
+    const recipes = await loadConnectorRecipes(loaded);
+    const connection = (id: string, manifestId: string, capabilityKeys: string[], grantedScopes: string[]) => connectionInstanceSchema.parse({
+      schemaVersion: "connection-instance/v1alpha1",
+      id,
+      manifestId,
+      capabilityKeys,
+      grantedScopes,
+      status: "connected",
+      environment: "live",
+      readPolicy: "read_only",
+      writePolicy: "approved_only"
+    });
+    const resolutions = resolveConnectorCapabilities({
+      requiredCapabilities: loaded.manifest.requiredCapabilities,
+      optionalCapabilities: loaded.manifest.optionalCapabilities,
+      recipes,
+      connections: [
+        connection("hubspot-production", "hubspot", ["crm.lead.read", "crm.account.read", "crm.lead.update"], ["crm.objects.contacts.read", "crm.objects.companies.read", "crm.objects.contacts.write"]),
+        connection("gmail-production", "gmail", ["mail.message.draft", "mail.message.send"], ["gmail.compose", "gmail.send"]),
+        connection("slack-production", "slack", ["messaging.channel.post"], ["chat:write"])
+      ],
+      selectedRecipeId: "hubspot-gmail-slack"
+    });
+    expect(resolutions.find((resolution) => resolution.capability === "mail.message.draft")).toMatchObject({ status: "reusable", connectionId: "gmail-production" });
+    expect(resolutions.find((resolution) => resolution.capability === "messaging.channel.post")).toMatchObject({ status: "reusable", connectionId: "slack-production" });
+  });
+
   it("suggests explainable mappings and never silently confirms uncertain fields", () => {
     const suggestions = suggestFieldMappings({
       requiredLogicalFields: ["lead.email", "lead.employeeCount", "lead.lifecycleStage"],
@@ -83,5 +113,22 @@ describe("logical connector and field mapping service", () => {
       objectType: "lead"
     })).toEqual({ complete: false, missing: ["lead.company"], unverified: [] });
   });
-});
 
+  it("stores connection-bound provider schema snapshots and ignores expired snapshots", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "loopgraph-provider-schemas-"));
+    temporaryDirectories.push(root);
+    const store = new FileProviderSchemaSnapshotStore(path.join(root, "provider-schemas.json"), "acme");
+    await store.save({
+      connectionId: "hubspot-production",
+      providerId: "hubspot",
+      source: "provider_api",
+      samplePolicy: "redacted_only",
+      objects: [{ objectType: "lead", fields: [{ name: "email", type: "string", writable: true, sampleValues: ["masked@example.com"] }] }],
+      inspectedAt: "2026-08-09T00:00:00.000Z",
+      expiresAt: "2026-08-10T00:00:00.000Z",
+      inspectedBy: "hermes-connector"
+    });
+    expect(await store.get("hubspot-production", new Date("2026-08-09T12:00:00.000Z"))).toMatchObject({ providerId: "hubspot", source: "provider_api" });
+    expect(await store.get("hubspot-production", new Date("2026-08-10T00:00:00.000Z"))).toBeUndefined();
+  });
+});

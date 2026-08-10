@@ -79,6 +79,12 @@ pack default
 
 Every resolved value retains its winning layer and provenance. Hermes should infer values from trusted context first, explain the evidence, ask only for missing or uncertain values, and request confirmation for high-impact values before saving them to shared company context.
 
+## Connector recipes and field mappings
+
+A multi-provider recipe resolves each capability against the provider that owns its declared operation. The recipe's primary provider does not implicitly satisfy mail, messaging, analytics, or other secondary capabilities. Broad connection grants such as `crm.read` may satisfy narrower read-only requirements such as `crm.lead.read`, but never create write authority.
+
+Provider field discovery is also separate from permission discovery. An authenticated connector records a connection-bound, expiring schema snapshot with a mandatory `redacted_only` sample policy. Loopgraph may use that snapshot—or clearly labelled connector metadata when no live snapshot exists—to produce explainable suggestions. Suggestions are never trusted automatically. A named operator or Hermes acting for that operator must confirm each logical-to-provider mapping before it can satisfy an installation plan. Confirmed mappings are workspace resources and may be reused by later apps without being deleted when one app is uninstalled.
+
 ## Updates and customization
 
 Published artifacts are immutable. Company changes are typed overlay operations. Updates use a three-way merge between the original base, the company overlay, and the new base. Permission changes and graph changes are visible before apply. Unresolved conflicts block the update. Rollback restores the previous pinned version and digest.

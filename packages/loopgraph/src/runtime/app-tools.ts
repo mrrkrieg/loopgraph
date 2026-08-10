@@ -9,11 +9,13 @@ import {
   appHistoricalReplayRequestSchema,
   historicalReplayEventSchema,
   appInstallPlanSchema,
+  appFieldMappingPlanSchema,
   appRolloutModeSchema,
   appUpdatePlanSchema,
   artifactDigestSchema,
   appSetupDefinitionSchema,
-  marketplaceCatalogSourceSchema
+  marketplaceCatalogSourceSchema,
+  providerSchemaFieldSchema
 } from "../core";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
@@ -21,6 +23,15 @@ import { LocalAppMarketplace } from "./app-marketplace";
 import { compileLoopPack } from "./app-pack-compiler";
 import { LoopgraphAppPublisher } from "./app-publisher";
 import { readConnectionInstances } from "./connector-registry";
+import {
+  FileConnectorFieldMappingStore,
+  FileProviderSchemaSnapshotStore,
+  loadConnectorRecipes,
+  providerIdForCapability,
+  resolveConnectorCapabilities,
+  suggestFieldMappings,
+  validateFieldMappingCoverage
+} from "./app-connector-service";
 import { inspectLoopgraphWorkspace } from "./workspace";
 
 export const LOOPGRAPH_APP_TOOL_NAMES = [
@@ -29,6 +40,9 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
+  "loopgraph_connector_schema_record",
+  "loopgraph_app_field_mappings_get",
+  "loopgraph_app_field_mapping_confirm",
   "loopgraph_app_test",
   "loopgraph_app_historical_replay",
   "loopgraph_app_evaluation_label",
@@ -116,6 +130,44 @@ export const appInstallStatusInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
   installationId: z.string().min(1).optional()
+}).strict();
+
+export const connectorSchemaRecordInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  connectionId: z.string().min(1),
+  providerId: z.string().min(1),
+  source: z.enum(["provider_api", "connector_metadata", "manual"]),
+  samplePolicy: z.literal("redacted_only"),
+  objects: z.array(z.object({
+    objectType: z.string().min(1),
+    fields: z.array(providerSchemaFieldSchema).min(1)
+  }).strict()).min(1),
+  inspectedAt: z.string().datetime().optional(),
+  ttlSeconds: z.number().int().min(300).max(604_800).default(86_400),
+  actor: z.string().min(1).default("hermes")
+}).strict();
+
+export const appFieldMappingsGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  appId: z.string().min(1),
+  version: z.string().min(1).optional(),
+  presetId: z.string().min(1)
+}).strict();
+
+export const appFieldMappingConfirmInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  connectionId: z.string().min(1),
+  objectType: z.string().min(1),
+  mappings: z.array(z.object({
+    logicalField: z.string().min(1),
+    providerField: z.string().min(1),
+    direction: z.enum(["read", "write", "bidirectional"]).default("read"),
+    confidence: z.number().min(0).max(1)
+  }).strict()).min(1).max(100),
+  actor: z.string().min(1).default("hermes")
 }).strict();
 
 const appInstallationActionInputSchema = projectSchema.extend({
@@ -227,6 +279,9 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_connector_schema_record", description: "Record a connection-bound provider field schema returned by an authenticated connector without storing credentials or unrestricted provider payloads.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_field_mappings_get", description: "Build an explainable field-mapping plan from an app recipe, reusable connection, live provider schema snapshot, and confirmed workspace mappings.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_field_mapping_confirm", description: "Confirm exact logical-to-provider field mappings for one connection; never silently confirms inferred mappings.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_test", description: "Run the installed app synthetic conformance suite with all provider writes blocked.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_historical_replay", description: "Evaluate a bounded historical event set through installed routing contracts with provider writes blocked and replay evidence recorded.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_evaluation_label", description: "Record an accountable correct, incomplete, or false-positive judgment and review burden for one replay decision.", readOnly: false, idempotent: true, destructive: false },
@@ -378,6 +433,71 @@ export async function callLoopgraphAppTool(
     ? raw.plan.workspaceId
     : undefined;
   const identity = await resolveIdentity(projectRoot, raw.workspaceId ?? planWorkspaceId, raw.companyId);
+  const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
+  if (name === "loopgraph_connector_schema_record") {
+    const parsed = connectorSchemaRecordInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const connections = await readConnectionInstances(projectRoot);
+    const connection = connections.find((candidate) => candidate.id === parsed.connectionId);
+    if (!connection) throw new Error(`Connection not found: ${parsed.connectionId}`);
+    if (!providerMatchesConnection(parsed.providerId, connection.manifestId)) {
+      throw new Error(`Provider ${parsed.providerId} does not match connection ${connection.id} (${connection.manifestId})`);
+    }
+    const observedNow = options.now ?? new Date();
+    const inspectedAt = parsed.inspectedAt ?? observedNow.toISOString();
+    if (Date.parse(inspectedAt) > observedNow.getTime() + 5 * 60_000) {
+      throw new Error("Provider schema inspection time is too far in the future");
+    }
+    if (Date.parse(inspectedAt) < observedNow.getTime() - 7 * 24 * 60 * 60_000) {
+      throw new Error("Provider schema snapshot is too old; inspect the connection again");
+    }
+    const expiresAt = new Date(Date.parse(inspectedAt) + parsed.ttlSeconds * 1000).toISOString();
+    const store = new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), identity.workspaceId);
+    return store.save({
+      connectionId: parsed.connectionId,
+      providerId: parsed.providerId,
+      source: parsed.source,
+      samplePolicy: parsed.samplePolicy,
+      objects: parsed.objects,
+      inspectedAt,
+      expiresAt,
+      inspectedBy: parsed.actor
+    });
+  }
+  if (name === "loopgraph_app_field_mappings_get") {
+    const parsed = appFieldMappingsGetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return buildAppFieldMappingPlan({ marketplace, projectRoot, workspaceId: identity.workspaceId, ...parsed, now: options.now });
+  }
+  if (name === "loopgraph_app_field_mapping_confirm") {
+    const parsed = appFieldMappingConfirmInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const connections = await readConnectionInstances(projectRoot);
+    if (!connections.some((connection) => connection.id === parsed.connectionId)) {
+      throw new Error(`Connection not found: ${parsed.connectionId}`);
+    }
+    const snapshotStore = new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), identity.workspaceId);
+    const snapshot = await snapshotStore.get(parsed.connectionId, options.now);
+    const providerFields = snapshot?.objects.find((object) => object.objectType === parsed.objectType)?.fields;
+    if (providerFields) {
+      const unknown = parsed.mappings.filter((mapping) => !providerFields.some((field) => field.name === mapping.providerField));
+      if (unknown.length > 0) {
+        throw new Error(`Provider fields are not present in the current schema snapshot: ${unknown.map((mapping) => mapping.providerField).join(", ")}`);
+      }
+    }
+    const mappingStore = new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), identity.workspaceId);
+    const mappings = [];
+    for (const mapping of parsed.mappings) {
+      mappings.push(await mappingStore.saveConfirmed({
+        connectionId: parsed.connectionId,
+        objectType: parsed.objectType,
+        logicalField: mapping.logicalField,
+        providerField: mapping.providerField,
+        direction: mapping.direction,
+        confidence: mapping.confidence,
+        confirmedBy: parsed.actor,
+        now: options.now
+      }));
+    }
+    return { schemaVersion: "loopgraph-field-mapping-confirmation/v1alpha1", connectionId: parsed.connectionId, objectType: parsed.objectType, mappings };
+  }
   const service = new AppInstallationService(marketplace, projectRoot, identity.workspaceId, identity.companyId);
   if (name === "loopgraph_app_install_plan") {
     const parsed = appInstallPlanInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -567,4 +687,141 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function readPackDocument(root: string, relativePath: string): Promise<unknown> {
   const text = await readFile(path.join(root, relativePath), "utf8");
   return relativePath.endsWith(".json") ? JSON.parse(text) : YAML.parse(text);
+}
+
+async function buildAppFieldMappingPlan(input: {
+  marketplace: LocalAppMarketplace;
+  projectRoot: string;
+  workspaceId: string;
+  appId: string;
+  version?: string;
+  presetId: string;
+  now?: Date;
+}): Promise<unknown> {
+  const version = input.version
+    ? await input.marketplace.resolveAppVersion(input.appId, input.version)
+    : await input.marketplace.resolveAppVersion(input.appId, "latest");
+  const loaded = await input.marketplace.getAppArtifact(input.appId, version.version, version.digest);
+  const preset = loaded.manifest.presets.find((candidate) => candidate.id === input.presetId);
+  if (!preset) throw new Error(`Preset ${input.presetId} does not exist in ${input.appId}@${version.version}`);
+  const presetDocument = await readPackDocument(loaded.root, preset.path);
+  const selectedRecipeId = isRecord(presetDocument) && typeof presetDocument.recipe === "string"
+    ? presetDocument.recipe
+    : preset.id;
+  const recipes = await loadConnectorRecipes(loaded);
+  const recipe = recipes.find((candidate) => candidate.id === selectedRecipeId);
+  if (!recipe) throw new Error(`Connector recipe not found: ${selectedRecipeId}`);
+  const connections = await readConnectionInstances(input.projectRoot);
+  const capabilityResolutions = resolveConnectorCapabilities({
+    requiredCapabilities: loaded.manifest.requiredCapabilities,
+    optionalCapabilities: loaded.manifest.optionalCapabilities,
+    recipes,
+    connections,
+    selectedRecipeId
+  });
+  const appsRoot = path.join(input.projectRoot, ".loopgraph", "apps");
+  const mappingStore = new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), input.workspaceId);
+  const snapshotStore = new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), input.workspaceId);
+  const confirmedMappings = await mappingStore.list();
+  const requirements = [];
+  for (const requirement of recipe.fieldMappings) {
+    const providerId = requirement.providerId ?? recipe.providerId;
+    const providerCapabilities = new Set(recipe.capabilities
+      .filter((binding) => providerIdForCapability(recipe, binding) === providerId)
+      .map((binding) => binding.logicalCapability));
+    const connectionId = capabilityResolutions.find((resolution) =>
+      Boolean(resolution.connectionId) && providerCapabilities.has(resolution.capability)
+    )?.connectionId;
+    const existingMappings = connectionId
+      ? confirmedMappings.filter((mapping) => mapping.connectionId === connectionId && mapping.objectType === requirement.objectType)
+      : [];
+    const coverage = connectionId
+      ? validateFieldMappingCoverage({
+        requiredLogicalFields: requirement.requiredLogicalFields,
+        mappings: existingMappings,
+        connectionId,
+        objectType: requirement.objectType
+      })
+      : { complete: false, missing: [...requirement.requiredLogicalFields], unverified: [] as string[] };
+    const snapshot = connectionId ? await snapshotStore.get(connectionId, input.now) : undefined;
+    const snapshotFields = snapshot?.objects.find((object) => object.objectType === requirement.objectType)?.fields;
+    const providerFields = connectionId
+      ? snapshotFields ?? connectorMetadataFields(providerId, [...requirement.requiredLogicalFields, ...requirement.optionalLogicalFields])
+      : [];
+    const suggestions = connectionId
+      ? suggestFieldMappings({
+        requiredLogicalFields: requirement.requiredLogicalFields,
+        optionalLogicalFields: requirement.optionalLogicalFields,
+        providerFields
+      }).map((suggestion) => snapshotFields ? suggestion : {
+        ...suggestion,
+        requiresConfirmation: true,
+        reason: `${suggestion.reason} This is a connector-metadata estimate and must be confirmed against the company schema.`
+      })
+      : [];
+    requirements.push({
+      recipeId: recipe.id,
+      providerId,
+      connectionId,
+      objectType: requirement.objectType,
+      requiredLogicalFields: requirement.requiredLogicalFields,
+      optionalLogicalFields: requirement.optionalLogicalFields,
+      schemaStatus: !connectionId ? "connection_required" : snapshotFields ? "connected_snapshot" : "connector_metadata",
+      snapshotInspectedAt: snapshotFields ? snapshot?.inspectedAt : undefined,
+      providerFields,
+      existingMappings,
+      suggestions,
+      missingRequiredFields: coverage.missing,
+      unverifiedRequiredFields: coverage.unverified
+    });
+  }
+  return appFieldMappingPlanSchema.parse({
+    schemaVersion: "loopgraph-field-mapping-plan/v1alpha1",
+    workspaceId: input.workspaceId,
+    appId: input.appId,
+    version: version.version,
+    presetId: input.presetId,
+    complete: requirements.every((requirement) => Boolean(requirement.connectionId) && requirement.missingRequiredFields.length === 0 && requirement.unverifiedRequiredFields.length === 0),
+    requirements
+  });
+}
+
+function connectorMetadataFields(providerId: string, logicalFields: string[]) {
+  return Array.from(new Set(logicalFields)).map((logicalField) => ({
+    name: providerFieldHint(providerId, logicalField),
+    label: logicalField.split(".").at(-1)?.replace(/([a-z])([A-Z])/g, "$1 $2"),
+    type: "string" as const,
+    writable: false,
+    sampleValues: []
+  }));
+}
+
+function providerFieldHint(providerId: string, logicalField: string): string {
+  const field = logicalField.split(".").at(-1) ?? logicalField;
+  const normalizedProvider = providerId.toLowerCase();
+  const common: Record<string, Record<string, string>> = {
+    hubspot: {
+      id: "hs_object_id",
+      lifecycleStage: "lifecyclestage",
+      employeeCount: "numberofemployees",
+      revenue: "annualrevenue",
+      customerStatus: "lifecyclestage",
+      domain: "domain"
+    },
+    salesforce: {
+      id: "Id",
+      email: "Email",
+      company: "Company",
+      lifecycleStage: "Status",
+      employeeCount: "NumberOfEmployees",
+      revenue: "AnnualRevenue",
+      customerStatus: "Type",
+      domain: "Website"
+    }
+  };
+  return common[normalizedProvider]?.[field] ?? field;
+}
+
+function providerMatchesConnection(providerId: string, manifestId: string): boolean {
+  return manifestId === providerId || manifestId.startsWith(`${providerId}.`) || manifestId.startsWith(`${providerId}-`);
 }
