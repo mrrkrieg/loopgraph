@@ -60,6 +60,18 @@ describe("Loopgraph template catalog", () => {
       examplePath: "packs/official/product/turn-feedback-into-product-problems",
       routingDefinition: expect.objectContaining({ problemTypes: ["product.recurring_feedback"] })
     });
+
+    const financeTemplates = getDepartmentTemplates().find((department) => department.key === "operations_finance")!.commonLoops;
+    expect(financeTemplates).toHaveLength(6);
+    expect(financeTemplates.find((template) => template.id === "operations_finance-forecast_variance")).toBeUndefined();
+    expect(financeTemplates.find((template) => template.id === "ops-finance-forecast-variance")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/operations-finance/manage-forecast-controls",
+      routingDefinition: expect.objectContaining({
+        problemTypes: ["finance.forecast_variance"],
+        supportingLoopTemplateIds: ["ops-finance-approval-bottleneck", "ops-finance-resource-allocation"]
+      })
+    });
   });
 
   it("generates valid v1alpha1 starter specs for spec-stub templates", () => {

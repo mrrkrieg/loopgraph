@@ -763,7 +763,7 @@ function catalogLoopId(templateId: string) {
     "product-feedback-clustering": "loop_demo_product_discovery",
     "cs-customer-health": "loop_demo_customer_health",
     "engineering-qa_checklist": "loop_demo_engineering_quality",
-    "operations_finance-approval_bottleneck": "loop_demo_ops_efficiency",
+    "ops-finance-approval-bottleneck": "loop_demo_ops_efficiency",
     "hr-manager_coaching": "loop_demo_people_engagement",
     "legal_security-policy_drift": "loop_demo_risk_compliance"
   };

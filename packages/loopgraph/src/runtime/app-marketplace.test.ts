@@ -23,6 +23,11 @@ describe("local app marketplace", () => {
     expect(byOutcome[0]?.app.id).toBe("loopgraph.sales.qualify-route-inbound-leads");
     const byCapability = await marketplace.searchApps({ capability: "crm.lead.read" });
     expect(byCapability.map((result) => result.app.id)).toContain("loopgraph.sales.qualify-route-inbound-leads");
+
+    const byFinanceOutcome = await marketplace.searchApps({ query: "explain forecast variance" });
+    expect(byFinanceOutcome[0]?.app.id).toBe("loopgraph.ops-finance.manage-forecast-controls");
+    const byFinanceCapability = await marketplace.searchApps({ capability: "finance.forecast.read" });
+    expect(byFinanceCapability.map((result) => result.app.id)).toContain("loopgraph.ops-finance.manage-forecast-controls");
   });
 
   it("resolves immutable versions and verifies the cached artifact", async () => {

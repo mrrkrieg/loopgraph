@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: ops-finance-decision-brief
+name: Governed Financial Decision Brief
+description: Convert reconciled constraints and options into a compact, source-cited decision contract without making the business decision.
+department: ops_finance
+goal: Give an accountable owner clear options, tradeoffs, assumptions, authority boundaries, and a measurable follow-through window.
+inputs: [named company constraint, reconciled financial evidence, capacity evidence, decision options, policy boundaries, accountable owner]
+outputs: [decision question, option comparison, recommendation bounds, approval requirements, measurement and revisit plan]
+instructions:
+  - State the one decision, accountable owner, deadline, and consequence of deferral.
+  - Compare options on cost, capacity, expected goal impact, risk, reversibility, dependencies, and evidence confidence.
+  - Separate observed facts, approved assumptions, estimates, and unknowns.
+  - Identify the exact authority and approval required for each possible action.
+  - Define a measurement window, falsification condition, and revisit trigger before proposing action.
+  - Return the approved, rejected, or deferred decision and realized outcome to forecast and company learning.
+boundaries:
+  - Never select strategy, allocate capital, authorize spend, change staffing, commit to a vendor, or send a customer message.
+  - Never collapse options into a recommendation when evidence or ownership is ambiguous.
+  - Never present estimated savings as realized value.
+requiredCapabilities: [finance.forecast.read, capacity.plan.read, analytics.metric.query]

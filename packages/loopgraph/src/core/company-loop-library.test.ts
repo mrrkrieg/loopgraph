@@ -49,14 +49,21 @@ describe("prebuilt company loop library", () => {
 
   it("uses the generated official LoopPack catalog for migrated departments", () => {
     expect(OFFICIAL_APP_CATALOG_SOURCE_DIGEST).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(PACK_DERIVED_COMPANY_LOOPS).toHaveLength(35);
+    expect(PACK_DERIVED_COMPANY_LOOPS).toHaveLength(41);
     expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "product-feedback_to_problem")).toBeUndefined();
     expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "product-feedback-clustering")).toMatchObject({
       departmentType: "product",
       problemTypes: ["product.recurring_feedback"]
     });
-    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "operations_finance-forecast_variance")).toBeDefined();
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "operations_finance-forecast_variance")).toBeUndefined();
+    expect(PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === "ops-finance-forecast-variance")).toMatchObject({
+      departmentType: "ops_finance",
+      problemTypes: ["finance.forecast_variance"],
+      supportingLoopTemplateIds: ["ops-finance-approval-bottleneck", "ops-finance-resource-allocation"]
+    });
     expect(resolveCompanyLoopTemplateId("marketing-campaign_learning")).toBe("marketing-campaign-learning");
     expect(getPrebuiltLoopDefinition("marketing-campaign_learning")?.templateId).toBe("marketing-campaign-learning");
+    expect(resolveCompanyLoopTemplateId("operations_finance-forecast_variance")).toBe("ops-finance-forecast-variance");
+    expect(getPrebuiltLoopDefinition("operations_finance-forecast_variance")?.templateId).toBe("ops-finance-forecast-variance");
   });
 });

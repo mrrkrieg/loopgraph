@@ -1,0 +1,1 @@
+{"id":"ops-finance-forecast-excluded","eventType":"finance.forecast_variance_detected","subject":{"type":"forecast_window","id":"forecast-sandbox-v1"},"normalizedPayload":{"forecastId":"forecast-sandbox","version":"v1","periodStart":"2027-01-01","periodEnd":"2027-03-31","baseline":1000,"current":900,"excluded":true,"confidence":1},"evidenceRefs":["policy:sandbox-scenario"]}

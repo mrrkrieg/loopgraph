@@ -194,6 +194,7 @@ Opinionated apps also declare a typed evidence topology in the signed pack: shar
 | [Find and Recover Deals Going Cold](packs/official/sales/find-recover-cold-deals) | Sales | Diagnose stalled deals, prepare governed recovery, and learn from pipeline outcomes |
 | [Learn Which Campaigns Create Qualified Pipeline](packs/official/marketing/learn-qualified-pipeline) | Marketing | Connect campaign spend to qualification, activation, pipeline, and governed allocation learning |
 | [Run Engineering Issue and Incident Operations](packs/official/engineering/run-issue-incident-operations) | Engineering | Route issues and incidents through planning, customer impact, release readiness, and recurrence learning |
+| [Explain Forecast Variance and Govern Financial Operations](packs/official/operations-finance/manage-forecast-controls) | Operations & Finance | Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions |
 | [Catch Strategic Account and Renewal Risk](packs/official/customer-success/catch-renewal-risk) | Customer Success | Join health, support, billing, adoption, and renewal evidence into governed account recovery |
 | [Triage GitHub Issues Safely](packs/official/engineering/triage-github-issues) | Engineering | Classify repository issues and govern security-sensitive escalation |
 | [Triage and Escalate Support Tickets](packs/official/customer-success/triage-support-tickets) | Customer Success | Route support demand, prepare responses, and identify material risk |

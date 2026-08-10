@@ -1,0 +1,53 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: ops-finance-approval-bottleneck
+  name: Approval Bottleneck
+  version: 1.0.0
+  description: Diagnose a policy-bound approval that blocks an evidenced business outcome and prepare an accountable resolution path.
+  department: ops_finance
+  ownerRole: operations_lead
+  tags: [approvals, bottlenecks, operating-controls]
+trigger: { type: event, source: "*", event: operations.approval_overdue }
+input:
+  requiredFields: [normalizedPayload.approvalId, normalizedPayload.policyVersion, normalizedPayload.ownerId, normalizedPayload.dueAt, normalizedPayload.affectedOutcome]
+  subjectTypes: [approval, approval_request]
+  fixtures: [{ id: approval-overdue, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize approval state, actor: system, type: observe, description: "Preserve request identity, policy version, threshold, owner, due time, dependencies, and affected outcome." }
+  - { id: verify, name: Verify policy and ownership, actor: agent, type: verify, description: "Confirm the applicable policy, required evidence, approver authority, and whether the request is actually blocked." }
+  - { id: diagnose, name: Diagnose bottleneck, actor: agent, type: assess, description: "Distinguish missing evidence, absent owner, sequencing, threshold, workload, and policy-conflict causes." }
+  - { id: prepare, name: Prepare resolution, actor: agent, type: prepare, description: Prepare the smallest owner action or escalation task without approving the underlying request. }
+  - { id: learn, name: Return approval outcome, actor: system, type: learn, description: "Record resolution time, cause, reviewer corrections, and whether the affected outcome recovered." }
+capabilities:
+  - { key: approval.record.read, authority: read, risk: medium, required: true, purpose: "Read approval state, owner, policy, threshold, and elapsed time.", customerFacing: false }
+  - { key: finance.forecast.read, authority: read, risk: high, required: true, purpose: Read the bounded financial outcome affected by the approval., customerFacing: false }
+  - { key: project.task.create, authority: approve, risk: high, required: false, purpose: Create the exact approved remediation or escalation task., customerFacing: false }
+skills: [ops-finance-control-review, ops-finance-decision-brief]
+outcomes:
+  - { metric: approval_resolution_minutes, description: Time from evidenced overdue state to accountable resolution., direction: decrease, sourceCapability: approval.record.read }
+  - { metric: repeat_approval_bottleneck_rate, description: Approval classes that repeat after corrective action., direction: decrease, sourceCapability: approval.record.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [operations.approval_bottleneck]
+  accepts: [{ sourcePattern: "*", eventTypePattern: operations.approval_overdue, subjectTypes: [approval, approval_request], requiredFields: [normalizedPayload.approvalId, normalizedPayload.policyVersion, normalizedPayload.ownerId, normalizedPayload.dueAt, normalizedPayload.affectedOutcome], reason: A policy-bound approval is overdue and its owner and affected outcome are known. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle evidence appends to existing work. }]
+  inputMapping: { approvalId: normalizedPayload.approvalId, policyVersion: normalizedPayload.policyVersion, ownerId: normalizedPayload.ownerId, dueAt: normalizedPayload.dueAt, affectedOutcome: normalizedPayload.affectedOutcome }
+  priority: 85
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 100, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [approval.record.read, finance.forecast.read]
+  examples: { shouldRoute: [A known approval owner missed a policy deadline and blocks an evidenced outcome.], shouldNotRoute: [The request is still within SLA., The applicable policy version cannot be resolved.] }
+policy:
+  forbiddenActions:
+    - { capability: approval.request.approve, reason: Hermes cannot approve the underlying business request. }
+    - { capability: finance.payment.execute, reason: Approval diagnosis cannot move money. }
+  escalationOwner: operations_lead
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

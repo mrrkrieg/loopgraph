@@ -2,7 +2,7 @@
 
 export const GENERATED_OFFICIAL_APP_CATALOG = {
   "schemaVersion": "loopgraph-generated-app-catalog/v1alpha1",
-  "sourceDigest": "sha256:51b27c522d85433d34a7016b9b518910c9fbcfaa1a1db27a92a717238dfa7300",
+  "sourceDigest": "sha256:84456cda465a7e61845e60f53f02d27d98141256d4b3c8ae0f302025553042d5",
   "entries": [
     {
       "app": {
@@ -2223,6 +2223,801 @@ export const GENERATED_OFFICIAL_APP_CATALOG = {
         ],
         "examplePath": "packs/official/marketing/learn-qualified-pipeline",
         "fixturePaths": []
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.ops-finance.manage-forecast-controls",
+        "name": "Explain Forecast Variance and Govern Financial Operations",
+        "version": "1.0.0",
+        "department": "ops_finance",
+        "summary": "Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.",
+        "sourcePath": "packs/official/operations-finance/manage-forecast-controls"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "ops-finance-forecast-variance",
+        "departmentType": "ops_finance",
+        "problemTypes": [
+          "finance.forecast_variance"
+        ],
+        "eventTypes": [
+          "finance.forecast_variance_detected"
+        ],
+        "subjectTypes": [
+          "forecast",
+          "forecast_window"
+        ],
+        "requiredContext": [
+          "normalizedPayload.forecastId",
+          "normalizedPayload.version",
+          "normalizedPayload.periodStart",
+          "normalizedPayload.periodEnd",
+          "normalizedPayload.baseline",
+          "normalizedPayload.current"
+        ],
+        "requiredConnections": [
+          "finance.forecast.read",
+          "analytics.metric.query"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Lifecycle events update existing work and cannot open a duplicate variance problem."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "declared_ordered",
+          "maxRoutes": 3,
+          "requiresIndependentProblems": false
+        },
+        "priority": 100,
+        "minimumConfidence": 0.9,
+        "supportingLoopTemplateIds": [
+          "ops-finance-approval-bottleneck",
+          "ops-finance-resource-allocation"
+        ],
+        "learningOutputs": [
+          "Forecast Variance Explanation Coverage: Material variance with reconciled and reviewable driver evidence.",
+          "Forecast Driver Accuracy: Identified drivers confirmed by realized outcomes in the declared window."
+        ],
+        "learningConsumers": [
+          "ops_finance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A versioned forecast window crosses the approved materiality threshold with reconciled baseline evidence."
+        ],
+        "shouldNotRouteExamples": [
+          "The forecast version is unknown.",
+          "The signal is a draft scenario with no approved baseline."
+        ]
+      },
+      "template": {
+        "id": "ops-finance-forecast-variance",
+        "department": "operations_finance",
+        "loopType": "forecast",
+        "name": "Forecast Variance",
+        "description": "Reconcile a versioned forecast against its approved baseline, identify material drivers, and prepare a traceable variance finding.",
+        "runtimeLevel": "runnable",
+        "goal": "Reconcile a versioned forecast against its approved baseline, identify material drivers, and prepare a traceable variance finding.",
+        "businessOutcome": "Material variance with reconciled and reviewable driver evidence.",
+        "primaryMetric": "Forecast Variance Explanation Coverage",
+        "secondaryMetrics": [
+          "Forecast Driver Accuracy",
+          "Approval Resolution Minutes",
+          "Close Cycle Time Hours",
+          "Overdue Receivable Days"
+        ],
+        "observes": [
+          "Forecast",
+          "Forecast Window",
+          "NormalizedPayload ForecastId",
+          "NormalizedPayload Version",
+          "NormalizedPayload PeriodStart",
+          "NormalizedPayload PeriodEnd",
+          "NormalizedPayload Baseline",
+          "NormalizedPayload Current"
+        ],
+        "requiredDataSources": [
+          "Finance Forecast Read",
+          "Analytics Metric Query",
+          "Finance Ledger Read",
+          "Finance Receivable Read",
+          "Finance Vendor Read",
+          "Approval Record Read",
+          "Contract Record Read",
+          "Crm Account Read",
+          "Capacity Plan Read"
+        ],
+        "routine": [
+          "Preserve forecast version, period, currency, baseline, current value, source timestamps, and delivery identity.",
+          "Reconcile approved forecast assumptions with ledger and operational driver evidence; list every unresolved difference.",
+          "Separate timing, volume, price, source-quality, approval, and capacity drivers using company materiality policy.",
+          "Produce one primary variance finding and invoke only topology-permitted support when its evidence condition is proven.",
+          "Check arithmetic, source coverage, period alignment, uncertainty, owner, and decision threshold.",
+          "Return reviewer corrections, realized values, driver accuracy, and decision outcomes to the next forecast window."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.forecastId, normalizedPayload.version, normalizedPayload.periodStart, normalizedPayload.periodEnd, normalizedPayload.baseline, normalizedPayload.current.",
+          "Evidence must remain traceable to the affected forecast, forecast_window.",
+          "Check arithmetic, source coverage, period alignment, uncertainty, owner, and decision threshold.",
+          "Forecast analysis can never move money.",
+          "Budget and forecast changes require a separate exact approval.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Finance Controller within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Forecast analysis can never move money.",
+          "Budget and forecast changes require a separate exact approval.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/operations-finance/manage-forecast-controls",
+        "fixturePaths": [
+          "packs/official/operations-finance/manage-forecast-controls/fixtures/happy.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.ops-finance.manage-forecast-controls",
+        "name": "Explain Forecast Variance and Govern Financial Operations",
+        "version": "1.0.0",
+        "department": "ops_finance",
+        "summary": "Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.",
+        "sourcePath": "packs/official/operations-finance/manage-forecast-controls"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "ops-finance-approval-bottleneck",
+        "departmentType": "ops_finance",
+        "problemTypes": [
+          "operations.approval_bottleneck"
+        ],
+        "eventTypes": [
+          "operations.approval_overdue"
+        ],
+        "subjectTypes": [
+          "approval",
+          "approval_request"
+        ],
+        "requiredContext": [
+          "normalizedPayload.approvalId",
+          "normalizedPayload.policyVersion",
+          "normalizedPayload.ownerId",
+          "normalizedPayload.dueAt",
+          "normalizedPayload.affectedOutcome"
+        ],
+        "requiredConnections": [
+          "approval.record.read",
+          "finance.forecast.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Lifecycle evidence appends to existing work."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 85,
+        "minimumConfidence": 0.9,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Approval Resolution Minutes: Time from evidenced overdue state to accountable resolution.",
+          "Repeat Approval Bottleneck Rate: Approval classes that repeat after corrective action."
+        ],
+        "learningConsumers": [
+          "ops_finance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A known approval owner missed a policy deadline and blocks an evidenced outcome."
+        ],
+        "shouldNotRouteExamples": [
+          "The request is still within SLA.",
+          "The applicable policy version cannot be resolved."
+        ]
+      },
+      "template": {
+        "id": "ops-finance-approval-bottleneck",
+        "department": "operations_finance",
+        "loopType": "approvals",
+        "name": "Approval Bottleneck",
+        "description": "Diagnose a policy-bound approval that blocks an evidenced business outcome and prepare an accountable resolution path.",
+        "runtimeLevel": "runnable",
+        "goal": "Diagnose a policy-bound approval that blocks an evidenced business outcome and prepare an accountable resolution path.",
+        "businessOutcome": "Time from evidenced overdue state to accountable resolution.",
+        "primaryMetric": "Approval Resolution Minutes",
+        "secondaryMetrics": [
+          "Repeat Approval Bottleneck Rate",
+          "Forecast Variance Explanation Coverage",
+          "Forecast Driver Accuracy",
+          "Close Cycle Time Hours"
+        ],
+        "observes": [
+          "Approval",
+          "Approval Request",
+          "NormalizedPayload ApprovalId",
+          "NormalizedPayload PolicyVersion",
+          "NormalizedPayload OwnerId",
+          "NormalizedPayload DueAt",
+          "NormalizedPayload AffectedOutcome"
+        ],
+        "requiredDataSources": [
+          "Approval Record Read",
+          "Finance Forecast Read",
+          "Project Task Create",
+          "Finance Ledger Read",
+          "Finance Receivable Read",
+          "Finance Vendor Read",
+          "Contract Record Read",
+          "Analytics Metric Query",
+          "Crm Account Read",
+          "Capacity Plan Read"
+        ],
+        "routine": [
+          "Preserve request identity, policy version, threshold, owner, due time, dependencies, and affected outcome.",
+          "Confirm the applicable policy, required evidence, approver authority, and whether the request is actually blocked.",
+          "Distinguish missing evidence, absent owner, sequencing, threshold, workload, and policy-conflict causes.",
+          "Prepare the smallest owner action or escalation task without approving the underlying request.",
+          "Record resolution time, cause, reviewer corrections, and whether the affected outcome recovered."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.approvalId, normalizedPayload.policyVersion, normalizedPayload.ownerId, normalizedPayload.dueAt, normalizedPayload.affectedOutcome.",
+          "Evidence must remain traceable to the affected approval, approval_request.",
+          "Confirm the applicable policy, required evidence, approver authority, and whether the request is actually blocked.",
+          "Hermes cannot approve the underlying business request.",
+          "Approval diagnosis cannot move money.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Operations Lead within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Hermes cannot approve the underlying business request.",
+          "Approval diagnosis cannot move money.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/operations-finance/manage-forecast-controls",
+        "fixturePaths": [
+          "packs/official/operations-finance/manage-forecast-controls/fixtures/happy.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.ops-finance.manage-forecast-controls",
+        "name": "Explain Forecast Variance and Govern Financial Operations",
+        "version": "1.0.0",
+        "department": "ops_finance",
+        "summary": "Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.",
+        "sourcePath": "packs/official/operations-finance/manage-forecast-controls"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "ops-finance-vendor-review",
+        "departmentType": "ops_finance",
+        "problemTypes": [
+          "finance.vendor_risk"
+        ],
+        "eventTypes": [
+          "finance.vendor_review_due"
+        ],
+        "subjectTypes": [
+          "vendor",
+          "vendor_contract"
+        ],
+        "requiredContext": [
+          "normalizedPayload.vendorId",
+          "normalizedPayload.contractId",
+          "normalizedPayload.renewalAt",
+          "normalizedPayload.spend",
+          "normalizedPayload.ownerId"
+        ],
+        "requiredConnections": [
+          "finance.vendor.read",
+          "contract.record.read",
+          "analytics.metric.query"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Lifecycle evidence cannot create a second vendor review."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 75,
+        "minimumConfidence": 0.92,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Vendor Review Evidence Completeness: Vendor reviews with current spend, usage, contract, security, and ownership evidence.",
+          "Vendor Commitment Utilization: Approved contract value supported by realized usage and service evidence."
+        ],
+        "learningConsumers": [
+          "ops_finance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A vendor renewal has current spend",
+          "usage",
+          "contract",
+          "and accountable ownership."
+        ],
+        "shouldNotRouteExamples": [
+          "Multiple contracts match the same vendor.",
+          "The contract is privileged and outside the approved evidence scope."
+        ]
+      },
+      "template": {
+        "id": "ops-finance-vendor-review",
+        "department": "operations_finance",
+        "loopType": "vendors",
+        "name": "Vendor Review",
+        "description": "Join vendor spend, usage, contract, security, renewal, and ownership evidence into a governed review packet.",
+        "runtimeLevel": "runnable",
+        "goal": "Join vendor spend, usage, contract, security, renewal, and ownership evidence into a governed review packet.",
+        "businessOutcome": "Vendor reviews with current spend, usage, contract, security, and ownership evidence.",
+        "primaryMetric": "Vendor Review Evidence Completeness",
+        "secondaryMetrics": [
+          "Vendor Commitment Utilization",
+          "Forecast Variance Explanation Coverage",
+          "Forecast Driver Accuracy",
+          "Approval Resolution Minutes"
+        ],
+        "observes": [
+          "Vendor",
+          "Vendor Contract",
+          "NormalizedPayload VendorId",
+          "NormalizedPayload ContractId",
+          "NormalizedPayload RenewalAt",
+          "NormalizedPayload Spend",
+          "NormalizedPayload OwnerId"
+        ],
+        "requiredDataSources": [
+          "Finance Vendor Read",
+          "Contract Record Read",
+          "Analytics Metric Query",
+          "Project Task Create",
+          "Finance Forecast Read",
+          "Finance Ledger Read",
+          "Finance Receivable Read",
+          "Approval Record Read",
+          "Crm Account Read",
+          "Capacity Plan Read"
+        ],
+        "routine": [
+          "Resolve vendor, contract, renewal, owner, business unit, spend window, and approved usage identity.",
+          "Compare contracted spend, realized usage, service health, security status, and dependency evidence.",
+          "Surface price, utilization, concentration, control, renewal, and ownership exceptions without making legal conclusions.",
+          "Prepare renew, renegotiate, consolidate, or retire options with exact assumptions and accountable reviewers.",
+          "Record the approved decision, realized cost, service outcome, and recurring exception class."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.vendorId, normalizedPayload.contractId, normalizedPayload.renewalAt, normalizedPayload.spend, normalizedPayload.ownerId.",
+          "Evidence must remain traceable to the affected vendor, vendor_contract.",
+          "Vendor commitments require procurement, finance, security, and legal approval.",
+          "Vendor review cannot move money.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Procurement Owner within 2d.",
+          "Customer-facing actions require a separate exact approval.",
+          "Vendor commitments require procurement, finance, security, and legal approval.",
+          "Vendor review cannot move money.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/operations-finance/manage-forecast-controls",
+        "fixturePaths": [
+          "packs/official/operations-finance/manage-forecast-controls/fixtures/happy.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.ops-finance.manage-forecast-controls",
+        "name": "Explain Forecast Variance and Govern Financial Operations",
+        "version": "1.0.0",
+        "department": "ops_finance",
+        "summary": "Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.",
+        "sourcePath": "packs/official/operations-finance/manage-forecast-controls"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "ops-finance-close-readiness",
+        "departmentType": "ops_finance",
+        "problemTypes": [
+          "finance.close_readiness"
+        ],
+        "eventTypes": [
+          "finance.close_review_due"
+        ],
+        "subjectTypes": [
+          "accounting_period"
+        ],
+        "requiredContext": [
+          "normalizedPayload.entityId",
+          "normalizedPayload.periodEnd",
+          "normalizedPayload.reconciliationStatus",
+          "normalizedPayload.blockers"
+        ],
+        "requiredConnections": [
+          "finance.ledger.read",
+          "approval.record.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Close lifecycle evidence updates the existing period problem."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 80,
+        "minimumConfidence": 0.94,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Close Readiness Evidence Coverage: Close checklist items with reconciled source evidence and accountable owners.",
+          "Close Cycle Time Hours: Hours from period end to verified close completion."
+        ],
+        "learningConsumers": [
+          "ops_finance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A declared accounting period has current reconciliation and blocker evidence."
+        ],
+        "shouldNotRouteExamples": [
+          "The period identity is missing.",
+          "The request asks Hermes to make an accounting judgment."
+        ]
+      },
+      "template": {
+        "id": "ops-finance-close-readiness",
+        "department": "operations_finance",
+        "loopType": "close",
+        "name": "Close Readiness",
+        "description": "Assess period-close evidence, reconciliation gaps, control exceptions, and accountable blockers without posting accounting entries.",
+        "runtimeLevel": "runnable",
+        "goal": "Assess period-close evidence, reconciliation gaps, control exceptions, and accountable blockers without posting accounting entries.",
+        "businessOutcome": "Close checklist items with reconciled source evidence and accountable owners.",
+        "primaryMetric": "Close Readiness Evidence Coverage",
+        "secondaryMetrics": [
+          "Close Cycle Time Hours",
+          "Forecast Variance Explanation Coverage",
+          "Forecast Driver Accuracy",
+          "Approval Resolution Minutes"
+        ],
+        "observes": [
+          "Accounting Period",
+          "NormalizedPayload EntityId",
+          "NormalizedPayload PeriodEnd",
+          "NormalizedPayload ReconciliationStatus",
+          "NormalizedPayload Blockers"
+        ],
+        "requiredDataSources": [
+          "Finance Ledger Read",
+          "Approval Record Read",
+          "Finance Forecast Read",
+          "Finance Receivable Read",
+          "Finance Vendor Read",
+          "Contract Record Read",
+          "Analytics Metric Query",
+          "Crm Account Read",
+          "Capacity Plan Read"
+        ],
+        "routine": [
+          "Preserve entity, period, checklist version, reconciliation status, blockers, owners, and evidence timestamps.",
+          "Compare ledger, subledger, approval, variance, and supporting-document evidence; retain unresolved differences.",
+          "Separate data, ownership, policy, approval, timing, and accounting-judgment blockers.",
+          "Prepare a readiness state and owner action list while escalating accounting judgment to the controller.",
+          "Check source citations, period alignment, reconciliation evidence, control exceptions, and accountable owners.",
+          "Record close duration, late adjustments, repeated blockers, and reviewer corrections."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.entityId, normalizedPayload.periodEnd, normalizedPayload.reconciliationStatus, normalizedPayload.blockers.",
+          "Evidence must remain traceable to the affected accounting_period.",
+          "Check source citations, period alignment, reconciliation evidence, control exceptions, and accountable owners.",
+          "Hermes cannot post or modify accounting entries.",
+          "The finance controller owns the close decision.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Finance Controller within 2h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Hermes cannot post or modify accounting entries.",
+          "The finance controller owns the close decision.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/operations-finance/manage-forecast-controls",
+        "fixturePaths": [
+          "packs/official/operations-finance/manage-forecast-controls/fixtures/outcome.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.ops-finance.manage-forecast-controls",
+        "name": "Explain Forecast Variance and Govern Financial Operations",
+        "version": "1.0.0",
+        "department": "ops_finance",
+        "summary": "Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.",
+        "sourcePath": "packs/official/operations-finance/manage-forecast-controls"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "ops-finance-cash-collection",
+        "departmentType": "ops_finance",
+        "problemTypes": [
+          "finance.receivable_risk"
+        ],
+        "eventTypes": [
+          "finance.receivable_risk_detected"
+        ],
+        "subjectTypes": [
+          "invoice",
+          "receivable_risk"
+        ],
+        "requiredContext": [
+          "normalizedPayload.invoiceId",
+          "normalizedPayload.accountId",
+          "normalizedPayload.amount",
+          "normalizedPayload.currency",
+          "normalizedPayload.dueAt",
+          "normalizedPayload.ownerId"
+        ],
+        "requiredConnections": [
+          "finance.receivable.read",
+          "crm.account.read"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Payment and communication outcomes append to the existing receivable problem."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 90,
+        "minimumConfidence": 0.94,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Overdue Receivable Days: Days an eligible receivable remains unresolved after its due date.",
+          "Collection Draft Correction Rate: Prepared customer collection drafts materially corrected by reviewers."
+        ],
+        "learningConsumers": [
+          "ops_finance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "An invoice is overdue with resolved account",
+          "balance",
+          "dispute",
+          "owner",
+          "and policy evidence."
+        ],
+        "shouldNotRouteExamples": [
+          "The balance is already settled.",
+          "Multiple accounts match the invoice identity."
+        ]
+      },
+      "template": {
+        "id": "ops-finance-cash-collection",
+        "department": "operations_finance",
+        "loopType": "receivables",
+        "name": "Cash Collection",
+        "description": "Resolve invoice and account context, diagnose receivable risk, and prepare controlled collection follow-up without sending or moving money.",
+        "runtimeLevel": "runnable",
+        "goal": "Resolve invoice and account context, diagnose receivable risk, and prepare controlled collection follow-up without sending or moving money.",
+        "businessOutcome": "Days an eligible receivable remains unresolved after its due date.",
+        "primaryMetric": "Overdue Receivable Days",
+        "secondaryMetrics": [
+          "Collection Draft Correction Rate",
+          "Forecast Variance Explanation Coverage",
+          "Forecast Driver Accuracy",
+          "Approval Resolution Minutes"
+        ],
+        "observes": [
+          "Invoice",
+          "Receivable Risk",
+          "NormalizedPayload InvoiceId",
+          "NormalizedPayload AccountId",
+          "NormalizedPayload Amount",
+          "NormalizedPayload Currency",
+          "NormalizedPayload DueAt",
+          "NormalizedPayload OwnerId"
+        ],
+        "requiredDataSources": [
+          "Finance Receivable Read",
+          "Crm Account Read",
+          "Mail Message Draft",
+          "Finance Forecast Read",
+          "Finance Ledger Read",
+          "Finance Vendor Read",
+          "Approval Record Read",
+          "Contract Record Read",
+          "Analytics Metric Query",
+          "Capacity Plan Read"
+        ],
+        "routine": [
+          "Resolve invoice, account, amount, currency, due date, owner, payment state, dispute state, and relationship policy.",
+          "Confirm open balance, payment events, credits, disputes, promises, and source recency before any proposal.",
+          "Distinguish operational delay, dispute, payment failure, relationship risk, and data error.",
+          "Prepare an internal action or customer draft using approved tone, facts, owner, and escalation policy.",
+          "Record payment, dispute resolution, communication review, promise accuracy, and relationship outcome."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.invoiceId, normalizedPayload.accountId, normalizedPayload.amount, normalizedPayload.currency, normalizedPayload.dueAt, normalizedPayload.ownerId.",
+          "Evidence must remain traceable to the affected invoice, receivable_risk.",
+          "Confirm open balance, payment events, credits, disputes, promises, and source recency before any proposal.",
+          "Hermes can never collect, refund, debit, or transfer money.",
+          "Customer communication requires separate account-owner approval and remains draft-only.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Accounts Receivable Owner within 4h.",
+          "Customer-facing actions require a separate exact approval.",
+          "Hermes can never collect, refund, debit, or transfer money.",
+          "Customer communication requires separate account-owner approval and remains draft-only.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/operations-finance/manage-forecast-controls",
+        "fixturePaths": [
+          "packs/official/operations-finance/manage-forecast-controls/fixtures/customer-facing.json"
+        ]
+      }
+    },
+    {
+      "app": {
+        "id": "loopgraph.ops-finance.manage-forecast-controls",
+        "name": "Explain Forecast Variance and Govern Financial Operations",
+        "version": "1.0.0",
+        "department": "ops_finance",
+        "summary": "Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.",
+        "sourcePath": "packs/official/operations-finance/manage-forecast-controls"
+      },
+      "definition": {
+        "schemaVersion": "company-loop-library/v1alpha1",
+        "templateId": "ops-finance-resource-allocation",
+        "departmentType": "ops_finance",
+        "problemTypes": [
+          "finance.resource_tradeoff"
+        ],
+        "eventTypes": [
+          "finance.resource_allocation_requested"
+        ],
+        "subjectTypes": [
+          "resource_plan",
+          "budget"
+        ],
+        "requiredContext": [
+          "normalizedPayload.planId",
+          "normalizedPayload.version",
+          "normalizedPayload.constraint",
+          "normalizedPayload.options",
+          "normalizedPayload.decisionOwnerId"
+        ],
+        "requiredConnections": [
+          "finance.forecast.read",
+          "capacity.plan.read",
+          "analytics.metric.query"
+        ],
+        "exclusionRules": [
+          {
+            "eventTypePattern": "loopgraph.lifecycle.*",
+            "fields": [],
+            "reason": "Decision outcomes and plan updates append to the existing resource problem."
+          }
+        ],
+        "fanoutPolicy": {
+          "mode": "none",
+          "maxRoutes": 1,
+          "requiresIndependentProblems": true
+        },
+        "priority": 88,
+        "minimumConfidence": 0.94,
+        "supportingLoopTemplateIds": [],
+        "learningOutputs": [
+          "Resource Decision Latency Hours: Time from complete tradeoff evidence to an accountable decision.",
+          "Constrained Goal Improvement: Movement in the named company constraint after the approved allocation decision."
+        ],
+        "learningConsumers": [
+          "ops_finance",
+          "management"
+        ],
+        "shouldRouteExamples": [
+          "A versioned plan names one constraint",
+          "bounded options",
+          "and an accountable decision owner."
+        ],
+        "shouldNotRouteExamples": [
+          "The request is an unbounded strategy question.",
+          "Budget and capacity evidence use different time horizons."
+        ]
+      },
+      "template": {
+        "id": "ops-finance-resource-allocation",
+        "department": "operations_finance",
+        "loopType": "resource-allocation",
+        "name": "Resource Allocation",
+        "description": "Join reconciled forecast and capacity evidence into explicit resource tradeoffs for an accountable management decision.",
+        "runtimeLevel": "runnable",
+        "goal": "Join reconciled forecast and capacity evidence into explicit resource tradeoffs for an accountable management decision.",
+        "businessOutcome": "Time from complete tradeoff evidence to an accountable decision.",
+        "primaryMetric": "Resource Decision Latency Hours",
+        "secondaryMetrics": [
+          "Constrained Goal Improvement",
+          "Forecast Variance Explanation Coverage",
+          "Forecast Driver Accuracy",
+          "Approval Resolution Minutes"
+        ],
+        "observes": [
+          "Resource Plan",
+          "Budget",
+          "NormalizedPayload PlanId",
+          "NormalizedPayload Version",
+          "NormalizedPayload Constraint",
+          "NormalizedPayload Options",
+          "NormalizedPayload DecisionOwnerId"
+        ],
+        "requiredDataSources": [
+          "Finance Forecast Read",
+          "Capacity Plan Read",
+          "Analytics Metric Query",
+          "Finance Record Update",
+          "Collaboration Message Draft",
+          "Finance Ledger Read",
+          "Finance Receivable Read",
+          "Finance Vendor Read",
+          "Approval Record Read",
+          "Contract Record Read",
+          "Crm Account Read"
+        ],
+        "routine": [
+          "Preserve plan version, constraint, options, budget, capacity, time horizon, owner, and decision deadline.",
+          "Compare forecast, approved budget, committed capacity, dependencies, and option-specific assumptions.",
+          "Show expected goal impact, cost, capacity, risk, reversibility, and measurement window for each option.",
+          "Prepare a source-cited decision packet without selecting strategy or changing a budget.",
+          "Check option completeness, material assumptions, ownership, approval boundary, and falsification conditions.",
+          "Record the accountable decision, execution state, realized constraint movement, and forecast correction."
+        ],
+        "verification": [
+          "Required context must resolve: normalizedPayload.planId, normalizedPayload.version, normalizedPayload.constraint, normalizedPayload.options, normalizedPayload.decisionOwnerId.",
+          "Evidence must remain traceable to the affected resource_plan, budget.",
+          "Check option completeness, material assumptions, ownership, approval boundary, and falsification conditions.",
+          "Management and finance retain budget authority.",
+          "Hermes cannot make hiring, reduction, or organizational commitments.",
+          "Hermes must request human judgment when the route is ambiguous."
+        ],
+        "escalation": [
+          "Escalate to Finance Business Partner within 1d.",
+          "Customer-facing actions require a separate exact approval.",
+          "Management and finance retain budget authority.",
+          "Hermes cannot make hiring, reduction, or organizational commitments.",
+          "Use unhandled when no routing contract matches."
+        ],
+        "examplePath": "packs/official/operations-finance/manage-forecast-controls",
+        "fixturePaths": [
+          "packs/official/operations-finance/manage-forecast-controls/fixtures/happy.json"
+        ]
       }
     },
     {

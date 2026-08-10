@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: ops-finance-control-conformance
+appId: loopgraph.ops-finance.manage-forecast-controls
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: A complete versioned forecast variance enters the primary reconciliation loop. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: Missing forecast version causes Hermes to abstain. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Sandbox scenarios cannot create production finance work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: A refreshed provider delivery appends evidence to the durable variance problem. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: Multiple forecast identities require human resolution. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: Low-confidence finance evidence cannot route automatically. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: ops-finance-forecast-variance, connectorState: unavailable, expectedApproval: false, notes: Provider unavailability defers instead of fabricating finance evidence. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: Required forecast fields remain explicit. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: ops-finance-cash-collection, connectorState: connected, expectedApproval: true, notes: Any prepared collection communication requires exact approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: ops-finance-cash-collection, connectorState: connected, expectedApproval: true, notes: Customer collection work remains draft-only with separate approval. }
+  - { id: missing-outcome, fixture: fixtures/outcome.json, expectedAction: route, expectedLoopId: ops-finance-close-readiness, connectorState: connected, expectedApproval: false, notes: An incomplete close window routes to evidence and blocker review. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: ops-finance-forecast-variance, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate variance work. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Finance permission increases require explicit update review and rollback. }

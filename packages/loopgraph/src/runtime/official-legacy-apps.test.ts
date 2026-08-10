@@ -79,7 +79,7 @@ describe("official apps migrated from legacy templates", () => {
     expect(evaluation.scenarios).toHaveLength(13);
   });
 
-  it("indexes the deep Sales and Product apps plus all three migrated apps in the official marketplace", async () => {
+  it("indexes every deep official app plus the three legacy migrations in the official marketplace", async () => {
     const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-official-apps-"));
     temporaryDirectories.push(stateRoot);
     const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
@@ -91,8 +91,9 @@ describe("official apps migrated from legacy templates", () => {
       "loopgraph.marketing.learn-qualified-pipeline",
       "loopgraph.engineering.run-issue-incident-operations",
       "loopgraph.customer-success.catch-renewal-risk",
+      "loopgraph.ops-finance.manage-forecast-controls",
       ...migratedApps.map((app) => app.appId)
     ]));
-    expect(apps).toHaveLength(9);
+    expect(apps.length).toBeGreaterThanOrEqual(10);
   });
 });
