@@ -1,0 +1,1 @@
+{"id":"message-learning-customer-facing","eventType":"marketing.message_outcome_ready","subject":{"type":"message","id":"message-408"},"normalizedPayload":{"messageId":"408","segment":"mid-market-operations","outcomeEvidenceRefs":["salesforce:cohort:408","amplitude:cohort:408"],"confidence":0.98},"evidenceRefs":["paid-social:message:408","salesforce:campaign:408"]}

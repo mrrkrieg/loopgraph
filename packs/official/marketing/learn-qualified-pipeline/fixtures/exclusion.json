@@ -1,0 +1,1 @@
+{"id":"campaign-learning-excluded","eventType":"marketing.campaign_window_closed","subject":{"type":"campaign_cohort","id":"campaign-403-test"},"normalizedPayload":{"campaignId":"403","windowStart":"2026-07-01T00:00:00.000Z","windowEnd":"2026-07-31T23:59:59.000Z","spend":10,"excluded":true,"confidence":1},"evidenceRefs":["policy:internal-test-campaign"]}

@@ -1,0 +1,25 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: paid-social-salesforce-amplitude
+providerId: paid_social
+providerFamily: paid_social
+displayName: Meta or LinkedIn Ads + Salesforce + Amplitude
+capabilities:
+  - { logicalCapability: ads.campaign.read, providerOperation: paid-social.campaigns.read, minimumScopes: [ads_read], authority: read, risk: low }
+  - { logicalCapability: crm.lead.read, providerOperation: salesforce.leads.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: crm.opportunity.read, providerOperation: salesforce.opportunities.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: analytics.event.query, providerOperation: amplitude.events.query, minimumScopes: [analytics:read], authority: read, risk: medium }
+  - { logicalCapability: ads.campaign.update, providerOperation: paid-social.campaigns.update, minimumScopes: [ads_management], authority: approve, risk: high }
+  - { logicalCapability: marketing.content.draft, providerOperation: paid-social.creative.prepare, minimumScopes: [ads_management], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: teams.messages.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: medium }
+eventSources:
+  - { eventFamily: marketing.campaign_window_closed, providerEvent: campaign.performanceWindow, transport: poll, normalizationTransformer: paid-social.campaign-to-learning-window.v1, signatureStrategy: oauth-response-bound, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: marketing.pipeline_outcome_observed, providerEvent: OpportunityChangeEvent, transport: webhook, normalizationTransformer: salesforce.opportunity-to-campaign-outcome.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { objectType: campaign, requiredLogicalFields: [campaign.id, campaign.channel, campaign.spend, campaign.windowStart, campaign.windowEnd], optionalLogicalFields: [campaign.messageId, campaign.audienceId, campaign.clicks, campaign.conversions] }
+  - { objectType: attributed_lead, requiredLogicalFields: [lead.id, lead.campaignId, lead.createdAt], optionalLogicalFields: [lead.accountId, lead.qualification, lead.segment] }
+  - { objectType: pipeline_outcome, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.campaignId], optionalLogicalFields: [opportunity.amount, opportunity.activatedAt, opportunity.closedAt] }
+healthCheck:
+  capability: ads.campaign.read
+  sampleQuery: { state: active, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

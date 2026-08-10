@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: marketing-message-learning
+name: ICP Message Learning
+description: Learn which message and segment combinations produce qualified and activated pipeline.
+department: marketing
+goal: Produce a traceable next message hypothesis from downstream evidence without publishing or inventing claims.
+inputs: [message identity, intended segment, campaign cohort, qualification, activation, pipeline, guardrails]
+outputs: [supported learning, weak-fit evidence, next hypothesis, creative brief, approval needs]
+instructions:
+  - Recover the exact message, intended segment, channel, campaign, and observation window.
+  - Compare engagement with qualification, activation, and opportunity outcomes.
+  - Separate message evidence from targeting, offer, landing-page, and channel effects.
+  - Draft one bounded next hypothesis with traceable claims and guardrails.
+  - Require review for every customer-facing phrase and destination.
+boundaries:
+  - Do not fabricate customer proof, performance claims, urgency, or guarantees.
+  - Do not publish content or change targeting.
+  - Do not generalize a cohort result beyond its evidenced segment.
+requiredCapabilities: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]

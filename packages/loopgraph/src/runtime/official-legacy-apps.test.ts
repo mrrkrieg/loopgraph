@@ -88,8 +88,9 @@ describe("official apps migrated from legacy templates", () => {
       "loopgraph.sales.qualify-route-inbound-leads",
       "loopgraph.sales.find-recover-cold-deals",
       "loopgraph.product.turn-feedback-into-product-problems",
+      "loopgraph.marketing.learn-qualified-pipeline",
       ...migratedApps.map((app) => app.appId)
     ]));
-    expect(apps).toHaveLength(6);
+    expect(apps).toHaveLength(7);
   });
 });

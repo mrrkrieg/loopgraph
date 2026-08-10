@@ -1,0 +1,95 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.marketing.learn-qualified-pipeline
+  name: Learn Which Campaigns Create Qualified Pipeline
+  version: 1.0.0
+  summary: Connect campaign spend to qualified leads, product activation, opportunity outcomes, and governed channel decisions.
+  description: Hermes joins advertising, CRM, product-analytics, and pipeline evidence; evaluates lead quality by campaign and cohort; prepares governed allocation and messaging recommendations; and learns from revenue outcomes instead of optimizing surface engagement.
+  department: marketing
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [marketing, campaigns, pipeline, attribution, cac, icp]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: qualification-join
+    name: Qualification join
+    description: Join campaign cohorts with the company qualification contract and durable lead identity.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/lead-qualification.yaml, skills/cohort-evaluation.yaml]
+  - id: allocation-learning
+    name: Channel allocation learning
+    description: Prepare evidence-backed allocation changes without autonomous budget mutation.
+    defaultEnabled: true
+    dependsOn: [qualification-join]
+    assets: [loops/channel-allocation.yaml, skills/campaign-analysis.yaml]
+  - id: message-learning
+    name: ICP message learning
+    description: Learn which message and segment combinations create qualified and activated pipeline.
+    defaultEnabled: true
+    dependsOn: [qualification-join]
+    assets: [loops/icp-messaging.yaml, skills/message-learning.yaml]
+presets:
+  - id: google-ads-hubspot-posthog
+    name: Google Ads + HubSpot + PostHog
+    description: Join Google Ads cohorts to HubSpot qualification and PostHog activation evidence.
+    path: presets/google-ads-hubspot-posthog.yaml
+    providerFamily: google_ads
+  - id: paid-social-salesforce-amplitude
+    name: Meta or LinkedIn Ads + Salesforce + Amplitude
+    description: Join paid-social cohorts to Salesforce qualification and Amplitude activation evidence.
+    path: presets/paid-social-salesforce-amplitude.yaml
+    providerFamily: paid_social
+permissions:
+  - { capability: ads.campaign.read, authority: read, mode: required, risk: low, purpose: "Read campaign, creative, spend, click, and conversion evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [advertising_data] }
+  - { capability: crm.lead.read, authority: read, mode: required, risk: low, purpose: "Read durable lead identity and company-defined qualification evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data, business_contact] }
+  - { capability: crm.opportunity.read, authority: read, mode: required, risk: low, purpose: "Read opportunity and pipeline outcomes linked to campaign cohorts.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data] }
+  - { capability: analytics.event.query, authority: read, mode: required, risk: medium, purpose: "Query bounded activation and product-outcome evidence for attributed cohorts.", customerFacing: false, defaultPolicy: allowed, dataClasses: [product_usage] }
+  - { capability: ads.campaign.update, authority: approve, mode: optional, risk: high, purpose: "Apply the exact approved campaign status, bid, or budget change.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [advertising_data] }
+  - { capability: marketing.content.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare an exact approved ICP message or creative brief.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [advertising_data, crm_data] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: medium, purpose: "Prepare an internal campaign learning brief for an approved channel.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [advertising_data, crm_data] }
+requiredCapabilities: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
+optionalCapabilities: [ads.campaign.update, marketing.content.draft, collaboration.message.draft]
+entrypoints:
+  loops:
+    - loops/campaign-learning.yaml
+    - loops/lead-qualification.yaml
+    - loops/pipeline-outcome.yaml
+    - loops/channel-allocation.yaml
+    - loops/icp-messaging.yaml
+  skills:
+    - skills/funnel-diagnosis.yaml
+    - skills/cohort-evaluation.yaml
+    - skills/campaign-analysis.yaml
+    - skills/message-learning.yaml
+  connectors:
+    - connectors/google-ads-hubspot-posthog.yaml
+    - connectors/paid-social-salesforce-amplitude.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/happy.json
+    - fixtures/missing-context.json
+    - fixtures/exclusion.json
+    - fixtures/duplicate.json
+    - fixtures/ambiguous.json
+    - fixtures/low-confidence.json
+    - fixtures/permission-change.json
+    - fixtures/customer-facing.json
+    - fixtures/outcome.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: growth_operations
+  reviewRoles: [growth_lead, demand_generation, revenue_operations]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

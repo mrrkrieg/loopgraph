@@ -1,0 +1,11 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: paid-social-salesforce-amplitude
+name: Meta or LinkedIn Ads + Salesforce + Amplitude
+description: Configure campaign-to-qualified-pipeline learning for paid social and Salesforce.
+connectorRecipe: connectors/paid-social-salesforce-amplitude.yaml
+defaults:
+  attributionModel: company_overlay
+  allocationMode: prepare_for_approval
+  historicalReplayDays: 90
+  rolloutMode: shadow
+requiredCompanyFields: [marketing.qualificationDefinition, marketing.attributionWindow, product.activationMetric, sales.pipelineStages]
