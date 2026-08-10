@@ -208,7 +208,9 @@ Use HubSpot, Gmail, and Slack, and ask only for missing company settings.
 Install it, test it, and keep it in shadow mode.
 ```
 
-Or use the same application service through the CLI:
+Or open **Marketplace** in the browser. The guided installer lets an operator choose a provider preset and optional modules, answer typed company questions, resolve connection blockers, review the exact graph/permission/test transaction, and install it atomically—without editing YAML. The install button stays disabled until required context, connections, mappings, confirmations, and permissions are resolved. Provider writes remain blocked after installation.
+
+The same application service is available through the CLI:
 
 ```bash
 # Discover and inspect without changing the workspace

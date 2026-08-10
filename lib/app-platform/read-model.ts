@@ -178,7 +178,6 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
       versionRange: "latest",
       presetId,
       configuration: {},
-      fieldMappingIds: [],
       actor: "loopgraph-browser"
     }) as Promise<AppInstallPlan>
   ]);
