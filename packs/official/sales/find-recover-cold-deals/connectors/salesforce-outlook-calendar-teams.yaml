@@ -1,0 +1,25 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: salesforce-outlook-calendar-teams
+providerId: salesforce
+providerFamily: salesforce
+displayName: Salesforce + Outlook + Microsoft Calendar + Teams
+capabilities:
+  - { logicalCapability: crm.opportunity.read, providerOperation: salesforce.opportunities.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: crm.contact.read, providerOperation: salesforce.contacts.read, minimumScopes: [api], authority: read, risk: low }
+  - { logicalCapability: mail.thread.read, providerOperation: outlook.threads.read, minimumScopes: [Mail.Read], authority: read, risk: high }
+  - { logicalCapability: calendar.event.read, providerOperation: outlook.events.read, minimumScopes: [Calendars.Read], authority: read, risk: medium }
+  - { logicalCapability: crm.opportunity.update, providerOperation: salesforce.opportunities.update, minimumScopes: [api], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: outlook.drafts.create, minimumScopes: [Mail.ReadWrite], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: teams.messages.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: medium }
+eventSources:
+  - { eventFamily: sales.opportunity_changed, providerEvent: OpportunityChangeEvent, transport: webhook, normalizationTransformer: salesforce.opportunity-to-risk-snapshot.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: sales.pipeline_outcome_observed, providerEvent: OpportunityStageChange, transport: webhook, normalizationTransformer: salesforce.opportunity-to-pipeline-outcome.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { objectType: opportunity, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.ownerId, opportunity.lastActivityAt], optionalLogicalFields: [opportunity.amount, opportunity.closeDate, opportunity.nextStep, opportunity.forecastCategory] }
+  - { objectType: communication_thread, requiredLogicalFields: [thread.id, thread.participants, thread.lastMessageAt], optionalLogicalFields: [thread.commitments, thread.sentiment] }
+  - { objectType: calendar_commitment, requiredLogicalFields: [event.id, event.participants, event.startAt], optionalLogicalFields: [event.opportunityId, event.outcome] }
+healthCheck:
+  capability: crm.opportunity.read
+  sampleQuery: { state: open, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

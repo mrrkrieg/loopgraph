@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-multithreading
+name: Deal Multithreading
+description: Assess verified stakeholder coverage and engagement without inferring influence from title or seniority.
+department: sales
+goal: Identify evidence-backed champion, decision, blocker, procurement, and single-thread gaps for one opportunity.
+inputs: [opportunity contacts, communication participants, meeting attendance, explicit role evidence, company sales policy]
+outputs: [verified stakeholder map, coverage gaps, ambiguity, owner questions]
+instructions:
+  - Resolve each person to one durable contact identity before assigning evidence.
+  - Separate explicit roles from inferred titles and label uncertainty.
+  - Compare recent engagement across required roles and the current deal stage.
+  - Identify single-thread risk only when the configured stage requires broader coverage.
+  - Prefer questions for the deal owner over speculative role assignment.
+boundaries:
+  - Do not infer authority, budget, personal relationships, or internal politics.
+  - Do not contact stakeholders or add them to provider records.
+  - Do not expose communication content outside the approved opportunity scope.
+requiredCapabilities: [crm.opportunity.read, mail.thread.read, calendar.event.read]

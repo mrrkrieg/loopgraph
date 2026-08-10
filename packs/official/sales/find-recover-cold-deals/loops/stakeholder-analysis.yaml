@@ -1,0 +1,49 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-stakeholder-analysis
+  name: Stakeholder Analysis
+  version: 1.0.0
+  description: Assess verified champion, decision-maker, procurement, legal, and multithreading coverage for an at-risk deal.
+  department: sales
+  ownerRole: account_executive
+  tags: [stakeholders, multithreading, deal-risk]
+trigger: { type: event, source: hermes, event: sales.missing_next_step_detected }
+input: { requiredFields: [normalizedPayload.opportunityId, normalizedPayload.accountId, normalizedPayload.ownerId], subjectTypes: [opportunity, account], fixtures: [] }
+routine:
+  - { id: resolve, name: Resolve verified people, actor: system, type: observe, description: "Join CRM contacts, communication participants, meetings, and explicit role evidence." }
+  - { id: assess, name: Assess stakeholder coverage, actor: agent, type: assess, description: "Identify verified champions, decision roles, blockers, silence, and single-thread risk." }
+  - { id: decide, name: Select stakeholder gap, actor: agent, type: decide, description: "Name only evidenced gaps and abstain when a role or identity would be inferred." }
+  - { id: prepare, name: Prepare coverage brief, actor: system, type: prepare, description: "Prepare a reviewable stakeholder map and recovery questions for the owner." }
+  - { id: learn, name: Learn from engagement, actor: system, type: learn, description: "Return role corrections, participation, re-engagement, and outcome evidence." }
+capabilities:
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read the opportunity and linked account context., customerFacing: false }
+  - { key: mail.thread.read, authority: read, risk: high, required: true, purpose: Read bounded participant and response evidence., customerFacing: false }
+  - { key: calendar.event.read, authority: read, risk: medium, required: true, purpose: Read verified meeting participation., customerFacing: false }
+  - { key: crm.contact.read, authority: read, risk: low, required: false, purpose: Resolve contact identity and explicit CRM roles., customerFacing: false }
+skills: [sales-multithreading, sales-deal-diagnosis]
+outcomes:
+  - { metric: multithreaded_at_risk_deals, description: At-risk opportunities with verified engagement across required roles., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: stakeholder_role_correction_rate, description: Proposed stakeholder roles corrected by accountable owners., direction: decrease, sourceCapability: crm.contact.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.stakeholder_gap]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: sales.missing_next_step_detected, subjectTypes: [opportunity, account], requiredFields: [normalizedPayload.opportunityId, normalizedPayload.accountId, normalizedPayload.ownerId], reason: A deal with a commitment gap is ready for bounded stakeholder analysis. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: sales.opportunity_changed, subjectTypes: [], fields: [], reason: Raw CRM changes cannot claim a stakeholder gap. }]
+  inputMapping: { opportunityId: normalizedPayload.opportunityId, accountId: normalizedPayload.accountId, ownerId: normalizedPayload.ownerId }
+  priority: 85
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 40, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.opportunity.read, mail.thread.read, calendar.event.read]
+  examples: { shouldRoute: ["One resolved opportunity has a verified next-step gap."], shouldNotRoute: ["Multiple accounts match the thread.", "Stakeholder roles are inferred from job titles alone."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: account_executive
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

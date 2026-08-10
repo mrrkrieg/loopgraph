@@ -1,0 +1,1 @@
+{"id":"deal-risk-low-confidence","eventType":"sales.opportunity_changed","subject":{"type":"opportunity","id":"deal-306"},"normalizedPayload":{"opportunityId":"306","stage":"discovery","lastActivityAt":"2026-07-30T10:00:00.000Z","confidence":0.4},"evidenceRefs":["hubspot:deal:306"]}

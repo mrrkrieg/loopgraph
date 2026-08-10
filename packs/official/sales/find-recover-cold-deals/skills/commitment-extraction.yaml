@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-commitment-extraction
+name: Commitment Extraction
+description: Extract explicit deal commitments while preserving speaker, owner, due date, status, and source evidence.
+department: sales
+goal: Determine whether a deal has one current, dated, owned, and verifiable next commitment.
+inputs: [crm next step, bounded deal threads, linked calendar events, owner mapping]
+outputs: [commitments, missing-next-step finding, conflicts, evidence references]
+instructions:
+  - Extract only explicit actions with an attributable speaker or system record.
+  - Record action, responsible party, counterparty, due date, current status, and evidence reference.
+  - Resolve conflicts between CRM, email, and calendar records without silently choosing one.
+  - Treat vague language and undated intent as context rather than a verified next step.
+  - Ask the owner when multiple commitments remain plausible or a due date is missing.
+boundaries:
+  - Do not invent dates, owners, or buyer commitments.
+  - Do not treat an automated reminder as buyer progress.
+  - Do not change CRM next-step fields.
+requiredCapabilities: [crm.opportunity.read, mail.thread.read, calendar.event.read]
