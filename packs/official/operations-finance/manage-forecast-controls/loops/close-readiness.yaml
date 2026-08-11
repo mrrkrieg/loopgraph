@@ -1,0 +1,53 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: ops-finance-close-readiness
+  name: Close Readiness
+  version: 1.0.0
+  description: Assess period-close evidence, reconciliation gaps, control exceptions, and accountable blockers without posting accounting entries.
+  department: ops_finance
+  ownerRole: finance_controller
+  tags: [close, reconciliation, controls]
+trigger: { type: event, source: "*", event: finance.close_review_due }
+input:
+  requiredFields: [normalizedPayload.entityId, normalizedPayload.periodEnd, normalizedPayload.reconciliationStatus, normalizedPayload.blockers]
+  subjectTypes: [accounting_period]
+  fixtures: [{ id: close-readiness, path: fixtures/outcome.json }]
+routine:
+  - { id: normalize, name: Normalize close period, actor: system, type: observe, description: "Preserve entity, period, checklist version, reconciliation status, blockers, owners, and evidence timestamps." }
+  - { id: reconcile, name: Reconcile close evidence, actor: agent, type: assess, description: "Compare ledger, subledger, approval, variance, and supporting-document evidence; retain unresolved differences." }
+  - { id: classify, name: Classify blockers, actor: agent, type: assess, description: "Separate data, ownership, policy, approval, timing, and accounting-judgment blockers." }
+  - { id: decide, name: Assess readiness, actor: agent, type: decide, description: Prepare a readiness state and owner action list while escalating accounting judgment to the controller. }
+  - { id: verify, name: Verify evidence coverage, actor: system, type: verify, description: "Check source citations, period alignment, reconciliation evidence, control exceptions, and accountable owners." }
+  - { id: learn, name: Return close outcome, actor: system, type: learn, description: "Record close duration, late adjustments, repeated blockers, and reviewer corrections." }
+capabilities:
+  - { key: finance.ledger.read, authority: read, risk: high, required: true, purpose: "Read bounded ledger, subledger, reconciliation, and close evidence.", customerFacing: false }
+  - { key: approval.record.read, authority: read, risk: medium, required: true, purpose: Read approval and control state for close blockers., customerFacing: false }
+skills: [ops-finance-evidence-reconciliation, ops-finance-control-review]
+outcomes:
+  - { metric: close_readiness_evidence_coverage, description: Close checklist items with reconciled source evidence and accountable owners., direction: increase, sourceCapability: finance.ledger.read }
+  - { metric: close_cycle_time_hours, description: Hours from period end to verified close completion., direction: decrease, sourceCapability: finance.ledger.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [finance.close_readiness]
+  accepts: [{ sourcePattern: "*", eventTypePattern: finance.close_review_due, subjectTypes: [accounting_period], requiredFields: [normalizedPayload.entityId, normalizedPayload.periodEnd, normalizedPayload.reconciliationStatus, normalizedPayload.blockers], reason: A bounded accounting period has reconciliation state and blocker evidence ready for review. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Close lifecycle evidence updates the existing period problem. }]
+  inputMapping: { entityId: normalizedPayload.entityId, periodEnd: normalizedPayload.periodEnd, reconciliationStatus: normalizedPayload.reconciliationStatus, blockers: normalizedPayload.blockers }
+  priority: 80
+  minimumConfidence: 0.94
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [finance.ledger.read, approval.record.read]
+  examples: { shouldRoute: [A declared accounting period has current reconciliation and blocker evidence.], shouldNotRoute: [The period identity is missing., The request asks Hermes to make an accounting judgment.] }
+policy:
+  forbiddenActions:
+    - { capability: finance.journal.post, reason: Hermes cannot post or modify accounting entries. }
+    - { capability: finance.period.close, reason: The finance controller owns the close decision. }
+  escalationOwner: finance_controller
+  escalationSla: 2h
+  separateCustomerFacingApproval: true

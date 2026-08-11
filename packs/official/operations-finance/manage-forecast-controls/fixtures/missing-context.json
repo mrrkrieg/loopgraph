@@ -1,0 +1,1 @@
+{"id":"ops-finance-forecast-missing-context","eventType":"finance.forecast_variance_detected","subject":{"type":"forecast_window","id":"forecast-fy27-unknown-q1"},"normalizedPayload":{"forecastId":"forecast-fy27","periodStart":"2027-01-01","periodEnd":"2027-03-31","baseline":2400000,"current":2100000,"confidence":0.98},"evidenceRefs":["warehouse:forecast-drivers:fy27-q1"]}

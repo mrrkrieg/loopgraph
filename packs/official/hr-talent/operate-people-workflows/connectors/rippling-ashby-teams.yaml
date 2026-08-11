@@ -1,0 +1,25 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: rippling-ashby-teams
+providerId: rippling
+providerFamily: rippling
+displayName: Rippling + Ashby + Teams
+capabilities:
+  - { logicalCapability: ats.candidate.read, providerOperation: ashby.candidates.read, minimumScopes: [candidates:read, applications:read], authority: read, risk: critical }
+  - { logicalCapability: calendar.schedule.read, providerOperation: microsoft-graph.calendar.read-bounded, minimumScopes: [Calendars.Read], authority: read, risk: high }
+  - { logicalCapability: hris.employee.read, providerOperation: rippling.workers.read-bounded, minimumScopes: [workers:read], authority: read, risk: critical }
+  - { logicalCapability: onboarding.plan.read, providerOperation: rippling.onboarding.read, minimumScopes: [onboarding:read], authority: read, risk: high }
+  - { logicalCapability: survey.response.read, providerOperation: survey.aggregate-responses.read, minimumScopes: [survey-aggregate:read], authority: read, risk: critical }
+  - { logicalCapability: performance.goal.read, providerOperation: performance.goals.read, minimumScopes: [goals:read], authority: read, risk: critical }
+  - { logicalCapability: project.task.read, providerOperation: project.onboarding-tasks.read, minimumScopes: [tasks:read], authority: read, risk: medium }
+  - { logicalCapability: project.task.create, providerOperation: project.tasks.create, minimumScopes: [tasks:write], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: microsoft-graph.teams-message.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: critical }
+eventSources:
+  - { eventFamily: talent.candidate_stage_stalled, providerEvent: ashby.application.stage_stalled, transport: poll, normalizationTransformer: ashby.application-to-candidate-process.v1, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: talent.onboarding_task_overdue, providerEvent: rippling.onboarding.task_overdue, transport: webhook, normalizationTransformer: rippling.task-to-onboarding-plan.v1, signatureStrategy: rippling-hmac-sha256, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: talent.manager_coaching_review_due, providerEvent: people.review.manager_support_due, transport: poll, normalizationTransformer: people.review-to-manager-window.v1, replayProtection: true, fallbackPollMinutes: 1440 }
+fieldMappings:
+  - { providerId: ashby, objectType: candidate_process, requiredLogicalFields: [candidate.id, requisition.id, candidate.stage, candidate.ownerId, candidate.stalledSince], optionalLogicalFields: [candidate.missingFeedbackIds, candidate.schedulingState, candidate.consentPolicy] }
+  - { providerId: rippling, objectType: onboarding_plan, requiredLogicalFields: [employee.id, onboarding.planId, onboarding.version, onboarding.managerId, onboarding.missingTaskIds], optionalLogicalFields: [onboarding.startDate, onboarding.dependencies, onboarding.ownerIds] }
+  - { providerId: rippling, objectType: manager_review_window, requiredLogicalFields: [manager.id, team.id, review.window, review.approvedSignalIds], optionalLogicalFields: [review.aggregateOnly, review.consentPolicy, review.humanOwnerId] }
+healthCheck: { capability: hris.employee.read, sampleQuery: { fields: [workerId], limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

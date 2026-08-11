@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: legal-security-control-evidence
+name: Security Control Evidence
+description: Map a bounded claim, access grant, questionnaire, or audit request to current control implementation and evidence without overstating assurance.
+department: legal_compliance
+goal: Prepare current, scoped, provenance-preserving security evidence for qualified review and block unsupported claims or access actions.
+inputs: [claim or request, control version, implementation state, tests, exceptions, evidence artifacts, scope, owner]
+outputs: [control mapping, evidence applicability table, gaps and exceptions, exact prepared decision packet, qualified reviewer route]
+instructions:
+  - Resolve control, implementation, test, exception, evidence, owner, period, and environment identity.
+  - Check whether evidence actually supports the requested assertion and scope.
+  - Expose stale tests, inherited controls, compensating controls, exceptions, and contradictory artifacts.
+  - For access review, separate observed use from justified need and preserve separation of duties.
+  - For external claims, state scope and limitations and require qualified approval.
+boundaries:
+  - No control-effectiveness attestation, access approval, risk acceptance, or customer claim approval.
+  - No broad access-log, SIEM, HRIS, or evidence-repository export.
+  - Human approval cannot cure fabricated, stale, or inapplicable evidence.
+requiredCapabilities: [policy.control.read, identity.access.read, security.knowledge.read]

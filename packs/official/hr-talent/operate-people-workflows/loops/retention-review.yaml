@@ -1,0 +1,55 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: hr-retention-review
+  name: Retention Signal Review
+  version: 1.0.0
+  description: Assemble a human-owned review packet from explicitly approved retention signals without predicting attrition or recommending employment action.
+  department: hr_talent
+  ownerRole: people_partner
+  tags: [retention, review, fairness, privacy]
+trigger: { type: event, source: "*", event: talent.retention_review_due }
+input:
+  requiredFields: [normalizedPayload.reviewId, normalizedPayload.subjectScope, normalizedPayload.reviewWindow, normalizedPayload.approvedSignalIds, normalizedPayload.humanOwnerId]
+  subjectTypes: [employee, team, retention_review_case]
+  fixtures: [{ id: retention-review, path: fixtures/low-confidence.json }]
+routine:
+  - { id: normalize, name: Normalize approved review case, actor: system, type: observe, description: "Resolve review identity, subject scope, owner, window, signal allowlist, provenance, consent, and access policy." }
+  - { id: assemble, name: Assemble evidence limits, actor: agent, type: assess, description: "Present approved observable evidence, conflicts, missing context, and forbidden inferences without generating attrition probability." }
+  - { id: prepare, name: Prepare human review, actor: agent, type: prepare, description: Prepare neutral questions and policy-approved process options for the accountable people partner. }
+  - { id: verify, name: Verify fairness and privacy, actor: human, type: verify, description: "A qualified reviewer verifies data minimization, consent, fairness, language, ownership, and whether the case should proceed." }
+  - { id: learn, name: Return reviewed outcome, actor: system, type: learn, description: Record reviewer corrections and process outcomes without storing a hidden employee risk score. }
+capabilities:
+  - { key: hris.employee.read, authority: read, risk: critical, required: true, purpose: "Resolve only the approved subject scope, owner, and policy context.", customerFacing: false }
+  - { key: survey.response.read, authority: read, risk: critical, required: true, purpose: Read only explicitly approved aggregate or consented signal evidence., customerFacing: false }
+skills: [hr-fairness-and-boundary-review, hr-evidence-minimization]
+outcomes:
+  - { metric: retention_review_evidence_completeness, description: "Human review cases with source, consent, limitation, and ownership evidence present.", direction: increase, sourceCapability: survey.response.read }
+  - { metric: retention_review_boundary_violation_rate, description: "Cases blocked for prohibited inference, access, consent, or action-boundary violations.", direction: decrease, sourceCapability: hris.employee.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [talent.retention_risk]
+  accepts: [{ sourcePattern: "*", eventTypePattern: talent.retention_review_due, subjectTypes: [employee, team, retention_review_case], requiredFields: [normalizedPayload.reviewId, normalizedPayload.subjectScope, normalizedPayload.reviewWindow, normalizedPayload.approvedSignalIds, normalizedPayload.humanOwnerId], reason: "A policy-approved, human-owned retention review case has explicit subject scope and signal allowlist." }]
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: talent.attrition_prediction_requested, subjectTypes: [employee], fields: [], reason: Individual attrition prediction and scoring are prohibited. }
+    - { sourcePattern: "*", eventTypePattern: talent.compensation_decision_requested, subjectTypes: [employee], fields: [], reason: Compensation decisions are always human-owned and outside this loop. }
+  inputMapping: { reviewId: normalizedPayload.reviewId, subjectScope: normalizedPayload.subjectScope, reviewWindow: normalizedPayload.reviewWindow, approvedSignalIds: normalizedPayload.approvedSignalIds, humanOwnerId: normalizedPayload.humanOwnerId }
+  priority: 85
+  minimumConfidence: 0.98
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 5, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [hris.employee.read, survey.response.read]
+  examples: { shouldRoute: [A people partner opens a policy-approved retention review with a bounded signal allowlist.], shouldNotRoute: [A manager asks for an attrition probability or a recommendation about whom to retain.] }
+policy:
+  forbiddenActions:
+    - { capability: people.attrition.predict, reason: Individual attrition prediction can create hidden employment judgments. }
+    - { capability: people.person.score, reason: People scoring is prohibited. }
+    - { capability: hris.compensation.update, reason: Compensation remains an accountable human decision with separate controls. }
+  escalationOwner: people_partner
+  escalationSla: 1bd
+  separateCustomerFacingApproval: true

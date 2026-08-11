@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: quickbooks-stripe-snowflake-slack
+name: QuickBooks + Stripe + Snowflake + Slack
+description: Configure finance operations around QuickBooks accounting, Stripe billing, Snowflake evidence, and governed Slack drafts.
+connectorRecipe: connectors/quickbooks-stripe-snowflake-slack.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 60, rolloutMode: shadow, currencyPolicy: preserve_source_currency }
+requiredCompanyFields: [finance.materialityPolicy, finance.forecastCadence, finance.closePolicy, finance.approvalPolicy, finance.receivablePolicy, finance.resourceDecisionPolicy]

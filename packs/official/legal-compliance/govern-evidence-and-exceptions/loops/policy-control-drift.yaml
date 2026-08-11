@@ -1,0 +1,47 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: legal-policy-control-drift, name: Policy and Control Drift, version: 1.0.0, description: "Reconcile a versioned policy and control implementation into a source-cited drift finding and owned remediation queue.", department: legal_compliance, ownerRole: compliance_owner, tags: [policy, control, drift, remediation] }
+trigger: { type: event, source: "*", event: compliance.control_changed }
+input:
+  requiredFields: [normalizedPayload.controlId, normalizedPayload.policyVersion, normalizedPayload.changeId, normalizedPayload.effectiveAt, normalizedPayload.ownerId]
+  subjectTypes: [control, policy, policy_control_state]
+  fixtures: [{ id: control-change, path: fixtures/outcome.json }]
+routine:
+  - { id: normalize, name: Normalize policy-control state, actor: system, type: observe, description: "Resolve control, policy version, implementation, test, exception, change, effective date, and owner identity." }
+  - { id: reconcile, name: Reconcile declared and actual state, actor: agent, type: assess, description: "Compare current implementation and evidence to the exact approved policy and control definition." }
+  - { id: prepare, name: Prepare drift finding, actor: agent, type: prepare, description: "Prepare a source-cited finding with affected scope, evidence gaps, owner, severity inputs, and remediation questions." }
+  - { id: verify, name: Verify control judgment, actor: human, type: verify, description: "A qualified compliance or security owner determines drift, exception, severity, and remediation." }
+  - { id: learn, name: Return remediation outcome, actor: system, type: learn, description: "Return approved findings, corrections, remediation evidence, recurrence, and residual gaps." }
+capabilities:
+  - { key: policy.control.read, authority: read, risk: critical, required: true, purpose: "Read exact policy, control, test, exception, and owner state.", customerFacing: false }
+  - { key: change.record.read, authority: read, risk: high, required: true, purpose: "Read the bounded implementation change and its provenance.", customerFacing: false }
+skills: [legal-source-citation-and-freshness, legal-security-control-evidence]
+outcomes:
+  - { metric: control_drift_resolution_hours, description: Time from qualified drift confirmation to verified remediation or approved exception., direction: decrease, sourceCapability: policy.control.read }
+  - { metric: repeated_control_exception_rate, description: Approved control exceptions that recur without durable remediation., direction: decrease, sourceCapability: change.record.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [compliance.policy_drift]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: compliance.control_changed, subjectTypes: [control, policy, policy_control_state], requiredFields: [normalizedPayload.controlId, normalizedPayload.policyVersion, normalizedPayload.changeId, normalizedPayload.effectiveAt, normalizedPayload.ownerId], reason: "A bounded change can be compared to an exact current policy-control version." }
+    - { sourcePattern: "*", eventTypePattern: compliance.policy_review_triggered, subjectTypes: [control, policy, policy_control_state], requiredFields: [normalizedPayload.controlId, normalizedPayload.policyVersion, normalizedPayload.triggerId, normalizedPayload.ownerId], reason: "A named trigger requires evidence review against an exact policy and accountable owner." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: compliance.exception_approval_requested, subjectTypes: [control], fields: [], reason: "Risk acceptance and policy exceptions require qualified accountable approval." }]
+  inputMapping: { controlId: normalizedPayload.controlId, policyVersion: normalizedPayload.policyVersion, changeId: normalizedPayload.changeId, effectiveAt: normalizedPayload.effectiveAt, ownerId: normalizedPayload.ownerId }
+  priority: 95
+  minimumConfidence: 0.98
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 25, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [policy.control.read, change.record.read]
+  examples: { shouldRoute: ["A named control change can be compared to a current policy version and owner."], shouldNotRoute: ["A user asks Hermes to accept risk or approve a policy exception."] }
+policy:
+  forbiddenActions:
+    - { capability: compliance.exception.approve, reason: "Risk acceptance and exceptions remain qualified human decisions." }
+    - { capability: policy.record.update, reason: "Hermes cannot publish or change policy." }
+  escalationOwner: compliance_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

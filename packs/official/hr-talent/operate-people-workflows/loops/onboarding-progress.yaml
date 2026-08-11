@@ -1,0 +1,55 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: hr-onboarding-progress
+  name: Onboarding Progress
+  version: 1.0.0
+  description: Resolve missing onboarding tasks and dependencies from a versioned plan while keeping manager and employment judgment human-owned.
+  department: hr_talent
+  ownerRole: people_operations
+  tags: [onboarding, workflow, dependencies, completion]
+trigger: { type: event, source: "*", event: talent.onboarding_task_overdue }
+input:
+  requiredFields: [normalizedPayload.employeeId, normalizedPayload.planId, normalizedPayload.version, normalizedPayload.missingTaskIds, normalizedPayload.managerId]
+  subjectTypes: [employee_onboarding, onboarding_plan]
+  fixtures: [{ id: onboarding-overdue, path: fixtures/outcome.json }]
+routine:
+  - { id: normalize, name: Normalize onboarding plan, actor: system, type: observe, description: "Resolve employee, plan, version, role, manager, task, dependency, and due-date identity using minimum necessary fields." }
+  - { id: reconcile, name: Reconcile progress, actor: agent, type: assess, description: "Separate incomplete tasks from blocked dependencies, stale data, unavailable access, and ownership gaps." }
+  - { id: prepare, name: Prepare recovery plan, actor: agent, type: prepare, description: Prepare accountable task and dependency actions without judging employee performance. }
+  - { id: verify, name: Verify ownership and privacy, actor: system, type: verify, description: "Check evidence provenance, task owners, restricted-field minimization, and prohibited inference boundaries." }
+  - { id: learn, name: Return onboarding outcome, actor: system, type: learn, description: "Return completion, latency, dependency recurrence, reviewer correction, and employee-experience evidence." }
+capabilities:
+  - { key: hris.employee.read, authority: read, risk: critical, required: true, purpose: "Resolve the minimum employee, role, manager, and start-date context.", customerFacing: false }
+  - { key: onboarding.plan.read, authority: read, risk: high, required: true, purpose: "Read versioned onboarding tasks, dependencies, due dates, owners, and status.", customerFacing: false }
+  - { key: project.task.read, authority: read, risk: medium, required: true, purpose: Read bounded operational task evidence related to the onboarding plan., customerFacing: false }
+skills: [hr-process-diagnosis, hr-evidence-minimization]
+outcomes:
+  - { metric: onboarding_completion_rate, description: Required onboarding-plan tasks completed within the approved window., direction: increase, sourceCapability: onboarding.plan.read }
+  - { metric: onboarding_dependency_delay_hours, description: "Delay caused by unresolved task, access, equipment, or owner dependencies.", direction: decrease, sourceCapability: project.task.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [talent.onboarding_gap]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: talent.onboarding_task_overdue, subjectTypes: [employee_onboarding, onboarding_plan], requiredFields: [normalizedPayload.employeeId, normalizedPayload.planId, normalizedPayload.version, normalizedPayload.missingTaskIds, normalizedPayload.managerId], reason: A versioned onboarding plan contains evidenced overdue work with resolved employee and manager identity. }
+    - { sourcePattern: "*", eventTypePattern: talent.onboarding_progress_changed, subjectTypes: [employee_onboarding, onboarding_plan], requiredFields: [normalizedPayload.employeeId, normalizedPayload.planId, normalizedPayload.version, normalizedPayload.changedTaskIds, normalizedPayload.managerId], reason: New progress evidence should update the durable onboarding problem or its outcome. }
+  excludes: [{ sourcePattern: "*", eventTypePattern: talent.performance_concern_reported, subjectTypes: [employee], fields: [], reason: Onboarding workflow evidence cannot be repurposed into a performance judgment. }]
+  inputMapping: { employeeId: normalizedPayload.employeeId, planId: normalizedPayload.planId, version: normalizedPayload.version, missingTaskIds: normalizedPayload.missingTaskIds, managerId: normalizedPayload.managerId }
+  priority: 95
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [hris.employee.read, onboarding.plan.read, project.task.read]
+  examples: { shouldRoute: [A versioned onboarding plan lists overdue access and training tasks with accountable owners.], shouldNotRoute: [A manager wants Hermes to decide whether the employee is performing well.] }
+policy:
+  forbiddenActions:
+    - { capability: hris.employment.update, reason: An onboarding loop cannot alter employment state or terms. }
+    - { capability: performance.rating.create, reason: Workflow progress cannot become an automated performance rating. }
+  escalationOwner: people_operations
+  escalationSla: 8h
+  separateCustomerFacingApproval: true

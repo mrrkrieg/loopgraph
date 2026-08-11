@@ -20,9 +20,9 @@ const LEGACY_LOOP_TO_HERO: Record<string, string> = {
   loop_demo_product_discovery: "product-feedback_to_problem",
   loop_demo_customer_health: "customer_success-customer_health_risk",
   loop_demo_engineering_quality: "engineering-qa_checklist",
-  loop_demo_ops_efficiency: "operations_finance-approval_bottleneck",
+  loop_demo_ops_efficiency: "ops-finance-approval-bottleneck",
   loop_demo_people_engagement: "hr-manager_coaching",
-  loop_demo_risk_compliance: "legal_security-policy_drift"
+  loop_demo_risk_compliance: "legal-policy-control-drift"
 };
 
 function slugLoopId(value: string) {

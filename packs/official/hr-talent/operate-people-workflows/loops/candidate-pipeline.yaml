@@ -1,0 +1,57 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: hr-candidate-pipeline
+  name: Candidate Pipeline
+  version: 1.0.0
+  description: Diagnose an evidenced hiring-process stall and prepare an accountable next action without ranking or deciding on a candidate.
+  department: hr_talent
+  ownerRole: recruiting_lead
+  tags: [candidate, recruiting, pipeline, fairness]
+trigger: { type: event, source: "*", event: talent.candidate_stage_stalled }
+input:
+  requiredFields: [normalizedPayload.candidateId, normalizedPayload.requisitionId, normalizedPayload.stage, normalizedPayload.ownerId, normalizedPayload.stalledSince]
+  subjectTypes: [candidate, candidate_process]
+  fixtures: [{ id: candidate-stage-stall, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize candidate process, actor: system, type: observe, description: "Resolve candidate, requisition, stage, owner, consent, scheduling state, and delivery identity while excluding protected attributes." }
+  - { id: diagnose, name: Diagnose process stall, actor: agent, type: assess, description: "Identify missing feedback, scheduling, approval, or ownership evidence without evaluating candidate quality." }
+  - { id: prepare, name: Prepare next action, actor: agent, type: prepare, description: Prepare a bounded process-remediation task or reviewer packet for the recruiting owner. }
+  - { id: verify, name: Verify fairness boundary, actor: system, type: verify, description: "Confirm no protected data, ranking, rejection recommendation, or unsupported inference entered the output." }
+  - { id: learn, name: Return process outcome, actor: system, type: learn, description: "Return stage latency, corrections, candidate-experience outcome, and accountable completion evidence." }
+capabilities:
+  - { key: ats.candidate.read, authority: read, risk: critical, required: true, purpose: "Read the bounded stage, requisition, owner, and process evidence.", customerFacing: false }
+  - { key: calendar.schedule.read, authority: read, risk: high, required: true, purpose: Read interview scheduling state and declared availability dependencies., customerFacing: false }
+skills: [hr-process-diagnosis, hr-fairness-and-boundary-review]
+outcomes:
+  - { metric: candidate_stage_latency_hours, description: Time a candidate process remains stalled before accountable resolution., direction: decrease, sourceCapability: ats.candidate.read }
+  - { metric: candidate_process_correction_rate, description: Hermes process diagnoses materially corrected by recruiting reviewers., direction: decrease, sourceCapability: ats.candidate.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [talent.candidate_pipeline]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: talent.candidate_stage_stalled, subjectTypes: [candidate, candidate_process], requiredFields: [normalizedPayload.candidateId, normalizedPayload.requisitionId, normalizedPayload.stage, normalizedPayload.ownerId, normalizedPayload.stalledSince], reason: "A candidate process has a resolved identity, accountable owner, and evidenced stage delay." }
+    - { sourcePattern: "*", eventTypePattern: talent.interview_feedback_missing, subjectTypes: [candidate, candidate_process], requiredFields: [normalizedPayload.candidateId, normalizedPayload.requisitionId, normalizedPayload.stage, normalizedPayload.ownerId, normalizedPayload.missingFeedbackIds], reason: "Required interview feedback is missing for an identified process, without asking Hermes to assess the candidate." }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: talent.candidate_decision_requested, subjectTypes: [candidate], fields: [], reason: "Hiring, rejection, and ranking decisions are always human-owned." }
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle events update existing work and cannot open a duplicate candidate problem. }
+  inputMapping: { candidateId: normalizedPayload.candidateId, requisitionId: normalizedPayload.requisitionId, stage: normalizedPayload.stage, ownerId: normalizedPayload.ownerId }
+  priority: 100
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 25, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [ats.candidate.read, calendar.schedule.read]
+  examples: { shouldRoute: ["An identified candidate process has missing interviewer feedback and an accountable recruiting owner."], shouldNotRoute: ["A user asks Hermes whether to hire or reject a candidate.", "Candidate identity or consent boundaries are unresolved."] }
+policy:
+  forbiddenActions:
+    - { capability: ats.candidate.rank, reason: Hermes must never rank candidates. }
+    - { capability: ats.candidate.reject, reason: Rejection is an accountable human employment decision. }
+    - { capability: mail.message.send, reason: Candidate communication requires exact human approval and a separate send control. }
+  escalationOwner: recruiting_lead
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: legal-incident-chain-of-custody
+name: Incident Evidence Chain of Custody
+description: Assemble a time-bounded incident timeline while preserving authorized scope, source hashes, collectors, transformations, custody events, and evidence gaps.
+department: legal_compliance
+goal: Make incident evidence reviewable and reproducible without deciding breach status, privilege, notification, or legal consequence.
+inputs: [incident identity, authorized systems, evidence window, collection authorization, source events, custody log, retention and legal-hold policy]
+outputs: [source-cited timeline, custody record, transformation register, disputed and missing facts, qualified review packet]
+instructions:
+  - Enforce exact incident, system, time-window, requestor, and collection authorization before access.
+  - Preserve source identifiers, timestamps, hashes, collectors, transformations, and storage receipts.
+  - Separate approved facts, model summaries, disputed facts, missing facts, and reviewer conclusions.
+  - Stop when scope, privilege, legal hold, privacy, regional, or disclosure boundaries are unclear.
+  - Return correction and gap-closure evidence without modifying original sources.
+boundaries:
+  - No breach determination, attribution conclusion, notification decision, evidence deletion, or source mutation.
+  - No collection outside the authorized systems and time window.
+  - Privileged or regulated evidence requires qualified owner review.
+requiredCapabilities: [incident.record.read, siem.event.read, access.log.read]

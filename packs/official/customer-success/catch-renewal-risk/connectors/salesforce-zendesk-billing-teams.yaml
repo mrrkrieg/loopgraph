@@ -15,7 +15,7 @@ eventSources:
   - { eventFamily: cs.account_snapshot_changed, providerEvent: AccountChangeEvent, transport: webhook, normalizationTransformer: salesforce.account-to-health-snapshot.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 60 }
   - { eventFamily: cs.support_risk_detected, providerEvent: ticket.updated, transport: webhook, normalizationTransformer: zendesk.ticket-to-support-risk.v1, signatureStrategy: zendesk-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
 fieldMappings:
-  - { objectType: account, requiredLogicalFields: [account.id, account.ownerId, account.tier, account.lifecycleStage], optionalLogicalFields: [account.renewalAt, account.healthStatus, account.executiveSponsor] }
-  - { objectType: subscription, requiredLogicalFields: [subscription.id, subscription.accountId, subscription.status], optionalLogicalFields: [subscription.renewalAt, subscription.arr, subscription.paymentStatus] }
+  - { providerId: salesforce, objectType: account, requiredLogicalFields: [account.id, account.ownerId, account.tier, account.lifecycleStage], optionalLogicalFields: [account.renewalAt, account.healthStatus, account.executiveSponsor] }
+  - { providerId: billing, objectType: subscription, requiredLogicalFields: [subscription.id, subscription.accountId, subscription.status], optionalLogicalFields: [subscription.renewalAt, subscription.arr, subscription.paymentStatus] }
 healthCheck: { capability: crm.account.read, sampleQuery: { state: active, limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

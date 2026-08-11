@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: legal-source-citation-and-freshness
+name: Legal and Compliance Source Citation
+description: Preserve exact source, version, scope, freshness, ownership, and reuse limits for every claim and evidence artifact.
+department: legal_compliance
+goal: Produce a reviewable evidence packet in which every statement can be traced to a current authorized source or is explicitly marked unsupported.
+inputs: [bounded business question, source allowlist, document and control versions, evidence window, freshness policy, qualified owner]
+outputs: [claim-to-source table, freshness and scope result, unsupported-claim flags, conflicting evidence, reuse limitations]
+instructions:
+  - Resolve exact source identity, version, author or system, effective date, scope, and owner before using evidence.
+  - Distinguish source text, extracted fact, model summary, reviewer interpretation, and qualified conclusion.
+  - Mark stale, partial, conflicting, inaccessible, unverified, or inapplicable evidence explicitly.
+  - Never convert the absence of contrary evidence into proof of a legal, security, or compliance claim.
+  - Return reviewer corrections and source invalidations to the approved knowledge and evidence gap registers.
+boundaries:
+  - No uncited legal, security, privacy, or compliance claim.
+  - No reuse outside declared control, customer, contract, jurisdiction, period, and confidentiality scope.
+  - Missing current evidence requires abstention or expert review.
+requiredCapabilities: [policy.control.read, audit.evidence.read]

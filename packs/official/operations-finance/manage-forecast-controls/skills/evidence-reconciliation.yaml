@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: ops-finance-evidence-reconciliation
+name: Financial Evidence Reconciliation
+description: Join ledger, billing, contract, approval, CRM, and operational evidence while preserving source, period, currency, and identity boundaries.
+department: ops_finance
+goal: Produce a source-cited evidence packet whose totals, identities, time windows, and unresolved differences are explicit enough for accountable review.
+inputs: [financial records, source documents, provider timestamps, company-object mappings, reconciliation rules, approval state]
+outputs: [reconciliation table, source citations, unresolved differences, stale-evidence flags, accountable owner]
+instructions:
+  - Resolve canonical company objects before joining provider records.
+  - Preserve original currency, unit, sign, period, version, and provider timestamp for every value.
+  - Compare ledger or billing totals to their source evidence and explain—not hide—differences.
+  - Mark stale, partial, inferred, disputed, or manually supplied evidence.
+  - Stop when a material amount, ownership mapping, accounting period, or source-of-truth conflict is unresolved.
+  - Record which approved evidence and corrections later proved predictive of the outcome.
+boundaries:
+  - Do not post accounting entries, move money, change invoices, alter contracts, or resolve disputes.
+  - Do not expose unrestricted payroll, bank, tax, or customer financial data outside approved visibility.
+  - Do not treat a spreadsheet total as authoritative when its lineage and period cannot be verified.
+requiredCapabilities: [finance.ledger.read, finance.receivable.read, finance.vendor.read, approval.record.read]

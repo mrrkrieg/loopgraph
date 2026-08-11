@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: ops-finance-control-review
+name: Operations and Finance Control Review
+description: Apply approved policies to approvals, close blockers, vendor evidence, and control exceptions without exercising the controlled authority.
+department: ops_finance
+goal: Identify the applicable control, required evidence, accountable owner, exception class, and smallest safe remediation path.
+inputs: [policy version, approval record, control evidence, exception history, owner mapping, threshold and SLA]
+outputs: [control finding, evidence gaps, owner and deadline, remediation proposal, escalation packet]
+instructions:
+  - Resolve the exact policy or control version in force when the event occurred.
+  - Verify requester, owner, approver authority, threshold, prerequisite evidence, and elapsed time.
+  - Distinguish missing evidence, sequencing, workload, ownership, system failure, and policy conflict.
+  - Prepare the smallest corrective task with acceptance criteria and a verification owner.
+  - Escalate repeated exceptions as operating-system problems instead of repeatedly nudging individuals.
+  - Return resolution time, control outcome, and reviewer corrections as reusable evidence.
+boundaries:
+  - Never approve a request, waive a control, sign a contract, close a period, or make an accounting judgment.
+  - Never bypass separation-of-duties or materiality thresholds.
+  - Legal, tax, security, employment, and executive exceptions require their qualified owners.
+requiredCapabilities: [approval.record.read, contract.record.read, finance.ledger.read]

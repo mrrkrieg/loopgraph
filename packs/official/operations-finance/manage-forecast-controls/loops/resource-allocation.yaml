@@ -1,0 +1,56 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: ops-finance-resource-allocation
+  name: Resource Allocation
+  version: 1.0.0
+  description: Join reconciled forecast and capacity evidence into explicit resource tradeoffs for an accountable management decision.
+  department: ops_finance
+  ownerRole: finance_business_partner
+  tags: [resource-allocation, capacity, budget, decisions]
+trigger: { type: event, source: "*", event: finance.resource_allocation_requested }
+input:
+  requiredFields: [normalizedPayload.planId, normalizedPayload.version, normalizedPayload.constraint, normalizedPayload.options, normalizedPayload.decisionOwnerId]
+  subjectTypes: [resource_plan, budget]
+  fixtures: [{ id: resource-plan, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize resource plan, actor: system, type: observe, description: "Preserve plan version, constraint, options, budget, capacity, time horizon, owner, and decision deadline." }
+  - { id: reconcile, name: Reconcile financial and capacity evidence, actor: agent, type: assess, description: "Compare forecast, approved budget, committed capacity, dependencies, and option-specific assumptions." }
+  - { id: model, name: Model explicit tradeoffs, actor: agent, type: assess, description: "Show expected goal impact, cost, capacity, risk, reversibility, and measurement window for each option." }
+  - { id: prepare, name: Prepare decision brief, actor: agent, type: prepare, description: Prepare a source-cited decision packet without selecting strategy or changing a budget. }
+  - { id: verify, name: Verify decision contract, actor: system, type: verify, description: "Check option completeness, material assumptions, ownership, approval boundary, and falsification conditions." }
+  - { id: learn, name: Return allocation outcome, actor: system, type: learn, description: "Record the accountable decision, execution state, realized constraint movement, and forecast correction." }
+capabilities:
+  - { key: finance.forecast.read, authority: read, risk: high, required: true, purpose: "Read reconciled forecast, budget, and variance evidence.", customerFacing: false }
+  - { key: capacity.plan.read, authority: read, risk: high, required: true, purpose: "Read approved headcount, workload, and capacity constraints.", customerFacing: false }
+  - { key: analytics.metric.query, authority: read, risk: medium, required: true, purpose: Query bounded goal and outcome evidence for each option., customerFacing: false }
+  - { key: finance.record.update, authority: approve, risk: critical, required: false, purpose: Apply an exact approved resource-plan record change., customerFacing: false }
+  - { key: collaboration.message.draft, authority: approve, risk: high, required: false, purpose: Prepare an internal decision brief for review., customerFacing: false }
+skills: [ops-finance-decision-brief, ops-finance-variance-analysis]
+outcomes:
+  - { metric: resource_decision_latency_hours, description: Time from complete tradeoff evidence to an accountable decision., direction: decrease, sourceCapability: finance.forecast.read }
+  - { metric: constrained_goal_improvement, description: Movement in the named company constraint after the approved allocation decision., direction: increase, sourceCapability: analytics.metric.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [finance.resource_tradeoff]
+  accepts: [{ sourcePattern: "*", eventTypePattern: finance.resource_allocation_requested, subjectTypes: [resource_plan, budget], requiredFields: [normalizedPayload.planId, normalizedPayload.version, normalizedPayload.constraint, normalizedPayload.options, normalizedPayload.decisionOwnerId], reason: "A versioned resource plan names one company constraint, explicit options, and an accountable decision owner." }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Decision outcomes and plan updates append to the existing resource problem. }]
+  inputMapping: { planId: normalizedPayload.planId, version: normalizedPayload.version, constraint: normalizedPayload.constraint, options: normalizedPayload.options, decisionOwnerId: normalizedPayload.decisionOwnerId }
+  priority: 88
+  minimumConfidence: 0.94
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 30, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [finance.forecast.read, capacity.plan.read, analytics.metric.query]
+  examples: { shouldRoute: [A versioned plan names one constraint, bounded options, and an accountable decision owner.], shouldNotRoute: [The request is an unbounded strategy question., Budget and capacity evidence use different time horizons.] }
+policy:
+  forbiddenActions:
+    - { capability: finance.budget.update, reason: Management and finance retain budget authority. }
+    - { capability: workforce.plan.execute, reason: "Hermes cannot make hiring, reduction, or organizational commitments." }
+  escalationOwner: finance_business_partner
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

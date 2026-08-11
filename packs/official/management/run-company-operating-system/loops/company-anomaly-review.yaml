@@ -1,0 +1,45 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: management-company-anomaly-review, name: Company Anomaly Review, version: 1.0.0, description: "Reconcile a material company-metric movement into evidence-backed drivers, uncertainty, constraints, and bounded decision paths.", department: management, ownerRole: company_operations, tags: [metric, anomaly, constraint, diagnosis] }
+trigger: { type: event, source: "*", event: management.company_metric_anomaly }
+input: { requiredFields: [normalizedPayload.metricId, normalizedPayload.observationWindow, normalizedPayload.baseline, normalizedPayload.current, normalizedPayload.materialityThreshold], subjectTypes: [company_metric, forecast, company_metric_anomaly], fixtures: [] }
+routine:
+  - { id: normalize, name: Normalize metric anomaly, actor: system, type: observe, description: "Resolve metric definition, version, window, baseline, current value, dimensions, threshold, source cutoffs, and owner." }
+  - { id: reconcile, name: Reconcile source evidence, actor: agent, type: assess, description: "Check definition, time alignment, dimensions, source quality, driver evidence, conflicting signals, and uncertainty." }
+  - { id: diagnose, name: Diagnose company constraint, actor: agent, type: assess, description: "Separate noise, timing, mix, operating delay, approval, capacity, market, policy, and source-quality drivers." }
+  - { id: prepare, name: Prepare bounded response, actor: agent, type: prepare, description: "Prepare the one primary anomaly finding and invoke only signed supporting decision or resource work when its condition is proven." }
+  - { id: learn, name: Return realized driver outcome, actor: system, type: learn, description: "Return reviewer corrections, realized values, driver accuracy, decisions, and constraint movement." }
+capabilities:
+  - { key: analytics.metric.query, authority: read, risk: high, required: true, purpose: "Query the bounded metric, baseline, current values, dimensions, and drivers.", customerFacing: false }
+  - { key: loopgraph.outcome.read, authority: read, risk: high, required: true, purpose: "Read related loop outcomes, costs, corrections, and confidence.", customerFacing: false }
+  - { key: finance.forecast.read, authority: read, risk: critical, required: true, purpose: "Read approved financial baseline and materiality evidence.", customerFacing: false }
+skills: [management-metric-and-constraint-diagnosis, management-cross-department-synthesis]
+outcomes:
+  - { metric: company_anomaly_explanation_coverage, description: Material anomalies with reconciled driver and uncertainty evidence., direction: increase, sourceCapability: analytics.metric.query }
+  - { metric: company_anomaly_driver_accuracy, description: Diagnosed drivers confirmed by realized outcomes., direction: increase, sourceCapability: loopgraph.outcome.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [management.company_anomaly]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: management.company_metric_anomaly, subjectTypes: [company_metric, forecast, company_metric_anomaly], requiredFields: [normalizedPayload.metricId, normalizedPayload.observationWindow, normalizedPayload.baseline, normalizedPayload.current, normalizedPayload.materialityThreshold], reason: "A defined metric and observation window contain a material change with baseline and source evidence." }
+    - { sourcePattern: "*", eventTypePattern: management.forecast_variance_escalated, subjectTypes: [company_metric, forecast, company_metric_anomaly], requiredFields: [normalizedPayload.metricId, normalizedPayload.observationWindow, normalizedPayload.baseline, normalizedPayload.current, normalizedPayload.materialityThreshold], reason: "A reconciled forecast variance is escalated as a company-level constraint." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: management.metric_target_change_requested, subjectTypes: [company_metric], fields: [], reason: "Hermes cannot change a target to make an anomaly disappear." }]
+  inputMapping: { metricId: normalizedPayload.metricId, observationWindow: normalizedPayload.observationWindow, baseline: normalizedPayload.baseline, current: normalizedPayload.current, materialityThreshold: normalizedPayload.materialityThreshold }
+  priority: 100
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: declared_ordered, maxRoutes: 3, requiresIndependentProblems: false }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [analytics.metric.query, loopgraph.outcome.read, finance.forecast.read]
+  examples: { shouldRoute: ["A defined company metric moves beyond approved materiality with reconciled baseline evidence."], shouldNotRoute: ["The metric definition, baseline, or observation window is unknown."] }
+policy:
+  forbiddenActions:
+    - { capability: metric.target.update, reason: "Target changes are accountable management decisions." }
+    - { capability: finance.budget.update, reason: "Anomaly review cannot change a budget." }
+  escalationOwner: executive_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

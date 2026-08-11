@@ -1,0 +1,142 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.ops-finance.manage-forecast-controls
+  name: Explain Forecast Variance and Govern Financial Operations
+  version: 1.0.0
+  summary: Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions.
+  description: Hermes receives normalized finance and operations events, resolves the affected company object, opens or updates one durable problem, and routes it to the narrowest eligible loop. Forecast variance can invoke approval or resource-allocation support only when the signed topology condition is proven. Every payment, collection message, vendor commitment, forecast mutation, and budget decision remains human-owned.
+  department: ops_finance
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [operations, finance, forecast, approvals, close, receivables, vendors, resource-allocation]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: forecast-intelligence
+    name: Forecast intelligence
+    description: Reconcile a bounded forecast window and explain material variance without mutating the forecast.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/forecast-variance.yaml, skills/variance-analysis.yaml]
+  - id: approval-governance
+    name: Approval governance
+    description: Diagnose approvals that block an evidenced business outcome and prepare an accountable next action.
+    defaultEnabled: true
+    dependsOn: [forecast-intelligence]
+    assets: [loops/approval-bottleneck.yaml, skills/control-review.yaml]
+  - id: close-controls
+    name: Close controls
+    description: Track period-close blockers, evidence completeness, ownership, and reconciliation state.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/close-readiness.yaml, skills/evidence-reconciliation.yaml]
+  - id: receivable-risk
+    name: Receivable risk
+    description: Prepare controlled collection follow-up from invoice, account, dispute, and payment evidence.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/cash-collection.yaml, skills/evidence-reconciliation.yaml]
+  - id: vendor-governance
+    name: Vendor governance
+    description: Join spend, usage, contract, security, and ownership evidence before renewal decisions.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/vendor-review.yaml, skills/control-review.yaml]
+  - id: resource-decisions
+    name: Resource decisions
+    description: Turn reconciled financial constraints into explicit, reviewable resource tradeoffs.
+    defaultEnabled: true
+    dependsOn: [forecast-intelligence]
+    assets: [loops/resource-allocation.yaml, skills/decision-brief.yaml]
+presets:
+  - id: quickbooks-stripe-snowflake-slack
+    name: QuickBooks + Stripe + Snowflake + Slack
+    description: Reconcile accounting and billing evidence with warehouse metrics and governed Slack drafts.
+    path: presets/quickbooks-stripe-snowflake-slack.yaml
+    providerFamily: quickbooks
+  - id: netsuite-salesforce-warehouse-teams
+    name: NetSuite + Salesforce + Warehouse + Teams
+    description: Reconcile ERP, CRM, warehouse, approval, and governed Teams evidence for enterprise finance operations.
+    path: presets/netsuite-salesforce-warehouse-teams.yaml
+    providerFamily: netsuite
+permissions:
+  - { capability: finance.forecast.read, authority: read, mode: required, risk: high, purpose: "Read bounded forecast versions, assumptions, periods, and approved baselines.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data] }
+  - { capability: finance.ledger.read, authority: read, mode: required, risk: high, purpose: "Read bounded ledger and close evidence needed for reconciliation.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data] }
+  - { capability: finance.receivable.read, authority: read, mode: required, risk: high, purpose: "Read invoice, payment, dispute, due-date, and receivable status.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data, customer_data] }
+  - { capability: finance.vendor.read, authority: read, mode: required, risk: high, purpose: "Read vendor spend, renewal, owner, and approved usage evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data, contract_data] }
+  - { capability: approval.record.read, authority: read, mode: required, risk: medium, purpose: "Read approval state, owner, policy, threshold, and elapsed time.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data] }
+  - { capability: contract.record.read, authority: read, mode: required, risk: high, purpose: "Read approved vendor contract terms and renewal windows.", customerFacing: false, defaultPolicy: allowed, dataClasses: [contract_data] }
+  - { capability: analytics.metric.query, authority: read, mode: required, risk: medium, purpose: "Query bounded operational drivers and reconciled metric evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data, financial_data] }
+  - { capability: crm.account.read, authority: read, mode: required, risk: high, purpose: "Read account ownership and dispute context for receivable risk.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data, customer_data] }
+  - { capability: capacity.plan.read, authority: read, mode: required, risk: high, purpose: "Read approved capacity, headcount, and resource constraints.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data, workforce_data] }
+  - { capability: finance.record.update, authority: approve, mode: optional, risk: critical, purpose: "Apply an exact approved forecast or finance-record change.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [financial_data] }
+  - { capability: project.task.create, authority: approve, mode: optional, risk: high, purpose: "Create the exact approved remediation or approval follow-up task.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [operational_data] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare an internal decision or escalation message for review.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [financial_data, operational_data] }
+  - { capability: mail.message.draft, authority: approve, mode: optional, risk: critical, purpose: "Prepare a customer collection message without sending it.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [financial_data, customer_data] }
+requiredCapabilities: [finance.forecast.read, finance.ledger.read, finance.receivable.read, finance.vendor.read, approval.record.read, contract.record.read, analytics.metric.query, crm.account.read, capacity.plan.read]
+optionalCapabilities: [finance.record.update, project.task.create, collaboration.message.draft, mail.message.draft]
+topology:
+  objects:
+    - { id: forecast-window, objectType: forecast_window, label: Forecast window, description: "A versioned forecast period joined to its approved baseline and source timestamps.", shared: true, identityKeys: [forecastId, version, periodStart, periodEnd] }
+    - { id: variance-finding, objectType: forecast_variance, label: Reconciled variance finding, description: "A material variance with evidence-backed drivers, uncertainty, and decision threshold.", shared: true, identityKeys: [forecastId, version, observationWindow] }
+    - { id: approval-request, objectType: approval_request, label: Approval request, description: "A policy-bound request with one owner, threshold, deadline, and affected outcome.", shared: true, identityKeys: [approvalId, policyVersion] }
+    - { id: accounting-period, objectType: accounting_period, label: Accounting period, description: "A close period with reconciliation state, blockers, evidence, and accountable owners.", shared: true, identityKeys: [entityId, periodEnd] }
+    - { id: receivable-risk, objectType: receivable_risk, label: Receivable risk, description: "An invoice and account risk joined to disputes, payment state, owner, and approved communication policy.", shared: true, identityKeys: [invoiceId, accountId] }
+    - { id: vendor-contract, objectType: vendor_contract, label: Vendor contract, description: "A vendor relationship joined to spend, usage, renewal, security, and accountable ownership.", shared: true, identityKeys: [vendorId, contractId] }
+    - { id: resource-plan, objectType: resource_plan, label: Resource plan, description: "A bounded capacity and budget tradeoff tied to a company constraint and measurement window.", shared: true, identityKeys: [planId, version] }
+    - { id: management-decision, objectType: management_decision, label: Management decision, description: "An approved, rejected, or deferred resource decision with explicit tradeoffs and follow-through evidence.", shared: true, identityKeys: [decisionId, planId] }
+  flows:
+    - { id: forecast-enters-variance, source: { kind: object, id: forecast-window }, target: { kind: loop, id: ops-finance-forecast-variance }, type: evidence_in, reason: "Hermes begins with a versioned period and reconciled baseline rather than a number without provenance." }
+    - { id: variance-supports-approval, source: { kind: loop, id: ops-finance-forecast-variance }, target: { kind: loop, id: ops-finance-approval-bottleneck }, type: supports, condition: "The same reconciled variance identifies a policy-bound approval whose delay is a material causal driver.", reason: "Approval work is supporting fan-out only when the variance evidence names the blocking approval." }
+    - { id: variance-supports-resource, source: { kind: loop, id: ops-finance-forecast-variance }, target: { kind: loop, id: ops-finance-resource-allocation }, type: supports, condition: "The same reconciled variance exceeds the configured materiality threshold and exposes an explicit budget or capacity tradeoff.", reason: "Resource allocation is supporting fan-out only for a material, evidenced constraint." }
+    - { id: variance-produces-finding, source: { kind: loop, id: ops-finance-forecast-variance }, target: { kind: object, id: variance-finding }, type: produces, reason: "The primary loop produces a reusable finding with drivers, uncertainty, threshold, and source evidence." }
+    - { id: variance-returns-resource, source: { kind: loop, id: ops-finance-forecast-variance }, target: { kind: loop, id: ops-finance-resource-allocation }, type: learning_return, reason: "A reviewed variance becomes bounded evidence for resource tradeoffs without authorizing a budget change." }
+    - { id: approval-enters-bottleneck, source: { kind: object, id: approval-request }, target: { kind: loop, id: ops-finance-approval-bottleneck }, type: evidence_in, reason: "Overdue approval evidence retains owner, threshold, policy, and affected outcome identity." }
+    - { id: period-enters-close, source: { kind: object, id: accounting-period }, target: { kind: loop, id: ops-finance-close-readiness }, type: evidence_in, reason: "Close readiness is evaluated from a bounded accounting period and reconciliation state." }
+    - { id: receivable-enters-collection, source: { kind: object, id: receivable-risk }, target: { kind: loop, id: ops-finance-cash-collection }, type: evidence_in, reason: "Collection work starts only after invoice, account, dispute, owner, and policy identity resolve." }
+    - { id: vendor-enters-review, source: { kind: object, id: vendor-contract }, target: { kind: loop, id: ops-finance-vendor-review }, type: evidence_in, reason: "Vendor review uses spend, usage, contract, security, and ownership evidence." }
+    - { id: resource-enters-allocation, source: { kind: object, id: resource-plan }, target: { kind: loop, id: ops-finance-resource-allocation }, type: evidence_in, reason: "Resource decisions operate on an explicit plan version and company constraint." }
+    - { id: resource-produces-decision, source: { kind: loop, id: ops-finance-resource-allocation }, target: { kind: object, id: management-decision }, type: produces, reason: "The loop produces a reviewable decision record; accountable management makes the decision." }
+entrypoints:
+  loops:
+    - loops/forecast-variance.yaml
+    - loops/approval-bottleneck.yaml
+    - loops/vendor-review.yaml
+    - loops/close-readiness.yaml
+    - loops/cash-collection.yaml
+    - loops/resource-allocation.yaml
+  skills:
+    - skills/variance-analysis.yaml
+    - skills/evidence-reconciliation.yaml
+    - skills/control-review.yaml
+    - skills/decision-brief.yaml
+  connectors:
+    - connectors/quickbooks-stripe-snowflake-slack.yaml
+    - connectors/netsuite-salesforce-warehouse-teams.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/happy.json
+    - fixtures/missing-context.json
+    - fixtures/exclusion.json
+    - fixtures/duplicate.json
+    - fixtures/ambiguous.json
+    - fixtures/low-confidence.json
+    - fixtures/permission-change.json
+    - fixtures/customer-facing.json
+    - fixtures/outcome.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: finance_operations
+  reviewRoles: [finance_controller, operations_lead, executive_approver]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

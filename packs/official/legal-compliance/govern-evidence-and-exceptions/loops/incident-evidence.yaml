@@ -1,0 +1,51 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: legal-incident-evidence, name: Incident Evidence, version: 1.0.0, description: "Assemble a time-bounded source-cited incident record with chain-of-custody and explicit evidence gaps.", department: legal_compliance, ownerRole: security_owner, tags: [incident, evidence, timeline, custody] }
+trigger: { type: event, source: "*", event: security.incident_evidence_requested }
+input:
+  requiredFields: [normalizedPayload.incidentId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.systemIds, normalizedPayload.securityOwnerId]
+  subjectTypes: [incident, incident_evidence_window]
+  fixtures: []
+routine:
+  - { id: normalize, name: Normalize authorized evidence scope, actor: system, type: observe, description: "Resolve incident, approved systems, start and end time, requestor, owner, legal-hold status, and collection authorization." }
+  - { id: collect, name: Assemble cited timeline, actor: agent, type: assess, description: "Join immutable source references into a chronological timeline while preserving timestamps, hashes, collectors, and gaps." }
+  - { id: prepare, name: Prepare evidence packet, actor: agent, type: prepare, description: "Prepare approved facts, disputed facts, missing sources, custody events, control mappings, and reviewer questions." }
+  - { id: verify, name: Verify evidence handling, actor: human, type: verify, description: "Security, privacy, and legal owners verify scope, custody, privilege, retention, disclosure, and breach-decision boundaries." }
+  - { id: learn, name: Return evidence outcome, actor: system, type: learn, description: "Return approved timeline corrections, gap closure, custody quality, and control evidence without deciding breach status." }
+capabilities:
+  - { key: incident.record.read, authority: read, risk: critical, required: true, purpose: "Read incident scope, owners, status, affected systems, and approved facts.", customerFacing: false }
+  - { key: siem.event.read, authority: read, risk: critical, required: true, purpose: "Read narrowly scoped security events for the authorized incident window.", customerFacing: false }
+  - { key: access.log.read, authority: read, risk: critical, required: true, purpose: "Read bounded access events relevant to the approved systems and window.", customerFacing: false }
+skills: [legal-incident-chain-of-custody, legal-source-citation-and-freshness]
+outcomes:
+  - { metric: incident_timeline_evidence_coverage, description: Approved timeline facts with current source citations and custody evidence., direction: increase, sourceCapability: incident.record.read }
+  - { metric: incident_evidence_gap_hours, description: Time required to resolve a named material incident-evidence gap., direction: decrease, sourceCapability: siem.event.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [security.incident_evidence]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: security.incident_evidence_requested, subjectTypes: [incident, incident_evidence_window], requiredFields: [normalizedPayload.incidentId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.systemIds, normalizedPayload.securityOwnerId], reason: "An authorized incident window and system scope are complete enough to assemble evidence." }
+    - { sourcePattern: "*", eventTypePattern: security.incident_opened, subjectTypes: [incident, incident_evidence_window], requiredFields: [normalizedPayload.incidentId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.systemIds, normalizedPayload.securityOwnerId], reason: "An opened incident includes an explicit evidence scope and accountable owner." }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: security.breach_decision_requested, subjectTypes: [incident], fields: [], reason: "Breach and notification decisions require qualified legal, privacy, and security owners." }
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: "Lifecycle events update existing incident work." }
+  inputMapping: { incidentId: normalizedPayload.incidentId, windowStart: normalizedPayload.windowStart, windowEnd: normalizedPayload.windowEnd, systemIds: normalizedPayload.systemIds, securityOwnerId: normalizedPayload.securityOwnerId }
+  priority: 100
+  minimumConfidence: 0.99
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: declared_ordered, maxRoutes: 2, requiresIndependentProblems: false }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [incident.record.read, siem.event.read, access.log.read]
+  examples: { shouldRoute: ["A security owner requests evidence for named systems and an authorized incident window."], shouldNotRoute: ["The requested time window is broad or no collection authorization exists.", "A user asks Hermes to decide whether a reportable breach occurred."] }
+policy:
+  forbiddenActions:
+    - { capability: security.breach.decide, reason: "Breach determination is a qualified expert decision." }
+    - { capability: evidence.source.delete, reason: "Evidence deletion cannot occur inside incident analysis." }
+    - { capability: customer.notification.send, reason: "Incident communication requires approved facts and separate authority." }
+  escalationOwner: security_owner
+  escalationSla: 1h
+  separateCustomerFacingApproval: true
