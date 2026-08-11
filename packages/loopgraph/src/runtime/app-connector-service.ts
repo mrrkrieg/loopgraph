@@ -3,22 +3,18 @@ import path from "node:path";
 import YAML from "yaml";
 import {
   CONNECTOR_RECIPE_SCHEMA_VERSION,
+  PROVIDER_SCHEMA_SNAPSHOT_VERSION,
   connectorFieldMappingSchema,
   connectorRecipeSchema,
   contentHash,
+  providerSchemaSnapshotSchema,
   type ConnectionInstance,
   type ConnectorFieldMapping,
-  type ConnectorRecipe
+  type ConnectorRecipe,
+  type ProviderSchemaField,
+  type ProviderSchemaSnapshot
 } from "../core";
 import type { LoopPackLoadResult } from "./app-pack-loader";
-
-export type ProviderSchemaField = {
-  name: string;
-  label?: string;
-  type: "string" | "number" | "boolean" | "date" | "datetime" | "enum" | "object";
-  writable: boolean;
-  sampleValues?: unknown[];
-};
 
 export type FieldMappingSuggestion = {
   logicalField: string;
@@ -28,6 +24,8 @@ export type FieldMappingSuggestion = {
   requiresConfirmation: boolean;
   required: boolean;
 };
+
+type ProviderSchemaFieldInput = Omit<ProviderSchemaField, "sampleValues"> & { sampleValues?: unknown[] };
 
 export type CapabilityResolution = {
   capability: string;
@@ -68,13 +66,24 @@ export function resolveConnectorCapabilities(input: {
       return { capability, required: required.has(capability), status: "missing", reason: "No selected provider recipe implements this logical capability." };
     }
     const binding = recipe.capabilities.find((candidate) => candidate.logicalCapability === capability)!;
+    const providerId = providerIdForCapability(recipe, binding);
     const compatible = input.connections.find((connection) => {
-      const providerMatch = connection.manifestId === recipe.providerId || connection.manifestId.startsWith(`${recipe.providerId}.`) || connection.manifestId.startsWith(`${recipe.providerId}-`);
-      const capabilityMatch = connection.capabilityKeys.includes(capability) || connection.capabilityKeys.includes(binding.providerOperation);
+      const manifestId = normalizeConnectorProviderId(connection.manifestId);
+      const providerMatch = manifestId === providerId || manifestId.startsWith(`${providerId}.`) || manifestId.startsWith(`${providerId}-`);
+      const capabilityMatch = connection.capabilityKeys.includes(capability)
+        || connection.capabilityKeys.includes(binding.providerOperation)
+        || connection.capabilityKeys.includes(broadCapability(capability));
       return providerMatch && capabilityMatch;
     });
     if (!compatible) {
-      return { capability, required: required.has(capability), recipeId: recipe.id, status: "missing", reason: `${recipe.displayName} is selected but no connection grants ${capability}.` };
+      return { capability, required: required.has(capability), recipeId: recipe.id, status: "missing", reason: `${providerId} is selected through ${recipe.displayName}, but no connection grants ${capability}.` };
+    }
+    const missingScopes = binding.minimumScopes.filter((scope) => !connectionGrantsScope(compatible, providerId, scope));
+    if (missingScopes.length > 0) {
+      return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "missing", reason: `Connection ${compatible.id} is missing required scopes: ${missingScopes.join(", ")}.` };
+    }
+    if (!connectionPolicyAllows(compatible, binding.authority)) {
+      return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "missing", reason: `Connection ${compatible.id} policy does not permit ${binding.authority} authority.` };
     }
     if (compatible.status === "degraded") {
       return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "degraded", reason: "A compatible connection exists but its health is degraded." };
@@ -93,10 +102,75 @@ export function resolveConnectorCapabilities(input: {
   });
 }
 
+export function providerIdForCapability(
+  recipe: ConnectorRecipe,
+  binding: ConnectorRecipe["capabilities"][number]
+): string {
+  if (binding.providerId) return normalizeConnectorProviderId(binding.providerId);
+  const operationProvider = binding.providerOperation.split(".", 1)[0];
+  return normalizeConnectorProviderId(operationProvider || recipe.providerId);
+}
+
+export function normalizeConnectorProviderId(providerId: string): string {
+  const normalized = providerId.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    "google-ads": "google_ads",
+    "paid-social": "meta_ads",
+    "product-analytics": "product_analytics"
+  };
+  return aliases[normalized] ?? normalized.replace(/-/g, "_");
+}
+
+export class FileProviderSchemaSnapshotStore {
+  constructor(private readonly filePath: string, private readonly workspaceId: string) {}
+
+  async list(): Promise<ProviderSchemaSnapshot[]> {
+    const raw = await readJson(this.filePath);
+    if (!raw) return [];
+    if (!isRecord(raw) || raw.schemaVersion !== PROVIDER_SCHEMA_SNAPSHOT_VERSION || !Array.isArray(raw.snapshots)) {
+      throw new Error("Invalid provider schema snapshot registry");
+    }
+    return raw.snapshots
+      .map((snapshot) => providerSchemaSnapshotSchema.parse(snapshot))
+      .filter((snapshot) => snapshot.workspaceId === this.workspaceId);
+  }
+
+  async get(connectionId: string, now = new Date()): Promise<ProviderSchemaSnapshot | undefined> {
+    const snapshot = (await this.list()).find((candidate) => candidate.connectionId === connectionId);
+    if (!snapshot?.expiresAt || Date.parse(snapshot.expiresAt) > now.getTime()) return snapshot;
+    return undefined;
+  }
+
+  async save(input: {
+    connectionId: string;
+    providerId: string;
+    source: ProviderSchemaSnapshot["source"];
+    samplePolicy: "redacted_only";
+    objects: ProviderSchemaSnapshot["objects"];
+    inspectedBy: string;
+    inspectedAt?: string;
+    expiresAt?: string;
+  }): Promise<ProviderSchemaSnapshot> {
+    const snapshots = await this.list();
+    const snapshot = providerSchemaSnapshotSchema.parse({
+      schemaVersion: PROVIDER_SCHEMA_SNAPSHOT_VERSION,
+      workspaceId: this.workspaceId,
+      ...input,
+      inspectedAt: input.inspectedAt ?? new Date().toISOString()
+    });
+    const next = [
+      ...snapshots.filter((candidate) => candidate.connectionId !== snapshot.connectionId),
+      snapshot
+    ].sort((left, right) => left.connectionId.localeCompare(right.connectionId));
+    await atomicWriteJson(this.filePath, { schemaVersion: PROVIDER_SCHEMA_SNAPSHOT_VERSION, snapshots: next });
+    return snapshot;
+  }
+}
+
 export function suggestFieldMappings(input: {
   requiredLogicalFields: string[];
   optionalLogicalFields?: string[];
-  providerFields: ProviderSchemaField[];
+  providerFields: ProviderSchemaFieldInput[];
   writeRequiredLogicalFields?: string[];
 }): FieldMappingSuggestion[] {
   const required = new Set(input.requiredLogicalFields);
@@ -224,13 +298,13 @@ export class FileConnectorFieldMappingStore {
   }
 }
 
-function fieldSimilarity(logicalField: string, providerField: ProviderSchemaField): number {
+function fieldSimilarity(logicalField: string, providerField: ProviderSchemaFieldInput): number {
   const logical = normalizeFieldName(logicalField.split(".").at(-1) ?? logicalField);
   const provider = normalizeFieldName(providerField.name);
   const label = normalizeFieldName(providerField.label ?? "");
   if (logical === provider || logical === label) return 1;
   const aliases: Record<string, string[]> = {
-    id: ["recordid", "contactid", "leadid", "accountid"],
+    id: ["recordid", "contactid", "leadid", "accountid", "hsobjectid"],
     email: ["emailaddress", "primaryemail", "workemail"],
     company: ["companyname", "organization", "organisation"],
     lifecyclestage: ["status", "stage", "leadstatus"],
@@ -249,6 +323,34 @@ function fieldSimilarity(logicalField: string, providerField: ProviderSchemaFiel
 
 function normalizeFieldName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function broadCapability(capability: string): string {
+  const parts = capability.split(".");
+  return parts.length >= 3 ? `${parts[0]}.${parts.at(-1)}` : capability;
+}
+
+function connectionPolicyAllows(connection: ConnectionInstance, authority: ConnectorRecipe["capabilities"][number]["authority"]): boolean {
+  if (authority === "read") return connection.readPolicy === "read_only";
+  if (authority === "draft") return connection.writePolicy === "draft_only" || connection.writePolicy === "approved_only";
+  return connection.writePolicy === "approved_only";
+}
+
+function connectionGrantsScope(connection: ConnectionInstance, providerId: string, requiredScope: string): boolean {
+  const normalize = (scope: string) => scope.toLowerCase().replace(/^https:\/\/www\.googleapis\.com\/auth\//, "").replace(/[^a-z0-9]/g, "");
+  const required = normalize(requiredScope);
+  if (connection.grantedScopes.some((scope) => normalize(scope) === required)) return true;
+  if (providerId === "intercom" && required === "conversationsread") {
+    return connection.grantedScopes.some((scope) => normalize(scope) === "readconversations");
+  }
+  if (providerId === "stripe" && requiredScope.toLowerCase().endsWith(":read")) {
+    return connection.grantedScopes.some((scope) => scope === "read_only" || scope === "read_write");
+  }
+  const brokerReadOnlyProviders = new Set(["zendesk", "workday", "netsuite"]);
+  return connection.source === "hermes_connector_broker"
+    && brokerReadOnlyProviders.has(providerId)
+    && connection.brokerCapabilities.includes("provider.data.read")
+    && connection.grantedScopes.length === 0;
 }
 
 function trigramOverlap(left: string, right: string): number {

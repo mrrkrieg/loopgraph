@@ -94,8 +94,9 @@ describe("official apps migrated from legacy templates", () => {
       "loopgraph.ops-finance.manage-forecast-controls",
       "loopgraph.hr-talent.operate-people-workflows",
       "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+      "loopgraph.management.run-company-operating-system",
       ...migratedApps.map((app) => app.appId)
     ]));
-    expect(apps.length).toBeGreaterThanOrEqual(12);
+    expect(apps.length).toBeGreaterThanOrEqual(13);
   });
 });

@@ -1,0 +1,46 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: management-system-improvement, name: Company System Improvement, version: 1.0.0, description: "Turn a repeated governed failure pattern into a reviewable loop, routing, policy, connection, or topology change proposal.", department: management, ownerRole: company_operations, tags: [improvement, topology, routing, policy] }
+trigger: { type: event, source: "*", event: management.failure_pattern_repeated }
+input: { requiredFields: [normalizedPayload.patternId, normalizedPayload.observationWindow, normalizedPayload.failureType, normalizedPayload.affectedLoopIds, normalizedPayload.recurrenceCount], subjectTypes: [loop, failure_cluster, repeated_failure_pattern], fixtures: [] }
+routine:
+  - { id: normalize, name: Normalize failure pattern, actor: system, type: observe, description: "Resolve pattern, window, type, affected loops, graph version, recurrence, impact, corrections, owner, and policy context." }
+  - { id: diagnose, name: Diagnose system cause, actor: agent, type: assess, description: "Separate loop design, routing, object identity, context, connector, policy, approval, model, ownership, reliability, and measurement causes." }
+  - { id: prepare, name: Prepare semantic change, actor: agent, type: prepare, description: "Prepare an exact add, connect, update, split, merge, retire, policy, connection, or measurement change with acceptance and rollback." }
+  - { id: verify, name: Verify governed proposal, actor: human, type: verify, description: "Affected owners verify problem evidence, semantic diff, risk, tests, migration, approvals, rollback, and outcome window." }
+  - { id: learn, name: Return change outcome, actor: system, type: learn, description: "Return rollout, correction, reliability, value, failure recurrence, rollback, and graph-version evidence." }
+capabilities:
+  - { key: loopgraph.topology.read, authority: read, risk: high, required: true, purpose: "Read exact current graph, loop, routing, policy, and connection state.", customerFacing: false }
+  - { key: loopgraph.routing.read, authority: read, risk: high, required: true, purpose: "Read repeated failure, correction, abstention, error, and escalation evidence.", customerFacing: false }
+  - { key: loopgraph.outcome.read, authority: read, risk: high, required: true, purpose: "Read outcome, cost, value, quality, and review-burden evidence.", customerFacing: false }
+  - { key: loopgraph.graph.change.propose, authority: approve, risk: critical, required: false, purpose: "Prepare the exact semantic graph or loop-policy transaction for governed approval.", customerFacing: false }
+skills: [management-loop-value-review, management-decision-and-follow-through]
+outcomes:
+  - { metric: repeated_failure_recurrence_rate, description: Governed failure patterns recurring after an approved system change., direction: decrease, sourceCapability: loopgraph.routing.read }
+  - { metric: system_change_value_realization, description: "Verified outcome improvement net of implementation, review, supervision, and organizational change cost.", direction: increase, sourceCapability: loopgraph.outcome.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [management.system_improvement]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: management.failure_pattern_repeated, subjectTypes: [loop, failure_cluster, repeated_failure_pattern], requiredFields: [normalizedPayload.patternId, normalizedPayload.observationWindow, normalizedPayload.failureType, normalizedPayload.affectedLoopIds, normalizedPayload.recurrenceCount], reason: "A governed repeated failure pattern identifies affected loops, recurrence, and an explicit system-change target." }
+    - { sourcePattern: "*", eventTypePattern: management.loop_improvement_proposed, subjectTypes: [loop, failure_cluster, repeated_failure_pattern], requiredFields: [normalizedPayload.patternId, normalizedPayload.observationWindow, normalizedPayload.failureType, normalizedPayload.affectedLoopIds, normalizedPayload.recurrenceCount], reason: "A loop owner proposes a governed improvement backed by repeated failure and correction evidence." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: management.graph_change_execute_requested, subjectTypes: [loop], fields: [], reason: "Hermes cannot apply a semantic graph transaction without governed approval." }]
+  inputMapping: { patternId: normalizedPayload.patternId, observationWindow: normalizedPayload.observationWindow, failureType: normalizedPayload.failureType, affectedLoopIds: normalizedPayload.affectedLoopIds, recurrenceCount: normalizedPayload.recurrenceCount }
+  priority: 95
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 10, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [loopgraph.topology.read, loopgraph.routing.read, loopgraph.outcome.read]
+  examples: { shouldRoute: ["A repeated failure pattern has affected loops, recurrence, corrections, impact, and an accountable owner."], shouldNotRoute: ["A single bad run has no repeated pattern or system-change evidence."] }
+policy:
+  forbiddenActions:
+    - { capability: loopgraph.graph.change.execute, reason: "Semantic changes require approved graph transactions." }
+    - { capability: loopgraph.mode.promote, reason: "Improvement preparation cannot increase autonomy." }
+  escalationOwner: company_operations
+  escalationSla: 1bd
+  separateCustomerFacingApproval: true

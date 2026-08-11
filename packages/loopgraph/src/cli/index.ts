@@ -257,6 +257,62 @@ apps
     await printAppTool("loopgraph_app_install_status", { projectRoot: options.project, installationId: options.installation, workspaceId: options.workspace, companyId: options.company });
   });
 
+apps
+  .command("mappings")
+  .description("Inspect required provider fields, live schema snapshots, suggestions, and confirmed reusable mappings")
+  .argument("<app-id>", "Marketplace app ID")
+  .requiredOption("--preset <preset>", "Provider preset ID")
+  .option("--version <version>", "Exact app version")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (appId: string, options: { preset: string; version?: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_field_mappings_get", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      version: options.version,
+      presetId: options.preset
+    });
+  });
+
+apps
+  .command("schema-record")
+  .description("Record a connection-bound provider schema snapshot produced by an authenticated Hermes connector")
+  .requiredOption("--file <path>", "JSON schema snapshot containing connectionId, providerId, source, and objects")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable connector identity", "cli")
+  .action(async (options: { file: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_connector_schema_record", {
+      ...await readJsonRecord(path.resolve(options.file)),
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("mapping-confirm")
+  .description("Confirm exact logical-to-provider field mappings from a reviewed JSON selection")
+  .requiredOption("--file <path>", "JSON selection containing connectionId, objectType, and mappings")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--actor <id>", "Accountable reviewer identity", "cli")
+  .action(async (options: { file: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_field_mapping_confirm", {
+      ...await readJsonRecord(path.resolve(options.file)),
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      actor: options.actor
+    });
+  });
+
 for (const action of ["test", "pause", "resume"] as const) {
   apps
     .command(action)

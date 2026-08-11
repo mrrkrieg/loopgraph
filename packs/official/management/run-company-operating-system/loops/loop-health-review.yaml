@@ -1,0 +1,45 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: management-loop-health-review, name: Loop Health Review, version: 1.0.0, description: "Review routing, quality, reliability, cost, review burden, value, and outcome evidence for one installed company loop.", department: management, ownerRole: loop_owner, tags: [loop-health, reliability, value, governance] }
+trigger: { type: event, source: "*", event: management.loop_health_degraded }
+input: { requiredFields: [normalizedPayload.loopId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.healthSignals, normalizedPayload.loopOwnerId], subjectTypes: [loop, department, loop_health_window], fixtures: [{ id: loop-health, path: fixtures/outcome.json }] }
+routine:
+  - { id: normalize, name: Normalize loop health window, actor: system, type: observe, description: "Resolve loop, version, mode, connections, owner, routing, quality, reliability, cost, outcome, correction, and review-window evidence." }
+  - { id: assess, name: Assess health and value, actor: agent, type: assess, description: "Separate missing connection, routing mismatch, low quality, reliability, policy, review burden, cost, and no-value conditions." }
+  - { id: prepare, name: Prepare owned recovery, actor: agent, type: prepare, description: "Prepare hold, repair, narrow, retrain, reconnect, remeasure, retire, or governed-improvement options with evidence." }
+  - { id: verify, name: Verify loop-owner decision, actor: human, type: verify, description: "The loop owner and affected department verify failure mode, customer impact, proposed boundary, and recovery evidence." }
+  - { id: learn, name: Return health outcome, actor: system, type: learn, description: "Return recovery, correction, cost, value, reliability, and recurrence evidence to company system improvement." }
+capabilities:
+  - { key: loopgraph.topology.read, authority: read, risk: high, required: true, purpose: "Read loop version, mode, connections, owner, and topology.", customerFacing: false }
+  - { key: loopgraph.routing.read, authority: read, risk: high, required: true, purpose: "Read routing, abstention, correction, duplicate, escalation, and error evidence.", customerFacing: false }
+  - { key: loopgraph.outcome.read, authority: read, risk: high, required: true, purpose: "Read quality, cost, value, outcome, confidence, and review burden.", customerFacing: false }
+skills: [management-loop-value-review, management-cross-department-synthesis]
+outcomes:
+  - { metric: loop_health_recovery_hours, description: Time from a governed health degradation to verified recovery or retirement., direction: decrease, sourceCapability: loopgraph.routing.read }
+  - { metric: loops_with_positive_net_value, description: "Active loops with verified value above execution, connector, review, supervision, and change cost.", direction: increase, sourceCapability: loopgraph.outcome.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [management.loop_health]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: management.loop_health_degraded, subjectTypes: [loop, department, loop_health_window], requiredFields: [normalizedPayload.loopId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.healthSignals, normalizedPayload.loopOwnerId], reason: "A named installed loop has a bounded health window and accountable owner." }
+    - { sourcePattern: "*", eventTypePattern: management.department_loop_review_due, subjectTypes: [loop, department, loop_health_window], requiredFields: [normalizedPayload.loopId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.healthSignals, normalizedPayload.loopOwnerId], reason: "A department requests governed review of one installed loop and evidence window." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: management.loop_delete_requested, subjectTypes: [loop], fields: [], reason: "Hermes cannot retire or delete a loop without governed semantic change approval." }]
+  inputMapping: { loopId: normalizedPayload.loopId, windowStart: normalizedPayload.windowStart, windowEnd: normalizedPayload.windowEnd, healthSignals: normalizedPayload.healthSignals, loopOwnerId: normalizedPayload.loopOwnerId }
+  priority: 95
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: declared_ordered, maxRoutes: 2, requiresIndependentProblems: false }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 30, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [loopgraph.topology.read, loopgraph.routing.read, loopgraph.outcome.read]
+  examples: { shouldRoute: ["A named loop has bounded routing, quality, cost, value, and owner evidence."], shouldNotRoute: ["A single failed run has no recurrence or material outcome evidence."] }
+policy:
+  forbiddenActions:
+    - { capability: loopgraph.loop.delete, reason: "Loop retirement requires governed semantic graph change." }
+    - { capability: loopgraph.mode.promote, reason: "Health review cannot increase autonomy." }
+  escalationOwner: loop_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

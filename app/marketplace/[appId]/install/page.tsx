@@ -47,6 +47,7 @@ export default async function AppInstallPlanPage({
           questions: data.detail.setupQuestions
         }}
         initialPlan={data.plan}
+        mappingPlan={data.mappingPlan}
       />
     </>
   );

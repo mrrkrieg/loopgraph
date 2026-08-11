@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { connectorInstallationViewSchema } from "../core";
 import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
+import { callLoopgraphConnectionTool } from "./connection-tools";
+import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
 
 const temporaryDirectories: string[] = [];
 
@@ -18,6 +21,9 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_install_plan",
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
+      "loopgraph_connector_schema_record",
+      "loopgraph_app_field_mappings_get",
+      "loopgraph_app_field_mapping_confirm",
       "loopgraph_app_test",
       "loopgraph_app_historical_replay",
       "loopgraph_app_evaluation_label",
@@ -143,5 +149,126 @@ describe("shared Loopgraph App tools", () => {
 
     const unchanged = await callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as { installations: unknown[] };
     expect(unchanged.installations).toEqual([]);
+  });
+
+  it("accepts a trusted, secret-free Hermes Broker projection for install planning", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-tools-broker-"));
+    temporaryDirectories.push(projectRoot);
+    const connection = connectionInstanceFromBrokerInstallation(connectorInstallationViewSchema.parse({
+      id: "provider_hubspot_main",
+      tenant: { organizationId: "org-acme", projectKey: "main" },
+      providerId: "hubspot",
+      displayName: "Acme HubSpot",
+      environment: "production",
+      status: "active",
+      grantedScopes: ["crm.objects.companies.read", "crm.objects.contacts.read", "crm.objects.deals.read"],
+      allowedCapabilities: ["provider.data.read", "provider.health.read", "provider.webhooks.verify"],
+      webhookStatus: "active",
+      customerManagedKeyConfigured: true,
+      createdAt: "2026-08-10T09:00:00.000Z",
+      updatedAt: "2026-08-10T10:00:00.000Z"
+    }));
+    const plan = await callLoopgraphAppTool("loopgraph_app_install_plan", {
+      projectRoot,
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      presetId: "hubspot-gmail-slack",
+      configuration: {}
+    }, { connections: [connection] }) as {
+      capabilityResolutions: Array<{ capability: string; required: boolean; status: string; connectionId?: string }>;
+    };
+    expect(plan.capabilityResolutions.filter((resolution) => resolution.required)).toEqual([
+      expect.objectContaining({ capability: "crm.lead.read", status: "reusable", connectionId: "provider_hubspot_main" }),
+      expect.objectContaining({ capability: "crm.account.read", status: "reusable", connectionId: "provider_hubspot_main" })
+    ]);
+  });
+
+  it("records a provider schema, suggests mappings, and requires explicit confirmation before install readiness", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-tools-"));
+    temporaryDirectories.push(projectRoot);
+    await callLoopgraphConnectionTool("loopgraph_connections_register", {
+      projectRoot,
+      id: "hubspot-production",
+      manifestId: "hubspot",
+      capabilityKeys: ["crm.read"],
+      grantedScopes: ["crm.objects.contacts.read", "crm.objects.companies.read"],
+      status: "connected",
+      environment: "live",
+      readPolicy: "read_only",
+      writePolicy: "approved_only"
+    });
+    await callLoopgraphAppTool("loopgraph_connector_schema_record", {
+      projectRoot,
+      connectionId: "hubspot-production",
+      providerId: "hubspot",
+      source: "provider_api",
+      samplePolicy: "redacted_only",
+      objects: [
+        {
+          objectType: "lead",
+          fields: [
+            { name: "hs_object_id", label: "Record ID", type: "string", writable: false, sampleValues: ["redacted-1"] },
+            { name: "email", label: "Email", type: "string", writable: true, sampleValues: ["masked@example.com"] },
+            { name: "company", label: "Company", type: "string", writable: true, sampleValues: ["Example Co"] },
+            { name: "lifecyclestage", label: "Lifecycle stage", type: "enum", writable: true, sampleValues: ["lead"] }
+          ]
+        },
+        {
+          objectType: "account",
+          fields: [
+            { name: "hs_object_id", label: "Record ID", type: "string", writable: false, sampleValues: ["company-1"] },
+            { name: "domain", label: "Domain", type: "string", writable: true, sampleValues: ["example.com"] },
+            { name: "lifecyclestage", label: "Customer status", type: "enum", writable: true, sampleValues: ["customer"] }
+          ]
+        }
+      ],
+      actor: "hermes-connector"
+    });
+    const before = await callLoopgraphAppTool("loopgraph_app_field_mappings_get", {
+      projectRoot,
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      presetId: "hubspot-gmail-slack"
+    }) as { complete: boolean; requirements: Array<{ objectType: string; schemaStatus: string; connectionId?: string; suggestions: Array<{ logicalField: string; providerField?: string; confidence: number }> }> };
+    expect(before.complete).toBe(false);
+    expect(before.requirements.find((requirement) => requirement.objectType === "lead")).toMatchObject({ schemaStatus: "connected_snapshot", connectionId: "hubspot-production" });
+    const lead = before.requirements.find((requirement) => requirement.objectType === "lead")!;
+    await callLoopgraphAppTool("loopgraph_app_field_mapping_confirm", {
+      projectRoot,
+      connectionId: "hubspot-production",
+      objectType: "lead",
+      mappings: lead.suggestions.filter((suggestion) => suggestion.providerField).map((suggestion) => ({
+        logicalField: suggestion.logicalField,
+        providerField: suggestion.providerField,
+        direction: "read",
+        confidence: suggestion.confidence
+      })),
+      actor: "sales-operations"
+    });
+    const account = before.requirements.find((requirement) => requirement.objectType === "account")!;
+    await callLoopgraphAppTool("loopgraph_app_field_mapping_confirm", {
+      projectRoot,
+      connectionId: "hubspot-production",
+      objectType: "account",
+      mappings: account.suggestions.filter((suggestion) => suggestion.providerField).map((suggestion) => ({
+        logicalField: suggestion.logicalField,
+        providerField: suggestion.providerField,
+        direction: "read",
+        confidence: suggestion.confidence
+      })),
+      actor: "sales-operations"
+    });
+    const after = await callLoopgraphAppTool("loopgraph_app_field_mappings_get", {
+      projectRoot,
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      presetId: "hubspot-gmail-slack"
+    }) as { complete: boolean };
+    expect(after.complete).toBe(true);
+    const installPlan = await callLoopgraphAppTool("loopgraph_app_install_plan", {
+      projectRoot,
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      presetId: "hubspot-gmail-slack",
+      configuration: {}
+    }) as { missingConfigurationKeys: string[]; fieldMappingIds: string[] };
+    expect(installPlan.fieldMappingIds).toHaveLength(7);
+    expect(installPlan.missingConfigurationKeys.filter((key) => key.startsWith("mapping"))).toEqual([]);
   });
 });

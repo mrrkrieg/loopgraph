@@ -14,9 +14,9 @@ eventSources:
   - { eventFamily: product.feedback_received, providerEvent: conversation.user.created, transport: webhook, normalizationTransformer: intercom.feedback-to-product-signal.v1, signatureStrategy: intercom-hmac-sha1, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: product.release_completed, providerEvent: linear.project.completed, transport: webhook, normalizationTransformer: linear.release-to-product-outcome.v1, signatureStrategy: linear-webhook-signature, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: feedback, requiredLogicalFields: [feedback.id, feedback.text, feedback.productArea, feedback.customerId], optionalLogicalFields: [feedback.segment, feedback.sentiment, feedback.createdAt] }
-  - { objectType: product_event, requiredLogicalFields: [event.name, event.distinctId, event.timestamp], optionalLogicalFields: [event.productArea, event.releaseId, event.segment] }
-  - { objectType: project_issue, requiredLogicalFields: [issue.id, issue.title, issue.status], optionalLogicalFields: [issue.productArea, issue.releaseId, issue.labels] }
+  - { providerId: intercom, objectType: feedback, requiredLogicalFields: [feedback.id, feedback.text, feedback.productArea, feedback.customerId], optionalLogicalFields: [feedback.segment, feedback.sentiment, feedback.createdAt] }
+  - { providerId: posthog, objectType: product_event, requiredLogicalFields: [event.name, event.distinctId, event.timestamp], optionalLogicalFields: [event.productArea, event.releaseId, event.segment] }
+  - { providerId: linear, objectType: project_issue, requiredLogicalFields: [issue.id, issue.title, issue.status], optionalLogicalFields: [issue.productArea, issue.releaseId, issue.labels] }
 healthCheck:
   capability: support.feedback.read
   sampleQuery: { state: open, limit: 1 }

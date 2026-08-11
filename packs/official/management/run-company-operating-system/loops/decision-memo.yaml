@@ -1,0 +1,46 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: management-decision-memo, name: Management Decision Memo, version: 1.0.0, description: "Prepare source-cited options, tradeoffs, risks, reversibility, owners, and follow-through for an accountable leadership decision.", department: management, ownerRole: executive_owner, tags: [decision, memo, tradeoffs, accountability] }
+trigger: { type: event, source: "*", event: management.decision_requested }
+input: { requiredFields: [normalizedPayload.decisionId, normalizedPayload.version, normalizedPayload.optionIds, normalizedPayload.tradeoffs, normalizedPayload.decisionOwnerId], subjectTypes: [decision, forecast, management_decision_request], fixtures: [{ id: decision-request, path: fixtures/customer-facing.json }] }
+routine:
+  - { id: normalize, name: Normalize decision request, actor: system, type: observe, description: "Resolve decision, version, owner, deadline, options, constraints, assumptions, affected goals, affected departments, and evidence cutoff." }
+  - { id: assemble, name: Assemble decision evidence, actor: agent, type: assess, description: "Join financial, capacity, customer, product, risk, legal, people, execution, and no-action evidence while preserving conflicts." }
+  - { id: prepare, name: Prepare decision memo, actor: agent, type: prepare, description: "Prepare options, explicit tradeoffs, uncertainty, reversibility, second-order effects, recommendation conditions, dissent, and follow-through." }
+  - { id: decide, name: Record accountable decision, actor: human, type: decide, description: "The named leadership owner approves, rejects, defers, or requests more evidence and owns the rationale." }
+  - { id: learn, name: Return decision outcome, actor: system, type: learn, description: "Return execution, outcome, corrections, assumption validity, constraint movement, and decision-quality evidence." }
+capabilities:
+  - { key: loopgraph.outcome.read, authority: read, risk: high, required: true, purpose: "Read related department outcomes, value, cost, correction, and confidence.", customerFacing: false }
+  - { key: analytics.metric.query, authority: read, risk: high, required: true, purpose: "Query bounded decision metrics, baselines, scenarios, and dimensions.", customerFacing: false }
+  - { key: finance.forecast.read, authority: read, risk: critical, required: true, purpose: "Read approved financial constraints and forecast evidence.", customerFacing: false }
+  - { key: collaboration.message.draft, authority: approve, risk: high, required: false, purpose: "Prepare the exact reviewed internal decision communication.", customerFacing: false }
+skills: [management-decision-and-follow-through, management-cross-department-synthesis]
+outcomes:
+  - { metric: decision_evidence_completeness, description: "Decisions with source-cited options, tradeoffs, uncertainty, owner, and follow-through.", direction: increase, sourceCapability: loopgraph.outcome.read }
+  - { metric: decision_execution_rate, description: Approved decisions executed and measured inside the declared window., direction: increase, sourceCapability: analytics.metric.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [management.decision_required]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: management.decision_requested, subjectTypes: [decision, forecast, management_decision_request], requiredFields: [normalizedPayload.decisionId, normalizedPayload.version, normalizedPayload.optionIds, normalizedPayload.tradeoffs, normalizedPayload.decisionOwnerId], reason: "A named decision has options, tradeoffs, accountable ownership, and bounded source evidence." }
+    - { sourcePattern: "*", eventTypePattern: management.material_anomaly_decision_required, subjectTypes: [decision, forecast, management_decision_request], requiredFields: [normalizedPayload.decisionId, normalizedPayload.version, normalizedPayload.optionIds, normalizedPayload.tradeoffs, normalizedPayload.decisionOwnerId], reason: "A reconciled material anomaly exposes a discrete accountable decision." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: management.decision_execute_requested, subjectTypes: [decision], fields: [], reason: "Hermes cannot execute or self-approve a management decision." }]
+  inputMapping: { decisionId: normalizedPayload.decisionId, version: normalizedPayload.version, optionIds: normalizedPayload.optionIds, tradeoffs: normalizedPayload.tradeoffs, decisionOwnerId: normalizedPayload.decisionOwnerId }
+  priority: 100
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 15, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [loopgraph.outcome.read, analytics.metric.query, finance.forecast.read]
+  examples: { shouldRoute: ["A named accountable decision has real options, tradeoffs, and source-cited constraints."], shouldNotRoute: ["A user asks Hermes to make or execute the leadership decision."] }
+policy:
+  forbiddenActions:
+    - { capability: management.decision.approve, reason: "Leadership remains accountable for the decision." }
+    - { capability: management.decision.execute, reason: "Decision execution requires separate governed systems and authority." }
+  escalationOwner: executive_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

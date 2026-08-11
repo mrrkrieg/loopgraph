@@ -62,11 +62,24 @@ async function discoverPackRoots() {
 
 async function compilePack(packRoot) {
   const manifest = await readYaml(path.join(packRoot, "loopgraph.pack.yaml"));
+  const connectors = await Promise.all((manifest.entrypoints.connectors ?? []).map((relativePath) =>
+    readYaml(path.join(packRoot, relativePath))
+  ));
+  for (const connector of connectors) validateOfficialConnectorMappingOwnership(connector, packRoot);
   const loops = await Promise.all(manifest.entrypoints.loops.map((relativePath) => readYaml(path.join(packRoot, relativePath))));
   const dashboards = await Promise.all((manifest.entrypoints.dashboards ?? []).map((relativePath) => readYaml(path.join(packRoot, relativePath))));
   const appMetrics = uniqueBy(dashboards.flatMap((dashboard) => dashboard.metrics ?? []), (metric) => metric.id);
   const loopsById = new Map(loops.map((loop) => [loop.metadata.id, loop]));
   return loops.map((loop) => compileLoop({ manifest, loop, loopsById, appMetrics, packRoot }));
+}
+
+function validateOfficialConnectorMappingOwnership(connector, packRoot) {
+  const missing = (connector.fieldMappings ?? [])
+    .filter((mapping) => typeof mapping.providerId !== "string" || mapping.providerId.length === 0)
+    .map((mapping) => mapping.objectType ?? "unknown");
+  if (missing.length > 0) {
+    throw new Error(`Official connector ${connector.id} in ${path.relative(repoRoot, packRoot)} must declare providerId for field mappings: ${missing.join(", ")}`);
+  }
 }
 
 function compileLoop({ manifest, loop, loopsById, appMetrics, packRoot }) {

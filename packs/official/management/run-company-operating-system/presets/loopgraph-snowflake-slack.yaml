@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: loopgraph-snowflake-slack
+name: Loopgraph + Snowflake + Slack
+description: Configure the company operating system around Loopgraph topology, routing, outcomes, value, Snowflake metrics, finance and capacity evidence, tasks, and governed Slack drafts.
+connectorRecipe: connectors/loopgraph-snowflake-slack.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 90, rolloutMode: shadow, decisionDraftingEnabled: true, semanticChangeProposalEnabled: false }
+requiredCompanyFields: [management.operatingReviewPolicy, company.metricDefinitions, company.materialityPolicy, management.decisionPolicy, management.resourcePolicy, management.loopValuePolicy]

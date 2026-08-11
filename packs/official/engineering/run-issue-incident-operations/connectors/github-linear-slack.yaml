@@ -15,7 +15,7 @@ eventSources:
   - { eventFamily: engineering.issue_received, providerEvent: issues, transport: webhook, normalizationTransformer: github.issue-to-engineering-signal.v1, signatureStrategy: github-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: engineering.incident_detected, providerEvent: incident.created, transport: webhook, normalizationTransformer: linear.incident-to-engineering-signal.v1, signatureStrategy: linear-webhook-signature, replayProtection: true, fallbackPollMinutes: 5 }
 fieldMappings:
-  - { objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }
-  - { objectType: incident, requiredLogicalFields: [incident.id, incident.service, incident.detectedAt], optionalLogicalFields: [incident.severity, incident.customerImpact, incident.deploymentId] }
+  - { providerId: github, objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }
+  - { providerId: linear, objectType: incident, requiredLogicalFields: [incident.id, incident.service, incident.detectedAt], optionalLogicalFields: [incident.severity, incident.customerImpact, incident.deploymentId] }
 healthCheck: { capability: repo.issue.read, sampleQuery: { state: open, limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

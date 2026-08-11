@@ -25,8 +25,8 @@ eventSources:
   - { eventFamily: security.questionnaire_received, providerEvent: security-portal.questionnaire.created, transport: webhook, normalizationTransformer: questionnaire-to-security-review.v1, signatureStrategy: provider-hmac-sha256, replayProtection: true, fallbackPollMinutes: 30 }
   - { eventFamily: compliance.evidence_gap_detected, providerEvent: drata.evidence.missing, transport: webhook, normalizationTransformer: drata-gap-to-audit-request.v1, signatureStrategy: drata-hmac-sha256, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: contract_review, requiredLogicalFields: [contract.id, contract.version, contract.clauseIds, playbook.version, contract.legalOwnerId], optionalLogicalFields: [contract.parties, contract.jurisdictionScope, contract.accountId] }
-  - { objectType: security_questionnaire, requiredLogicalFields: [questionnaire.id, questionnaire.version, account.id, questionnaire.questionIds, questionnaire.securityOwnerId], optionalLogicalFields: [questionnaire.dueAt, questionnaire.libraryVersion] }
-  - { objectType: audit_evidence_request, requiredLogicalFields: [request.id, control.id, evidence.window, evidence.requiredArtifactIds, evidence.ownerId], optionalLogicalFields: [request.framework, request.requestor, evidence.freshnessPolicy] }
+  - { providerId: docusign, objectType: contract_review, requiredLogicalFields: [contract.id, contract.version, contract.clauseIds, playbook.version, contract.legalOwnerId], optionalLogicalFields: [contract.parties, contract.jurisdictionScope, contract.accountId] }
+  - { providerId: hubspot, objectType: security_questionnaire, requiredLogicalFields: [questionnaire.id, questionnaire.version, account.id, questionnaire.questionIds, questionnaire.securityOwnerId], optionalLogicalFields: [questionnaire.dueAt, questionnaire.libraryVersion] }
+  - { providerId: drata, objectType: audit_evidence_request, requiredLogicalFields: [request.id, control.id, evidence.window, evidence.requiredArtifactIds, evidence.ownerId], optionalLogicalFields: [request.framework, request.requestor, evidence.freshnessPolicy] }
 healthCheck: { capability: policy.control.read, sampleQuery: { fields: [controlId, version], limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

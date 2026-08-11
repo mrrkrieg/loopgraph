@@ -26,12 +26,14 @@ export function IntegrationAdmin({
   initialWorkloadIdentities,
   initialKillSwitches,
   providers,
+  initialProviderId,
   brokerConfigured
 }: {
   initialInstallations: ConnectorInstallationView[];
   initialWorkloadIdentities: WorkloadIdentityAdminView[];
   initialKillSwitches: ConnectorKillSwitchAdminView[];
   providers: ProviderOnboardingProfile[];
+  initialProviderId?: string;
   brokerConfigured: boolean;
 }) {
   const [installations, setInstallations] = useState(initialInstallations);
@@ -316,7 +318,7 @@ export function IntegrationAdmin({
         <form action={connect} className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="text-sm font-medium">
             Provider
-            <select name="provider_id" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" disabled={pending || !brokerConfigured}>
+            <select name="provider_id" defaultValue={initialProviderId ?? providers[0]?.providerId} className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" disabled={pending || !brokerConfigured}>
               {providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.label}</option>)}
             </select>
           </label>

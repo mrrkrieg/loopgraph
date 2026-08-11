@@ -14,9 +14,9 @@ eventSources:
   - { eventFamily: product.feedback_received, providerEvent: ticket.created, transport: webhook, normalizationTransformer: zendesk.ticket-to-product-signal.v1, signatureStrategy: zendesk-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: product.release_completed, providerEvent: version.released, transport: webhook, normalizationTransformer: jira.release-to-product-outcome.v1, signatureStrategy: atlassian-jwt, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: feedback, requiredLogicalFields: [feedback.id, feedback.text, feedback.productArea, feedback.customerId], optionalLogicalFields: [feedback.segment, feedback.sentiment, feedback.createdAt] }
-  - { objectType: product_event, requiredLogicalFields: [event.name, event.distinctId, event.timestamp], optionalLogicalFields: [event.productArea, event.releaseId, event.segment] }
-  - { objectType: project_issue, requiredLogicalFields: [issue.id, issue.title, issue.status], optionalLogicalFields: [issue.productArea, issue.releaseId, issue.labels] }
+  - { providerId: zendesk, objectType: feedback, requiredLogicalFields: [feedback.id, feedback.text, feedback.productArea, feedback.customerId], optionalLogicalFields: [feedback.segment, feedback.sentiment, feedback.createdAt] }
+  - { providerId: amplitude, objectType: product_event, requiredLogicalFields: [event.name, event.distinctId, event.timestamp], optionalLogicalFields: [event.productArea, event.releaseId, event.segment] }
+  - { providerId: jira, objectType: project_issue, requiredLogicalFields: [issue.id, issue.title, issue.status], optionalLogicalFields: [issue.productArea, issue.releaseId, issue.labels] }
 healthCheck:
   capability: support.feedback.read
   sampleQuery: { status: open, limit: 1 }

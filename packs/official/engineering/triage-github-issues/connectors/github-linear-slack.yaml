@@ -12,6 +12,7 @@ eventSources:
   - { eventFamily: github.issue_opened, providerEvent: issues.opened, transport: webhook, normalizationTransformer: github.issue-to-repository-issue.v1, signatureStrategy: github-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
 fieldMappings:
   - objectType: repository_issue
+    providerId: github
     requiredLogicalFields: [issue.id, issue.title, issue.body]
     optionalLogicalFields: [issue.labels, issue.author, issue.repository, issue.createdAt, issue.assignees]
 healthCheck:

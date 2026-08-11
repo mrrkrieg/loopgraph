@@ -22,8 +22,8 @@ eventSources:
   - { eventFamily: finance.receivable_risk_detected, providerEvent: invoice.payment_failed, transport: webhook, normalizationTransformer: stripe.invoice-to-receivable-risk.v1, signatureStrategy: stripe-v1-signature, replayProtection: true, fallbackPollMinutes: 30 }
   - { eventFamily: finance.close_review_due, providerEvent: accounting_period.review_due, transport: poll, normalizationTransformer: quickbooks.close-to-readiness.v1, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: forecast_window, requiredLogicalFields: [forecast.id, forecast.version, forecast.periodStart, forecast.periodEnd, forecast.baseline, forecast.current], optionalLogicalFields: [forecast.currency, forecast.scenario, forecast.ownerId] }
-  - { objectType: invoice, requiredLogicalFields: [invoice.id, invoice.accountId, invoice.amount, invoice.currency, invoice.dueAt, invoice.status], optionalLogicalFields: [invoice.disputeStatus, invoice.ownerId, invoice.promiseAt] }
-  - { objectType: vendor_contract, requiredLogicalFields: [vendor.id, contract.id, contract.renewalAt, vendor.spend, vendor.ownerId], optionalLogicalFields: [vendor.usage, vendor.securityStatus, vendor.businessCriticality] }
+  - { providerId: snowflake, objectType: forecast_window, requiredLogicalFields: [forecast.id, forecast.version, forecast.periodStart, forecast.periodEnd, forecast.baseline, forecast.current], optionalLogicalFields: [forecast.currency, forecast.scenario, forecast.ownerId] }
+  - { providerId: stripe, objectType: invoice, requiredLogicalFields: [invoice.id, invoice.accountId, invoice.amount, invoice.currency, invoice.dueAt, invoice.status], optionalLogicalFields: [invoice.disputeStatus, invoice.ownerId, invoice.promiseAt] }
+  - { providerId: quickbooks, objectType: vendor_contract, requiredLogicalFields: [vendor.id, contract.id, contract.renewalAt, vendor.spend, vendor.ownerId], optionalLogicalFields: [vendor.usage, vendor.securityStatus, vendor.businessCriticality] }
 healthCheck: { capability: finance.ledger.read, sampleQuery: { report: balance_sheet, limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true
