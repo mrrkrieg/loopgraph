@@ -15,9 +15,9 @@ eventSources:
   - { eventFamily: sales.opportunity_changed, providerEvent: OpportunityChangeEvent, transport: webhook, normalizationTransformer: salesforce.opportunity-to-risk-snapshot.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: sales.pipeline_outcome_observed, providerEvent: OpportunityStageChange, transport: webhook, normalizationTransformer: salesforce.opportunity-to-pipeline-outcome.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: opportunity, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.ownerId, opportunity.lastActivityAt], optionalLogicalFields: [opportunity.amount, opportunity.closeDate, opportunity.nextStep, opportunity.forecastCategory] }
-  - { objectType: communication_thread, requiredLogicalFields: [thread.id, thread.participants, thread.lastMessageAt], optionalLogicalFields: [thread.commitments, thread.sentiment] }
-  - { objectType: calendar_commitment, requiredLogicalFields: [event.id, event.participants, event.startAt], optionalLogicalFields: [event.opportunityId, event.outcome] }
+  - { providerId: salesforce, objectType: opportunity, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.ownerId, opportunity.lastActivityAt], optionalLogicalFields: [opportunity.amount, opportunity.closeDate, opportunity.nextStep, opportunity.forecastCategory] }
+  - { providerId: outlook, objectType: communication_thread, requiredLogicalFields: [thread.id, thread.participants, thread.lastMessageAt], optionalLogicalFields: [thread.commitments, thread.sentiment] }
+  - { providerId: outlook, objectType: calendar_commitment, requiredLogicalFields: [event.id, event.participants, event.startAt], optionalLogicalFields: [event.opportunityId, event.outcome] }
 healthCheck:
   capability: crm.opportunity.read
   sampleQuery: { state: open, limit: 1 }

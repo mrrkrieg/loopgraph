@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { AppInstallPlan } from "loopgraph/core";
 import { requireHostedPermission } from "@/lib/auth/hosted-access";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
-import { callLoopgraphAppTool } from "@/lib/loopgraph-runtime/app-tools";
+import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import {
   configurationFromInstallForm,
   type InstallWizardState
@@ -76,6 +76,34 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   revalidatePath("/apps");
   revalidatePath("/brain");
   redirect(`/apps/${encodeURIComponent(result.installation.id)}`);
+}
+
+export async function confirmAppFieldMappingsAction(formData: FormData): Promise<void> {
+  await requireHostedPermission("organization.manage");
+  if (formData.get("confirmMappings") !== "on") throw new Error("Confirm the reviewed field mappings before saving them");
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const appId = requiredFormString(formData, "appId");
+  const presetId = requiredFormString(formData, "presetId");
+  const connectionId = requiredFormString(formData, "connectionId");
+  const objectType = requiredFormString(formData, "objectType");
+  const logicalFields = formData.getAll("logicalField").filter((value): value is string => typeof value === "string" && value.length > 0);
+  const mappings = logicalFields.flatMap((logicalField) => {
+    const providerField = formData.get(`providerField:${logicalField}`);
+    if (typeof providerField !== "string" || providerField.trim() === "") return [];
+    const rawConfidence = formData.get(`confidence:${logicalField}`);
+    const confidence = typeof rawConfidence === "string" && Number.isFinite(Number(rawConfidence)) ? Number(rawConfidence) : 0;
+    return [{ logicalField, providerField: providerField.trim(), direction: "read" as const, confidence }];
+  });
+  if (mappings.length === 0) throw new Error("Select at least one reviewed provider field mapping");
+  await callLoopgraphAppTool("loopgraph_app_field_mapping_confirm", {
+    projectRoot,
+    connectionId,
+    objectType,
+    mappings,
+    actor: "loopgraph-browser"
+  });
+  revalidatePath(`/marketplace/${encodeURIComponent(appId)}/install`);
+  redirect(`/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`);
 }
 
 function requiredFormString(formData: FormData, key: string, maxLength = 240): string {

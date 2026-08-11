@@ -15,9 +15,9 @@ eventSources:
   - { eventFamily: marketing.campaign_window_closed, providerEvent: campaign.performanceWindow, transport: poll, normalizationTransformer: paid-social.campaign-to-learning-window.v1, signatureStrategy: oauth-response-bound, replayProtection: true, fallbackPollMinutes: 60 }
   - { eventFamily: marketing.pipeline_outcome_observed, providerEvent: OpportunityChangeEvent, transport: webhook, normalizationTransformer: salesforce.opportunity-to-campaign-outcome.v1, signatureStrategy: salesforce-oauth-channel, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: campaign, requiredLogicalFields: [campaign.id, campaign.channel, campaign.spend, campaign.windowStart, campaign.windowEnd], optionalLogicalFields: [campaign.messageId, campaign.audienceId, campaign.clicks, campaign.conversions] }
-  - { objectType: attributed_lead, requiredLogicalFields: [lead.id, lead.campaignId, lead.createdAt], optionalLogicalFields: [lead.accountId, lead.qualification, lead.segment] }
-  - { objectType: pipeline_outcome, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.campaignId], optionalLogicalFields: [opportunity.amount, opportunity.activatedAt, opportunity.closedAt] }
+  - { providerId: meta_ads, objectType: campaign, requiredLogicalFields: [campaign.id, campaign.channel, campaign.spend, campaign.windowStart, campaign.windowEnd], optionalLogicalFields: [campaign.messageId, campaign.audienceId, campaign.clicks, campaign.conversions] }
+  - { providerId: salesforce, objectType: attributed_lead, requiredLogicalFields: [lead.id, lead.campaignId, lead.createdAt], optionalLogicalFields: [lead.accountId, lead.qualification, lead.segment] }
+  - { providerId: salesforce, objectType: pipeline_outcome, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.campaignId], optionalLogicalFields: [opportunity.amount, opportunity.activatedAt, opportunity.closedAt] }
 healthCheck:
   capability: ads.campaign.read
   sampleQuery: { state: active, limit: 1 }

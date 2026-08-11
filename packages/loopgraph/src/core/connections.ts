@@ -14,6 +14,7 @@ export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hma
 export const connectorCapabilityDirectionSchema = z.enum(["read", "event", "draft_write", "approved_write"]);
 export const connectorRiskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
 export const connectionEnvironmentSchema = z.enum(["simulate", "sandbox", "live"]);
+export const connectionSourceSchema = z.enum(["local_registry", "hermes_connector_broker"]);
 export { credentialReferenceSchema };
 export const connectorCategorySchema = z.enum([
   "ads",
@@ -86,6 +87,9 @@ export const connectionInstanceSchema = z.object({
   schemaVersion: z.literal(CONNECTION_INSTANCE_SCHEMA_VERSION).default(CONNECTION_INSTANCE_SCHEMA_VERSION),
   id: z.string().min(1),
   manifestId: z.string().min(1),
+  source: connectionSourceSchema.default("local_registry"),
+  externalInstallationId: z.string().min(1).optional(),
+  brokerCapabilities: z.array(z.string().min(1)).default([]),
   accountLabel: z.string().optional(),
   capabilityKeys: z.array(z.string().min(1)).default([]),
   credentialRef: credentialReferenceSchema.optional(),
@@ -215,6 +219,7 @@ export type ConnectorTransport = z.infer<typeof connectorTransportSchema>;
 export type ConnectorAuthType = z.infer<typeof connectorAuthTypeSchema>;
 export type ConnectorCapabilityDirection = z.infer<typeof connectorCapabilityDirectionSchema>;
 export type ConnectorRiskLevel = z.infer<typeof connectorRiskLevelSchema>;
+export type ConnectionSource = z.infer<typeof connectionSourceSchema>;
 export type ConnectorCategory = z.infer<typeof connectorCategorySchema>;
 export type ConnectorCapability = z.infer<typeof connectorCapabilitySchema>;
 export type ConnectorWebhook = z.infer<typeof connectorWebhookSchema>;

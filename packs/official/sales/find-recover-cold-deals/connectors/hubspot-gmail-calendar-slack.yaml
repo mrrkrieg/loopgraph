@@ -15,9 +15,9 @@ eventSources:
   - { eventFamily: sales.opportunity_changed, providerEvent: deal.propertyChange, transport: webhook, normalizationTransformer: hubspot.deal-to-risk-snapshot.v1, signatureStrategy: hubspot-v3-signature, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: sales.pipeline_outcome_observed, providerEvent: deal.stageChanged, transport: webhook, normalizationTransformer: hubspot.deal-to-pipeline-outcome.v1, signatureStrategy: hubspot-v3-signature, replayProtection: true, fallbackPollMinutes: 60 }
 fieldMappings:
-  - { objectType: opportunity, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.ownerId, opportunity.lastActivityAt], optionalLogicalFields: [opportunity.amount, opportunity.closeDate, opportunity.nextStep, opportunity.forecastCategory] }
-  - { objectType: communication_thread, requiredLogicalFields: [thread.id, thread.participants, thread.lastMessageAt], optionalLogicalFields: [thread.commitments, thread.sentiment] }
-  - { objectType: calendar_commitment, requiredLogicalFields: [event.id, event.participants, event.startAt], optionalLogicalFields: [event.opportunityId, event.outcome] }
+  - { providerId: hubspot, objectType: opportunity, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.ownerId, opportunity.lastActivityAt], optionalLogicalFields: [opportunity.amount, opportunity.closeDate, opportunity.nextStep, opportunity.forecastCategory] }
+  - { providerId: gmail, objectType: communication_thread, requiredLogicalFields: [thread.id, thread.participants, thread.lastMessageAt], optionalLogicalFields: [thread.commitments, thread.sentiment] }
+  - { providerId: google_calendar, objectType: calendar_commitment, requiredLogicalFields: [event.id, event.participants, event.startAt], optionalLogicalFields: [event.opportunityId, event.outcome] }
 healthCheck:
   capability: crm.opportunity.read
   sampleQuery: { state: open, limit: 1 }
