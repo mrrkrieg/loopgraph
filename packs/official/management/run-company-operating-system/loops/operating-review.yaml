@@ -1,0 +1,45 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: management-operating-review, name: Company Operating Review, version: 1.0.0, description: "Join cross-department outcomes, risks, constraints, decisions, and follow-through into an accountable operating review.", department: management, ownerRole: executive_owner, tags: [operating-review, departments, outcomes, follow-through] }
+trigger: { type: event, source: "*", event: management.review_due }
+input: { requiredFields: [normalizedPayload.reviewId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.departmentIds, normalizedPayload.executiveOwnerId], subjectTypes: [company, operating_review, operating_review_window], fixtures: [{ id: operating-review, path: fixtures/happy.json }] }
+routine:
+  - { id: normalize, name: Normalize review window, actor: system, type: observe, description: "Resolve review identity, window, evidence cutoff, departments, metrics, risks, constraints, prior decisions, and owners." }
+  - { id: reconcile, name: Reconcile department evidence, actor: agent, type: assess, description: "Join outcomes, baselines, risks, capacity, value, cost, review burden, and conflicting department views without collapsing uncertainty." }
+  - { id: prepare, name: Prepare operating review, actor: agent, type: prepare, description: "Prepare decisions needed, owned follow-through, unresolved evidence, cross-functional dependencies, and measurement windows." }
+  - { id: verify, name: Verify accountability, actor: human, type: verify, description: "Leadership verifies evidence, priorities, tradeoffs, owners, decisions, and unresolved conflicts." }
+  - { id: learn, name: Return review outcomes, actor: system, type: learn, description: "Return decision execution, constraint movement, outcome evidence, corrections, and missing company-system capabilities." }
+capabilities:
+  - { key: loopgraph.topology.read, authority: read, risk: high, required: true, purpose: "Read current departments, loops, ownership, status, and typed topology.", customerFacing: false }
+  - { key: loopgraph.outcome.read, authority: read, risk: high, required: true, purpose: "Read declared outcomes, value, cost, confidence, and review burden.", customerFacing: false }
+  - { key: analytics.metric.query, authority: read, risk: high, required: true, purpose: "Query bounded company metrics with definitions and provenance.", customerFacing: false }
+skills: [management-cross-department-synthesis, management-decision-and-follow-through]
+outcomes:
+  - { metric: management_decision_latency_hours, description: Time from a complete evidence packet to accountable decision., direction: decrease, sourceCapability: loopgraph.outcome.read }
+  - { metric: operating_review_follow_through_rate, description: Owned decisions completed with observed outcome evidence in the declared window., direction: increase, sourceCapability: analytics.metric.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [management.operating_review]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: management.review_due, subjectTypes: [company, operating_review, operating_review_window], requiredFields: [normalizedPayload.reviewId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.departmentIds, normalizedPayload.executiveOwnerId], reason: "A bounded operating review has explicit department scope, evidence cutoff, and accountable owner." }
+    - { sourcePattern: "*", eventTypePattern: management.company_risk_rollup_ready, subjectTypes: [company, operating_review, operating_review_window], requiredFields: [normalizedPayload.reviewId, normalizedPayload.windowStart, normalizedPayload.windowEnd, normalizedPayload.departmentIds, normalizedPayload.executiveOwnerId], reason: "A cross-department risk rollup is ready for the same governed review window." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: management.strategy_change_requested, subjectTypes: [company], fields: [], reason: "Hermes cannot make or apply a strategy decision." }]
+  inputMapping: { reviewId: normalizedPayload.reviewId, windowStart: normalizedPayload.windowStart, windowEnd: normalizedPayload.windowEnd, departmentIds: normalizedPayload.departmentIds, executiveOwnerId: normalizedPayload.executiveOwnerId }
+  priority: 100
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 10, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [loopgraph.topology.read, loopgraph.outcome.read, analytics.metric.query]
+  examples: { shouldRoute: ["An operating review has a bounded period, named departments, source cutoffs, and executive owner."], shouldNotRoute: ["A user asks Hermes to set company strategy or priorities autonomously."] }
+policy:
+  forbiddenActions:
+    - { capability: company.strategy.update, reason: "Strategy remains accountable leadership judgment." }
+    - { capability: company.priority.update, reason: "Priority changes require accountable approval and separate execution." }
+  escalationOwner: executive_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

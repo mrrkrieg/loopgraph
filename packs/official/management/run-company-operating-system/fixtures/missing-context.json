@@ -1,0 +1,1 @@
+{"id":"management-operating-review-missing-context","eventType":"management.review_due","subject":{"type":"operating_review_window","id":"review-company-2026-w33"},"normalizedPayload":{"reviewId":"company-w33","windowStart":"2026-08-10","windowEnd":"2026-08-16","departmentIds":["product","sales"],"confidence":0.98},"evidenceRefs":["loopgraph:outcomes:2026-w33"]}

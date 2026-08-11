@@ -1,0 +1,49 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: legal-privileged-access-review, name: Privileged Access Review, version: 1.0.0, description: "Prepare least-privilege evidence for one identified grant while keeping the access decision and execution independently human-owned.", department: legal_compliance, ownerRole: identity_owner, tags: [identity, access, privilege, least-privilege] }
+trigger: { type: event, source: "*", event: security.access_review_due }
+input:
+  requiredFields: [normalizedPayload.principalId, normalizedPayload.systemId, normalizedPayload.grantId, normalizedPayload.roleId, normalizedPayload.ownerId]
+  subjectTypes: [access_grant, identity, access_review]
+  fixtures: []
+routine:
+  - { id: normalize, name: Normalize access grant, actor: system, type: observe, description: "Resolve principal, system, role, scope, grant, expiry, prior approval, owner, employment status, and review window." }
+  - { id: assess, name: Assess least-privilege evidence, actor: agent, type: assess, description: "Summarize declared need, bounded usage, toxic combinations, expiry, and missing evidence without deciding access." }
+  - { id: prepare, name: Prepare access decision packet, actor: agent, type: prepare, description: "Prepare retain, reduce, revoke, time-bound, or investigate options with exact evidence and execution fingerprints." }
+  - { id: verify, name: Verify owner decision, actor: human, type: verify, description: "The system and identity owners make the access decision under separation-of-duties policy." }
+  - { id: learn, name: Return access outcome, actor: system, type: learn, description: "Return approved decision, execution receipt, correction, least-privilege result, and recurrence evidence." }
+capabilities:
+  - { key: identity.access.read, authority: read, risk: critical, required: true, purpose: "Read exact principal, system, role, scope, grant, expiry, and approval evidence.", customerFacing: false }
+  - { key: hris.employee.read, authority: read, risk: critical, required: true, purpose: "Resolve minimum employment and manager status needed for access ownership.", customerFacing: false }
+  - { key: access.log.read, authority: read, risk: critical, required: true, purpose: "Read a time-bounded access-use window with provenance.", customerFacing: false }
+  - { key: identity.access.change, authority: approve, risk: critical, required: false, purpose: "Prepare an exact approved access change for independent execution.", customerFacing: false }
+skills: [legal-security-control-evidence, legal-source-citation-and-freshness]
+outcomes:
+  - { metric: privileged_access_review_hours, description: Time from complete review evidence to accountable access disposition., direction: decrease, sourceCapability: identity.access.read }
+  - { metric: standing_privilege_reduction, description: Approved reduction in unnecessary standing privileged access., direction: increase, sourceCapability: access.log.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [security.access_exception]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: security.access_review_due, subjectTypes: [access_grant, identity, access_review], requiredFields: [normalizedPayload.principalId, normalizedPayload.systemId, normalizedPayload.grantId, normalizedPayload.roleId, normalizedPayload.ownerId], reason: "One identified access grant has complete ownership and scope evidence for review." }
+    - { sourcePattern: "*", eventTypePattern: security.privilege_exception_detected, subjectTypes: [access_grant, identity, access_review], requiredFields: [normalizedPayload.principalId, normalizedPayload.systemId, normalizedPayload.grantId, normalizedPayload.exceptionId, normalizedPayload.ownerId], reason: "A named privilege exception has an accountable owner and exact grant identity." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: security.access_change_requested, subjectTypes: [access_grant], fields: [], reason: "A requested access mutation cannot bypass evidence review and independent approval." }]
+  inputMapping: { principalId: normalizedPayload.principalId, systemId: normalizedPayload.systemId, grantId: normalizedPayload.grantId, roleId: normalizedPayload.roleId, ownerId: normalizedPayload.ownerId }
+  priority: 100
+  minimumConfidence: 0.99
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [identity.access.read, hris.employee.read, access.log.read]
+  examples: { shouldRoute: ["An exact grant, principal, role, system, and accountable owner are available."], shouldNotRoute: ["Principal identity is ambiguous or a user asks Hermes to revoke access directly."] }
+policy:
+  forbiddenActions:
+    - { capability: identity.access.execute, reason: "Access execution must be independent from analysis and approval." }
+    - { capability: identity.policy.override, reason: "Hermes cannot override identity or separation-of-duties policy." }
+  escalationOwner: identity_owner
+  escalationSla: 2h
+  separateCustomerFacingApproval: true

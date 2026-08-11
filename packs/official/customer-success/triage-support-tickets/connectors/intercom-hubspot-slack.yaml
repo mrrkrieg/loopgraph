@@ -13,9 +13,11 @@ eventSources:
   - { eventFamily: support.ticket_created, providerEvent: conversation.user.created, transport: webhook, normalizationTransformer: intercom.conversation-to-support-ticket.v1, signatureStrategy: intercom-hmac-sha1, replayProtection: true, fallbackPollMinutes: 10 }
 fieldMappings:
   - objectType: support_ticket
+    providerId: intercom
     requiredLogicalFields: [ticket.id, ticket.summary, ticket.priority, ticket.requesterId]
     optionalLogicalFields: [ticket.status, ticket.createdAt, ticket.assignee, ticket.sentiment]
   - objectType: account
+    providerId: hubspot
     requiredLogicalFields: [account.id, account.customerStatus]
     optionalLogicalFields: [account.tier, account.owner, account.renewalDate, account.serviceLevel]
 healthCheck:

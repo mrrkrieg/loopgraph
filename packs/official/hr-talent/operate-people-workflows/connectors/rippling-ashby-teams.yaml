@@ -18,8 +18,8 @@ eventSources:
   - { eventFamily: talent.onboarding_task_overdue, providerEvent: rippling.onboarding.task_overdue, transport: webhook, normalizationTransformer: rippling.task-to-onboarding-plan.v1, signatureStrategy: rippling-hmac-sha256, replayProtection: true, fallbackPollMinutes: 60 }
   - { eventFamily: talent.manager_coaching_review_due, providerEvent: people.review.manager_support_due, transport: poll, normalizationTransformer: people.review-to-manager-window.v1, replayProtection: true, fallbackPollMinutes: 1440 }
 fieldMappings:
-  - { objectType: candidate_process, requiredLogicalFields: [candidate.id, requisition.id, candidate.stage, candidate.ownerId, candidate.stalledSince], optionalLogicalFields: [candidate.missingFeedbackIds, candidate.schedulingState, candidate.consentPolicy] }
-  - { objectType: onboarding_plan, requiredLogicalFields: [employee.id, onboarding.planId, onboarding.version, onboarding.managerId, onboarding.missingTaskIds], optionalLogicalFields: [onboarding.startDate, onboarding.dependencies, onboarding.ownerIds] }
-  - { objectType: manager_review_window, requiredLogicalFields: [manager.id, team.id, review.window, review.approvedSignalIds], optionalLogicalFields: [review.aggregateOnly, review.consentPolicy, review.humanOwnerId] }
+  - { providerId: ashby, objectType: candidate_process, requiredLogicalFields: [candidate.id, requisition.id, candidate.stage, candidate.ownerId, candidate.stalledSince], optionalLogicalFields: [candidate.missingFeedbackIds, candidate.schedulingState, candidate.consentPolicy] }
+  - { providerId: rippling, objectType: onboarding_plan, requiredLogicalFields: [employee.id, onboarding.planId, onboarding.version, onboarding.managerId, onboarding.missingTaskIds], optionalLogicalFields: [onboarding.startDate, onboarding.dependencies, onboarding.ownerIds] }
+  - { providerId: rippling, objectType: manager_review_window, requiredLogicalFields: [manager.id, team.id, review.window, review.approvedSignalIds], optionalLogicalFields: [review.aggregateOnly, review.consentPolicy, review.humanOwnerId] }
 healthCheck: { capability: hris.employee.read, sampleQuery: { fields: [workerId], limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

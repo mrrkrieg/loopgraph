@@ -1,0 +1,51 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: legal-contract-exception-triage, name: Contract Exception Triage, version: 1.0.0, description: "Extract and compare contract clauses against an exact approved playbook while queuing every exception for qualified legal judgment.", department: legal_compliance, ownerRole: legal_counsel, tags: [contract, clause, exception, playbook] }
+trigger: { type: event, source: "*", event: legal.contract_redline_received }
+input:
+  requiredFields: [normalizedPayload.contractId, normalizedPayload.version, normalizedPayload.clauseIds, normalizedPayload.playbookVersion, normalizedPayload.legalOwnerId]
+  subjectTypes: [contract, contract_review]
+  fixtures: [{ id: contract-redline, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize contract version, actor: system, type: observe, description: "Resolve contract, version, parties, clause identifiers, playbook version, jurisdiction scope, owner, and delivery identity." }
+  - { id: compare, name: Compare approved positions, actor: agent, type: assess, description: "Extract exact text and compare it to current approved positions, fallbacks, conditions, and citations without interpreting law." }
+  - { id: triage, name: Prepare exception queue, actor: agent, type: prepare, description: "Classify standard, fallback, exception, unsupported, and missing-context cases for qualified legal review." }
+  - { id: verify, name: Verify citations and scope, actor: human, type: verify, description: "Qualified counsel verifies clause text, playbook version, jurisdiction, commercial context, and legal disposition." }
+  - { id: learn, name: Return approved disposition, actor: system, type: learn, description: "Return approved clauses, exceptions, reviewer corrections, cycle time, and explicit answer-reuse limits." }
+capabilities:
+  - { key: contract.record.read, authority: read, risk: critical, required: true, purpose: "Read exact contract version, clauses, parties, owner, and metadata.", customerFacing: false }
+  - { key: legal.playbook.read, authority: read, risk: critical, required: true, purpose: "Read current approved positions, fallbacks, effective dates, and reviewer ownership.", customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: high, required: true, purpose: "Read bounded deal, account, owner, and timing context.", customerFacing: false }
+skills: [legal-contract-playbook-comparison, legal-source-citation-and-freshness]
+outcomes:
+  - { metric: contract_exception_review_hours, description: Time from a complete redline packet to qualified legal disposition., direction: decrease, sourceCapability: contract.record.read }
+  - { metric: contract_triage_correction_rate, description: Hermes clause extraction or playbook comparisons materially corrected by counsel., direction: decrease, sourceCapability: legal.playbook.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [legal.contract_exception]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: legal.contract_redline_received, subjectTypes: [contract, contract_review], requiredFields: [normalizedPayload.contractId, normalizedPayload.version, normalizedPayload.clauseIds, normalizedPayload.playbookVersion, normalizedPayload.legalOwnerId], reason: "An exact contract version and current playbook are available for source-cited exception triage." }
+    - { sourcePattern: "*", eventTypePattern: legal.contract_review_requested, subjectTypes: [contract, contract_review], requiredFields: [normalizedPayload.contractId, normalizedPayload.version, normalizedPayload.clauseIds, normalizedPayload.playbookVersion, normalizedPayload.legalOwnerId], reason: "A qualified owner requested bounded review of identified clauses against the approved playbook." }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: legal.legal_conclusion_requested, subjectTypes: [contract], fields: [], reason: "Hermes cannot issue a legal conclusion." }
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: "Lifecycle events update existing work and cannot open a duplicate legal problem." }
+  inputMapping: { contractId: normalizedPayload.contractId, version: normalizedPayload.version, clauseIds: normalizedPayload.clauseIds, playbookVersion: normalizedPayload.playbookVersion, legalOwnerId: normalizedPayload.legalOwnerId }
+  priority: 100
+  minimumConfidence: 0.98
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: declared_ordered, maxRoutes: 2, requiresIndependentProblems: false }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 25, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [contract.record.read, legal.playbook.read, crm.account.read]
+  examples: { shouldRoute: ["An exact redline contains identified clauses and a current approved playbook version."], shouldNotRoute: ["The contract version or qualified legal owner is missing.", "A user asks Hermes to decide whether a clause is legally enforceable."] }
+policy:
+  forbiddenActions:
+    - { capability: contract.record.update, reason: "Hermes cannot change a contract." }
+    - { capability: legal.conclusion.issue, reason: "Only qualified counsel may make legal judgments." }
+    - { capability: mail.message.send, reason: "External legal communication requires separate exact approval and send authority." }
+  escalationOwner: legal_counsel
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

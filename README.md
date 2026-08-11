@@ -196,6 +196,8 @@ Opinionated apps also declare a typed evidence topology in the signed pack: shar
 | [Run Engineering Issue and Incident Operations](packs/official/engineering/run-issue-incident-operations) | Engineering | Route issues and incidents through planning, customer impact, release readiness, and recurrence learning |
 | [Explain Forecast Variance and Govern Financial Operations](packs/official/operations-finance/manage-forecast-controls) | Operations & Finance | Reconcile forecast, approval, close, receivable, vendor, and capacity evidence into controlled financial decisions |
 | [Operate Fair and Accountable People Workflows](packs/official/hr-talent/operate-people-workflows) | HR & Talent | Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment |
+| [Govern Legal, Security, and Compliance Evidence](packs/official/legal-compliance/govern-evidence-and-exceptions) | Legal & Compliance | Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while preserving expert judgment |
+| [Run the Company Operating System](packs/official/management/run-company-operating-system) | Management | Turn cross-department outcomes, constraints, decisions, loop health, and verified value into accountable follow-through and system improvement |
 | [Catch Strategic Account and Renewal Risk](packs/official/customer-success/catch-renewal-risk) | Customer Success | Join health, support, billing, adoption, and renewal evidence into governed account recovery |
 | [Triage GitHub Issues Safely](packs/official/engineering/triage-github-issues) | Engineering | Classify repository issues and govern security-sensitive escalation |
 | [Triage and Escalate Support Tickets](packs/official/customer-success/triage-support-tickets) | Customer Success | Route support demand, prepare responses, and identify material risk |
@@ -216,12 +218,21 @@ Install it, test it, and keep it in shadow mode.
 
 Or open **Marketplace** in the browser. The guided installer lets an operator choose a provider preset and optional modules, answer typed company questions, resolve connection blockers, review the exact graph/permission/test transaction, and install it atomically—without editing YAML. The install button stays disabled until required context, connections, mappings, confirmations, and permissions are resolved. Provider writes remain blocked after installation.
 
+Field mappings are connection-bound and reusable. An authenticated Hermes connector may record a short-lived, redacted-only provider schema snapshot; Loopgraph then explains its logical-field suggestions and shows bounded sample values. An operator must confirm the exact mappings before they can satisfy installation readiness. Loopgraph never treats name similarity as approval and never stores a provider credential in the mapping registry.
+
+In a hosted workspace, the installer reads eligible connections directly from the Hermes Connector Broker through a server-only, secret-free projection. App Platform receives only the installation identity, provider, environment, health, granted scopes, and broker-authorized capabilities—not access tokens, refresh tokens, or vault references. It resolves each app's logical capability against that bounded authority, deep-links operators into supported provider onboarding when a connection is missing, and labels providers outside the current broker catalog as **Custom connector required** instead of implying one-click support.
+
 The same application service is available through the CLI:
 
 ```bash
 # Discover and inspect without changing the workspace
 npm run loopgraph -- apps search "qualify inbound leads"
 npm run loopgraph -- apps get loopgraph.sales.qualify-route-inbound-leads
+
+# After Hermes connects the stack, inspect and confirm provider fields
+npm run loopgraph -- apps mappings loopgraph.sales.qualify-route-inbound-leads \
+  --preset hubspot-gmail-slack
+npm run loopgraph -- apps mapping-confirm --file reviewed-field-mappings.json
 
 # Review an exact, read-only plan before installation
 npm run --silent loopgraph -- apps plan loopgraph.sales.qualify-route-inbound-leads \

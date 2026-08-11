@@ -14,9 +14,11 @@ eventSources:
   - { eventFamily: account.risk_detected, providerEvent: zendesk.ticket.created, transport: webhook, normalizationTransformer: zendesk.ticket-to-account-risk.v1, signatureStrategy: zendesk-hmac-sha256, replayProtection: true, fallbackPollMinutes: 10 }
 fieldMappings:
   - objectType: support_ticket
+    providerId: zendesk
     requiredLogicalFields: [ticket.id, ticket.accountId, ticket.severity]
     optionalLogicalFields: [ticket.status, ticket.requesterId, ticket.incidentId, ticket.businessImpact]
   - objectType: account
+    providerId: salesforce
     requiredLogicalFields: [account.id, account.tier, account.renewalDate]
     optionalLogicalFields: [account.owner, account.executiveSponsor, account.arr, account.health]
 healthCheck:

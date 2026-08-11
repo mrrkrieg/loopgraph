@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: management-decision-and-follow-through
+name: Accountable Decision and Follow-Through
+description: Prepare explicit options, tradeoffs, reversibility, decision conditions, ownership, execution, and outcome measurement for accountable leadership.
+department: management
+goal: Reduce decision and follow-through latency without transferring strategy or resource authority to Hermes.
+inputs: [decision identity, options, tradeoffs, constraints, affected goals, finance, capacity, risk, owner, deadline, source evidence]
+outputs: [decision memo, tradeoff matrix, uncertainty and dissent, accountable owner and deadline, execution and outcome plan]
+instructions:
+  - Resolve decision identity, version, owner, deadline, options, constraints, affected goals, and evidence cutoff.
+  - Include the no-action option, opportunity cost, displacement effects, reversibility, conditions, and second-order effects.
+  - Separate Hermes analysis from human recommendation, approval, rejection, deferral, and execution.
+  - Bind prepared communication and tasks to exact approved decision content and expiration.
+  - Measure execution and observed outcomes against the original constraint and assumptions.
+boundaries:
+  - No decision approval, budget change, hiring change, contract commitment, priority change, or external commitment.
+  - No silent removal of dissent or conflicting department evidence.
+  - An expired or materially changed decision packet requires re-review.
+requiredCapabilities: [loopgraph.outcome.read, finance.forecast.read, capacity.plan.read]

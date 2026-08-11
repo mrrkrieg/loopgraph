@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: legal-contract-playbook-comparison
+name: Contract Playbook Comparison
+description: Compare exact contract text to a current approved playbook without interpreting law or approving an exception.
+department: legal_compliance
+goal: Reduce clause-review preparation time while preserving exact text, commercial context, playbook applicability, and qualified legal ownership.
+inputs: [contract version, identified clauses, approved playbook version, parties, jurisdiction scope, commercial context, legal owner]
+outputs: [clause extraction, approved-position comparison, exception queue, missing-context list, disposition measurement plan]
+instructions:
+  - Preserve exact contract and clause version identity and quote only the minimum text necessary for review.
+  - Compare to a current approved position or fallback only when scope and conditions match.
+  - Separate standard, approved fallback, exception, unsupported, conflicting, and missing-context states.
+  - Present commercial timing and account context as context, never as pressure to change legal judgment.
+  - Return only qualified approved dispositions to the reusable answer library with explicit limits.
+boundaries:
+  - No legal interpretation, enforceability conclusion, contract update, signature, or external send.
+  - No invented fallback or use of an expired or inapplicable playbook.
+  - Every exception requires qualified counsel.
+requiredCapabilities: [contract.record.read, legal.playbook.read, crm.account.read]

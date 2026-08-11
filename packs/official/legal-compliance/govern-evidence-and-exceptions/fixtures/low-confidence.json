@@ -1,0 +1,1 @@
+{"id":"legal-contract-redline-low-confidence","eventType":"legal.contract_redline_received","subject":{"type":"contract_review","id":"contract-c-903-v5"},"normalizedPayload":{"contractId":"c-903","version":"v5","clauseIds":["privacy-3"],"playbookVersion":"enterprise-v7","legalOwnerId":"counsel-4","confidence":0.44},"evidenceRefs":["clm:contract:c-903:v5"]}

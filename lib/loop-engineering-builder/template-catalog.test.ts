@@ -81,6 +81,31 @@ describe("Loopgraph template catalog", () => {
       examplePath: "packs/official/hr-talent/operate-people-workflows",
       routingDefinition: expect.objectContaining({ problemTypes: ["talent.performance_review"] })
     });
+
+    const legalTemplates = getDepartmentTemplates().find((department) => department.key === "legal_security")!.commonLoops;
+    expect(legalTemplates).toHaveLength(6);
+    expect(legalTemplates.find((template) => template.id === "legal_security-contract_triage")).toBeUndefined();
+    expect(legalTemplates.find((template) => template.id === "legal-contract-exception-triage")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/legal-compliance/govern-evidence-and-exceptions",
+      routingDefinition: expect.objectContaining({
+        problemTypes: ["legal.contract_exception"],
+        supportingLoopTemplateIds: ["legal-policy-control-drift"]
+      })
+    });
+
+    const managementTemplates = getDepartmentTemplates().find((department) => department.key === "management")!.commonLoops;
+    expect(managementTemplates).toHaveLength(7);
+    expect(managementTemplates.find((template) => template.id === "management-decision_memo")).toBeUndefined();
+    expect(managementTemplates.find((template) => template.id === "management-company-anomaly-review")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/management/run-company-operating-system",
+      routingDefinition: expect.objectContaining({
+        problemTypes: ["management.company_anomaly"],
+        supportingLoopTemplateIds: ["management-decision-memo", "management-resource-allocation"]
+      })
+    });
+    expect(managementTemplates.find((template) => template.id === "management-operating_rhythm")).toBeTruthy();
   });
 
   it("generates valid v1alpha1 starter specs for spec-stub templates", () => {

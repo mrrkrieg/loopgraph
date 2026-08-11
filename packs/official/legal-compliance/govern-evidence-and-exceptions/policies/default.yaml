@@ -1,0 +1,4 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules: { contract.read: allowed, playbook.read: allowed, crm.read: allowed, control.read: allowed, change.read: allowed, identity.read: allowed, hris.read_bounded: allowed, access_log.read_bounded: allowed, incident.read: allowed, siem.read_bounded: allowed, security_kb.read: allowed, audit_evidence.read: allowed, contract_comment.draft: approval_required, security_answer.draft: approval_required, access_change.prepare: approval_required, remediation_task.create: approval_required, legal_conclusion.issue: forbidden, contract.change: forbidden, exception.approve: forbidden, risk.accept: forbidden, breach.decide: forbidden, notification.send: forbidden, access_change.execute: forbidden, attestation.issue: forbidden, external_claim.approve: forbidden, evidence.fabricate: forbidden }
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 15 }

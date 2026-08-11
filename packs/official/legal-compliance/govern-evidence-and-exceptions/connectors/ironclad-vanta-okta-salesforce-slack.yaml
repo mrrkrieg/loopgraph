@@ -1,0 +1,32 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: ironclad-vanta-okta-salesforce-slack
+providerId: ironclad
+providerFamily: ironclad
+displayName: Ironclad + Vanta + Okta + Salesforce + Slack
+capabilities:
+  - { logicalCapability: contract.record.read, providerOperation: ironclad.contracts.read-version, minimumScopes: [contracts:read], authority: read, risk: critical }
+  - { logicalCapability: legal.playbook.read, providerOperation: legal-kb.playbooks.read, minimumScopes: [playbooks:read], authority: read, risk: critical }
+  - { logicalCapability: crm.account.read, providerOperation: salesforce.accounts-opportunities.read, minimumScopes: [api], authority: read, risk: high }
+  - { logicalCapability: policy.control.read, providerOperation: vanta.controls.read, minimumScopes: [controls:read], authority: read, risk: critical }
+  - { logicalCapability: change.record.read, providerOperation: change-system.changes.read, minimumScopes: [changes:read], authority: read, risk: high }
+  - { logicalCapability: identity.access.read, providerOperation: okta.assignments.read, minimumScopes: [okta.apps.read, okta.users.read], authority: read, risk: critical }
+  - { logicalCapability: hris.employee.read, providerOperation: hris.workers.read-bounded, minimumScopes: [workers:read], authority: read, risk: critical }
+  - { logicalCapability: access.log.read, providerOperation: okta.system-log.read-bounded, minimumScopes: [okta.logs.read], authority: read, risk: critical }
+  - { logicalCapability: incident.record.read, providerOperation: incident-system.incidents.read, minimumScopes: [incidents:read], authority: read, risk: critical }
+  - { logicalCapability: siem.event.read, providerOperation: siem.events.read-bounded, minimumScopes: [events:read], authority: read, risk: critical }
+  - { logicalCapability: security.knowledge.read, providerOperation: security-kb.answers.read, minimumScopes: [answers:read], authority: read, risk: critical }
+  - { logicalCapability: audit.evidence.read, providerOperation: vanta.evidence.read, minimumScopes: [evidence:read], authority: read, risk: critical }
+  - { logicalCapability: contract.comment.draft, providerOperation: ironclad.comments.draft, minimumScopes: [comments:write], authority: approve, risk: critical }
+  - { logicalCapability: security.answer.draft, providerOperation: security-kb.answers.draft, minimumScopes: [answers:write], authority: approve, risk: critical }
+  - { logicalCapability: identity.access.change, providerOperation: okta.assignment-change.prepare, minimumScopes: [okta.apps.manage], authority: approve, risk: critical }
+  - { logicalCapability: project.task.create, providerOperation: project.tasks.create, minimumScopes: [tasks:write], authority: approve, risk: high }
+eventSources:
+  - { eventFamily: legal.contract_redline_received, providerEvent: ironclad.contract.version_created, transport: webhook, normalizationTransformer: ironclad.contract-to-legal-review.v1, signatureStrategy: ironclad-hmac-sha256, replayProtection: true, fallbackPollMinutes: 30 }
+  - { eventFamily: security.access_review_due, providerEvent: okta.access_review.due, transport: poll, normalizationTransformer: okta.grant-to-access-review.v1, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: compliance.evidence_gap_detected, providerEvent: vanta.evidence.missing, transport: webhook, normalizationTransformer: vanta-gap-to-audit-request.v1, signatureStrategy: vanta-hmac-sha256, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { providerId: ironclad, objectType: contract_review, requiredLogicalFields: [contract.id, contract.version, contract.clauseIds, playbook.version, contract.legalOwnerId], optionalLogicalFields: [contract.parties, contract.jurisdictionScope, contract.accountId] }
+  - { providerId: okta, objectType: access_review, requiredLogicalFields: [principal.id, system.id, grant.id, role.id, access.ownerId], optionalLogicalFields: [grant.scope, grant.expiresAt, access.lastUsedAt] }
+  - { providerId: vanta, objectType: audit_evidence_request, requiredLogicalFields: [request.id, control.id, evidence.window, evidence.requiredArtifactIds, evidence.ownerId], optionalLogicalFields: [request.framework, request.requestor, evidence.freshnessPolicy] }
+healthCheck: { capability: policy.control.read, sampleQuery: { fields: [controlId, version], limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

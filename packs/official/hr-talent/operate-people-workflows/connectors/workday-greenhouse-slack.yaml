@@ -18,8 +18,8 @@ eventSources:
   - { eventFamily: talent.onboarding_task_overdue, providerEvent: workday.onboarding.task_overdue, transport: webhook, normalizationTransformer: workday.task-to-onboarding-plan.v1, signatureStrategy: workday-hmac-sha256, replayProtection: true, fallbackPollMinutes: 60 }
   - { eventFamily: talent.performance_review_due, providerEvent: workday.performance.review_due, transport: poll, normalizationTransformer: workday.review-to-performance-period.v1, replayProtection: true, fallbackPollMinutes: 1440 }
 fieldMappings:
-  - { objectType: candidate_process, requiredLogicalFields: [candidate.id, requisition.id, candidate.stage, candidate.ownerId, candidate.stalledSince], optionalLogicalFields: [candidate.missingFeedbackIds, candidate.schedulingState, candidate.consentPolicy] }
-  - { objectType: onboarding_plan, requiredLogicalFields: [employee.id, onboarding.planId, onboarding.version, onboarding.managerId, onboarding.missingTaskIds], optionalLogicalFields: [onboarding.startDate, onboarding.dependencies, onboarding.ownerIds] }
-  - { objectType: performance_review_period, requiredLogicalFields: [employee.id, manager.id, review.period, review.policyVersion, review.goalEvidenceIds], optionalLogicalFields: [review.authoredEvidenceIds, review.missingEvidenceIds] }
+  - { providerId: greenhouse, objectType: candidate_process, requiredLogicalFields: [candidate.id, requisition.id, candidate.stage, candidate.ownerId, candidate.stalledSince], optionalLogicalFields: [candidate.missingFeedbackIds, candidate.schedulingState, candidate.consentPolicy] }
+  - { providerId: workday, objectType: onboarding_plan, requiredLogicalFields: [employee.id, onboarding.planId, onboarding.version, onboarding.managerId, onboarding.missingTaskIds], optionalLogicalFields: [onboarding.startDate, onboarding.dependencies, onboarding.ownerIds] }
+  - { providerId: workday, objectType: performance_review_period, requiredLogicalFields: [employee.id, manager.id, review.period, review.policyVersion, review.goalEvidenceIds], optionalLogicalFields: [review.authoredEvidenceIds, review.missingEvidenceIds] }
 healthCheck: { capability: hris.employee.read, sampleQuery: { fields: [workerId], limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

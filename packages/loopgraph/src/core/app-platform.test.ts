@@ -13,7 +13,8 @@ import {
   canonicalAppDigest,
   loopPackSignatureSchema,
   marketplaceCatalogSourceSchema,
-  loopPackManifestSchema
+  loopPackManifestSchema,
+  providerSchemaSnapshotSchema
 } from "./app-platform";
 
 const now = "2026-08-08T12:00:00.000Z";
@@ -176,6 +177,30 @@ describe("Loopgraph App Platform contracts", () => {
     });
     expect(source.trustedPublisherKeys[0]).toMatchObject({ publisherId: "acme", keyId: "acme.release.primary" });
     expect(source).not.toHaveProperty("trustedKeyIds");
+  });
+
+  it("accepts only explicitly redacted, connection-bound provider schema samples", () => {
+    const snapshot = {
+      schemaVersion: "loopgraph-provider-schema/v1alpha1",
+      workspaceId: "acme",
+      connectionId: "hubspot-production",
+      providerId: "hubspot",
+      source: "provider_api",
+      samplePolicy: "redacted_only",
+      objects: [{
+        objectType: "lead",
+        fields: [{ name: "email", label: "Email", type: "string", writable: true, sampleValues: ["masked@example.com"] }]
+      }],
+      inspectedAt: now,
+      expiresAt: later,
+      inspectedBy: "hermes-connector"
+    } as const;
+    expect(providerSchemaSnapshotSchema.parse(snapshot).samplePolicy).toBe("redacted_only");
+    expect(() => providerSchemaSnapshotSchema.parse({ ...snapshot, samplePolicy: "raw" })).toThrow();
+    expect(() => providerSchemaSnapshotSchema.parse({
+      ...snapshot,
+      objects: [{ objectType: "lead", fields: [snapshot.objects[0].fields[0], snapshot.objects[0].fields[0]] }]
+    })).toThrow(/unique/i);
   });
 
   it("binds an install plan to its exact content and rejects direct execution", () => {

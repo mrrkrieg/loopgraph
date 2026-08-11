@@ -2,6 +2,7 @@ import "server-only";
 
 import type {
   AppEvalRun,
+  AppFieldMappingPlan,
   AppInstallPlan,
   AppInstallationLock,
   AppLifecycleReceipt,
@@ -15,7 +16,7 @@ import type {
   MarketplaceAppVersion,
   WorkspaceAppInstallation
 } from "loopgraph/core";
-import { callLoopgraphAppTool } from "@/lib/loopgraph-runtime/app-tools";
+import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export type MarketplaceSearchEntry = {
@@ -174,9 +175,10 @@ export async function getInstalledAppsViewData(
 export async function getAppInstallPlanViewData(appId: string, presetId: string): Promise<{
   detail: MarketplaceAppDetail;
   plan: AppInstallPlan;
+  mappingPlan: AppFieldMappingPlan;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
-  const [detail, plan] = await Promise.all([
+  const [detail, plan, mappingPlan] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", { projectRoot, appId }) as Promise<MarketplaceAppDetail>,
     callLoopgraphAppTool("loopgraph_app_install_plan", {
       projectRoot,
@@ -185,9 +187,14 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
       presetId,
       configuration: {},
       actor: "loopgraph-browser"
-    }) as Promise<AppInstallPlan>
+    }) as Promise<AppInstallPlan>,
+    callLoopgraphAppTool("loopgraph_app_field_mappings_get", {
+      projectRoot,
+      appId,
+      presetId
+    }) as Promise<AppFieldMappingPlan>
   ]);
-  return { detail, plan };
+  return { detail, plan, mappingPlan };
 }
 
 export async function getInstalledAppViewData(installationId: string): Promise<{
