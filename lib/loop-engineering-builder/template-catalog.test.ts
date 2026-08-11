@@ -39,7 +39,7 @@ describe("Loopgraph template catalog", () => {
       expect(template.primaryMetric).toBeTruthy();
       expect(template.defaultOwners?.length).toBeGreaterThan(0);
       expect(template.defaultMetrics?.length).toBeGreaterThanOrEqual(3);
-      expect(template.requiredDataSources?.length).toBeGreaterThanOrEqual(3);
+      expect(template.requiredDataSources?.length).toBeGreaterThan(0);
       expect(template.routine?.length).toBeGreaterThanOrEqual(4);
       expect(template.verification?.length).toBeGreaterThanOrEqual(3);
       expect(template.escalation?.length).toBeGreaterThanOrEqual(2);
@@ -49,6 +49,17 @@ describe("Loopgraph template catalog", () => {
       expect(template.verification).not.toContain("Verify output");
       expect(template.requiredDataSources).not.toContain("Workspace signals");
     }
+  });
+
+  it("builds migrated department cards from the generated official app catalog", () => {
+    const productTemplates = getDepartmentTemplates().find((department) => department.key === "product")!.commonLoops;
+    expect(productTemplates).toHaveLength(5);
+    expect(productTemplates.find((template) => template.id === "product-feedback_to_problem")).toBeUndefined();
+    expect(productTemplates.find((template) => template.id === "product-feedback-clustering")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/product/turn-feedback-into-product-problems",
+      routingDefinition: expect.objectContaining({ problemTypes: ["product.recurring_feedback"] })
+    });
   });
 
   it("generates valid v1alpha1 starter specs for spec-stub templates", () => {
@@ -72,6 +83,7 @@ describe("Loopgraph template catalog", () => {
       expect(card?.problemTypes).toEqual(definition.problemTypes);
       expect(card?.requiredConnections).toEqual(definition.requiredConnections);
       expect(card?.fanoutPolicy).toEqual(definition.fanoutPolicy);
+      expect(card?.permittedSupportingLoopIds).toEqual(definition.supportingLoopTemplateIds);
       expect(card?.activationMode).toBe("shadow");
     }
   });

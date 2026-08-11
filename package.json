@@ -42,6 +42,8 @@
     "validate:staging": "node scripts/validate-staging.mjs",
     "rehearse:restore": "node scripts/backup-restore-rehearsal.mjs",
     "audit:drain": "node scripts/export-audit-retention.mjs",
+    "generate:app-catalog": "node scripts/generate-official-app-catalog.mjs",
+    "check:app-catalog": "node scripts/generate-official-app-catalog.mjs --check",
     "build:package": "npm run build -w loopgraph",
     "loopgraph": "tsx packages/loopgraph/src/cli/index.ts",
     "loopgraph:studio": "tsx scripts/loopgraph-studio.ts",

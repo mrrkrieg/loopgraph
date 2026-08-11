@@ -14,7 +14,7 @@ import type {
 import { getDepartmentTemplate, getTemplateById, getTemplateCatalog } from "./templates";
 import type { LoadedRegisteredLoopSpec } from "./local-workspace";
 import { loopIdsMatch } from "@/lib/loopgraph-runtime/run-filters";
-import { CROSS_DEPARTMENT_PLAYBOOKS } from "loopgraph/core";
+import { CROSS_DEPARTMENT_PLAYBOOKS, resolveCompanyLoopTemplateId } from "loopgraph/core";
 
 const defaultView: LoopGraphViewState = {
   mode: "topology",
@@ -723,7 +723,7 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "management-review",
     "management-decision_memo",
     "management-resource_allocation"
-  ]);
+  ].map(resolveCompanyLoopTemplateId));
   const improvementTemplateIds = new Set([
     "marketing-channel_allocation",
     "marketing-landing_page_conversion",
@@ -738,7 +738,7 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "legal_security-security_questionnaire",
     "management-department_loop_review",
     "management-improvement"
-  ]);
+  ].map(resolveCompanyLoopTemplateId));
   const attentionTemplateIds = new Set([
     "customer_success-renewal_risk",
     "engineering-release_readiness",
@@ -746,7 +746,7 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "hr-retention_signal",
     "legal_security-policy_drift",
     "management-department_loop_review"
-  ]);
+  ].map(resolveCompanyLoopTemplateId));
 
   return {
     status: attentionTemplateIds.has(template.id) ? "needs_attention" : "active",
@@ -758,16 +758,16 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
 
 function catalogLoopId(templateId: string) {
   const legacyIds: Record<string, string> = {
-    "marketing-campaign_learning": "loop_demo_marketing_campaign",
-    "sales-follow_up": "loop_demo_sales_pipeline",
-    "product-feedback_to_problem": "loop_demo_product_discovery",
-    "customer_success-customer_health_risk": "loop_demo_customer_health",
+    "marketing-campaign-learning": "loop_demo_marketing_campaign",
+    "sales-inbound-follow-up": "loop_demo_sales_pipeline",
+    "product-feedback-clustering": "loop_demo_product_discovery",
+    "cs-customer-health": "loop_demo_customer_health",
     "engineering-qa_checklist": "loop_demo_engineering_quality",
     "operations_finance-approval_bottleneck": "loop_demo_ops_efficiency",
     "hr-manager_coaching": "loop_demo_people_engagement",
     "legal_security-policy_drift": "loop_demo_risk_compliance"
   };
-  return legacyIds[templateId] ?? `catalog_${slug(templateId)}`;
+  return legacyIds[resolveCompanyLoopTemplateId(templateId)] ?? `catalog_${slug(templateId)}`;
 }
 
 function titleCase(value: string) {
