@@ -1,0 +1,136 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.legal-compliance.govern-evidence-and-exceptions
+  name: Govern Legal, Security, and Compliance Evidence
+  version: 1.0.0
+  summary: Assemble source-cited contract, control, access, incident, questionnaire, and audit evidence while keeping expert judgment human-owned.
+  description: Hermes receives normalized legal, security, and compliance events, resolves the affected contract, control, access grant, incident window, questionnaire, or audit request, and routes one durable problem to the narrowest eligible loop. Supporting policy or evidence-gap work is permitted only through explicit signed topology conditions. Legal interpretation, exceptions, breach decisions, privileged access, risk acceptance, and external claims remain expert-owned.
+  department: legal_compliance
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [legal, compliance, security, contracts, controls, access, incidents, questionnaires, audit]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: contract-exceptions
+    name: Contract exception triage
+    description: Extract clauses, compare approved playbooks, and queue precise exceptions for qualified legal review.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/contract-exception-triage.yaml, skills/contract-playbook-comparison.yaml]
+  - id: policy-drift
+    name: Policy and control drift
+    description: Reconcile current controls and policy versions into an owned remediation finding.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/policy-control-drift.yaml, skills/source-citation-and-freshness.yaml]
+  - id: access-review
+    name: Privileged access review
+    description: Prepare least-privilege decision evidence while keeping access changes human-approved and separately executed.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/privileged-access-review.yaml, skills/security-control-evidence.yaml]
+  - id: incident-evidence
+    name: Incident evidence
+    description: Build a source-cited, time-bounded incident record with chain-of-custody and evidence gaps.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/incident-evidence.yaml, skills/incident-chain-of-custody.yaml]
+  - id: questionnaire-response
+    name: Security questionnaire response
+    description: Prepare current, evidence-backed answers and flag every unsupported or stale claim.
+    defaultEnabled: true
+    dependsOn: [policy-drift]
+    assets: [loops/security-questionnaire.yaml, skills/security-control-evidence.yaml]
+  - id: compliance-evidence
+    name: Compliance evidence gap
+    description: Assemble control evidence, gaps, owners, windows, and expert review receipts for audits.
+    defaultEnabled: true
+    dependsOn: [policy-drift]
+    assets: [loops/compliance-evidence-gap.yaml, skills/source-citation-and-freshness.yaml]
+presets:
+  - id: ironclad-vanta-okta-salesforce-slack
+    name: Ironclad + Vanta + Okta + Salesforce + Slack
+    description: Join CLM, control, identity, CRM, incident, evidence, and governed Slack review surfaces.
+    path: presets/ironclad-vanta-okta-salesforce-slack.yaml
+    providerFamily: ironclad
+  - id: docusign-drata-entra-hubspot-teams
+    name: DocuSign CLM + Drata + Entra + HubSpot + Teams
+    description: Join enterprise contract, compliance, access, CRM, security, and governed Teams evidence.
+    path: presets/docusign-drata-entra-hubspot-teams.yaml
+    providerFamily: docusign
+permissions:
+  - { capability: contract.record.read, authority: read, mode: required, risk: critical, purpose: "Read the bounded contract version, clauses, parties, owner, and approved metadata.", customerFacing: false, defaultPolicy: allowed, dataClasses: [contract_data, customer_data] }
+  - { capability: legal.playbook.read, authority: read, mode: required, risk: critical, purpose: "Read approved clause positions, fallbacks, effective dates, jurisdictions, and reviewer ownership.", customerFacing: false, defaultPolicy: allowed, dataClasses: [legal_data] }
+  - { capability: crm.account.read, authority: read, mode: required, risk: high, purpose: "Read bounded account, deal, owner, and commercial timing context needed for triage.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data, customer_data] }
+  - { capability: policy.control.read, authority: read, mode: required, risk: critical, purpose: "Read current policy, control, test, exception, owner, and effective-version evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [security_data, compliance_data] }
+  - { capability: change.record.read, authority: read, mode: required, risk: high, purpose: "Read bounded system and control changes with exact timestamps and owners.", customerFacing: false, defaultPolicy: allowed, dataClasses: [security_data, operational_data] }
+  - { capability: identity.access.read, authority: read, mode: required, risk: critical, purpose: "Read principal, system, role, scope, grant, expiry, approval, and usage evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [identity_data, security_data] }
+  - { capability: hris.employee.read, authority: read, mode: required, risk: critical, purpose: "Resolve minimum employment and manager status needed to review access ownership.", customerFacing: false, defaultPolicy: allowed, dataClasses: [restricted_people_data] }
+  - { capability: access.log.read, authority: read, mode: required, risk: critical, purpose: "Read a time-bounded access-use window with immutable provenance.", customerFacing: false, defaultPolicy: allowed, dataClasses: [identity_data, security_data] }
+  - { capability: incident.record.read, authority: read, mode: required, risk: critical, purpose: "Read incident scope, systems, timeline, owners, status, and approved facts.", customerFacing: false, defaultPolicy: allowed, dataClasses: [security_data, customer_data] }
+  - { capability: siem.event.read, authority: read, mode: required, risk: critical, purpose: "Read narrowly scoped security events for the approved incident window.", customerFacing: false, defaultPolicy: allowed, dataClasses: [security_data] }
+  - { capability: security.knowledge.read, authority: read, mode: required, risk: critical, purpose: "Read approved, current security answers and cited control evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [security_data, compliance_data] }
+  - { capability: audit.evidence.read, authority: read, mode: required, risk: critical, purpose: "Read control evidence artifacts, periods, owners, gaps, and review receipts.", customerFacing: false, defaultPolicy: allowed, dataClasses: [compliance_data, security_data] }
+  - { capability: contract.comment.draft, authority: approve, mode: optional, risk: critical, purpose: "Prepare exact clause comments for qualified legal review without changing the contract.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [contract_data, legal_data] }
+  - { capability: security.answer.draft, authority: approve, mode: optional, risk: critical, purpose: "Prepare a source-cited customer security answer for expert approval.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [security_data, compliance_data, customer_data] }
+  - { capability: identity.access.change, authority: approve, mode: optional, risk: critical, purpose: "Prepare an exact access-change action for independent owner approval and execution.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [identity_data, security_data] }
+  - { capability: project.task.create, authority: approve, mode: optional, risk: high, purpose: "Create the exact approved remediation or evidence-gap task.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [security_data, compliance_data] }
+requiredCapabilities: [contract.record.read, legal.playbook.read, crm.account.read, policy.control.read, change.record.read, identity.access.read, hris.employee.read, access.log.read, incident.record.read, siem.event.read, security.knowledge.read, audit.evidence.read]
+optionalCapabilities: [contract.comment.draft, security.answer.draft, identity.access.change, project.task.create]
+topology:
+  objects:
+    - { id: contract-review, objectType: contract_review, label: Contract review, description: "A specific contract version joined to parties, clauses, approved playbook version, owner, and commercial context.", shared: true, identityKeys: [contractId, version] }
+    - { id: approved-clause-outcome, objectType: approved_clause_outcome, label: Approved clause outcome, description: "A qualified expert disposition with exact clause, fallback, exception, conditions, and effective playbook reference.", shared: true, identityKeys: [contractId, clauseId, dispositionId] }
+    - { id: policy-control-state, objectType: policy_control_state, label: Policy and control state, description: "A versioned policy-control mapping with implementation, test, exception, evidence, owner, and effective dates.", shared: true, identityKeys: [controlId, policyVersion] }
+    - { id: access-review, objectType: access_review, label: Access review, description: "A principal-system-role grant joined to scope, usage, expiry, approvals, employment status, and accountable owners.", shared: true, identityKeys: [principalId, systemId, grantId] }
+    - { id: incident-evidence-window, objectType: incident_evidence_window, label: Incident evidence window, description: "A time-bounded incident scope with systems, approved facts, source hashes, collection method, custody, and gaps.", shared: true, identityKeys: [incidentId, windowStart, windowEnd] }
+    - { id: security-questionnaire, objectType: security_questionnaire, label: Security questionnaire, description: "A customer questionnaire version joined to account, questions, due date, approved answer library, and reviewer.", shared: true, identityKeys: [questionnaireId, version, accountId] }
+    - { id: audit-evidence-request, objectType: audit_evidence_request, label: Audit evidence request, description: "A control and period-specific evidence request with requestor, scope, freshness, provenance, and review requirements.", shared: true, identityKeys: [requestId, controlId, evidenceWindow] }
+    - { id: approved-evidence-outcome, objectType: approved_evidence_outcome, label: Approved evidence outcome, description: "An expert-approved answer, evidence packet, exception, remediation, or gap result with reusable limits.", shared: true, identityKeys: [problemId, outcomeType, policyVersion] }
+  flows:
+    - { id: contract-enters-triage, source: { kind: object, id: contract-review }, target: { kind: loop, id: legal-contract-exception-triage }, type: evidence_in, reason: "Contract work begins with exact version and playbook identity rather than free-form interpretation." }
+    - { id: contract-supports-drift, source: { kind: loop, id: legal-contract-exception-triage }, target: { kind: loop, id: legal-policy-control-drift }, type: supports, condition: "The same clause exception was qualified and approved repeatedly, and the current playbook lacks an applicable governed fallback.", reason: "Repeated expert-approved exceptions may create separate policy-drift work without changing the playbook automatically." }
+    - { id: contract-produces-outcome, source: { kind: loop, id: legal-contract-exception-triage }, target: { kind: object, id: approved-clause-outcome }, type: produces, reason: "Qualified legal disposition becomes source-cited evidence with explicit reuse limits." }
+    - { id: policy-enters-drift, source: { kind: object, id: policy-control-state }, target: { kind: loop, id: legal-policy-control-drift }, type: evidence_in, reason: "Drift is evaluated against an exact policy, control, implementation, test, and effective version." }
+    - { id: access-enters-review, source: { kind: object, id: access-review }, target: { kind: loop, id: legal-privileged-access-review }, type: evidence_in, reason: "Access review starts only after principal, system, grant, scope, owner, and employment identity resolve." }
+    - { id: incident-enters-evidence, source: { kind: object, id: incident-evidence-window }, target: { kind: loop, id: legal-incident-evidence }, type: evidence_in, reason: "Incident evidence is collected only for the authorized systems and time window." }
+    - { id: incident-supports-compliance, source: { kind: loop, id: legal-incident-evidence }, target: { kind: loop, id: legal-compliance-evidence-gap }, type: supports, condition: "The approved incident scope identifies a mapped control and a concrete missing evidence artifact for the same period.", reason: "A separate compliance gap is permitted only when mapped control and missing-artifact evidence are explicit." }
+    - { id: questionnaire-enters-response, source: { kind: object, id: security-questionnaire }, target: { kind: loop, id: legal-security-questionnaire }, type: evidence_in, reason: "Questionnaire drafting uses exact customer, question-set, due-date, control, and answer-library versions." }
+    - { id: audit-enters-gap, source: { kind: object, id: audit-evidence-request }, target: { kind: loop, id: legal-compliance-evidence-gap }, type: evidence_in, reason: "Evidence work remains bounded to a named control, request, and evidence window." }
+    - { id: evidence-produces-outcome, source: { kind: loop, id: legal-compliance-evidence-gap }, target: { kind: object, id: approved-evidence-outcome }, type: produces, reason: "Expert-reviewed evidence, gaps, remediation, and limitations become reusable governed outcomes." }
+    - { id: questionnaire-returns-policy, source: { kind: loop, id: legal-security-questionnaire }, target: { kind: loop, id: legal-policy-control-drift }, type: learning_return, reason: "Repeated unsupported claims and reviewer corrections help identify stale approved answer or control documentation." }
+entrypoints:
+  loops:
+    - loops/contract-exception-triage.yaml
+    - loops/policy-control-drift.yaml
+    - loops/privileged-access-review.yaml
+    - loops/incident-evidence.yaml
+    - loops/security-questionnaire.yaml
+    - loops/compliance-evidence-gap.yaml
+  skills:
+    - skills/source-citation-and-freshness.yaml
+    - skills/contract-playbook-comparison.yaml
+    - skills/security-control-evidence.yaml
+    - skills/incident-chain-of-custody.yaml
+  connectors:
+    - connectors/ironclad-vanta-okta-salesforce-slack.yaml
+    - connectors/docusign-drata-entra-hubspot-teams.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json, fixtures/customer-facing.json, fixtures/outcome.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: legal_compliance_operations
+  reviewRoles: [legal_counsel, security_owner, compliance_owner, identity_owner, privacy_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

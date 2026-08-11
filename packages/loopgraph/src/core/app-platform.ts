@@ -16,6 +16,8 @@ export const MARKETPLACE_SCHEMA_VERSION = "loopgraph-marketplace/v1alpha1" as co
 export const APP_INSTALL_SCHEMA_VERSION = "loopgraph-app-install/v1alpha1" as const;
 export const COMPANY_CONTEXT_SCHEMA_VERSION = "loopgraph-company-context/v1alpha1" as const;
 export const CONNECTOR_RECIPE_SCHEMA_VERSION = "loopgraph-connector-recipe/v1alpha1" as const;
+export const PROVIDER_SCHEMA_SNAPSHOT_VERSION = "loopgraph-provider-schema/v1alpha1" as const;
+export const FIELD_MAPPING_PLAN_SCHEMA_VERSION = "loopgraph-field-mapping-plan/v1alpha1" as const;
 export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1alpha1" as const;
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 
@@ -32,6 +34,7 @@ export const APP_PLATFORM_INVARIANTS = [
   "Hermes, CLI, MCP, and browser clients use the same application services.",
   "Uninstall removes only assets exclusively owned by that installation.",
   "Shared connectors, mappings, entities, context, and evidence survive uninstall.",
+  "Provider schema samples are connection-bound, short-lived, redacted-only, and never trusted as field mappings without confirmation.",
   "Workspace customization is stored as an overlay and never mutates the pinned artifact.",
   "Quality and maturity labels are derived from recorded evidence.",
   "Low-level implementation details are hidden behind an explicit Advanced surface."
@@ -465,6 +468,7 @@ export const connectorFieldMappingSchema = z.object({
 
 const providerCapabilityBindingSchema = z.object({
   logicalCapability: logicalCapabilitySchema,
+  providerId: appIdSchema.optional(),
   providerOperation: z.string().min(1),
   minimumScopes: z.array(z.string().min(1)).default([]),
   authority: actionAuthoritySchema,
@@ -490,6 +494,7 @@ export const connectorRecipeSchema = z.object({
   }).strict()).default([]),
   fieldMappings: z.array(z.object({
     objectType: z.string().min(1),
+    providerId: appIdSchema.optional(),
     requiredLogicalFields: z.array(z.string().min(1)).default([]),
     optionalLogicalFields: z.array(z.string().min(1)).default([])
   }).strict()).default([]),
@@ -499,6 +504,78 @@ export const connectorRecipeSchema = z.object({
     timeoutMs: z.number().int().positive().max(30_000).default(10_000)
   }).strict(),
   supportsBoundedSamples: z.boolean().default(true)
+}).strict();
+
+export const providerSchemaFieldSchema = z.object({
+  name: z.string().min(1),
+  label: z.string().min(1).optional(),
+  type: z.enum(["string", "number", "boolean", "date", "datetime", "enum", "object"]),
+  writable: z.boolean(),
+  sampleValues: z.array(jsonValueSchema).max(10).default([])
+}).strict();
+
+export const providerSchemaSnapshotSchema = z.object({
+  schemaVersion: z.literal(PROVIDER_SCHEMA_SNAPSHOT_VERSION),
+  workspaceId: appIdSchema,
+  connectionId: appIdSchema,
+  providerId: appIdSchema,
+  source: z.enum(["provider_api", "connector_metadata", "manual"]),
+  samplePolicy: z.literal("redacted_only"),
+  objects: z.array(z.object({
+    objectType: z.string().min(1),
+    fields: z.array(providerSchemaFieldSchema).min(1)
+  }).strict()).min(1),
+  inspectedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema.optional(),
+  inspectedBy: z.string().min(1)
+}).strict().superRefine((snapshot, ctx) => {
+  if (snapshot.expiresAt && Date.parse(snapshot.expiresAt) <= Date.parse(snapshot.inspectedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Provider schema expiry must follow inspection" });
+  }
+  const objectTypes = snapshot.objects.map((object) => object.objectType);
+  if (new Set(objectTypes).size !== objectTypes.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["objects"], message: "Provider object types must be unique" });
+  }
+  snapshot.objects.forEach((object, index) => {
+    const names = object.fields.map((field) => field.name);
+    if (new Set(names).size !== names.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["objects", index, "fields"], message: "Provider field names must be unique per object" });
+    }
+  });
+});
+
+export const fieldMappingSuggestionSchema = z.object({
+  logicalField: z.string().min(1),
+  providerField: z.string().min(1).optional(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().min(1),
+  requiresConfirmation: z.boolean(),
+  required: z.boolean()
+}).strict();
+
+export const appFieldMappingPlanSchema = z.object({
+  schemaVersion: z.literal(FIELD_MAPPING_PLAN_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  appId: appIdSchema,
+  version: appVersionSchema,
+  presetId: appIdSchema,
+  complete: z.boolean(),
+  requirements: z.array(z.object({
+    recipeId: appIdSchema,
+    providerId: appIdSchema,
+    connectorOnboarding: z.enum(["available", "custom_required"]).default("custom_required"),
+    connectionId: appIdSchema.optional(),
+    objectType: z.string().min(1),
+    requiredLogicalFields: z.array(z.string().min(1)).default([]),
+    optionalLogicalFields: z.array(z.string().min(1)).default([]),
+    schemaStatus: z.enum(["connected_snapshot", "connector_metadata", "connection_required"]),
+    snapshotInspectedAt: isoDateTimeSchema.optional(),
+    providerFields: z.array(providerSchemaFieldSchema).default([]),
+    existingMappings: z.array(connectorFieldMappingSchema).default([]),
+    suggestions: z.array(fieldMappingSuggestionSchema).default([]),
+    missingRequiredFields: z.array(z.string().min(1)).default([]),
+    unverifiedRequiredFields: z.array(z.string().min(1)).default([])
+  }).strict()).default([])
 }).strict();
 
 export const appConfigFieldSchema = z.object({
@@ -928,6 +1005,10 @@ export type CompanyContext = z.infer<typeof companyContextSchema>;
 export type CompanyContextValue = z.infer<typeof companyContextValueSchema>;
 export type ConnectorRecipe = z.infer<typeof connectorRecipeSchema>;
 export type ConnectorFieldMapping = z.infer<typeof connectorFieldMappingSchema>;
+export type ProviderSchemaField = z.infer<typeof providerSchemaFieldSchema>;
+export type ProviderSchemaSnapshot = z.infer<typeof providerSchemaSnapshotSchema>;
+export type FieldMappingSuggestion = z.infer<typeof fieldMappingSuggestionSchema>;
+export type AppFieldMappingPlan = z.infer<typeof appFieldMappingPlanSchema>;
 export type AppConfiguration = z.infer<typeof appConfigurationSchema>;
 export type AppConfigField = z.infer<typeof appConfigFieldSchema>;
 export type AppOverlay = z.infer<typeof appOverlaySchema>;
@@ -958,6 +1039,8 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,
     ConnectorRecipe: zodToJsonSchema(connectorRecipeSchema, "ConnectorRecipe") as Record<string, unknown>,
     ConnectorFieldMapping: zodToJsonSchema(connectorFieldMappingSchema, "ConnectorFieldMapping") as Record<string, unknown>,
+    ProviderSchemaSnapshot: zodToJsonSchema(providerSchemaSnapshotSchema, "ProviderSchemaSnapshot") as Record<string, unknown>,
+    AppFieldMappingPlan: zodToJsonSchema(appFieldMappingPlanSchema, "AppFieldMappingPlan") as Record<string, unknown>,
     AppConfiguration: zodToJsonSchema(appConfigurationSchema, "AppConfiguration") as Record<string, unknown>,
     AppOverlay: zodToJsonSchema(appOverlaySchema, "AppOverlay") as Record<string, unknown>,
     AppEvalRun: zodToJsonSchema(appEvalRunSchema, "AppEvalRun") as Record<string, unknown>,

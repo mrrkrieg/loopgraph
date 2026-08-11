@@ -1,0 +1,47 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: legal-security-questionnaire, name: Security Questionnaire, version: 1.0.0, description: "Prepare current source-cited security answers while flagging unsupported claims and requiring qualified external-claim approval.", department: legal_compliance, ownerRole: security_owner, tags: [security, questionnaire, claims, customer] }
+trigger: { type: event, source: "*", event: security.questionnaire_received }
+input:
+  requiredFields: [normalizedPayload.questionnaireId, normalizedPayload.version, normalizedPayload.accountId, normalizedPayload.questionIds, normalizedPayload.securityOwnerId]
+  subjectTypes: [questionnaire, account, security_questionnaire]
+  fixtures: [{ id: security-questionnaire, path: fixtures/customer-facing.json }]
+routine:
+  - { id: normalize, name: Normalize questionnaire, actor: system, type: observe, description: "Resolve questionnaire, version, customer account, question set, due date, approved library version, and expert owner." }
+  - { id: assemble, name: Assemble current evidence, actor: agent, type: assess, description: "Map each question to current approved answers, exact controls, artifacts, freshness, scope, and unsupported-claim flags." }
+  - { id: prepare, name: Prepare answer draft, actor: agent, type: prepare, description: "Prepare source-cited answers and explicit unknown, partial, conditional, stale, or expert-judgment states." }
+  - { id: verify, name: Verify external claims, actor: human, type: verify, description: "Qualified security and legal owners verify every claim, scope, confidentiality boundary, attachment, and customer commitment." }
+  - { id: learn, name: Return approved answer outcome, actor: system, type: learn, description: "Return approved reusable answers, scope limits, reviewer corrections, stale sources, and control-documentation gaps." }
+capabilities:
+  - { key: security.knowledge.read, authority: read, risk: critical, required: true, purpose: "Read approved security answers, citations, scope, freshness, and reuse limits.", customerFacing: false }
+  - { key: policy.control.read, authority: read, risk: critical, required: true, purpose: "Read current control implementation, tests, exceptions, and evidence.", customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: high, required: true, purpose: "Read bounded customer, deal, owner, and timing context.", customerFacing: false }
+  - { key: security.answer.draft, authority: approve, risk: critical, required: false, purpose: "Prepare exact source-cited customer answers for expert approval.", customerFacing: true }
+skills: [legal-security-control-evidence, legal-source-citation-and-freshness]
+outcomes:
+  - { metric: security_questionnaire_cycle_hours, description: Time from complete questionnaire intake to expert-approved response., direction: decrease, sourceCapability: security.knowledge.read }
+  - { metric: unsupported_security_claim_rate, description: "Draft claims blocked for missing, stale, inapplicable, or contradictory evidence.", direction: decrease, sourceCapability: policy.control.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [security.questionnaire]
+  accepts: [{ sourcePattern: "*", eventTypePattern: security.questionnaire_received, subjectTypes: [questionnaire, account, security_questionnaire], requiredFields: [normalizedPayload.questionnaireId, normalizedPayload.version, normalizedPayload.accountId, normalizedPayload.questionIds, normalizedPayload.securityOwnerId], reason: "An exact questionnaire and customer identity have a qualified owner and current evidence sources." }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: security.claim_approval_requested, subjectTypes: [questionnaire], fields: [], reason: "Hermes cannot approve its own external security claim." }]
+  inputMapping: { questionnaireId: normalizedPayload.questionnaireId, version: normalizedPayload.version, accountId: normalizedPayload.accountId, questionIds: normalizedPayload.questionIds, securityOwnerId: normalizedPayload.securityOwnerId }
+  priority: 95
+  minimumConfidence: 0.99
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 15, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [security.knowledge.read, policy.control.read, crm.account.read]
+  examples: { shouldRoute: ["A versioned questionnaire has identified questions, customer scope, and qualified security owner."], shouldNotRoute: ["Current control evidence is absent or the requested answer would overstate scope."] }
+policy:
+  forbiddenActions:
+    - { capability: security.answer.send, reason: "External claims require separate approved send authority." }
+    - { capability: security.claim.approve, reason: "Hermes cannot approve its own security claim." }
+  escalationOwner: security_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

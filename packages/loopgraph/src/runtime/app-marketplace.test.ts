@@ -28,6 +28,21 @@ describe("local app marketplace", () => {
     expect(byFinanceOutcome[0]?.app.id).toBe("loopgraph.ops-finance.manage-forecast-controls");
     const byFinanceCapability = await marketplace.searchApps({ capability: "finance.forecast.read" });
     expect(byFinanceCapability.map((result) => result.app.id)).toContain("loopgraph.ops-finance.manage-forecast-controls");
+
+    const byHrOutcome = await marketplace.searchApps({ query: "operate fair people workflows" });
+    expect(byHrOutcome[0]?.app.id).toBe("loopgraph.hr-talent.operate-people-workflows");
+    const byHrCapability = await marketplace.searchApps({ capability: "hris.employee.read" });
+    expect(byHrCapability.map((result) => result.app.id)).toContain("loopgraph.hr-talent.operate-people-workflows");
+
+    const byLegalOutcome = await marketplace.searchApps({ query: "govern legal security compliance evidence" });
+    expect(byLegalOutcome[0]?.app.id).toBe("loopgraph.legal-compliance.govern-evidence-and-exceptions");
+    const byLegalCapability = await marketplace.searchApps({ capability: "policy.control.read" });
+    expect(byLegalCapability.map((result) => result.app.id)).toContain("loopgraph.legal-compliance.govern-evidence-and-exceptions");
+
+    const byManagementOutcome = await marketplace.searchApps({ query: "run company operating system" });
+    expect(byManagementOutcome[0]?.app.id).toBe("loopgraph.management.run-company-operating-system");
+    const byManagementCapability = await marketplace.searchApps({ capability: "loopgraph.topology.read" });
+    expect(byManagementCapability.map((result) => result.app.id)).toContain("loopgraph.management.run-company-operating-system");
   });
 
   it("resolves immutable versions and verifies the cached artifact", async () => {

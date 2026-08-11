@@ -1,0 +1,75 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.management.run-company-operating-system
+  name: Run the Company Operating System
+  version: 1.0.0
+  summary: Turn cross-department outcomes, constraints, risks, loop health, and value evidence into accountable decisions and system improvement.
+  description: Hermes receives normalized company-operating events, resolves the affected review, metric, loop, decision, resource plan, or failure pattern, and routes one durable management problem. Explicit supporting work is permitted only through signed evidence conditions. Hermes assembles tradeoffs and follow-through; leadership retains strategy, budget, hiring, priority, legal, and high-risk customer decisions.
+  department: management
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [management, operating-review, metrics, decisions, resource-allocation, loop-health, improvement]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility: { loopgraph: ">=0.2.0 <1.0.0", hermes: ">=1.0.0", platforms: [darwin, linux, win32] }
+dependencies: []
+modules:
+  - { id: operating-review, name: Operating review, description: Join cross-department results and risks into an owned operating review., defaultEnabled: true, dependsOn: [], assets: [loops/operating-review.yaml, skills/cross-department-synthesis.yaml] }
+  - { id: anomaly-review, name: Company anomaly review, description: Reconcile material metric movement before proposing a decision path., defaultEnabled: true, dependsOn: [operating-review], assets: [loops/company-anomaly-review.yaml, skills/metric-and-constraint-diagnosis.yaml] }
+  - { id: loop-health, name: Loop health review, description: "Review routing, quality, cost, outcome, correction, and reliability evidence for company loops.", defaultEnabled: true, dependsOn: [], assets: [loops/loop-health-review.yaml, skills/loop-value-review.yaml] }
+  - { id: decision-memo, name: Decision memo, description: Prepare source-cited options and tradeoffs for an accountable leadership decision., defaultEnabled: true, dependsOn: [operating-review], assets: [loops/decision-memo.yaml, skills/decision-and-follow-through.yaml] }
+  - { id: resource-allocation, name: Resource allocation, description: Prepare explicit budget and capacity tradeoffs without changing resources., defaultEnabled: true, dependsOn: [anomaly-review], assets: [loops/resource-allocation.yaml, skills/decision-and-follow-through.yaml] }
+  - { id: system-improvement, name: Company system improvement, description: Convert repeated governed failure patterns into reviewable topology or policy change proposals., defaultEnabled: true, dependsOn: [loop-health], assets: [loops/system-improvement.yaml, skills/loop-value-review.yaml] }
+presets:
+  - { id: loopgraph-snowflake-slack, name: Loopgraph + Snowflake + Slack, description: Join Loopgraph operations and value evidence with Snowflake metrics and governed Slack decision drafts., path: presets/loopgraph-snowflake-slack.yaml, providerFamily: loopgraph }
+  - { id: loopgraph-bigquery-teams, name: Loopgraph + BigQuery + Teams, description: Join Loopgraph operations and value evidence with BigQuery metrics and governed Teams decision drafts., path: presets/loopgraph-bigquery-teams.yaml, providerFamily: loopgraph }
+permissions:
+  - { capability: loopgraph.topology.read, authority: read, mode: required, risk: high, purpose: "Read installed departments, loops, typed graph edges, status, ownership, and governed configuration.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data] }
+  - { capability: loopgraph.routing.read, authority: read, mode: required, risk: high, purpose: "Read bounded routing decisions, abstentions, corrections, duplicates, and escalations.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data] }
+  - { capability: loopgraph.outcome.read, authority: read, mode: required, risk: high, purpose: "Read declared outcomes, baselines, observations, value, cost, review burden, and confidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data, financial_data] }
+  - { capability: analytics.metric.query, authority: read, mode: required, risk: high, purpose: "Query bounded company metrics with definitions, baselines, windows, dimensions, and source provenance.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data, financial_data] }
+  - { capability: finance.forecast.read, authority: read, mode: required, risk: critical, purpose: "Read approved forecast, budget, and constraint evidence for management tradeoffs.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data] }
+  - { capability: capacity.plan.read, authority: read, mode: required, risk: critical, purpose: "Read approved people, vendor, and system capacity plans and constraints.", customerFacing: false, defaultPolicy: allowed, dataClasses: [financial_data, workforce_data] }
+  - { capability: project.task.read, authority: read, mode: required, risk: medium, purpose: "Read decision and improvement follow-through status.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare an exact internal decision or operating-review message for accountable approval.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [operational_data, financial_data] }
+  - { capability: project.task.create, authority: approve, mode: optional, risk: high, purpose: "Create exact approved follow-through tasks for named owners.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [operational_data] }
+  - { capability: loopgraph.graph.change.propose, authority: approve, mode: optional, risk: critical, purpose: "Prepare an exact semantic topology or loop-policy change for governed review.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [operational_data] }
+requiredCapabilities: [loopgraph.topology.read, loopgraph.routing.read, loopgraph.outcome.read, analytics.metric.query, finance.forecast.read, capacity.plan.read, project.task.read]
+optionalCapabilities: [collaboration.message.draft, project.task.create, loopgraph.graph.change.propose]
+topology:
+  objects:
+    - { id: operating-review-window, objectType: operating_review_window, label: Operating review window, description: "A bounded company review period with department outcomes, risks, constraints, decisions, owners, and source cutoffs.", shared: true, identityKeys: [reviewId, windowStart, windowEnd] }
+    - { id: company-metric-anomaly, objectType: company_metric_anomaly, label: Company metric anomaly, description: "A metric definition and observation window joined to baseline, current value, dimensions, materiality, and source evidence.", shared: true, identityKeys: [metricId, observationWindow, segmentKey] }
+    - { id: loop-health-window, objectType: loop_health_window, label: Loop health window, description: "A loop and review window joined to routing, quality, reliability, cost, outcome, correction, and ownership evidence.", shared: true, identityKeys: [loopId, windowStart, windowEnd] }
+    - { id: management-decision-request, objectType: management_decision_request, label: Management decision request, description: "A named decision with options, tradeoffs, constraints, owner, deadline, and source evidence.", shared: true, identityKeys: [decisionId, version] }
+    - { id: company-resource-plan, objectType: company_resource_plan, label: Company resource plan, description: "A versioned budget and capacity tradeoff tied to a named company constraint and measurement window.", shared: true, identityKeys: [planId, version] }
+    - { id: repeated-failure-pattern, objectType: repeated_failure_pattern, label: Repeated failure pattern, description: "A governed cluster of repeated loop, routing, connection, policy, or review failures with affected scope and recurrence evidence.", shared: true, identityKeys: [patternId, observationWindow] }
+    - { id: accountable-management-decision, objectType: accountable_management_decision, label: Accountable management decision, description: "An approved, rejected, or deferred human decision with rationale, owner, conditions, and follow-through.", shared: true, identityKeys: [decisionId, dispositionVersion] }
+    - { id: company-system-change, objectType: company_system_change, label: Company system change, description: "An approved semantic graph, loop, routing, policy, or operating-process change with rollback and measurement evidence.", shared: true, identityKeys: [changeId, graphVersion] }
+  flows:
+    - { id: review-enters-operating, source: { kind: object, id: operating-review-window }, target: { kind: loop, id: management-operating-review }, type: evidence_in, reason: "Management review starts from a bounded evidence cutoff and explicit department ownership." }
+    - { id: anomaly-enters-review, source: { kind: object, id: company-metric-anomaly }, target: { kind: loop, id: management-company-anomaly-review }, type: evidence_in, reason: "Anomaly review requires metric definition, baseline, window, dimensions, materiality, and source provenance." }
+    - { id: anomaly-supports-decision, source: { kind: loop, id: management-company-anomaly-review }, target: { kind: loop, id: management-decision-memo }, type: supports, condition: "The reconciled anomaly exceeds the approved materiality threshold and exposes a discrete accountable decision with at least two real options.", reason: "Decision work is supporting fan-out only after the anomaly and decision identity are proven." }
+    - { id: anomaly-supports-resource, source: { kind: loop, id: management-company-anomaly-review }, target: { kind: loop, id: management-resource-allocation }, type: supports, condition: "The reconciled anomaly exposes an explicit budget or capacity constraint with approved forecast and resource-plan evidence.", reason: "Resource work is supporting fan-out only for a material evidenced constraint." }
+    - { id: health-enters-review, source: { kind: object, id: loop-health-window }, target: { kind: loop, id: management-loop-health-review }, type: evidence_in, reason: "Loop health joins routing, quality, cost, reliability, correction, outcome, and owner evidence for one window." }
+    - { id: health-supports-improvement, source: { kind: loop, id: management-loop-health-review }, target: { kind: loop, id: management-system-improvement }, type: supports, condition: "The same governed failure pattern recurs above threshold and reviewer correction or outcome evidence proves that a topology, routing, policy, or loop change is warranted.", reason: "Improvement fan-out requires recurrence and change-target evidence, not a single bad run." }
+    - { id: decision-enters-memo, source: { kind: object, id: management-decision-request }, target: { kind: loop, id: management-decision-memo }, type: evidence_in, reason: "Decision preparation operates on explicit options, tradeoffs, accountable owner, and deadline." }
+    - { id: resource-enters-allocation, source: { kind: object, id: company-resource-plan }, target: { kind: loop, id: management-resource-allocation }, type: evidence_in, reason: "Resource allocation uses an exact plan version, budget, capacity, constraint, and measurement window." }
+    - { id: failure-enters-improvement, source: { kind: object, id: repeated-failure-pattern }, target: { kind: loop, id: management-system-improvement }, type: evidence_in, reason: "System improvement starts from a repeated governed failure pattern and affected loop identities." }
+    - { id: memo-produces-decision, source: { kind: loop, id: management-decision-memo }, target: { kind: object, id: accountable-management-decision }, type: produces, reason: "Hermes prepares the memo; accountable leadership records the decision." }
+    - { id: improvement-produces-change, source: { kind: loop, id: management-system-improvement }, target: { kind: object, id: company-system-change }, type: produces, reason: "An approved semantic change preserves exact before state, rollback, owner, and outcome window." }
+    - { id: decision-returns-review, source: { kind: loop, id: management-decision-memo }, target: { kind: loop, id: management-operating-review }, type: learning_return, reason: "Decision execution and observed outcomes return to the next operating review." }
+entrypoints:
+  loops: [loops/operating-review.yaml, loops/company-anomaly-review.yaml, loops/loop-health-review.yaml, loops/decision-memo.yaml, loops/resource-allocation.yaml, loops/system-improvement.yaml]
+  skills: [skills/cross-department-synthesis.yaml, skills/metric-and-constraint-diagnosis.yaml, skills/decision-and-follow-through.yaml, skills/loop-value-review.yaml]
+  connectors: [connectors/loopgraph-snowflake-slack.yaml, connectors/loopgraph-bigquery-teams.yaml]
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json, fixtures/customer-facing.json, fixtures/outcome.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership: { defaultOwnerRole: company_operations, reviewRoles: [executive_owner, finance_owner, department_owner, loop_owner], supportUrl: https://github.com/mrrkrieg/loopgraph/issues }
+defaultRolloutMode: shadow

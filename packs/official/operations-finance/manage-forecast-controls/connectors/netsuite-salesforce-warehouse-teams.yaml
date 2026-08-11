@@ -22,8 +22,8 @@ eventSources:
   - { eventFamily: finance.receivable_risk_detected, providerEvent: customer_payment.changed, transport: webhook, normalizationTransformer: netsuite.receivable-to-risk.v1, signatureStrategy: netsuite-oauth-channel, replayProtection: true, fallbackPollMinutes: 30 }
   - { eventFamily: operations.approval_overdue, providerEvent: approval.status_changed, transport: webhook, normalizationTransformer: netsuite.approval-to-operating-signal.v1, signatureStrategy: netsuite-oauth-channel, replayProtection: true, fallbackPollMinutes: 15 }
 fieldMappings:
-  - { objectType: forecast_window, requiredLogicalFields: [forecast.id, forecast.version, forecast.periodStart, forecast.periodEnd, forecast.baseline, forecast.current], optionalLogicalFields: [forecast.currency, forecast.scenario, forecast.ownerId] }
-  - { objectType: invoice, requiredLogicalFields: [invoice.id, invoice.accountId, invoice.amount, invoice.currency, invoice.dueAt, invoice.status], optionalLogicalFields: [invoice.disputeStatus, invoice.ownerId, invoice.promiseAt] }
-  - { objectType: approval_request, requiredLogicalFields: [approval.id, approval.policyVersion, approval.ownerId, approval.dueAt, approval.affectedOutcome], optionalLogicalFields: [approval.threshold, approval.requesterId, approval.dependencies] }
+  - { providerId: enterprise_warehouse, objectType: forecast_window, requiredLogicalFields: [forecast.id, forecast.version, forecast.periodStart, forecast.periodEnd, forecast.baseline, forecast.current], optionalLogicalFields: [forecast.currency, forecast.scenario, forecast.ownerId] }
+  - { providerId: netsuite, objectType: invoice, requiredLogicalFields: [invoice.id, invoice.accountId, invoice.amount, invoice.currency, invoice.dueAt, invoice.status], optionalLogicalFields: [invoice.disputeStatus, invoice.ownerId, invoice.promiseAt] }
+  - { providerId: netsuite, objectType: approval_request, requiredLogicalFields: [approval.id, approval.policyVersion, approval.ownerId, approval.dueAt, approval.affectedOutcome], optionalLogicalFields: [approval.threshold, approval.requesterId, approval.dependencies] }
 healthCheck: { capability: finance.ledger.read, sampleQuery: { savedSearch: close_readiness, limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

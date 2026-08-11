@@ -716,13 +716,13 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "operations_finance-forecast_variance",
     "hr-retention_signal",
     "hr-performance_review_prep",
-    "legal_security-contract_triage",
-    "legal_security-policy_drift",
-    "legal_security-access_review",
-    "legal_security-incident_evidence",
-    "management-review",
-    "management-decision_memo",
-    "management-resource_allocation"
+    "legal-contract-exception-triage",
+    "legal-policy-control-drift",
+    "legal-privileged-access-review",
+    "legal-incident-evidence",
+    "management-operating-review",
+    "management-decision-memo",
+    "management-resource-allocation"
   ].map(resolveCompanyLoopTemplateId));
   const improvementTemplateIds = new Set([
     "marketing-channel_allocation",
@@ -735,17 +735,17 @@ function catalogOperationalState(template: ReturnType<typeof getTemplateCatalog>
     "engineering-incident_learning",
     "operations_finance-vendor_review",
     "hr-manager_coaching",
-    "legal_security-security_questionnaire",
-    "management-department_loop_review",
-    "management-improvement"
+    "legal-security-questionnaire",
+    "management-loop-health-review",
+    "management-system-improvement"
   ].map(resolveCompanyLoopTemplateId));
   const attentionTemplateIds = new Set([
     "customer_success-renewal_risk",
     "engineering-release_readiness",
     "operations_finance-forecast_variance",
     "hr-retention_signal",
-    "legal_security-policy_drift",
-    "management-department_loop_review"
+    "legal-policy-control-drift",
+    "management-loop-health-review"
   ].map(resolveCompanyLoopTemplateId));
 
   return {
@@ -765,7 +765,7 @@ function catalogLoopId(templateId: string) {
     "engineering-qa_checklist": "loop_demo_engineering_quality",
     "ops-finance-approval-bottleneck": "loop_demo_ops_efficiency",
     "hr-manager_coaching": "loop_demo_people_engagement",
-    "legal_security-policy_drift": "loop_demo_risk_compliance"
+    "legal-policy-control-drift": "loop_demo_risk_compliance"
   };
   return legacyIds[resolveCompanyLoopTemplateId(templateId)] ?? `catalog_${slug(templateId)}`;
 }

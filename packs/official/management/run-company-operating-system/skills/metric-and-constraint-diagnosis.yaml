@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: management-metric-and-constraint-diagnosis
+name: Company Metric and Constraint Diagnosis
+description: Reconcile a material metric movement and identify the binding company constraint without changing targets or inventing causality.
+department: management
+goal: Produce a source-cited anomaly finding with driver evidence, uncertainty, materiality, constraint hypotheses, and bounded next decision paths.
+inputs: [metric definition, baseline, observation window, dimensions, materiality policy, department outcomes, forecast, capacity, corrections]
+outputs: [reconciled anomaly, driver table, uncertainty and missing context, binding-constraint hypothesis, supporting-route evidence]
+instructions:
+  - Verify metric definition, version, source, baseline, time alignment, dimensions, and materiality before diagnosis.
+  - Separate noise, timing, mix, source quality, operating delay, approval, capacity, market, and policy effects.
+  - Mark correlation, hypothesis, reviewed finding, and realized causal evidence as different states.
+  - Permit decision or resource fan-out only when the signed condition and company object identity are proven.
+  - Return realized values and reviewer corrections to driver accuracy and future threshold review.
+boundaries:
+  - No target, budget, forecast, priority, or resource mutation.
+  - No causal assertion from correlation alone.
+  - Material unresolved source conflict requires finance or data-owner review.
+requiredCapabilities: [analytics.metric.query, finance.forecast.read, loopgraph.outcome.read]

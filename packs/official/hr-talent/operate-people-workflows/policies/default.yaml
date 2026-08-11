@@ -1,0 +1,4 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules: { ats.read: allowed, calendar.read: allowed, hris.read_bounded: allowed, onboarding.read: allowed, aggregate_survey.read: allowed, goals.read: allowed, tasks.read: allowed, task.create: approval_required, sensitive_message.draft: approval_required, person.score: forbidden, candidate.rank: forbidden, candidate.reject: forbidden, hiring.decide: forbidden, performance.rate: forbidden, attrition.predict: forbidden, compensation.change: forbidden, employment.change: forbidden, discipline.recommend: forbidden, private_message.ingest: forbidden, sensitive_message.send: forbidden }
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 15 }
