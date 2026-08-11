@@ -68,7 +68,8 @@ export function resolveConnectorCapabilities(input: {
     const binding = recipe.capabilities.find((candidate) => candidate.logicalCapability === capability)!;
     const providerId = providerIdForCapability(recipe, binding);
     const compatible = input.connections.find((connection) => {
-      const providerMatch = connection.manifestId === providerId || connection.manifestId.startsWith(`${providerId}.`) || connection.manifestId.startsWith(`${providerId}-`);
+      const manifestId = normalizeConnectorProviderId(connection.manifestId);
+      const providerMatch = manifestId === providerId || manifestId.startsWith(`${providerId}.`) || manifestId.startsWith(`${providerId}-`);
       const capabilityMatch = connection.capabilityKeys.includes(capability)
         || connection.capabilityKeys.includes(binding.providerOperation)
         || connection.capabilityKeys.includes(broadCapability(capability));
@@ -77,7 +78,7 @@ export function resolveConnectorCapabilities(input: {
     if (!compatible) {
       return { capability, required: required.has(capability), recipeId: recipe.id, status: "missing", reason: `${providerId} is selected through ${recipe.displayName}, but no connection grants ${capability}.` };
     }
-    const missingScopes = binding.minimumScopes.filter((scope) => !compatible.grantedScopes.includes(scope));
+    const missingScopes = binding.minimumScopes.filter((scope) => !connectionGrantsScope(compatible, providerId, scope));
     if (missingScopes.length > 0) {
       return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "missing", reason: `Connection ${compatible.id} is missing required scopes: ${missingScopes.join(", ")}.` };
     }
@@ -105,9 +106,19 @@ export function providerIdForCapability(
   recipe: ConnectorRecipe,
   binding: ConnectorRecipe["capabilities"][number]
 ): string {
-  if (binding.providerId) return binding.providerId;
+  if (binding.providerId) return normalizeConnectorProviderId(binding.providerId);
   const operationProvider = binding.providerOperation.split(".", 1)[0];
-  return operationProvider || recipe.providerId;
+  return normalizeConnectorProviderId(operationProvider || recipe.providerId);
+}
+
+export function normalizeConnectorProviderId(providerId: string): string {
+  const normalized = providerId.trim().toLowerCase();
+  const aliases: Record<string, string> = {
+    "google-ads": "google_ads",
+    "paid-social": "meta_ads",
+    "product-analytics": "product_analytics"
+  };
+  return aliases[normalized] ?? normalized.replace(/-/g, "_");
 }
 
 export class FileProviderSchemaSnapshotStore {
@@ -323,6 +334,23 @@ function connectionPolicyAllows(connection: ConnectionInstance, authority: Conne
   if (authority === "read") return connection.readPolicy === "read_only";
   if (authority === "draft") return connection.writePolicy === "draft_only" || connection.writePolicy === "approved_only";
   return connection.writePolicy === "approved_only";
+}
+
+function connectionGrantsScope(connection: ConnectionInstance, providerId: string, requiredScope: string): boolean {
+  const normalize = (scope: string) => scope.toLowerCase().replace(/^https:\/\/www\.googleapis\.com\/auth\//, "").replace(/[^a-z0-9]/g, "");
+  const required = normalize(requiredScope);
+  if (connection.grantedScopes.some((scope) => normalize(scope) === required)) return true;
+  if (providerId === "intercom" && required === "conversationsread") {
+    return connection.grantedScopes.some((scope) => normalize(scope) === "readconversations");
+  }
+  if (providerId === "stripe" && requiredScope.toLowerCase().endsWith(":read")) {
+    return connection.grantedScopes.some((scope) => scope === "read_only" || scope === "read_write");
+  }
+  const brokerReadOnlyProviders = new Set(["zendesk", "workday", "netsuite"]);
+  return connection.source === "hermes_connector_broker"
+    && brokerReadOnlyProviders.has(providerId)
+    && connection.brokerCapabilities.includes("provider.data.read")
+    && connection.grantedScopes.length === 0;
 }
 
 function trigramOverlap(left: string, right: string): number {

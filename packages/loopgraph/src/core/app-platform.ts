@@ -563,6 +563,7 @@ export const appFieldMappingPlanSchema = z.object({
   requirements: z.array(z.object({
     recipeId: appIdSchema,
     providerId: appIdSchema,
+    connectorOnboarding: z.enum(["available", "custom_required"]).default("custom_required"),
     connectionId: appIdSchema.optional(),
     objectType: z.string().min(1),
     requiredLogicalFields: z.array(z.string().min(1)).default([]),

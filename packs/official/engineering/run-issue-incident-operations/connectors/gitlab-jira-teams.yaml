@@ -15,7 +15,7 @@ eventSources:
   - { eventFamily: engineering.issue_received, providerEvent: Issue Hook, transport: webhook, normalizationTransformer: gitlab.issue-to-engineering-signal.v1, signatureStrategy: gitlab-token, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: engineering.incident_detected, providerEvent: jira.incident.created, transport: webhook, normalizationTransformer: jira.incident-to-engineering-signal.v1, signatureStrategy: atlassian-jwt, replayProtection: true, fallbackPollMinutes: 5 }
 fieldMappings:
-  - { objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }
-  - { objectType: incident, requiredLogicalFields: [incident.id, incident.service, incident.detectedAt], optionalLogicalFields: [incident.severity, incident.customerImpact, incident.deploymentId] }
+  - { providerId: gitlab, objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }
+  - { providerId: jira, objectType: incident, requiredLogicalFields: [incident.id, incident.service, incident.detectedAt], optionalLogicalFields: [incident.severity, incident.customerImpact, incident.deploymentId] }
 healthCheck: { capability: repo.issue.read, sampleQuery: { state: opened, limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireHostedPermission } from "@/lib/auth/hosted-access";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
-import { callLoopgraphAppTool, type LoopgraphAppToolName } from "@/lib/loopgraph-runtime/app-tools";
+import { callLoopgraphAppTool, type LoopgraphAppToolName } from "@/lib/app-platform/tool-bridge";
 
 const actionTools = {
   test: "loopgraph_app_test",

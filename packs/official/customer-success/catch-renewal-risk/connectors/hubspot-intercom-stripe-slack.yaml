@@ -15,7 +15,7 @@ eventSources:
   - { eventFamily: cs.account_snapshot_changed, providerEvent: company.propertyChange, transport: webhook, normalizationTransformer: hubspot.account-to-health-snapshot.v1, signatureStrategy: hubspot-v3-signature, replayProtection: true, fallbackPollMinutes: 60 }
   - { eventFamily: cs.support_risk_detected, providerEvent: conversation.admin.replied, transport: webhook, normalizationTransformer: intercom.conversation-to-support-risk.v1, signatureStrategy: intercom-hmac-sha1, replayProtection: true, fallbackPollMinutes: 15 }
 fieldMappings:
-  - { objectType: account, requiredLogicalFields: [account.id, account.ownerId, account.tier, account.lifecycleStage], optionalLogicalFields: [account.renewalAt, account.healthStatus, account.executiveSponsor] }
-  - { objectType: subscription, requiredLogicalFields: [subscription.id, subscription.accountId, subscription.status], optionalLogicalFields: [subscription.renewalAt, subscription.arr, subscription.paymentStatus] }
+  - { providerId: hubspot, objectType: account, requiredLogicalFields: [account.id, account.ownerId, account.tier, account.lifecycleStage], optionalLogicalFields: [account.renewalAt, account.healthStatus, account.executiveSponsor] }
+  - { providerId: stripe, objectType: subscription, requiredLogicalFields: [subscription.id, subscription.accountId, subscription.status], optionalLogicalFields: [subscription.renewalAt, subscription.arr, subscription.paymentStatus] }
 healthCheck: { capability: crm.account.read, sampleQuery: { state: active, limit: 1 }, timeoutMs: 10000 }
 supportsBoundedSamples: true
