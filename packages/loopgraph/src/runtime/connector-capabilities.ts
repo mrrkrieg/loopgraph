@@ -78,7 +78,28 @@ export const PROVIDER_OPERATION_CATALOG: ProviderOperationDescriptor[] = [
     ["job.read", "provider.data.read", ["jobs:read"]]
   ]),
   ...provider("netsuite", [["transaction.read", "provider.data.read", []]]),
-  ...provider("quickbooks", [["accounting.read", "provider.data.read", []]])
+  ...provider("quickbooks", [["accounting.read", "provider.data.read", []]]),
+  ...provider("gmail", [
+    ["threads.read", "provider.data.read", ["https://www.googleapis.com/auth/gmail.readonly"]],
+    ["drafts.create", "provider.draft.write", ["https://www.googleapis.com/auth/gmail.compose"], true],
+    ["messages.send", "provider.action.execute", ["https://www.googleapis.com/auth/gmail.send"], true, true]
+  ]),
+  ...provider("google_calendar", [
+    ["events.read", "provider.data.read", ["https://www.googleapis.com/auth/calendar.events.readonly"]]
+  ]),
+  ...provider("outlook", [
+    ["threads.read", "provider.data.read", ["Mail.Read"]],
+    ["events.read", "provider.data.read", ["Calendars.Read"]],
+    ["drafts.create", "provider.draft.write", ["Mail.ReadWrite"], true],
+    ["message.draft", "provider.draft.write", ["Mail.ReadWrite"], true],
+    ["message.send", "provider.action.execute", ["Mail.Send"], true, true]
+  ]),
+  ...provider("teams", [
+    ["messages.draft", "provider.draft.write", ["ChannelMessage.Send"], true],
+    ["channel.post", "provider.action.execute", ["ChannelMessage.Send"], true, true]
+  ]),
+  ...provider("posthog", [["insights.query", "provider.data.read", ["query:read"]]]),
+  ...provider("amplitude", [["events.query", "provider.data.read", ["analytics:read"]]])
 ];
 
 export function getProviderOperation(providerId: ProviderId, operation: string) {

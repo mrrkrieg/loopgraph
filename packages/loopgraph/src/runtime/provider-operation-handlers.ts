@@ -7,7 +7,8 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   const handlers = new Map<string, ConnectorOperationHandler>();
   for (const providerId of [
     "hubspot", "google_ads", "slack", "notion", "salesforce", "stripe", "github",
-    "zendesk", "intercom", "workday", "greenhouse", "netsuite", "quickbooks"
+    "zendesk", "intercom", "workday", "greenhouse", "netsuite", "quickbooks",
+    "gmail", "google_calendar", "outlook", "teams", "posthog", "amplitude"
   ] satisfies ProviderId[]) {
     handlers.set(operationKey(providerId, "health.check"), async (context) => {
       const lease = await context.getCredential();
@@ -57,6 +58,9 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   registerSupportHandlers(handlers, fetcher);
   registerHrisHandlers(handlers, fetcher);
   registerFinanceHandlers(handlers, fetcher);
+  registerGoogleWorkspaceHandlers(handlers, fetcher);
+  registerMicrosoftGraphHandlers(handlers, fetcher);
+  registerAnalyticsHandlers(handlers, fetcher);
   return handlers;
 }
 
@@ -436,6 +440,140 @@ function registerFinanceHandlers(handlers: Map<string, ConnectorOperationHandler
   });
 }
 
+function registerGoogleWorkspaceHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  handlers.set(operationKey("gmail", "threads.read"), async (context) => {
+    const input = z.object({ threadId: safeProviderId }).strict().parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(input.threadId)}`);
+    url.searchParams.set("format", "metadata");
+    url.searchParams.append("metadataHeaders", "From");
+    url.searchParams.append("metadataHeaders", "To");
+    url.searchParams.append("metadataHeaders", "Date");
+    url.searchParams.append("metadataHeaders", "Subject");
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const messages = Array.isArray(body.messages) ? body.messages.slice(0, 100).map((item) => {
+      const message = objectValue(item);
+      return selectFields(message, ["id", "threadId", "labelIds", "snippet", "internalDate", "payload"]);
+    }) : [];
+    return { providerObjectRef: `gmail:thread:${input.threadId}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), messages };
+  });
+  handlers.set(operationKey("gmail", "drafts.create"), async (context) => {
+    const draft = emailMessageInput.parse(context.request.input);
+    return { providerObjectRef: "gmail:draft:prepared", sourceTimestamp: new Date().toISOString(), responseStatusClass: "not_sent", draft };
+  });
+  handlers.set(operationKey("gmail", "messages.send"), async (context) => {
+    const input = emailMessageInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const raw = Buffer.from(`To: ${input.to}\r\nSubject: ${input.subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${input.body}`, "utf8").toString("base64url");
+    const response = await fixedFetch(fetcher, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+      body: JSON.stringify({ raw })
+    });
+    const body = await providerJson(response);
+    return { providerObjectRef: `gmail:message:${stringField(body, "id") ?? "sent"}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), delivered: true, threadId: stringField(body, "threadId") };
+  });
+  handlers.set(operationKey("google_calendar", "events.read"), async (context) => {
+    const input = eventWindowInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId ?? "primary")}/events`);
+    url.searchParams.set("timeMin", input.startAt);
+    url.searchParams.set("timeMax", input.endAt);
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("maxResults", String(input.limit));
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const events = Array.isArray(body.items) ? body.items.slice(0, input.limit).map((item) => selectFields(objectValue(item), ["id", "status", "summary", "start", "end", "attendees", "updated", "organizer"])) : [];
+    return { providerObjectRef: `google_calendar:${input.calendarId ?? "primary"}:${input.startAt}:${input.endAt}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), events };
+  });
+}
+
+function registerMicrosoftGraphHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  handlers.set(operationKey("outlook", "threads.read"), async (context) => {
+    const input = z.object({ conversationId: safeProviderId, limit: z.number().int().min(1).max(100).default(50) }).strict().parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL("https://graph.microsoft.com/v1.0/me/messages");
+    url.searchParams.set("$filter", `conversationId eq '${input.conversationId}'`);
+    url.searchParams.set("$select", "id,conversationId,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,isRead");
+    url.searchParams.set("$top", String(input.limit));
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const messages = Array.isArray(body.value) ? body.value.slice(0, input.limit).map((item) => selectFields(objectValue(item), ["id", "conversationId", "subject", "from", "toRecipients", "receivedDateTime", "sentDateTime", "bodyPreview", "isRead"])) : [];
+    return { providerObjectRef: `outlook:conversation:${input.conversationId}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), messages };
+  });
+  handlers.set(operationKey("outlook", "events.read"), async (context) => {
+    const input = eventWindowInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL("https://graph.microsoft.com/v1.0/me/calendarView");
+    url.searchParams.set("startDateTime", input.startAt);
+    url.searchParams.set("endDateTime", input.endAt);
+    url.searchParams.set("$select", "id,subject,start,end,attendees,organizer,isCancelled,lastModifiedDateTime");
+    url.searchParams.set("$top", String(input.limit));
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const events = Array.isArray(body.value) ? body.value.slice(0, input.limit).map((item) => selectFields(objectValue(item), ["id", "subject", "start", "end", "attendees", "organizer", "isCancelled", "lastModifiedDateTime"])) : [];
+    return { providerObjectRef: `outlook:calendar:${input.startAt}:${input.endAt}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), events };
+  });
+  const prepareOutlookDraft: ConnectorOperationHandler = async (context) => {
+    const draft = emailMessageInput.parse(context.request.input);
+    return { providerObjectRef: "outlook:draft:prepared", sourceTimestamp: new Date().toISOString(), responseStatusClass: "not_sent", draft };
+  };
+  handlers.set(operationKey("outlook", "drafts.create"), prepareOutlookDraft);
+  handlers.set(operationKey("outlook", "message.draft"), prepareOutlookDraft);
+  handlers.set(operationKey("outlook", "message.send"), async (context) => {
+    const input = emailMessageInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const response = await fixedFetch(fetcher, "https://graph.microsoft.com/v1.0/me/sendMail", {
+      method: "POST",
+      headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+      body: JSON.stringify({ message: { subject: input.subject, body: { contentType: "Text", content: input.body }, toRecipients: [{ emailAddress: { address: input.to } }] }, saveToSentItems: true })
+    });
+    return { providerObjectRef: `outlook:message:${context.request.idempotencyKey}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), delivered: true };
+  });
+  handlers.set(operationKey("teams", "messages.draft"), async (context) => {
+    const draft = teamsMessageInput.parse(context.request.input);
+    return { providerObjectRef: `teams:${draft.teamId}:${draft.channelId}:draft`, sourceTimestamp: new Date().toISOString(), responseStatusClass: "not_sent", draft };
+  });
+  handlers.set(operationKey("teams", "channel.post"), async (context) => {
+    const input = teamsMessageInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const response = await fixedFetch(fetcher, `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(input.teamId)}/channels/${encodeURIComponent(input.channelId)}/messages`, {
+      method: "POST",
+      headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+      body: JSON.stringify({ body: { contentType: "text", content: input.body } })
+    });
+    const body = await providerJson(response);
+    return { providerObjectRef: `teams:${input.teamId}:${input.channelId}:message:${stringField(body, "id") ?? "sent"}`, sourceTimestamp: stringField(body, "createdDateTime") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), delivered: true };
+  });
+}
+
+function registerAnalyticsHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  handlers.set(operationKey("posthog", "insights.query"), async (context) => {
+    const input = z.object({ insightId: safeProviderId }).strict().parse(context.request.input);
+    const credential = await revealCredential(context);
+    if (!credential.projectId || !/^\d{1,20}$/.test(credential.projectId)) throw new ConnectorBrokerError("provider_credential_invalid", "PostHog project ID is unavailable.", false, true);
+    const base = credential.instanceUrl ? trustedInstanceUrl(credential, /(?:^|\.)posthog\.com$/) : new URL("https://us.posthog.com");
+    const response = await fixedFetch(fetcher, new URL(`/api/projects/${credential.projectId}/insights/${encodeURIComponent(input.insightId)}/`, base), { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    return { providerObjectRef: `posthog:project:${credential.projectId}:insight:${input.insightId}`, sourceTimestamp: stringField(body, "last_modified_at") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), insight: selectFields(body, ["id", "short_id", "name", "description", "filters", "result", "last_modified_at"]) };
+  });
+  handlers.set(operationKey("amplitude", "events.query"), async (context) => {
+    const input = z.object({ eventType: z.string().trim().min(1).max(200), startDate: z.string().regex(/^\d{8}$/), endDate: z.string().regex(/^\d{8}$/) }).strict().refine((value) => value.startDate <= value.endDate, "startDate must not be after endDate").parse(context.request.input);
+    const credential = await revealCredential(context);
+    if (!credential.apiKey || !credential.apiSecret) throw new ConnectorBrokerError("provider_credential_invalid", "Amplitude API key and secret are unavailable.", false, true);
+    const base = credential.region === "eu" ? "https://analytics.eu.amplitude.com" : "https://amplitude.com";
+    const url = new URL("/api/2/events/segmentation", base);
+    url.searchParams.set("e", JSON.stringify({ event_type: input.eventType }));
+    url.searchParams.set("start", input.startDate);
+    url.searchParams.set("end", input.endDate);
+    const authorization = Buffer.from(`${credential.apiKey}:${credential.apiSecret}`, "utf8").toString("base64");
+    const response = await fixedFetch(fetcher, url, { headers: { authorization: `Basic ${authorization}`, accept: "application/json" } });
+    const body = await providerJson(response);
+    return { providerObjectRef: `amplitude:event:${createHash("sha256").update(input.eventType).digest("hex").slice(0, 16)}:${input.startDate}:${input.endDate}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), series: selectFields(body, ["data", "timeComputed", "wasCached"]) };
+  });
+}
+
 function healthProbe(providerId: ProviderId, credential: StoredCredential): {
   url: string;
   method?: string;
@@ -451,6 +589,17 @@ function healthProbe(providerId: ProviderId, credential: StoredCredential): {
   if (providerId === "notion") return { url: "https://api.notion.com/v1/users/me", headers: { ...bearer, "notion-version": "2026-03-11" } };
   if (providerId === "stripe") return { url: "https://api.stripe.com/v1/account", headers: bearer };
   if (providerId === "intercom") return { url: "https://api.intercom.io/me", headers: { ...bearer, accept: "application/json" } };
+  if (providerId === "gmail") return { url: "https://gmail.googleapis.com/gmail/v1/users/me/profile", headers: bearer };
+  if (providerId === "google_calendar") return { url: "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1", headers: bearer };
+  if (providerId === "outlook" || providerId === "teams") return { url: "https://graph.microsoft.com/v1.0/me?$select=id", headers: bearer };
+  if (providerId === "posthog") {
+    const base = credential.instanceUrl ? trustedInstanceUrl(credential, /(?:^|\.)posthog\.com$/) : new URL("https://us.posthog.com");
+    return { url: new URL("/api/users/@me/", base).toString(), headers: bearer };
+  }
+  if (providerId === "amplitude" && credential.apiKey && credential.apiSecret) {
+    const base = credential.region === "eu" ? "https://analytics.eu.amplitude.com" : "https://amplitude.com";
+    return { url: `${base}/api/2/events/list`, headers: { authorization: `Basic ${Buffer.from(`${credential.apiKey}:${credential.apiSecret}`, "utf8").toString("base64")}` } };
+  }
   if (providerId === "salesforce" && credential.instanceUrl) {
     const url = new URL(credential.instanceUrl);
     if (url.protocol !== "https:" || !/(?:^|\.)salesforce\.com$/.test(url.hostname)) {
@@ -467,6 +616,10 @@ type StoredCredential = {
   developerToken?: string;
   subdomain?: string;
   realmId?: string;
+  projectId?: string;
+  apiKey?: string;
+  apiSecret?: string;
+  region?: "us" | "eu";
 };
 
 function parseCredential(value: string): StoredCredential {
@@ -482,7 +635,11 @@ function parseCredential(value: string): StoredCredential {
       subdomain: typeof parsed.subdomain === "string" ? parsed.subdomain : undefined,
       realmId: typeof parsed.realm_id === "string"
         ? parsed.realm_id
-        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined
+        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined,
+      projectId: typeof parsed.project_id === "string" || typeof parsed.project_id === "number" ? String(parsed.project_id) : undefined,
+      apiKey: typeof parsed.api_key === "string" ? parsed.api_key : undefined,
+      apiSecret: typeof parsed.api_secret === "string" ? parsed.api_secret : undefined,
+      region: parsed.region === "eu" ? "eu" : parsed.region === "us" ? "us" : undefined
     };
   } catch {
     return { accessToken: value };
@@ -491,6 +648,22 @@ function parseCredential(value: string): StoredCredential {
 
 const safeProviderId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/);
 const notionId = z.string().regex(/^[a-fA-F0-9-]{32,36}$/);
+const emailMessageInput = z.object({
+  to: z.string().email().max(320),
+  subject: z.string().trim().min(1).max(998).refine((value) => !/[\r\n]/.test(value), "subject cannot contain line breaks"),
+  body: z.string().min(1).max(100_000)
+}).strict();
+const eventWindowInput = z.object({
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime(),
+  calendarId: z.string().min(1).max(512).optional(),
+  limit: z.number().int().min(1).max(100).default(50)
+}).strict().refine((value) => value.startAt <= value.endAt, "startAt must not be after endAt");
+const teamsMessageInput = z.object({
+  teamId: safeProviderId,
+  channelId: safeProviderId,
+  body: z.string().trim().min(1).max(16_000)
+}).strict();
 const slackMessageInput = z.object({
   channelId: z.string().regex(/^[CGD][A-Z0-9]{5,30}$/),
   text: z.string().trim().min(1).max(16_000)
