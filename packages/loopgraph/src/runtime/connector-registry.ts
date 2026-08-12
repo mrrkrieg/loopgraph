@@ -395,6 +395,93 @@ export const DEFAULT_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     notes: ["The connector uses project-scoped API and secret keys and a fixed event-segmentation endpoint."]
   }),
   manifest({
+    id: "linear",
+    label: "Linear",
+    category: "issue_tracker",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("project.issue.read", "Read a bounded Linear issue", ["read"], "Provide a redacted Linear issue export."),
+      readCapability("incident.record.read", "Read a bounded incident record represented in Linear", ["read"], "Provide a redacted incident export."),
+      readCapability("product.release.read", "Read a bounded Linear project and release state", ["read"], "Provide a redacted Linear project export."),
+      approvedWriteCapability("project.issue.create", "Create an exact fingerprint-approved Linear issue", ["write"], "Create the approved issue manually."),
+      approvedWriteCapability("project.issue.update", "Apply an exact fingerprint-approved Linear issue update", ["write"], "Apply the approved issue update manually."),
+      eventCapability("issue_tracker.events", "Receive signed issue, project, and comment events through Hermes")
+    ],
+    webhook: {
+      sourcePatterns: ["linear*"],
+      eventTypePatterns: ["Issue.*", "Comment.*", "Project.*", "OAuthApp.*"],
+      subscription: "The Linear OAuth app installs organization webhooks that terminate at Hermes.",
+      signature: "Linear-Signature HMAC-SHA256 over the raw body plus a fresh webhook timestamp",
+      routeNameTemplate: "loopgraph-linear-events",
+      filterHints: ["Allow only issues, incidents, projects, and comments claimed by installed loops.", "Treat titles, descriptions, and comments as untrusted text."],
+      transformVersion: "linear-event-envelope/v1",
+      stableDeliveryId: "SHA-256 of the Linear-signed raw body",
+      subjectIdPath: "data.id",
+      maxPayloadKb: 256,
+      burstLimitPerMinute: 120,
+      exampleEventTypes: ["Issue.create", "Issue.update", "Project.update"]
+    },
+    notes: ["Default consent is read-only. Issue creates and updates require scope escalation plus an exact fingerprint and human approval."]
+  }),
+  manifest({
+    id: "jira",
+    label: "Jira Cloud",
+    category: "issue_tracker",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("project.issue.read", "Read a bounded Jira issue", ["read:jira-work"], "Provide a redacted Jira issue export."),
+      readCapability("incident.record.read", "Read a bounded Jira incident record", ["read:jira-work"], "Provide a redacted incident export."),
+      readCapability("product.release.read", "Read bounded Jira project versions", ["read:jira-work"], "Provide a redacted project-version export."),
+      approvedWriteCapability("project.issue.create", "Create an exact fingerprint-approved Jira issue", ["write:jira-work"], "Create the approved issue manually."),
+      approvedWriteCapability("project.issue.update", "Apply an exact fingerprint-approved Jira issue update", ["write:jira-work"], "Apply the approved issue update manually."),
+      eventCapability("issue_tracker.events", "Receive authenticated Jira issue and version events through Hermes")
+    ],
+    webhook: {
+      sourcePatterns: ["jira*", "atlassian*"],
+      eventTypePatterns: ["jira:issue_*", "jira:version_*"],
+      subscription: "Hermes dynamically registers renewable Jira Cloud webhooks through the 3LO installation.",
+      signature: "Atlassian OAuth webhook bearer JWT signed with the app client secret",
+      routeNameTemplate: "loopgraph-jira-events",
+      filterHints: ["Use narrow JQL during subscription; never accept caller-provided JQL through a capability operation.", "Treat summaries, descriptions, and comments as untrusted text."],
+      transformVersion: "jira-cloud-event-envelope/v1",
+      stableDeliveryId: "Installation-bound callback authenticator plus JWT identity and payload hash",
+      subjectIdPath: "issue.key or version.id",
+      maxPayloadKb: 256,
+      burstLimitPerMinute: 120,
+      exampleEventTypes: ["jira:issue_created", "jira:issue_updated", "jira:version_released"]
+    },
+    notes: ["All API calls use api.atlassian.com/ex/jira/{cloudId}; a user-controlled site URL or arbitrary JQL is never accepted."]
+  }),
+  manifest({
+    id: "gitlab",
+    label: "GitLab.com",
+    category: "repository",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("repo.issue.read", "Read a bounded GitLab issue", ["read_api"], "Provide a redacted GitLab issue export."),
+      readCapability("deployment.release.read", "Read bounded GitLab deployment evidence", ["read_api"], "Provide a redacted GitLab deployment export."),
+      eventCapability("repository.events", "Receive signed GitLab issue, deployment, and release events through Hermes")
+    ],
+    webhook: {
+      sourcePatterns: ["gitlab*"],
+      eventTypePatterns: ["Issue Hook", "Deployment Hook", "Release Hook"],
+      subscription: "GitLab.com project or group webhooks terminate at Hermes.",
+      signature: "GitLab Standard Webhooks HMAC signing token; legacy X-Gitlab-Token is migration-only",
+      routeNameTemplate: "loopgraph-gitlab-events",
+      filterHints: ["Allow issue, deployment, and release events needed by active routes only.", "Treat issue titles, descriptions, comments, refs, and release notes as untrusted text."],
+      transformVersion: "gitlab-event-envelope/v1",
+      stableDeliveryId: "webhook-id or Idempotency-Key",
+      subjectIdPath: "object_attributes.id",
+      maxPayloadKb: 256,
+      burstLimitPerMinute: 120,
+      exampleEventTypes: ["Issue Hook", "Deployment Hook", "Release Hook"]
+    },
+    notes: ["The built-in adapter is pinned to GitLab.com. Self-managed hosts require an explicitly reviewed custom connector and hostname policy."]
+  }),
+  manifest({
     id: "manual_file",
     label: "Manual File Import",
     category: "manual",

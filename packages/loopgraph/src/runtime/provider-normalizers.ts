@@ -108,6 +108,25 @@ function providerFields(provider: ProviderId, event: Record<string, unknown>): P
   if (provider === "posthog" || provider === "amplitude") {
     return fields(string(event.type, "metric.threshold_crossed"), "metric", string(event.insightId ?? event.chartId ?? event.metricId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.breakdown", "normalizedPayload.sample"]);
   }
+  if (provider === "linear") {
+    const data = asRecord(event.data);
+    const resourceType = string(event.type, "Issue");
+    const normalizedType = resourceType.toLowerCase() === "project" ? "release" : resourceType.toLowerCase() === "comment" ? "issue_comment" : "issue";
+    return fields(`${resourceType}.${string(event.action, "update")}`, normalizedType, string(data.id ?? data.identifier ?? event.id, "unknown"), event, iso(event.webhookTimestamp) ?? occurredAt, ["normalizedPayload.data.title", "normalizedPayload.data.description", "normalizedPayload.data.body"]);
+  }
+  if (provider === "jira") {
+    const issue = asRecord(event.issue);
+    const version = asRecord(event.version);
+    const eventType = string(event.webhookEvent ?? event.type, "jira:issue_updated");
+    const isRelease = eventType.includes("version") || Object.keys(version).length > 0;
+    return fields(eventType, isRelease ? "release" : eventType.includes("incident") ? "incident" : "issue", string(isRelease ? version.id : issue.key ?? issue.id ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.issue.fields.summary", "normalizedPayload.issue.fields.description", "normalizedPayload.comment.body", "normalizedPayload.version.description"]);
+  }
+  if (provider === "gitlab") {
+    const attributes = asRecord(event.object_attributes);
+    const kind = string(event.object_kind, "issue");
+    const subjectType = kind === "deployment" || kind === "release" ? "release" : "issue";
+    return fields(`${titleCase(kind)} Hook`, subjectType, string(attributes.id ?? attributes.iid ?? event.id, "unknown"), event, iso(attributes.updated_at ?? attributes.created_at) ?? occurredAt, ["normalizedPayload.object_attributes.title", "normalizedPayload.object_attributes.description", "normalizedPayload.object_attributes.note", "normalizedPayload.object_attributes.ref"]);
+  }
   if (["zendesk", "intercom"].includes(provider)) {
     const ticket = asRecord(event.ticket);
     const conversation = asRecord(event.conversation);
@@ -145,3 +164,4 @@ function mapEntityType(value: string) {
   if (normalized.includes("invoice")) return "invoice";
   return normalized.replace(/[^a-z0-9_]/g, "_") || "object";
 }
+function titleCase(value: string) { return value.length === 0 ? value : `${value[0]!.toUpperCase()}${value.slice(1)}`; }

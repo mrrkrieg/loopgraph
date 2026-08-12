@@ -16,7 +16,7 @@ import { PROVIDER_OPERATION_CATALOG } from "./connector-capabilities";
 import { createProviderOperationHandlers } from "./provider-operation-handlers";
 import { OAuthLifecycleService, type OAuthLifecycleStore, type OAuthTransaction } from "./oauth-lifecycle";
 import { ProviderSubscriptionService } from "./provider-subscriptions";
-import { InMemoryWebhookReplayStore, ProviderWebhookVerifier } from "./provider-webhook-verifier";
+import { deriveJiraWebhookCallbackBinding, InMemoryWebhookReplayStore, ProviderWebhookVerifier } from "./provider-webhook-verifier";
 import { assertSecretFree, containsSecretMaterial, redactSensitive } from "./secret-redaction";
 import { CompositeVault, GcpSecretManagerAdapter, type SecretResolutionContext, type VaultAdapter } from "./vault-adapters";
 import { WorkloadIdentityVerifier } from "./workload-identity";
@@ -481,6 +481,41 @@ describe("enterprise connector security boundary", () => {
       installationId: installation.id,
       webhookSecretRef: `vault://${installation.credentialNamespace}/webhooks/attacker-selected`
     })).rejects.toMatchObject({ code: "webhook_secret_reference_mismatch" });
+  });
+
+  it("generates a Jira callback URL bound to the exact tenant installation", async () => {
+    const namespace = buildCredentialNamespace({ organizationId: "org-1", projectKey: "main", providerId: "jira", installationId: "jira-1" });
+    const installation = connectorInstallationAdminSchema.parse({
+      id: "jira-1",
+      tenant: { organizationId: "org-1", projectKey: "main" },
+      providerId: "jira",
+      displayName: "Jira",
+      status: "connected",
+      credentialRef: `vault://${namespace}/tokens/provider`,
+      credentialNamespace: namespace,
+      grantedScopes: ["read:jira-work", "manage:jira-webhook", "offline_access"],
+      allowedCapabilities: ["provider.health.read"],
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z"
+    });
+    const webhookSecretRef = deriveCredentialChildReference(installation.credentialRef, "webhooks/signing");
+    const webhookSecret = "jira-client-secret";
+    const store = new MemoryOAuthStore();
+    store.installations.set(installation.id, installation);
+    const subscriptions = new ProviderSubscriptionService({
+      store,
+      vault: new CompositeVault([new MemoryVault([[webhookSecretRef, webhookSecret]])]),
+      publicUrl: "https://broker.example"
+    });
+
+    const activated = await subscriptions.activate({ ...installation.tenant, installationId: installation.id, providerConfigured: true });
+    const callback = new URL(activated.endpointUrl);
+    expect(callback.pathname).toBe("/api/connector-broker/v1/webhooks/jira-1");
+    expect(callback.searchParams.get("loopgraph_binding")).toBe(deriveJiraWebhookCallbackBinding({
+      secret: webhookSecret,
+      ...installation.tenant,
+      installationId: installation.id
+    }));
   });
 
   it("uses a workload access token for GCP Secret Manager and rejects cross-tenant references", async () => {

@@ -10,6 +10,10 @@ const providerExpansionMigrationPath = path.join(
   process.cwd(),
   "supabase/migrations/202608100001_expand_connector_broker_providers.sql"
 );
+const engineeringProviderExpansionMigrationPath = path.join(
+  process.cwd(),
+  "supabase/migrations/202608100002_expand_engineering_connector_providers.sql"
+);
 
 describe("enterprise connector broker migration", () => {
   it("persists only non-secret control-plane, replay, receipt, and revocation state", async () => {
@@ -83,5 +87,12 @@ describe("enterprise connector broker migration", () => {
       expect(sql).toContain(`'${providerId}'`);
     }
     expect(sql).toContain("adding a provider requires schema, onboarding, capability, operation, normalization, fixture, and migration coverage");
+  });
+
+  it("adds Engineering providers only through the reviewed database allowlist", async () => {
+    const sql = await readFile(engineeringProviderExpansionMigrationPath, "utf8");
+    expect(sql).toContain("drop constraint if exists connector_installations_provider_check");
+    for (const providerId of ["linear", "jira", "gitlab"]) expect(sql).toContain(`'${providerId}'`);
+    expect(sql).toContain("webhook-security");
   });
 });

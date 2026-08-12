@@ -1,6 +1,7 @@
 import { connectorInstallationHasExpectedNamespace, deriveCredentialChildReference, type ConnectorInstallationAdmin, type CredentialReference } from "../core";
 import type { OAuthLifecycleStore } from "./oauth-lifecycle";
 import { getProviderOnboardingProfile } from "./provider-onboarding";
+import { deriveJiraWebhookCallbackBinding } from "./provider-webhook-verifier";
 import type { CompositeVault } from "./vault-adapters";
 
 export class ProviderSubscriptionService {
@@ -34,7 +35,12 @@ export class ProviderSubscriptionService {
       throw new ProviderSubscriptionError("webhook_secret_reference_mismatch");
     }
     const verificationLease = await this.dependencies.vault.resolve(webhookSecretRef, secretContext(installation));
-    verificationLease.dispose();
+    let endpointUrl: string;
+    try {
+      endpointUrl = this.endpoint(installation, verificationLease.reveal());
+    } finally {
+      verificationLease.dispose();
+    }
     const profile = getProviderOnboardingProfile(installation.providerId);
     const pendingVerification = !input.providerConfigured;
     const updated: ConnectorInstallationAdmin = {
@@ -57,7 +63,7 @@ export class ProviderSubscriptionService {
     await this.dependencies.store.saveInstallation(updated);
     return {
       installation: updated,
-      endpointUrl: this.endpoint(updated),
+      endpointUrl,
       requiresProviderConfirmation: pendingVerification,
       eventFamilies: profile.ingestion.eventFamilies
     };
@@ -110,11 +116,20 @@ export class ProviderSubscriptionService {
     return { installation: updated, endpointUrl: this.endpoint(updated), requiresProviderConfirmation: false, eventFamilies: profile.ingestion.eventFamilies };
   }
 
-  private endpoint(installation: ConnectorInstallationAdmin) {
-    return new URL(
+  private endpoint(installation: ConnectorInstallationAdmin, webhookSecret?: string) {
+    const endpoint = new URL(
       `/api/connector-broker/v1/webhooks/${installation.id}`,
       this.dependencies.publicUrl
-    ).toString();
+    );
+    if (installation.providerId === "jira") {
+      if (!webhookSecret) throw new ProviderSubscriptionError("jira_webhook_secret_required");
+      endpoint.searchParams.set("loopgraph_binding", deriveJiraWebhookCallbackBinding({
+        secret: webhookSecret,
+        ...installation.tenant,
+        installationId: installation.id
+      }));
+    }
+    return endpoint.toString();
   }
 }
 
