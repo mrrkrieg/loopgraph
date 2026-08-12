@@ -99,7 +99,25 @@ export const PROVIDER_OPERATION_CATALOG: ProviderOperationDescriptor[] = [
     ["channel.post", "provider.action.execute", ["ChannelMessage.Send"], true, true]
   ]),
   ...provider("posthog", [["insights.query", "provider.data.read", ["query:read"]]]),
-  ...provider("amplitude", [["events.query", "provider.data.read", ["analytics:read"]]])
+  ...provider("amplitude", [["events.query", "provider.data.read", ["analytics:read"]]]),
+  ...provider("linear", [
+    ["issues.read", "provider.data.read", ["read"]],
+    ["incidents.read", "provider.data.read", ["read"]],
+    ["projects.read", "provider.data.read", ["read"]],
+    ["issues.create", "provider.action.execute", ["write"], true, true],
+    ["issues.update", "provider.action.execute", ["write"], true, true]
+  ]),
+  ...provider("jira", [
+    ["issues.read", "provider.data.read", ["read:jira-work"]],
+    ["incidents.read", "provider.data.read", ["read:jira-work"]],
+    ["versions.read", "provider.data.read", ["read:jira-work"]],
+    ["issues.create", "provider.action.execute", ["write:jira-work"], true, true],
+    ["issues.update", "provider.action.execute", ["write:jira-work"], true, true]
+  ]),
+  ...provider("gitlab", [
+    ["issues.read", "provider.data.read", ["read_api"]],
+    ["deployments.read", "provider.data.read", ["read_api"]]
+  ])
 ];
 
 export function getProviderOperation(providerId: ProviderId, operation: string) {

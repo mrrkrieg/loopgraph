@@ -12,7 +12,7 @@ capabilities:
   - { logicalCapability: project.issue.update, providerOperation: jira.issues.update, minimumScopes: [write:jira-work], authority: approve, risk: high }
   - { logicalCapability: collaboration.message.draft, providerOperation: teams.messages.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: high }
 eventSources:
-  - { eventFamily: engineering.issue_received, providerEvent: Issue Hook, transport: webhook, normalizationTransformer: gitlab.issue-to-engineering-signal.v1, signatureStrategy: gitlab-token, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: engineering.issue_received, providerEvent: Issue Hook, transport: webhook, normalizationTransformer: gitlab.issue-to-engineering-signal.v1, signatureStrategy: gitlab-standard-webhooks, replayProtection: true, fallbackPollMinutes: 15 }
   - { eventFamily: engineering.incident_detected, providerEvent: jira.incident.created, transport: webhook, normalizationTransformer: jira.incident-to-engineering-signal.v1, signatureStrategy: atlassian-jwt, replayProtection: true, fallbackPollMinutes: 5 }
 fieldMappings:
   - { providerId: gitlab, objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }

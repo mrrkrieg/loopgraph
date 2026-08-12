@@ -8,7 +8,8 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   for (const providerId of [
     "hubspot", "google_ads", "slack", "notion", "salesforce", "stripe", "github",
     "zendesk", "intercom", "workday", "greenhouse", "netsuite", "quickbooks",
-    "gmail", "google_calendar", "outlook", "teams", "posthog", "amplitude"
+    "gmail", "google_calendar", "outlook", "teams", "posthog", "amplitude",
+    "linear", "jira", "gitlab"
   ] satisfies ProviderId[]) {
     handlers.set(operationKey(providerId, "health.check"), async (context) => {
       const lease = await context.getCredential();
@@ -61,6 +62,7 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   registerGoogleWorkspaceHandlers(handlers, fetcher);
   registerMicrosoftGraphHandlers(handlers, fetcher);
   registerAnalyticsHandlers(handlers, fetcher);
+  registerEngineeringHandlers(handlers, fetcher);
   return handlers;
 }
 
@@ -574,6 +576,119 @@ function registerAnalyticsHandlers(handlers: Map<string, ConnectorOperationHandl
   });
 }
 
+function registerEngineeringHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  const linearIssueInput = z.object({ issueId: z.string().trim().min(1).max(255) }).strict();
+  const linearIssueQuery = `query LoopgraphIssue($id: String!) { issue(id: $id) { id identifier title description priority createdAt updatedAt canceledAt completedAt url state { id name type } team { id key name } project { id name state } assignee { id name } labels { nodes { id name } } } }`;
+  const readLinearIssue = (objectType: "issue" | "incident"): ConnectorOperationHandler => async (context) => {
+    const input = linearIssueInput.parse(context.request.input);
+    const body = await linearGraphql(fetcher, context, linearIssueQuery, { id: input.issueId });
+    const issue = objectField(objectField(body, "data"), "issue");
+    return {
+      providerObjectRef: `linear:${objectType}:${stringField(issue, "id") ?? input.issueId}`,
+      sourceTimestamp: stringField(issue, "updatedAt") ?? new Date().toISOString(),
+      responseStatusClass: "success",
+      [objectType]: selectFields(issue, ["id", "identifier", "title", "description", "priority", "createdAt", "updatedAt", "canceledAt", "completedAt", "url", "state", "team", "project", "assignee", "labels"])
+    };
+  };
+  handlers.set(operationKey("linear", "issues.read"), readLinearIssue("issue"));
+  handlers.set(operationKey("linear", "incidents.read"), readLinearIssue("incident"));
+  handlers.set(operationKey("linear", "projects.read"), async (context) => {
+    const input = z.object({ projectId: z.string().trim().min(1).max(255) }).strict().parse(context.request.input);
+    const body = await linearGraphql(fetcher, context, `query LoopgraphProject($id: String!) { project(id: $id) { id name description state progress startDate targetDate completedAt canceledAt updatedAt teams { nodes { id key name } } } }`, { id: input.projectId });
+    const project = objectField(objectField(body, "data"), "project");
+    return { providerObjectRef: `linear:project:${stringField(project, "id") ?? input.projectId}`, sourceTimestamp: stringField(project, "updatedAt") ?? new Date().toISOString(), responseStatusClass: "success", project: selectFields(project, ["id", "name", "description", "state", "progress", "startDate", "targetDate", "completedAt", "canceledAt", "updatedAt", "teams"]) };
+  });
+  handlers.set(operationKey("linear", "issues.create"), async (context) => {
+    const input = z.object({ teamId: z.string().trim().min(1).max(255), title: z.string().trim().min(1).max(512), description: z.string().max(100_000).optional(), priority: z.number().int().min(0).max(4).optional(), projectId: z.string().trim().min(1).max(255).optional() }).strict().parse(context.request.input);
+    const body = await linearGraphql(fetcher, context, `mutation LoopgraphIssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title url createdAt updatedAt } } }`, { input });
+    const payload = objectField(objectField(body, "data"), "issueCreate");
+    if (payload.success !== true) throw new ConnectorBrokerError("provider_request_rejected", "Linear did not create the issue.", false, true);
+    const issue = objectField(payload, "issue");
+    return { providerObjectRef: `linear:issue:${stringField(issue, "id") ?? "created"}`, sourceTimestamp: stringField(issue, "updatedAt") ?? new Date().toISOString(), responseStatusClass: "success", issue: selectFields(issue, ["id", "identifier", "title", "url", "createdAt", "updatedAt"]) };
+  });
+  handlers.set(operationKey("linear", "issues.update"), async (context) => {
+    const input = z.object({ issueId: z.string().trim().min(1).max(255), title: z.string().trim().min(1).max(512).optional(), description: z.string().max(100_000).nullable().optional(), priority: z.number().int().min(0).max(4).optional(), stateId: z.string().trim().min(1).max(255).optional(), assigneeId: z.string().trim().min(1).max(255).nullable().optional() }).strict().refine((value) => Object.keys(value).some((key) => key !== "issueId"), "At least one issue field is required").parse(context.request.input);
+    const { issueId, ...fields } = input;
+    const body = await linearGraphql(fetcher, context, `mutation LoopgraphIssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title url updatedAt } } }`, { id: issueId, input: fields });
+    const payload = objectField(objectField(body, "data"), "issueUpdate");
+    if (payload.success !== true) throw new ConnectorBrokerError("provider_request_rejected", "Linear did not update the issue.", false, true);
+    const issue = objectField(payload, "issue");
+    return { providerObjectRef: `linear:issue:${stringField(issue, "id") ?? issueId}`, sourceTimestamp: stringField(issue, "updatedAt") ?? new Date().toISOString(), responseStatusClass: "success", issue: selectFields(issue, ["id", "identifier", "title", "url", "updatedAt"]) };
+  });
+
+  const jiraIssueInput = z.object({ issueIdOrKey: z.string().regex(/^(?:[A-Z][A-Z0-9_]{1,19}-[1-9]\d*|\d{1,24})$/) }).strict();
+  const readJiraIssue = (objectType: "issue" | "incident"): ConnectorOperationHandler => async (context) => {
+    const input = jiraIssueInput.parse(context.request.input);
+    const response = await jiraRequest(fetcher, context, `/issue/${encodeURIComponent(input.issueIdOrKey)}?fields=summary,description,status,priority,labels,assignee,reporter,created,updated,resolutiondate,fixVersions,project,issuetype`);
+    const body = await providerJson(response);
+    return { providerObjectRef: `jira:${objectType}:${stringField(body, "key") ?? input.issueIdOrKey}`, sourceTimestamp: stringField(objectField(body, "fields"), "updated") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), [objectType]: selectFields(body, ["id", "key", "fields"]) };
+  };
+  handlers.set(operationKey("jira", "issues.read"), readJiraIssue("issue"));
+  handlers.set(operationKey("jira", "incidents.read"), readJiraIssue("incident"));
+  handlers.set(operationKey("jira", "versions.read"), async (context) => {
+    const input = z.object({ projectIdOrKey: z.string().regex(/^(?:[A-Z][A-Z0-9_]{1,19}|\d{1,24})$/), limit: z.number().int().min(1).max(100).default(50) }).strict().parse(context.request.input);
+    const response = await jiraRequest(fetcher, context, `/project/${encodeURIComponent(input.projectIdOrKey)}/version?maxResults=${input.limit}&orderBy=-releaseDate`);
+    const body = await providerJson(response);
+    const values = Array.isArray(body.values) ? body.values.slice(0, input.limit).map((value) => selectFields(objectValue(value), ["id", "name", "description", "archived", "released", "startDate", "releaseDate", "projectId"])) : [];
+    return { providerObjectRef: `jira:project:${input.projectIdOrKey}:versions`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), versions: values };
+  });
+  handlers.set(operationKey("jira", "issues.create"), async (context) => {
+    const input = z.object({ projectIdOrKey: z.string().regex(/^(?:[A-Z][A-Z0-9_]{1,19}|\d{1,24})$/), issueTypeId: z.string().regex(/^\d{1,24}$/), summary: z.string().trim().min(1).max(255), description: z.string().max(100_000).optional(), labels: z.array(z.string().regex(/^[A-Za-z0-9_.-]{1,255}$/)).max(20).optional() }).strict().parse(context.request.input);
+    const fields = { project: /^\d+$/.test(input.projectIdOrKey) ? { id: input.projectIdOrKey } : { key: input.projectIdOrKey }, issuetype: { id: input.issueTypeId }, summary: input.summary, ...(input.description ? { description: jiraDocument(input.description) } : {}), ...(input.labels ? { labels: input.labels } : {}) };
+    const response = await jiraRequest(fetcher, context, "/issue", { method: "POST", body: JSON.stringify({ fields }) });
+    const body = await providerJson(response);
+    return { providerObjectRef: `jira:issue:${stringField(body, "key") ?? stringField(body, "id") ?? "created"}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), issue: selectFields(body, ["id", "key", "self"]) };
+  });
+  handlers.set(operationKey("jira", "issues.update"), async (context) => {
+    const input = jiraIssueInput.extend({ summary: z.string().trim().min(1).max(255).optional(), description: z.string().max(100_000).nullable().optional(), labels: z.array(z.string().regex(/^[A-Za-z0-9_.-]{1,255}$/)).max(20).optional(), priorityId: z.string().regex(/^\d{1,24}$/).optional(), assigneeAccountId: z.string().trim().min(1).max(255).nullable().optional() }).refine((value) => Object.keys(value).some((key) => key !== "issueIdOrKey"), "At least one issue field is required").parse(context.request.input);
+    const fields = { ...(input.summary ? { summary: input.summary } : {}), ...(input.description !== undefined ? { description: input.description === null ? null : jiraDocument(input.description) } : {}), ...(input.labels ? { labels: input.labels } : {}), ...(input.priorityId ? { priority: { id: input.priorityId } } : {}), ...(input.assigneeAccountId !== undefined ? { assignee: input.assigneeAccountId === null ? null : { accountId: input.assigneeAccountId } } : {}) };
+    const response = await jiraRequest(fetcher, context, `/issue/${encodeURIComponent(input.issueIdOrKey)}`, { method: "PUT", body: JSON.stringify({ fields }) });
+    return { providerObjectRef: `jira:issue:${input.issueIdOrKey}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), updated: true };
+  });
+
+  handlers.set(operationKey("gitlab", "issues.read"), async (context) => {
+    const input = gitlabProjectInput.extend({ issueIid: z.number().int().positive() }).parse(context.request.input);
+    const response = await gitlabRequest(fetcher, context, `/projects/${encodeURIComponent(input.projectIdOrPath)}/issues/${input.issueIid}`);
+    const body = await providerJson(response);
+    return { providerObjectRef: `gitlab:project:${input.projectIdOrPath}:issue:${input.issueIid}`, sourceTimestamp: stringField(body, "updated_at") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), issue: selectFields(body, ["id", "iid", "project_id", "title", "description", "state", "labels", "milestone", "assignees", "created_at", "updated_at", "closed_at", "web_url"]) };
+  });
+  handlers.set(operationKey("gitlab", "deployments.read"), async (context) => {
+    const input = gitlabProjectInput.extend({ deploymentId: z.number().int().positive().optional(), limit: z.number().int().min(1).max(100).default(20) }).parse(context.request.input);
+    const path = input.deploymentId ? `/projects/${encodeURIComponent(input.projectIdOrPath)}/deployments/${input.deploymentId}` : `/projects/${encodeURIComponent(input.projectIdOrPath)}/deployments?order_by=updated_at&sort=desc&per_page=${input.limit}`;
+    const response = await gitlabRequest(fetcher, context, path);
+    const body = await providerJsonValue(response);
+    const deployments = Array.isArray(body) ? body.slice(0, input.limit).map((value) => selectGitLabDeployment(objectValue(value))) : [selectGitLabDeployment(objectValue(body))];
+    return { providerObjectRef: `gitlab:project:${input.projectIdOrPath}:deployment:${input.deploymentId ?? "latest"}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), deployments };
+  });
+}
+
+async function linearGraphql(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], query: string, variables: Record<string, unknown>) {
+  const credential = await revealCredential(context);
+  const response = await fixedFetch(fetcher, "https://api.linear.app/graphql", { method: "POST", headers: { ...bearerHeaders(credential), "content-type": "application/json" }, body: JSON.stringify({ query, variables }) });
+  const body = await providerJson(response);
+  if (Array.isArray(body.errors) && body.errors.length > 0) throw new ConnectorBrokerError("provider_request_rejected", "Linear rejected the fixed GraphQL operation.", false, true);
+  return body;
+}
+
+async function jiraRequest(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], path: string, init: RequestInit = {}) {
+  const credential = await revealCredential(context);
+  if (!credential.cloudId || !/^[A-Za-z0-9-]{8,128}$/.test(credential.cloudId)) throw new ConnectorBrokerError("provider_credential_invalid", "Jira Cloud ID is unavailable.", false, true);
+  return fixedFetch(fetcher, `https://api.atlassian.com/ex/jira/${encodeURIComponent(credential.cloudId)}/rest/api/3${path}`, { ...init, headers: { ...bearerHeaders(credential), accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) } });
+}
+
+async function gitlabRequest(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], path: string) {
+  const credential = await revealCredential(context);
+  return fixedFetch(fetcher, `https://gitlab.com/api/v4${path}`, { headers: bearerHeaders(credential) });
+}
+
+function jiraDocument(text: string) {
+  return { type: "doc", version: 1, content: text.split(/\n{2,}/).slice(0, 200).map((paragraph) => ({ type: "paragraph", content: [{ type: "text", text: paragraph.slice(0, 10_000) }] })) };
+}
+
+function selectGitLabDeployment(value: Record<string, unknown>) {
+  return selectFields(value, ["id", "iid", "status", "created_at", "updated_at", "finished_at", "ref", "sha", "tag", "environment", "deployable", "user"]);
+}
+
 function healthProbe(providerId: ProviderId, credential: StoredCredential): {
   url: string;
   method?: string;
@@ -600,6 +715,9 @@ function healthProbe(providerId: ProviderId, credential: StoredCredential): {
     const base = credential.region === "eu" ? "https://analytics.eu.amplitude.com" : "https://amplitude.com";
     return { url: `${base}/api/2/events/list`, headers: { authorization: `Basic ${Buffer.from(`${credential.apiKey}:${credential.apiSecret}`, "utf8").toString("base64")}` } };
   }
+  if (providerId === "linear") return { url: "https://api.linear.app/graphql", method: "POST", headers: { ...bearer, "content-type": "application/json" }, body: JSON.stringify({ query: "query LoopgraphHealth { viewer { id } }" }) };
+  if (providerId === "jira" && credential.cloudId && /^[A-Za-z0-9-]{8,128}$/.test(credential.cloudId)) return { url: `https://api.atlassian.com/ex/jira/${encodeURIComponent(credential.cloudId)}/rest/api/3/myself`, headers: bearer };
+  if (providerId === "gitlab") return { url: "https://gitlab.com/api/v4/user", headers: bearer };
   if (providerId === "salesforce" && credential.instanceUrl) {
     const url = new URL(credential.instanceUrl);
     if (url.protocol !== "https:" || !/(?:^|\.)salesforce\.com$/.test(url.hostname)) {
@@ -620,6 +738,7 @@ type StoredCredential = {
   apiKey?: string;
   apiSecret?: string;
   region?: "us" | "eu";
+  cloudId?: string;
 };
 
 function parseCredential(value: string): StoredCredential {
@@ -639,7 +758,10 @@ function parseCredential(value: string): StoredCredential {
       projectId: typeof parsed.project_id === "string" || typeof parsed.project_id === "number" ? String(parsed.project_id) : undefined,
       apiKey: typeof parsed.api_key === "string" ? parsed.api_key : undefined,
       apiSecret: typeof parsed.api_secret === "string" ? parsed.api_secret : undefined,
-      region: parsed.region === "eu" ? "eu" : parsed.region === "us" ? "us" : undefined
+      region: parsed.region === "eu" ? "eu" : parsed.region === "us" ? "us" : undefined,
+      cloudId: typeof parsed.cloud_id === "string"
+        ? parsed.cloud_id
+        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined
     };
   } catch {
     return { accessToken: value };
@@ -673,6 +795,9 @@ const githubRepositoryInput = z.object({
   repository: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/)
 }).strict();
 const githubIssueInput = githubRepositoryInput.extend({ issueNumber: z.number().int().positive() }).strict();
+const gitlabProjectInput = z.object({
+  projectIdOrPath: z.string().trim().min(1).max(512).regex(/^(?:\d{1,24}|[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,20})$/)
+}).strict();
 
 async function revealCredential(context: Parameters<ConnectorOperationHandler>[0]) {
   const lease = await context.getCredential();
@@ -779,6 +904,21 @@ async function providerJsonArray(response: Response) {
     const parsed = JSON.parse(text) as unknown;
     if (!Array.isArray(parsed) || parsed.length > 1_000) throw new Error("invalid array");
     return parsed.map(objectValue);
+  } catch {
+    throw new ConnectorBrokerError("provider_response_invalid", "Provider returned an invalid response.", false, true);
+  }
+}
+
+async function providerJsonValue(response: Response): Promise<unknown> {
+  const maximum = 1024 * 1024;
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maximum) throw new ConnectorBrokerError("provider_response_too_large", "Provider response exceeded 1 MiB.", false, true);
+  const text = await response.text();
+  if (Buffer.byteLength(text, "utf8") > maximum) throw new ConnectorBrokerError("provider_response_too_large", "Provider response exceeded 1 MiB.", false, true);
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object") throw new Error("invalid JSON value");
+    return parsed;
   } catch {
     throw new ConnectorBrokerError("provider_response_invalid", "Provider returned an invalid response.", false, true);
   }
