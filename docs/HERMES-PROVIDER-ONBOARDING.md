@@ -54,6 +54,8 @@ Linear, Jira, and GitLab also begin read-only. Linear receives only the fixed is
 
 BigQuery and Snowflake are read-only scheduled-detector providers for the official Management and Operations/Finance apps. A credential-vault record owns the account/project context and one approved SQL template per broker operation. Every template must be a single comment-free `SELECT`/`WITH` statement, must bind `windowStart` and `windowEnd`, and is capped by caller-independent byte/result limits. Capability callers submit only a bounded window, optional company-object ID, and row limit; they cannot submit SQL, endpoint URLs, project/account identifiers, databases, schemas, warehouses, roles, or table names. BigQuery uses named `@window_start`, `@window_end`, optional `@subject_id`, and optional `@limit` parameters. Snowflake uses `?` placeholders plus an explicit `binding_order` containing only `windowStart`, `windowEnd`, `subjectId`, and `limit`.
 
+The durable scheduler provisions fixed company-metric, forecast-variance, and capacity-plan detectors for every active warehouse installation with `provider.events.emit`. Each approved query must return the explicit material-event row contract; the scheduler signs and forwards only material observations, retains the exact window across retries, and advances its checkpoint only after Hermes accepts every event. Query results remain process-local and are not written to the broker response cache. See the [provider detector scheduler](PROVIDER-DETECTOR-SCHEDULER.md) for the required columns, failure behavior, migration, and deployment checks.
+
 ## Security invariants
 
 - Start read-only. Add write scopes only for an accepted LoopSpec with an approval-bound action fingerprint.

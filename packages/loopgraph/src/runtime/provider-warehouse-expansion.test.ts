@@ -30,6 +30,7 @@ describe("warehouse provider expansion", () => {
         "analytics.metric.query", "finance.forecast.read", "capacity.plan.read", "warehouse.events"
       ]));
       expect(getProviderOperation(providerId, "company-metrics.query")).toMatchObject({ capability: "provider.data.read", write: false, approvalRequired: false });
+      expect(getProviderOperation(providerId, "company-metrics.detect")).toMatchObject({ capability: "provider.events.emit", write: false, approvalRequired: false });
     }
   });
 
@@ -71,6 +72,30 @@ describe("warehouse provider expansion", () => {
     expect(request).toMatchObject({ useLegacySql: false, maximumBytesBilled: "1000000", maxResults: 25 });
     expect(String(request.query)).toContain("approved.company_metrics");
     expect(JSON.stringify(request.queryParameters)).not.toContain("private.secrets");
+  });
+
+  it("maps detector operations to the same credential-owned fixed query templates", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      jobComplete: true,
+      schema: { fields: [{ name: "material", type: "BOOLEAN" }] },
+      rows: [{ f: [{ v: "false" }] }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const handler = createProviderOperationHandlers(fetcher as typeof fetch).get("bigquery:company-metrics.detect")!;
+    const secret = JSON.stringify({
+      access_token: "workload-token",
+      project_id: "loopgraph-demo",
+      maximum_bytes_billed: "1000000",
+      query_templates: {
+        "company-metrics.query": {
+          statement: "SELECT false AS material WHERE @window_start < @window_end LIMIT @limit"
+        }
+      }
+    });
+    await expect(handler(context("bigquery", "company-metrics.detect", {
+      windowStart: "2026-08-01T00:00:00.000Z",
+      windowEnd: "2026-08-01T01:00:00.000Z",
+      limit: 100
+    }, secret))).resolves.toMatchObject({ templateId: "company-metrics.query" });
   });
 
   it("rejects mutation or unbounded BigQuery templates before any provider request", async () => {

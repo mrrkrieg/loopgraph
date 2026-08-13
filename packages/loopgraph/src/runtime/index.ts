@@ -69,6 +69,7 @@ export * from "./aws-workload-secrets-manager";
 export * from "./provider-operation-handlers";
 export * from "./provider-subscriptions";
 export * from "./provider-fixtures";
+export * from "./provider-detector-scheduler";
 export * from "./graph-authoring-store";
 export * from "./department-golden-suites";
 export * from "./connection-plan";
