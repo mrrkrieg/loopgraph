@@ -483,6 +483,51 @@ describe("enterprise connector security boundary", () => {
     })).rejects.toMatchObject({ code: "webhook_secret_reference_mismatch" });
   });
 
+  it("activates scheduled detectors without inventing a webhook secret or callback", async () => {
+    const namespace = buildCredentialNamespace({ organizationId: "org-1", projectKey: "main", providerId: "bigquery", installationId: "bigquery-1" });
+    const installation = connectorInstallationAdminSchema.parse({
+      id: "bigquery-1",
+      tenant: { organizationId: "org-1", projectKey: "main" },
+      providerId: "bigquery",
+      displayName: "BigQuery",
+      status: "connected",
+      credentialRef: `vault://${namespace}/tokens/provider`,
+      credentialNamespace: namespace,
+      grantedScopes: ["https://www.googleapis.com/auth/bigquery.readonly"],
+      allowedCapabilities: ["provider.health.read", "provider.data.read"],
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z"
+    });
+    const store = new MemoryOAuthStore();
+    store.installations.set(installation.id, installation);
+    const subscriptions = new ProviderSubscriptionService({
+      store,
+      vault: new CompositeVault([new MemoryVault()]),
+      publicUrl: "https://broker.example"
+    });
+
+    const activated = await subscriptions.activate({
+      ...installation.tenant,
+      installationId: installation.id,
+      providerConfigured: true,
+      providerSubscriptionId: "hermes-detector-bigquery-1"
+    });
+
+    expect(activated).toMatchObject({
+      endpointUrl: undefined,
+      intakeMode: "scheduled_detector",
+      pollCadenceMinutes: 60,
+      installation: {
+        status: "active",
+        webhookStatus: "not_configured",
+        providerSubscriptionId: "hermes-detector-bigquery-1"
+      }
+    });
+    expect(activated.installation.webhookSecretRef).toBeUndefined();
+    expect(activated.installation.allowedCapabilities).toContain("provider.events.emit");
+    expect(activated.installation.allowedCapabilities).not.toContain("provider.webhooks.verify");
+  });
+
   it("generates a Jira callback URL bound to the exact tenant installation", async () => {
     const namespace = buildCredentialNamespace({ organizationId: "org-1", projectKey: "main", providerId: "jira", installationId: "jira-1" });
     const installation = connectorInstallationAdminSchema.parse({
@@ -509,7 +554,7 @@ describe("enterprise connector security boundary", () => {
     });
 
     const activated = await subscriptions.activate({ ...installation.tenant, installationId: installation.id, providerConfigured: true });
-    const callback = new URL(activated.endpointUrl);
+    const callback = new URL(activated.endpointUrl!);
     expect(callback.pathname).toBe("/api/connector-broker/v1/webhooks/jira-1");
     expect(callback.searchParams.get("loopgraph_binding")).toBe(deriveJiraWebhookCallbackBinding({
       secret: webhookSecret,

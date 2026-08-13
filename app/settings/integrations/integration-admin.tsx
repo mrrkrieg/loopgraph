@@ -14,6 +14,7 @@ const BROKER_CAPABILITIES = [
   "provider.oauth.revoke",
   "provider.webhooks.subscribe",
   "provider.webhooks.verify",
+  "provider.events.emit",
   "provider.health.read",
   "provider.data.read",
   "provider.draft.write",
@@ -122,7 +123,9 @@ export function IntegrationAdmin({
       }
       const installation = body.installation as ConnectorInstallationView;
       setInstallations((current) => current.map((item) => item.id === installationId ? installation : item));
-      setMessage(`${installation.providerId} webhook is ${installation.webhookStatus}. Endpoint: ${String(body.endpointUrl ?? "broker route")}`);
+      setMessage(body.intakeMode === "scheduled_detector"
+        ? `${installation.providerId} detector is ${installation.status}. Hermes will poll the approved evidence templates on its configured schedule.`
+        : `${installation.providerId} webhook is ${installation.webhookStatus}. Endpoint: ${String(body.endpointUrl ?? "broker route")}`);
     });
   }
 

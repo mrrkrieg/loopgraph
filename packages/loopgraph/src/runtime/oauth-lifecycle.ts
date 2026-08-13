@@ -248,7 +248,7 @@ export class OAuthLifecycleService {
       credentialRef: tokenReference,
       status: missingScopes.length > 0 ? "degraded" : "connected",
       grantedScopes,
-      allowedCapabilities: [...activeOAuthCapabilities()],
+      allowedCapabilities: [...activeOAuthCapabilities(installation.providerId)],
       connectedBy: input.actorId,
       connectedAt: now,
       tokenExpiresAt: token.expires_at,
@@ -334,7 +334,7 @@ export class OAuthLifecycleService {
       credentialRef: nextReference,
       status: refreshMissingScopes.length > 0 ? "degraded" as const : "active" as const,
       grantedScopes: refreshedScopes,
-      allowedCapabilities: [...activeOAuthCapabilities()],
+      allowedCapabilities: [...activeOAuthCapabilities(installation.providerId)],
       lastRotatedAt: this.now().toISOString(),
       tokenExpiresAt: merged.expires_at,
       updatedAt: this.now().toISOString()
@@ -585,12 +585,14 @@ function normalizeScopes(scope: string | undefined, fallback: string[]) {
   return scope ? [...new Set(scope.split(/[ ,]+/).filter(Boolean))] : fallback;
 }
 
-function activeOAuthCapabilities() {
+function activeOAuthCapabilities(providerId: ProviderId) {
+  const detector = getProviderOnboardingProfile(providerId).ingestion.mode === "scheduled_detector";
   return [
     "provider.oauth.refresh",
     "provider.oauth.revoke",
-    "provider.webhooks.subscribe",
-    "provider.webhooks.verify",
+    ...(detector
+      ? ["provider.events.emit" as const]
+      : ["provider.webhooks.subscribe" as const, "provider.webhooks.verify" as const]),
     "provider.health.read",
     "provider.data.read",
     "provider.disconnect"

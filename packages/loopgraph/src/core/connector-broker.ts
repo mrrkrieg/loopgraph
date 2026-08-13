@@ -31,6 +31,7 @@ export const brokerCapabilitySchema = z.enum([
   "provider.oauth.revoke",
   "provider.webhooks.subscribe",
   "provider.webhooks.verify",
+  "provider.events.emit",
   "provider.health.read",
   "provider.data.read",
   "provider.draft.write",

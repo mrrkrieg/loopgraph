@@ -149,7 +149,7 @@ callback binding derived for the exact tenant installation. The binding is inclu
 registered with Jira and must not be logged or exposed as integration metadata. New GitLab routes
 use Standard Webhooks HMAC signing tokens with a fresh timestamp; the weaker `X-Gitlab-Token` path is
 accepted only as a migration bridge. Scheduled/event-stream
-providers use their workload identity or stream receipt instead of pretending to have an HMAC.
+providers—including BigQuery and Snowflake bounded-query detectors—use their workload identity or stream receipt instead of pretending to have an HMAC.
 Timestamp windows and durable delivery claims prevent replay. A claimed delivery is marked forwarded
 only after Hermes accepts it; failed or expired leases can be retried with the identical body hash,
 while already-forwarded deliveries and delivery-ID/body mismatches remain blocked. A signed receipt binds
@@ -191,7 +191,7 @@ HERMES_WEBHOOK_URL=https://hermes.example/webhooks/loopgraph
 LOOPGRAPH_HERMES_WEBHOOK_AUDIENCE=https://hermes.example
 ```
 
-Apply `202608010001_enterprise_connector_broker.sql`, `202608100001_expand_connector_broker_providers.sql`, and `202608100002_expand_engineering_connector_providers.sql`; configure provider callback URLs; and validate
+Apply `202608010001_enterprise_connector_broker.sql`, `202608100001_expand_connector_broker_providers.sql`, `202608100002_expand_engineering_connector_providers.sql`, and `20260813133306_expand_warehouse_connector_providers.sql`; configure provider callback URLs and scheduled detectors; and validate
 each provider in its sandbox before granting live scopes. Do not enable a provider if production
 dependency audit, RLS checks, backup/restore rehearsal, revocation drill, alerting, or audit export
 validation is failing.

@@ -9,7 +9,7 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
     "hubspot", "google_ads", "slack", "notion", "salesforce", "stripe", "github",
     "zendesk", "intercom", "workday", "greenhouse", "netsuite", "quickbooks",
     "gmail", "google_calendar", "outlook", "teams", "posthog", "amplitude",
-    "linear", "jira", "gitlab"
+    "linear", "jira", "gitlab", "bigquery", "snowflake"
   ] satisfies ProviderId[]) {
     handlers.set(operationKey(providerId, "health.check"), async (context) => {
       const lease = await context.getCredential();
@@ -63,6 +63,7 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   registerMicrosoftGraphHandlers(handlers, fetcher);
   registerAnalyticsHandlers(handlers, fetcher);
   registerEngineeringHandlers(handlers, fetcher);
+  registerWarehouseHandlers(handlers, fetcher);
   return handlers;
 }
 
@@ -662,6 +663,95 @@ function registerEngineeringHandlers(handlers: Map<string, ConnectorOperationHan
   });
 }
 
+function registerWarehouseHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  const bigQueryOperations = ["company-metrics.query", "finance-forecast.query", "capacity-plan.query"] as const;
+  const snowflakeOperations = [
+    "company-metrics.query", "finance-forecast.query", "capacity-plan.query",
+    "finance_forecast.query", "operating_metrics.query", "capacity_plan.query"
+  ] as const;
+
+  for (const operation of bigQueryOperations) {
+    handlers.set(operationKey("bigquery", operation), async (context) => {
+      const input = warehouseQueryInput.parse(context.request.input);
+      const credential = await revealCredential(context);
+      const projectId = gcpProjectId.parse(credential.projectId);
+      const template = warehouseTemplate(credential, operation, "bigquery");
+      const maximumBytesBilled = z.string().regex(/^[1-9]\d{0,18}$/).parse(credential.maximumBytesBilled);
+      const response = await fixedFetch(fetcher, `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}/queries`, {
+        method: "POST",
+        headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+        body: JSON.stringify({
+          query: template.statement,
+          useLegacySql: false,
+          parameterMode: "NAMED",
+          queryParameters: bigQueryBindings(template.statement, input),
+          maximumBytesBilled,
+          maxResults: input.limit,
+          timeoutMs: 10_000
+        })
+      });
+      const body = await providerJson(response);
+      if (body.jobComplete === false) {
+        throw new ConnectorBrokerError("provider_query_pending", "BigQuery did not complete the bounded query inside the broker window.", true, true);
+      }
+      return {
+        providerObjectRef: `bigquery:project:${projectId}:template:${operation}`,
+        sourceTimestamp: new Date().toISOString(),
+        responseStatusClass: statusClass(response.status),
+        templateId: operation,
+        totalRows: stringField(body, "totalRows"),
+        totalBytesProcessed: stringField(body, "totalBytesProcessed"),
+        schema: selectFields(objectField(body, "schema"), ["fields"]),
+        rows: Array.isArray(body.rows) ? body.rows.slice(0, input.limit) : []
+      };
+    });
+  }
+
+  for (const operation of snowflakeOperations) {
+    handlers.set(operationKey("snowflake", operation), async (context) => {
+      const input = warehouseQueryInput.parse(context.request.input);
+      const credential = await revealCredential(context);
+      const template = warehouseTemplate(credential, operation, "snowflake");
+      const base = trustedInstanceUrl(credential, /(?:^|\.)snowflakecomputing\.com$/);
+      const requestId = stableRequestUuid(context.request.idempotencyKey);
+      const url = new URL("/api/v2/statements", base);
+      url.searchParams.set("requestId", requestId);
+      const response = await fixedFetch(fetcher, url, {
+        method: "POST",
+        headers: {
+          ...bearerHeaders(credential),
+          accept: "application/json",
+          "content-type": "application/json",
+          "user-agent": "loopgraph-connector-broker/1.0",
+          ...(credential.tokenType ? { "x-snowflake-authorization-token-type": credential.tokenType } : {})
+        },
+        body: JSON.stringify({
+          statement: template.statement,
+          bindings: snowflakeBindings(template, input),
+          timeout: 10,
+          database: snowflakeIdentifier.parse(credential.database),
+          schema: snowflakeIdentifier.parse(credential.schema),
+          warehouse: snowflakeIdentifier.parse(credential.warehouse),
+          role: snowflakeIdentifier.parse(credential.role)
+        })
+      });
+      const body = await providerJson(response);
+      if (response.status === 202 && !Array.isArray(body.data)) {
+        throw new ConnectorBrokerError("provider_query_pending", "Snowflake did not complete the bounded query inside the broker window.", true, true);
+      }
+      return {
+        providerObjectRef: `snowflake:template:${operation}:request:${requestId}`,
+        sourceTimestamp: new Date().toISOString(),
+        responseStatusClass: statusClass(response.status),
+        templateId: operation,
+        statementHandle: stringField(body, "statementHandle"),
+        resultSetMetaData: selectFields(objectField(body, "resultSetMetaData"), ["numRows", "format", "rowType"]),
+        rows: Array.isArray(body.data) ? body.data.slice(0, input.limit) : []
+      };
+    });
+  }
+}
+
 async function linearGraphql(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], query: string, variables: Record<string, unknown>) {
   const credential = await revealCredential(context);
   const response = await fixedFetch(fetcher, "https://api.linear.app/graphql", { method: "POST", headers: { ...bearerHeaders(credential), "content-type": "application/json" }, body: JSON.stringify({ query, variables }) });
@@ -718,6 +808,29 @@ function healthProbe(providerId: ProviderId, credential: StoredCredential): {
   if (providerId === "linear") return { url: "https://api.linear.app/graphql", method: "POST", headers: { ...bearer, "content-type": "application/json" }, body: JSON.stringify({ query: "query LoopgraphHealth { viewer { id } }" }) };
   if (providerId === "jira" && credential.cloudId && /^[A-Za-z0-9-]{8,128}$/.test(credential.cloudId)) return { url: `https://api.atlassian.com/ex/jira/${encodeURIComponent(credential.cloudId)}/rest/api/3/myself`, headers: bearer };
   if (providerId === "gitlab") return { url: "https://gitlab.com/api/v4/user", headers: bearer };
+  if (providerId === "bigquery" && credential.projectId && gcpProjectId.safeParse(credential.projectId).success) {
+    return {
+      url: `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(credential.projectId)}/queries`,
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ query: "SELECT 1 AS loopgraph_health", useLegacySql: false, maximumBytesBilled: "0", maxResults: 1, timeoutMs: 5_000 })
+    };
+  }
+  if (providerId === "snowflake" && credential.accessToken && credential.database && credential.schema && credential.warehouse && credential.role) {
+    const base = trustedInstanceUrl(credential, /(?:^|\.)snowflakecomputing\.com$/);
+    return {
+      url: new URL("/api/v2/statements", base).toString(),
+      method: "POST",
+      headers: {
+        ...bearer,
+        accept: "application/json",
+        "content-type": "application/json",
+        "user-agent": "loopgraph-connector-broker/1.0",
+        ...(credential.tokenType ? { "x-snowflake-authorization-token-type": credential.tokenType } : {})
+      },
+      body: JSON.stringify({ statement: "SELECT CURRENT_ACCOUNT() AS LOOPGRAPH_HEALTH", timeout: 5, database: snowflakeIdentifier.parse(credential.database), schema: snowflakeIdentifier.parse(credential.schema), warehouse: snowflakeIdentifier.parse(credential.warehouse), role: snowflakeIdentifier.parse(credential.role) })
+    };
+  }
   if (providerId === "salesforce" && credential.instanceUrl) {
     const url = new URL(credential.instanceUrl);
     if (url.protocol !== "https:" || !/(?:^|\.)salesforce\.com$/.test(url.hostname)) {
@@ -739,6 +852,13 @@ type StoredCredential = {
   apiSecret?: string;
   region?: "us" | "eu";
   cloudId?: string;
+  maximumBytesBilled?: string;
+  database?: string;
+  schema?: string;
+  warehouse?: string;
+  role?: string;
+  tokenType?: "OAUTH" | "KEYPAIR_JWT" | "PROGRAMMATIC_ACCESS_TOKEN";
+  queryTemplates?: Record<string, WarehouseQueryTemplate>;
 };
 
 function parseCredential(value: string): StoredCredential {
@@ -761,11 +881,42 @@ function parseCredential(value: string): StoredCredential {
       region: parsed.region === "eu" ? "eu" : parsed.region === "us" ? "us" : undefined,
       cloudId: typeof parsed.cloud_id === "string"
         ? parsed.cloud_id
-        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined
+        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined,
+      maximumBytesBilled: typeof parsed.maximum_bytes_billed === "string" || typeof parsed.maximum_bytes_billed === "number"
+        ? String(parsed.maximum_bytes_billed)
+        : undefined,
+      database: typeof parsed.database === "string" ? parsed.database : undefined,
+      schema: typeof parsed.schema === "string" ? parsed.schema : undefined,
+      warehouse: typeof parsed.warehouse === "string" ? parsed.warehouse : undefined,
+      role: typeof parsed.role === "string" ? parsed.role : undefined,
+      tokenType: parsed.token_type === "OAUTH" || parsed.token_type === "KEYPAIR_JWT" || parsed.token_type === "PROGRAMMATIC_ACCESS_TOKEN"
+        ? parsed.token_type
+        : undefined,
+      queryTemplates: parseWarehouseQueryTemplates(parsed.query_templates)
     };
   } catch {
     return { accessToken: value };
   }
+}
+
+function parseWarehouseQueryTemplates(value: unknown): Record<string, WarehouseQueryTemplate> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: Record<string, WarehouseQueryTemplate> = {};
+  for (const [operation, candidate] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof candidate === "string") {
+      result[operation] = { statement: candidate };
+      continue;
+    }
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const record = candidate as Record<string, unknown>;
+    if (typeof record.statement !== "string") continue;
+    const rawOrder = record.binding_order ?? record.bindingOrder;
+    const bindingOrder = Array.isArray(rawOrder)
+      ? rawOrder.filter((item): item is WarehouseBindingName => ["windowStart", "windowEnd", "subjectId", "limit"].includes(String(item)))
+      : undefined;
+    result[operation] = { statement: record.statement, ...(bindingOrder ? { bindingOrder } : {}) };
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 const safeProviderId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/);
@@ -798,6 +949,91 @@ const githubIssueInput = githubRepositoryInput.extend({ issueNumber: z.number().
 const gitlabProjectInput = z.object({
   projectIdOrPath: z.string().trim().min(1).max(512).regex(/^(?:\d{1,24}|[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,20})$/)
 }).strict();
+const warehouseQueryInput = z.object({
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+  subjectId: safeProviderId.optional(),
+  limit: z.number().int().min(1).max(500).default(100)
+}).strict().superRefine((value, context) => {
+  const start = Date.parse(value.windowStart);
+  const end = Date.parse(value.windowEnd);
+  if (start >= end) context.addIssue({ code: z.ZodIssueCode.custom, path: ["windowEnd"], message: "windowEnd must be after windowStart" });
+  if (end - start > 366 * 24 * 60 * 60 * 1_000) context.addIssue({ code: z.ZodIssueCode.custom, path: ["windowEnd"], message: "warehouse query windows cannot exceed 366 days" });
+});
+const gcpProjectId = z.string().regex(/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/);
+const snowflakeIdentifier = z.string().regex(/^[A-Za-z][A-Za-z0-9_$]{0,254}$/);
+
+type WarehouseQueryInput = z.infer<typeof warehouseQueryInput>;
+type WarehouseBindingName = "windowStart" | "windowEnd" | "subjectId" | "limit";
+type WarehouseQueryTemplate = { statement: string; bindingOrder?: WarehouseBindingName[] };
+
+function warehouseTemplate(credential: StoredCredential, operation: string, providerId: "bigquery" | "snowflake") {
+  const candidate = credential.queryTemplates?.[operation];
+  if (!candidate) throw new ConnectorBrokerError("provider_query_template_missing", `No approved ${providerId} query template is configured for ${operation}.`, false, true);
+  const statement = approvedReadStatement(candidate.statement);
+  if (providerId === "bigquery") {
+    const placeholders = [...statement.matchAll(/@([a-z_][a-z0-9_]*)/gi)].map((match) => match[1]!.toLowerCase());
+    const allowed = new Set(["window_start", "window_end", "subject_id", "limit"]);
+    if (!placeholders.includes("window_start") || !placeholders.includes("window_end") || placeholders.some((name) => !allowed.has(name))) {
+      throw new ConnectorBrokerError("provider_query_template_invalid", "BigQuery templates must use bounded @window_start and @window_end parameters and only approved parameter names.", false, true);
+    }
+  } else {
+    const order = candidate.bindingOrder ?? [];
+    const placeholderCount = [...statement].filter((character) => character === "?").length;
+    if (placeholderCount === 0 || placeholderCount !== order.length || order.length > 16 || !order.includes("windowStart") || !order.includes("windowEnd")) {
+      throw new ConnectorBrokerError("provider_query_template_invalid", "Snowflake templates must bind every placeholder and include windowStart and windowEnd.", false, true);
+    }
+  }
+  return { statement, bindingOrder: candidate.bindingOrder };
+}
+
+function approvedReadStatement(value: string) {
+  const statement = z.string().trim().min(1).max(100_000).parse(value);
+  if (!/^(?:select|with)\b/i.test(statement) || /;|--|\/\*/.test(statement)) {
+    throw new ConnectorBrokerError("provider_query_template_invalid", "Warehouse query templates must contain one comment-free SELECT statement.", false, true);
+  }
+  if (/\b(?:insert|update|delete|merge|create|alter|drop|truncate|call|execute|grant|revoke|copy|put|get|remove|export)\b/i.test(statement)) {
+    throw new ConnectorBrokerError("provider_query_template_invalid", "Warehouse query templates cannot contain mutation, administration, transfer, or export operations.", false, true);
+  }
+  return statement;
+}
+
+function bigQueryBindings(statement: string, input: WarehouseQueryInput) {
+  const names = [...new Set([...statement.matchAll(/@([a-z_][a-z0-9_]*)/gi)].map((match) => match[1]!.toLowerCase()))];
+  if (names.includes("subject_id") && !input.subjectId) {
+    throw new ConnectorBrokerError("provider_query_input_missing", "The approved query template requires subjectId.", false, true);
+  }
+  const values = {
+    window_start: { type: "TIMESTAMP", value: input.windowStart },
+    window_end: { type: "TIMESTAMP", value: input.windowEnd },
+    subject_id: { type: "STRING", value: input.subjectId ?? "" },
+    limit: { type: "INT64", value: String(input.limit) }
+  } as const;
+  return names.map((name) => ({
+    name,
+    parameterType: { type: values[name as keyof typeof values].type },
+    parameterValue: { value: values[name as keyof typeof values].value }
+  }));
+}
+
+function snowflakeBindings(template: WarehouseQueryTemplate, input: WarehouseQueryInput) {
+  const order = template.bindingOrder ?? [];
+  if (order.includes("subjectId") && !input.subjectId) {
+    throw new ConnectorBrokerError("provider_query_input_missing", "The approved query template requires subjectId.", false, true);
+  }
+  return Object.fromEntries(order.map((name, index) => [String(index + 1), {
+    type: name === "limit" ? "FIXED" : "TEXT",
+    value: String(input[name] ?? "")
+  }]));
+}
+
+function stableRequestUuid(value: string) {
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 32).split("");
+  digest[12] = "4";
+  digest[16] = ["8", "9", "a", "b"][parseInt(digest[16]!, 16) % 4]!;
+  const text = digest.join("");
+  return `${text.slice(0, 8)}-${text.slice(8, 12)}-${text.slice(12, 16)}-${text.slice(16, 20)}-${text.slice(20)}`;
+}
 
 async function revealCredential(context: Parameters<ConnectorOperationHandler>[0]) {
   const lease = await context.getCredential();

@@ -9,7 +9,7 @@ import { callLoopgraphProviderTool } from "./provider-tools";
 
 describe("enterprise provider and department foundations", () => {
   it("ships onboarding and normalization contracts for every supported provider", () => {
-    expect(PROVIDER_ONBOARDING_CATALOG).toHaveLength(22);
+    expect(PROVIDER_ONBOARDING_CATALOG).toHaveLength(24);
     expect(PROVIDER_GOLDEN_FIXTURES).toHaveLength(PROVIDER_ONBOARDING_CATALOG.length);
     for (const fixture of PROVIDER_GOLDEN_FIXTURES) {
       const event = normalizeProviderEvent({ providerId: fixture.providerId, workspaceId: "workspace", companyId: "company", sourceRoute: `hermes-${fixture.providerId}`, deliveryId: fixture.deliveryId, signatureVerified: true }, fixture.payload);
@@ -29,7 +29,7 @@ describe("enterprise provider and department foundations", () => {
 
   it("gives Hermes provider tools with one-time OAuth material redacted by default", async () => {
     const catalog = await callLoopgraphProviderTool("loopgraph_provider_catalog_get", {});
-    expect(catalog).toMatchObject({ count: 22 });
+    expect(catalog).toMatchObject({ count: 24 });
     const plan = await callLoopgraphProviderTool("loopgraph_provider_install_prepare", {
       providerId: "hubspot",
       workspaceId: "workspace",
