@@ -29,6 +29,8 @@ export class ProviderSubscriptionService {
     if (!["connected", "subscription_pending", "active"].includes(installation.status)) {
       throw new ProviderSubscriptionError("installation_not_connected");
     }
+    const profile = getProviderOnboardingProfile(installation.providerId);
+    if (profile.ingestion.mode === "scheduled_detector") return this.activateScheduledDetector(installation, input, profile);
     if (installation.providerId === "stripe") return this.activateStripe(installation);
     const webhookSecretRef = deriveCredentialChildReference(installation.credentialRef, "webhooks/signing");
     if (input.webhookSecretRef && input.webhookSecretRef !== webhookSecretRef) {
@@ -41,7 +43,6 @@ export class ProviderSubscriptionService {
     } finally {
       verificationLease.dispose();
     }
-    const profile = getProviderOnboardingProfile(installation.providerId);
     const pendingVerification = !input.providerConfigured;
     const updated: ConnectorInstallationAdmin = {
       ...installation,
@@ -64,8 +65,39 @@ export class ProviderSubscriptionService {
     return {
       installation: updated,
       endpointUrl,
+      intakeMode: profile.ingestion.mode,
       requiresProviderConfirmation: pendingVerification,
       eventFamilies: profile.ingestion.eventFamilies
+    };
+  }
+
+  private async activateScheduledDetector(
+    installation: ConnectorInstallationAdmin,
+    input: { providerSubscriptionId?: string; providerConfigured?: boolean },
+    profile: ReturnType<typeof getProviderOnboardingProfile>
+  ) {
+    const pendingVerification = !input.providerConfigured;
+    const updated: ConnectorInstallationAdmin = {
+      ...installation,
+      status: pendingVerification ? "subscription_pending" : "active",
+      providerSubscriptionId: input.providerSubscriptionId,
+      webhookStatus: "not_configured",
+      allowedCapabilities: [...new Set([
+        ...installation.allowedCapabilities,
+        "provider.events.emit" as const,
+        "provider.health.read" as const,
+        "provider.data.read" as const
+      ])],
+      updatedAt: new Date().toISOString()
+    };
+    await this.dependencies.store.saveInstallation(updated);
+    return {
+      installation: updated,
+      endpointUrl: undefined,
+      intakeMode: "scheduled_detector" as const,
+      requiresProviderConfirmation: pendingVerification,
+      eventFamilies: profile.ingestion.eventFamilies,
+      pollCadenceMinutes: profile.ingestion.pollCadenceMinutes
     };
   }
 
@@ -113,7 +145,7 @@ export class ProviderSubscriptionService {
       updatedAt: new Date().toISOString()
     };
     await this.dependencies.store.saveInstallation(updated);
-    return { installation: updated, endpointUrl: this.endpoint(updated), requiresProviderConfirmation: false, eventFamilies: profile.ingestion.eventFamilies };
+    return { installation: updated, endpointUrl: this.endpoint(updated), intakeMode: profile.ingestion.mode, requiresProviderConfirmation: false, eventFamilies: profile.ingestion.eventFamilies };
   }
 
   private endpoint(installation: ConnectorInstallationAdmin, webhookSecret?: string) {

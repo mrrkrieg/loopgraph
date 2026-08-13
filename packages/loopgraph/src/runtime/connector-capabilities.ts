@@ -117,6 +117,19 @@ export const PROVIDER_OPERATION_CATALOG: ProviderOperationDescriptor[] = [
   ...provider("gitlab", [
     ["issues.read", "provider.data.read", ["read_api"]],
     ["deployments.read", "provider.data.read", ["read_api"]]
+  ]),
+  ...provider("bigquery", [
+    ["company-metrics.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["finance-forecast.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["capacity-plan.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]]
+  ]),
+  ...provider("snowflake", [
+    ["company-metrics.query", "provider.data.read", ["warehouse:read"]],
+    ["finance-forecast.query", "provider.data.read", ["warehouse:read"]],
+    ["capacity-plan.query", "provider.data.read", ["warehouse:read"]],
+    ["finance_forecast.query", "provider.data.read", ["warehouse:read"]],
+    ["operating_metrics.query", "provider.data.read", ["warehouse:read"]],
+    ["capacity_plan.query", "provider.data.read", ["warehouse:read"]]
   ])
 ];
 

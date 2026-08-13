@@ -7,9 +7,9 @@ capabilities:
   - { logicalCapability: loopgraph.topology.read, providerOperation: loopgraph.graph.read, minimumScopes: [graph:read], authority: read, risk: high }
   - { logicalCapability: loopgraph.routing.read, providerOperation: loopgraph.routing-decisions.read, minimumScopes: [routing:read], authority: read, risk: high }
   - { logicalCapability: loopgraph.outcome.read, providerOperation: loopgraph.outcomes-value.read, minimumScopes: [outcomes:read], authority: read, risk: high }
-  - { logicalCapability: analytics.metric.query, providerOperation: bigquery.company-metrics.query, minimumScopes: [bigquery.readsessions.create], authority: read, risk: high }
-  - { logicalCapability: finance.forecast.read, providerOperation: bigquery.finance-forecast.query, minimumScopes: [bigquery.readsessions.create], authority: read, risk: critical }
-  - { logicalCapability: capacity.plan.read, providerOperation: bigquery.capacity-plan.query, minimumScopes: [bigquery.readsessions.create], authority: read, risk: critical }
+  - { logicalCapability: analytics.metric.query, providerOperation: bigquery.company-metrics.query, minimumScopes: ["https://www.googleapis.com/auth/bigquery.readonly"], authority: read, risk: high }
+  - { logicalCapability: finance.forecast.read, providerOperation: bigquery.finance-forecast.query, minimumScopes: ["https://www.googleapis.com/auth/bigquery.readonly"], authority: read, risk: critical }
+  - { logicalCapability: capacity.plan.read, providerOperation: bigquery.capacity-plan.query, minimumScopes: ["https://www.googleapis.com/auth/bigquery.readonly"], authority: read, risk: critical }
   - { logicalCapability: project.task.read, providerOperation: project.tasks.read, minimumScopes: [tasks:read], authority: read, risk: medium }
   - { logicalCapability: collaboration.message.draft, providerOperation: microsoft-graph.teams-message.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: high }
   - { logicalCapability: project.task.create, providerOperation: project.tasks.create, minimumScopes: [tasks:write], authority: approve, risk: high }

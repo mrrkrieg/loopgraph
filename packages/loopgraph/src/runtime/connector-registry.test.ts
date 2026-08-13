@@ -64,6 +64,25 @@ describe("Hermes Connector Broker App Platform projection", () => {
     });
   });
 
+  it("projects scheduled detector events without granting webhook authority", () => {
+    const connection = connectionInstanceFromBrokerInstallation(installation({
+      id: "provider_bigquery_main",
+      providerId: "bigquery",
+      displayName: "Acme BigQuery",
+      grantedScopes: ["https://www.googleapis.com/auth/bigquery.readonly"],
+      allowedCapabilities: ["provider.health.read", "provider.data.read", "provider.events.emit"],
+      webhookStatus: "not_configured"
+    }));
+
+    expect(connection).toMatchObject({
+      manifestId: "bigquery",
+      status: "connected",
+      readPolicy: "read_only",
+      capabilityKeys: expect.arrayContaining(["analytics.metric.query", "finance.forecast.read", "capacity.plan.read", "warehouse.events"])
+    });
+    expect(connection.capabilityKeys).not.toContain("webhook.subscribe");
+  });
+
   it("has an App Platform manifest for every broker onboarding provider", () => {
     const manifestIds = new Set(DEFAULT_CONNECTOR_MANIFESTS.map((manifest) => manifest.id));
     expect(PROVIDER_ONBOARDING_CATALOG.every((provider) => manifestIds.has(provider.providerId))).toBe(true);

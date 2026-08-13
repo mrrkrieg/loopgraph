@@ -482,6 +482,40 @@ export const DEFAULT_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     notes: ["The built-in adapter is pinned to GitLab.com. Self-managed hosts require an explicitly reviewed custom connector and hostname policy."]
   }),
   manifest({
+    id: "bigquery",
+    label: "Google BigQuery",
+    category: "data_warehouse",
+    transport: "http_api",
+    authType: "service_account",
+    capabilities: [
+      readCapability("analytics.metric.query", "Query an approved company-metric template", ["https://www.googleapis.com/auth/bigquery.readonly"], "Provide a redacted metric-window export."),
+      readCapability("finance.forecast.read", "Query an approved forecast-evidence template", ["https://www.googleapis.com/auth/bigquery.readonly"], "Provide a redacted forecast export."),
+      readCapability("capacity.plan.read", "Query an approved capacity-plan template", ["https://www.googleapis.com/auth/bigquery.readonly"], "Provide a redacted capacity-plan export."),
+      eventCapability("warehouse.events", "Emit material metric, forecast, and capacity changes through a Hermes detector")
+    ],
+    notes: [
+      "The broker accepts only named query templates stored inside the credential boundary; capability callers cannot provide SQL, table names, project IDs, or endpoints.",
+      "Use a dedicated service account with BigQuery Job User plus dataset-level Data Viewer access only for approved views."
+    ]
+  }),
+  manifest({
+    id: "snowflake",
+    label: "Snowflake",
+    category: "data_warehouse",
+    transport: "http_api",
+    authType: "service_account",
+    capabilities: [
+      readCapability("analytics.metric.query", "Query an approved company-metric template", ["warehouse:read"], "Provide a redacted metric-window export."),
+      readCapability("finance.forecast.read", "Query an approved forecast-evidence template", ["warehouse:read"], "Provide a redacted forecast export."),
+      readCapability("capacity.plan.read", "Query an approved capacity-plan template", ["warehouse:read"], "Provide a redacted capacity-plan export."),
+      eventCapability("warehouse.events", "Emit material metric, forecast, and capacity changes through a Hermes detector")
+    ],
+    notes: [
+      "The broker accepts only named query templates stored inside the credential boundary; capability callers cannot provide SQL, object names, roles, warehouses, or endpoints.",
+      "Use an OAuth or workload-identity token restricted to a read-only role and approved secure views."
+    ]
+  }),
+  manifest({
     id: "manual_file",
     label: "Manual File Import",
     category: "manual",
@@ -539,7 +573,7 @@ export function connectionInstanceFromBrokerInstallation(
   const canRead = allowed.has("provider.data.read");
   const canDraft = allowed.has("provider.draft.write");
   const canExecute = allowed.has("provider.action.execute");
-  const canReceiveEvents = allowed.has("provider.webhooks.verify") || allowed.has("provider.webhooks.subscribe");
+  const canReceiveEvents = allowed.has("provider.webhooks.verify") || allowed.has("provider.webhooks.subscribe") || allowed.has("provider.events.emit");
   const capabilityKeys = connector.capabilities
     .filter((capability) => {
       if (capability.direction === "read") return canRead;

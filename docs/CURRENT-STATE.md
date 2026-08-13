@@ -43,7 +43,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ### Hermes event brain and durable execution
 
 - Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision.
-- Thirteen provider onboarding profiles define least-privilege authorization, subscriptions/streams/detectors, signature requirements, and normalization transformers. Trusted Hermes MCP tools expose catalog, preparation, and bounded normalization operations while default-redacting one-time OAuth material.
+- Twenty-four provider onboarding profiles define least-privilege authorization, subscriptions/streams/detectors, signature requirements, and normalization transformers. Trusted Hermes MCP tools expose catalog, preparation, and bounded normalization operations while default-redacting one-time OAuth material.
+- BigQuery and Snowflake satisfy the warehouse capabilities already declared by the official Management and Operations/Finance apps through broker-owned, read-only query templates with mandatory time windows, byte/result ceilings, fixed provider endpoints, and no caller-supplied SQL or account context.
 - Exact provider aliases resolve Account, Campaign, Incident, Customer, Contract, and related company objects to tenant-scoped canonical entities before routing; ambiguous deterministic matches require human review and fuzzy auto-merge is disabled.
 - Loopgraph validates route eligibility, evidence, confidence, readiness, deduplication, cooldown, concurrency, fan-out, policy, and immutable LoopSpec identity.
 - Accepted routes create durable jobs with atomic claims, leases, retries, dead-letter state, activation gates, and review reconciliation.

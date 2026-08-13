@@ -127,6 +127,15 @@ function providerFields(provider: ProviderId, event: Record<string, unknown>): P
     const subjectType = kind === "deployment" || kind === "release" ? "release" : "issue";
     return fields(`${titleCase(kind)} Hook`, subjectType, string(attributes.id ?? attributes.iid ?? event.id, "unknown"), event, iso(attributes.updated_at ?? attributes.created_at) ?? occurredAt, ["normalizedPayload.object_attributes.title", "normalizedPayload.object_attributes.description", "normalizedPayload.object_attributes.note", "normalizedPayload.object_attributes.ref"]);
   }
+  if (provider === "bigquery" || provider === "snowflake") {
+    const metric = asRecord(event.metric);
+    const forecast = asRecord(event.forecast);
+    const capacity = asRecord(event.capacityPlan ?? event.capacity_plan);
+    const eventType = string(event.eventType ?? event.type, "management.company_metric_anomaly");
+    const subjectType = eventType.includes("forecast") ? "forecast_window" : eventType.includes("capacity") ? "capacity_plan" : "company_metric_anomaly";
+    const subjectId = string(forecast.id ?? capacity.id ?? metric.id ?? event.id, "unknown");
+    return fields(eventType, subjectType, subjectId, event, occurredAt, ["normalizedPayload.metric.dimensions", "normalizedPayload.rows"]);
+  }
   if (["zendesk", "intercom"].includes(provider)) {
     const ticket = asRecord(event.ticket);
     const conversation = asRecord(event.conversation);

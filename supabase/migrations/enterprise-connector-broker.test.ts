@@ -14,6 +14,10 @@ const engineeringProviderExpansionMigrationPath = path.join(
   process.cwd(),
   "supabase/migrations/202608100002_expand_engineering_connector_providers.sql"
 );
+const warehouseProviderExpansionMigrationPath = path.join(
+  process.cwd(),
+  "supabase/migrations/20260813133306_expand_warehouse_connector_providers.sql"
+);
 
 describe("enterprise connector broker migration", () => {
   it("persists only non-secret control-plane, replay, receipt, and revocation state", async () => {
@@ -94,5 +98,12 @@ describe("enterprise connector broker migration", () => {
     expect(sql).toContain("drop constraint if exists connector_installations_provider_check");
     for (const providerId of ["linear", "jira", "gitlab"]) expect(sql).toContain(`'${providerId}'`);
     expect(sql).toContain("webhook-security");
+  });
+
+  it("adds warehouse providers only through the reviewed database allowlist", async () => {
+    const sql = await readFile(warehouseProviderExpansionMigrationPath, "utf8");
+    expect(sql).toContain("drop constraint if exists connector_installations_provider_check");
+    for (const providerId of ["bigquery", "snowflake"]) expect(sql).toContain(`'${providerId}'`);
+    expect(sql).toContain("bounded operation");
   });
 });

@@ -10,7 +10,7 @@ export const MANUAL_CONNECTION_FALLBACKS_SCHEMA_VERSION = "manual-connection-fal
 export const connectionRequiredForSchema = z.enum(["design", "simulation", "execution", "routing"]);
 export const connectionCapabilityStatusSchema = z.enum(["missing", "manual_fallback", "connected", "degraded"]);
 export const connectorTransportSchema = z.enum(["native_adapter", "mcp", "http_api", "file_import", "manual"]);
-export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hmac", "provider_app", "manual"]);
+export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hmac", "provider_app", "service_account", "manual"]);
 export const connectorCapabilityDirectionSchema = z.enum(["read", "event", "draft_write", "approved_write"]);
 export const connectorRiskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
 export const connectionEnvironmentSchema = z.enum(["simulate", "sandbox", "live"]);
@@ -19,6 +19,7 @@ export { credentialReferenceSchema };
 export const connectorCategorySchema = z.enum([
   "ads",
   "analytics",
+  "data_warehouse",
   "crm",
   "content_repository",
   "cms",
