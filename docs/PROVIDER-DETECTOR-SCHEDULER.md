@@ -79,9 +79,22 @@ Transient provider or Hermes failures retain the exact pending window and retry 
 
 The raw query result is process-local. The detector path deliberately bypasses the generic broker response cache. Durable state contains hashes, receipt IDs, window metadata, event IDs, status, and a bounded error code—not provider rows or credentials.
 
+## Operator view and controls
+
+**Settings → Integrations → Scheduled evidence detectors** exposes a tenant-bound operations projection, not the scheduler tables. Organization viewers may inspect schedule health and five recent run summaries. Organization admins may use MFA step-up to:
+
+- pause future claims without breaking an in-flight lease;
+- resume a reviewed schedule when the connector and policy gates are active;
+- make an idle schedule eligible for the next worker cycle; or
+- retry a dead-lettered schedule with the exact preserved evidence window and a new run identity.
+
+Every accepted or denied control attempt is appended to the tenant audit chain in the same database transaction. The free-form operator reason is represented by its SHA-256 digest so it can be correlated without copying potentially sensitive text into audit telemetry. A connector, environment, provider, connection, or `provider.events.emit` kill switch blocks resume, run, and retry. Pause remains available as a containment action.
+
+The read model returns schedule state, provider/installation labels, cadence, checkpoint, eligibility times, bounded error codes, and the five latest outcomes with emitted-event counts. It deliberately omits provider rows, event IDs, broker receipt IDs, result hashes, credentials, and lease tokens. “View Hermes events” opens the agent activity ledger filtered to the detector provider.
+
 ## Deployment
 
-1. Apply `supabase/migrations/20260813200615_provider_detector_scheduler.sql` after the connector and warehouse-provider migrations.
+1. Apply `supabase/migrations/20260813200615_provider_detector_scheduler.sql` and `supabase/migrations/20260815222254_provider_detector_operations.sql` after the connector and warehouse-provider migrations.
 2. Configure the Connector Broker vault, tenant-owned warehouse identity, and approved `.query` templates.
 3. Grant the installation only `provider.events.emit` and the provider's read-only scope.
 4. Configure `CRON_SECRET`, `HERMES_WEBHOOK_URL`, `LOOPGRAPH_HERMES_WEBHOOK_AUDIENCE`, `LOOPGRAPH_WEBHOOK_RECEIPT_SIGNING_KEY_REF`, and `LOOPGRAPH_WEBHOOK_RECEIPT_KEY_ID`.
@@ -99,5 +112,6 @@ Vercel invokes `/api/connector-broker/v1/workers/provider-detectors` every five 
 - The schedule lease token is returned once to the worker and stored only as a hash.
 - A tenant/provider/connection/capability kill switch prevents claims before credential resolution.
 - Checkpoints do not advance on partial delivery, ambiguous materiality, invalid evidence, Hermes rejection, or lease loss.
+- Detector operations RPCs are revoked from `public`, `anon`, and `authenticated`; permission-checked server routes invoke them with the service role after binding the organization and project.
 
 This implementation supplies the durable intake mechanism. Operators must still create and review the tenant's approved warehouse views, validate their business definition of materiality, configure cloud IAM, and prove that the resulting loops create net value.

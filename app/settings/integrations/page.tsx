@@ -4,6 +4,7 @@ import {
   getExternalConnectorBrokerClient,
   listConnectorInstallations,
   listConnectorKillSwitches,
+  listProviderDetectorOperations,
   listWorkloadIdentities
 } from "@/lib/connector-broker/admin";
 import { PROVIDER_ONBOARDING_CATALOG } from "loopgraph/runtime";
@@ -21,10 +22,11 @@ export default async function IntegrationsSettingsPage({
   const initialProviderId = PROVIDER_ONBOARDING_CATALOG.some((provider) => provider.providerId === requestedProvider)
     ? requestedProvider
     : undefined;
-  const [installations, workloadIdentities, killSwitches] = await Promise.all([
+  const [installations, workloadIdentities, killSwitches, detectors] = await Promise.all([
     listConnectorInstallations(database),
     listWorkloadIdentities(database),
-    listConnectorKillSwitches(database)
+    listConnectorKillSwitches(database),
+    listProviderDetectorOperations(database)
   ]);
   return (
     <>
@@ -37,6 +39,7 @@ export default async function IntegrationsSettingsPage({
         initialInstallations={installations}
         initialWorkloadIdentities={workloadIdentities}
         initialKillSwitches={killSwitches}
+        initialDetectors={detectors}
         providers={PROVIDER_ONBOARDING_CATALOG}
         initialProviderId={initialProviderId}
         brokerConfigured={Boolean(getExternalConnectorBrokerClient())}

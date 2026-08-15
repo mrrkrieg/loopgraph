@@ -4,8 +4,10 @@ import { useState, useTransition } from "react";
 import type { ConnectorInstallationView, ProviderOnboardingProfile } from "loopgraph/core";
 import type {
   ConnectorKillSwitchAdminView,
+  ProviderDetectorScheduleAdminView,
   WorkloadIdentityAdminView
 } from "@/lib/connector-broker/admin";
+import { DetectorOperations } from "./detector-operations";
 
 const BROKER_CAPABILITIES = [
   "provider.oauth.authorize",
@@ -26,6 +28,7 @@ export function IntegrationAdmin({
   initialInstallations,
   initialWorkloadIdentities,
   initialKillSwitches,
+  initialDetectors,
   providers,
   initialProviderId,
   brokerConfigured
@@ -33,6 +36,7 @@ export function IntegrationAdmin({
   initialInstallations: ConnectorInstallationView[];
   initialWorkloadIdentities: WorkloadIdentityAdminView[];
   initialKillSwitches: ConnectorKillSwitchAdminView[];
+  initialDetectors: ProviderDetectorScheduleAdminView[];
   providers: ProviderOnboardingProfile[];
   initialProviderId?: string;
   brokerConfigured: boolean;
@@ -347,6 +351,8 @@ export function IntegrationAdmin({
         </form>
         {message ? <p role="status" className="mt-4 rounded-md border border-line bg-paper px-3 py-2 text-sm">{message}</p> : null}
       </section>
+
+      <DetectorOperations initialDetectors={initialDetectors} />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-sm">
         <h2 className="text-base font-semibold">Provider access</h2>

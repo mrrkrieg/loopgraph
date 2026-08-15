@@ -22,6 +22,10 @@ const providerDetectorMigrationPath = path.join(
   process.cwd(),
   "supabase/migrations/20260813200615_provider_detector_scheduler.sql"
 );
+const providerDetectorOperationsMigrationPath = path.join(
+  process.cwd(),
+  "supabase/migrations/20260815222254_provider_detector_operations.sql"
+);
 
 describe("enterprise connector broker migration", () => {
   it("persists only non-secret control-plane, replay, receipt, and revocation state", async () => {
@@ -123,5 +127,22 @@ describe("enterprise connector broker migration", () => {
     expect(sql).toContain("revoke all on table public.provider_detector_schedules from public, anon, authenticated");
     expect(sql).toContain("to service_role");
     expect(sql).not.toMatch(/\b(access_token|refresh_token|client_secret|raw_payload|provider_rows)\s+(?:text|jsonb)/i);
+  });
+
+  it("exposes only a bounded detector operations view and audits fenced controls", async () => {
+    const sql = await readFile(providerDetectorOperationsMigrationPath, "utf8");
+    expect(sql).toContain("public.list_provider_detector_operations");
+    expect(sql).toContain("public.control_provider_detector_schedule");
+    expect(sql).toContain("limit 5");
+    expect(sql).toContain("for update");
+    expect(sql).toContain("blocked_by_kill_switch");
+    expect(sql).toContain("append_connector_security_audit_event");
+    expect(sql).toContain("then 'accepted' else 'denied'");
+    expect(sql).toContain("reasonHash");
+    expect(sql).toContain("pending_window_start is null");
+    expect(sql).toContain("from public, anon, authenticated");
+    expect(sql).toContain("to service_role");
+    expect(sql).not.toMatch(/jsonb_build_object\([\s\S]*?(?:event_ids|result_hash|broker_receipt_id)/i);
+    expect(sql).not.toMatch(/\b(access_token|refresh_token|client_secret|provider_rows)\b/i);
   });
 });

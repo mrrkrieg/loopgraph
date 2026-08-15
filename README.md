@@ -411,9 +411,9 @@ Local discovery and simulation work without provider credentials. A hosted compa
 4. workload-identity issuers, principals, exact capability grants, and optional trusted mTLS confirmation;
 5. staging validation, alerts, revocation drills, backup and restore rehearsal, and independent audit retention.
 
-Warehouse sources use a durable scheduled-detector path: fixed read-only templates produce explicitly material observations, signed events reach Hermes, and checkpoints advance only after delivery. Raw query rows remain process-local. See the [provider detector scheduler](docs/PROVIDER-DETECTOR-SCHEDULER.md).
+Warehouse sources use a durable scheduled-detector path: fixed read-only templates produce explicitly material observations, signed events reach Hermes, and checkpoints advance only after delivery. Settings shows tenant-scoped health and recent runs, links the resulting events to Hermes activity, and gives stepped-up admins audited pause, resume, run, and exact-window retry controls. Raw query rows remain process-local. See the [provider detector scheduler](docs/PROVIDER-DETECTOR-SCHEDULER.md).
 
-Use **Settings → Integrations** to review provider consent and scopes, inspect health, rotate or revoke credentials, manage workload grants, activate kill switches, and disconnect providers. See [Hosted security](docs/HOSTED-SECURITY.md) and [Production operations](docs/PRODUCTION-OPERATIONS.md).
+Use **Settings → Integrations** to review provider consent and scopes, inspect connector and scheduled-detector health, open recent detector runs in Hermes activity, rotate or revoke credentials, safely control detector schedules, manage workload grants, activate kill switches, and disconnect providers. See [Hosted security](docs/HOSTED-SECURITY.md) and [Production operations](docs/PRODUCTION-OPERATIONS.md).
 
 ## Runnable examples
 
