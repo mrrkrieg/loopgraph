@@ -20,3 +20,5 @@ Run at least quarterly and after material persistence changes. Restore into an i
 ## Provider boundary
 
 Provider credentials and raw webhooks terminate in Hermes. Loopgraph stores tenant-scoped installation receipts, normalized EventEnvelopes, canonical entity aliases, measurements, outcomes, and value entries. Never put OAuth tokens, signing secrets, raw HR records, raw message bodies, or full provider payloads in audit export or evidence tables.
+
+Scheduled provider detectors expose only bounded operations metadata in Settings: schedule/run state, checkpoints, eligibility timestamps, fixed error codes, and recent emitted-event counts. Alert on repeated `retry`, any `dead_letter`, stale checkpoints beyond twice the configured cadence, or leases that repeatedly expire. Resume, run-now, and retry must remain blocked by connector kill switches; pause must remain available during containment. Rehearse a dead-letter recovery in staging and verify the preserved window, new run identity, Hermes event deduplication, and corresponding accepted/denied audit receipts before production promotion.

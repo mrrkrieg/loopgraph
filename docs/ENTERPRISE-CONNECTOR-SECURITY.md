@@ -191,7 +191,7 @@ HERMES_WEBHOOK_URL=https://hermes.example/webhooks/loopgraph
 LOOPGRAPH_HERMES_WEBHOOK_AUDIENCE=https://hermes.example
 ```
 
-Apply `202608010001_enterprise_connector_broker.sql`, `202608100001_expand_connector_broker_providers.sql`, `202608100002_expand_engineering_connector_providers.sql`, `20260813133306_expand_warehouse_connector_providers.sql`, and `20260813200615_provider_detector_scheduler.sql`; configure provider callback URLs and scheduled detectors; and validate
+Apply `202608010001_enterprise_connector_broker.sql`, `202608100001_expand_connector_broker_providers.sql`, `202608100002_expand_engineering_connector_providers.sql`, `20260813133306_expand_warehouse_connector_providers.sql`, `20260813200615_provider_detector_scheduler.sql`, and `20260815222254_provider_detector_operations.sql`; configure provider callback URLs and scheduled detectors; and validate
 each provider in its sandbox before granting live scopes. Do not enable a provider if production
 dependency audit, RLS checks, backup/restore rehearsal, revocation drill, alerting, or audit export
 validation is failing.

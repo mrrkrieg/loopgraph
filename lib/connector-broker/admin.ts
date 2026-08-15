@@ -10,7 +10,7 @@ import {
   type ConnectorInstallationView,
   type ProviderId
 } from "loopgraph/core";
-import type { z } from "zod";
+import { z } from "zod";
 import {
   AmbientWorkloadTokenProvider,
   ConnectorBrokerClient
@@ -349,6 +349,147 @@ export type ConnectorKillSwitchAdminView = {
   clearedBy?: string;
   clearedAt?: string;
 };
+
+const providerDetectorTimestampSchema = z.string().datetime({ offset: true });
+
+const providerDetectorRunAdminViewSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["forwarded", "no_change", "retry", "dead_letter"]),
+  attemptCount: z.number().int().min(1).max(100),
+  emittedEventCount: z.number().int().min(0).max(500),
+  errorCode: z.string().min(1).max(160).optional(),
+  windowStart: providerDetectorTimestampSchema,
+  windowEnd: providerDetectorTimestampSchema,
+  startedAt: providerDetectorTimestampSchema,
+  completedAt: providerDetectorTimestampSchema
+}).strict();
+
+const providerDetectorScheduleAdminViewSchema = z.object({
+  id: z.string().min(8).max(160),
+  installationId: z.string().min(1).max(128),
+  installationDisplayName: z.string().min(1).max(120),
+  installationStatus: z.string().min(1).max(64),
+  environment: z.enum(["development", "staging", "production"]),
+  providerId: z.enum(["bigquery", "snowflake"]),
+  detectorKey: z.string().min(3).max(64),
+  operation: z.string().min(3).max(128),
+  eventType: z.string().min(3).max(160),
+  subjectType: z.string().min(1).max(96),
+  cadenceMinutes: z.number().int().min(5).max(1440),
+  windowMinutes: z.number().int().min(5).max(525_600),
+  overlapMinutes: z.number().int().min(0).max(1440),
+  status: z.enum(["active", "paused", "disabled"]),
+  runState: z.enum(["idle", "leased", "retry", "dead_letter"]),
+  checkpointAt: providerDetectorTimestampSchema.optional(),
+  nextRunAt: providerDetectorTimestampSchema,
+  availableAt: providerDetectorTimestampSchema,
+  leaseUntil: providerDetectorTimestampSchema.optional(),
+  attemptCount: z.number().int().min(0).max(100),
+  lastErrorCode: z.string().min(1).max(160).optional(),
+  lastStartedAt: providerDetectorTimestampSchema.optional(),
+  lastCompletedAt: providerDetectorTimestampSchema.optional(),
+  blockedByKillSwitch: z.boolean(),
+  recentRuns: z.array(providerDetectorRunAdminViewSchema).max(5)
+}).strict();
+
+export type ProviderDetectorRunAdminView = z.infer<typeof providerDetectorRunAdminViewSchema>;
+export type ProviderDetectorScheduleAdminView = z.infer<typeof providerDetectorScheduleAdminViewSchema>;
+export type ProviderDetectorControlAction = "pause" | "resume" | "run_now" | "retry_now";
+
+export class ProviderDetectorControlError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: 404 | 409
+  ) {
+    super(message);
+    this.name = "ProviderDetectorControlError";
+  }
+}
+
+export async function listProviderDetectorOperations(
+  database: WorkspaceDatabase
+): Promise<ProviderDetectorScheduleAdminView[]> {
+  if (!database.organizationId) return [];
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const { data, error } = await connectorControlPlaneClient().rpc("list_provider_detector_operations", {
+    p_organization_id: database.organizationId,
+    p_project_key: projectKey,
+    p_limit: 200
+  });
+  if (error) throw error;
+  return (data ?? []).map((row: Record<string, unknown>) => providerDetectorScheduleAdminViewSchema.parse({
+    id: row.schedule_id,
+    installationId: row.installation_id,
+    installationDisplayName: row.installation_display_name,
+    installationStatus: row.installation_status,
+    environment: row.environment,
+    providerId: row.provider_id,
+    detectorKey: row.detector_key,
+    operation: row.operation,
+    eventType: row.event_type,
+    subjectType: row.subject_type,
+    cadenceMinutes: row.cadence_minutes,
+    windowMinutes: row.window_minutes,
+    overlapMinutes: row.overlap_minutes,
+    status: row.schedule_status,
+    runState: row.run_state,
+    checkpointAt: row.checkpoint_at ?? undefined,
+    nextRunAt: row.next_run_at,
+    availableAt: row.available_at,
+    leaseUntil: row.lease_until ?? undefined,
+    attemptCount: row.attempt_count,
+    lastErrorCode: row.last_error_code ?? undefined,
+    lastStartedAt: row.last_started_at ?? undefined,
+    lastCompletedAt: row.last_completed_at ?? undefined,
+    blockedByKillSwitch: row.blocked_by_kill_switch,
+    recentRuns: row.recent_runs ?? []
+  }));
+}
+
+export async function controlProviderDetectorSchedule(input: {
+  database: WorkspaceDatabase;
+  scheduleId: string;
+  action: ProviderDetectorControlAction;
+  reason: string;
+}) {
+  if (!input.database.organizationId || !input.database.userId) {
+    throw new ProviderDetectorControlError("storage_unavailable", "Hosted detector operations are unavailable.", 409);
+  }
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const { data, error } = await connectorControlPlaneClient().rpc("control_provider_detector_schedule", {
+    p_organization_id: input.database.organizationId,
+    p_project_key: projectKey,
+    p_schedule_id: input.scheduleId,
+    p_action: input.action,
+    p_actor_id: input.database.userId,
+    p_reason: input.reason,
+    p_now: new Date().toISOString()
+  });
+  if (error) throw error;
+  const result = String(data ?? "missing");
+  const failure = detectorControlFailure(result);
+  if (failure) throw failure;
+  const schedule = (await listProviderDetectorOperations(input.database)).find((item) => item.id === input.scheduleId);
+  if (!schedule) throw new ProviderDetectorControlError("missing", "Detector schedule was not found.", 404);
+  return { result, schedule };
+}
+
+function detectorControlFailure(result: string): ProviderDetectorControlError | undefined {
+  const failures: Record<string, [string, string, 404 | 409]> = {
+    missing: ["missing", "Detector schedule was not found.", 404],
+    connector_inactive: ["connector_inactive", "Reconnect the provider and grant event emission before changing this detector.", 409],
+    blocked_by_kill_switch: ["blocked_by_kill_switch", "An active connector kill switch blocks this detector.", 409],
+    schedule_paused: ["schedule_paused", "Resume this detector before scheduling a run.", 409],
+    already_running: ["already_running", "This detector already has a leased run.", 409],
+    retry_pending: ["retry_pending", "This detector already has a retry pending.", 409],
+    requires_retry: ["requires_retry", "Use Retry now to recover this dead-lettered detector.", 409],
+    not_dead_lettered: ["not_dead_lettered", "Only a dead-lettered detector can be retried manually.", 409],
+    retry_window_missing: ["retry_window_missing", "The failed detector window is unavailable and cannot be retried safely.", 409]
+  };
+  const entry = failures[result];
+  return entry ? new ProviderDetectorControlError(...entry) : undefined;
+}
 
 export async function listWorkloadIdentities(database: WorkspaceDatabase): Promise<WorkloadIdentityAdminView[]> {
   if (!database.organizationId) return [];
