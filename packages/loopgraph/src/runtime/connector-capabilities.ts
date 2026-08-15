@@ -121,7 +121,10 @@ export const PROVIDER_OPERATION_CATALOG: ProviderOperationDescriptor[] = [
   ...provider("bigquery", [
     ["company-metrics.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
     ["finance-forecast.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
-    ["capacity-plan.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]]
+    ["capacity-plan.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["company-metrics.detect", "provider.events.emit", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["finance-forecast.detect", "provider.events.emit", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["capacity-plan.detect", "provider.events.emit", ["https://www.googleapis.com/auth/bigquery.readonly"]]
   ]),
   ...provider("snowflake", [
     ["company-metrics.query", "provider.data.read", ["warehouse:read"]],
@@ -129,7 +132,10 @@ export const PROVIDER_OPERATION_CATALOG: ProviderOperationDescriptor[] = [
     ["capacity-plan.query", "provider.data.read", ["warehouse:read"]],
     ["finance_forecast.query", "provider.data.read", ["warehouse:read"]],
     ["operating_metrics.query", "provider.data.read", ["warehouse:read"]],
-    ["capacity_plan.query", "provider.data.read", ["warehouse:read"]]
+    ["capacity_plan.query", "provider.data.read", ["warehouse:read"]],
+    ["company-metrics.detect", "provider.events.emit", ["warehouse:read"]],
+    ["finance-forecast.detect", "provider.events.emit", ["warehouse:read"]],
+    ["capacity-plan.detect", "provider.events.emit", ["warehouse:read"]]
   ])
 ];
 

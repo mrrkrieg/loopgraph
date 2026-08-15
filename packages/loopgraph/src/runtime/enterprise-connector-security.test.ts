@@ -83,12 +83,79 @@ describe("enterprise connector security boundary", () => {
   it("ships a fixed handler for every provider data, draft, and action operation", () => {
     const handlers = createProviderOperationHandlers();
     for (const descriptor of PROVIDER_OPERATION_CATALOG.filter((item) =>
-      ["provider.data.read", "provider.draft.write", "provider.action.execute", "provider.health.read"].includes(item.capability)
+      ["provider.data.read", "provider.draft.write", "provider.action.execute", "provider.health.read", "provider.events.emit"].includes(item.capability)
     )) {
       expect(handlers.has(operationKey(descriptor.providerId, descriptor.operation)), `${descriptor.providerId}:${descriptor.operation}`).toBe(true);
     }
     expect([...handlers.keys()]).not.toContain("http.request");
     expect([...handlers.keys()]).not.toContain("provider.raw_api");
+  });
+
+  it("keeps scheduled detector rows process-local and requires the system scheduler actor", async () => {
+    const state = new InMemoryConnectorState();
+    const namespace = buildCredentialNamespace({
+      organizationId: "org-1",
+      projectKey: "main",
+      providerId: "bigquery",
+      installationId: "bigquery-1",
+      environment: "production"
+    });
+    const installation = connectorInstallationAdminSchema.parse({
+      id: "bigquery-1",
+      tenant: { organizationId: "org-1", projectKey: "main" },
+      providerId: "bigquery",
+      displayName: "BigQuery",
+      environment: "production",
+      status: "active",
+      credentialRef: `vault://${namespace}/tokens/provider`,
+      credentialNamespace: namespace,
+      grantedScopes: ["https://www.googleapis.com/auth/bigquery.readonly"],
+      allowedCapabilities: ["provider.events.emit"],
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z"
+    });
+    await state.save(installation);
+    const getResponse = vi.spyOn(state, "getResponse");
+    const reserve = vi.spyOn(state, "reserve");
+    const putResponse = vi.spyOn(state, "putResponse");
+    const handler = vi.fn(async () => ({
+      providerObjectRef: "bigquery:project:example:template:company-metrics.query",
+      sourceTimestamp: "2026-08-13T12:00:00.000Z",
+      responseStatusClass: "success",
+      schema: { fields: [{ name: "material" }] },
+      rows: [{ f: [{ v: "true" }] }]
+    }));
+    const broker = new HermesConnectorBroker({
+      installations: state,
+      idempotency: state,
+      audit: state,
+      vault: new CompositeVault([new MemoryVault([[installation.credentialRef, "opaque-token"]])]),
+      handlers: new Map([[operationKey("bigquery", "company-metrics.detect"), handler]]),
+      now: () => new Date("2026-08-13T12:00:00.000Z")
+    });
+    const request = connectorBrokerRequestSchema.parse({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: "request_detector_1",
+      idempotencyKey: "idempotency_detector_1",
+      tenant: installation.tenant,
+      actor: { type: "workload", subject: "spiffe://example/hermes" },
+      providerId: "bigquery",
+      installationId: installation.id,
+      capability: "provider.events.emit",
+      operation: "company-metrics.detect",
+      input: { windowStart: "2026-08-13T11:00:00.000Z", windowEnd: "2026-08-13T12:00:00.000Z", limit: 100 },
+      issuedAt: "2026-08-13T11:59:30.000Z",
+      expiresAt: "2026-08-13T12:00:30.000Z",
+      correlationId: "detector-run-1"
+    });
+    await expect(broker.execute(request)).resolves.toMatchObject({ status: "denied", error: { code: "system_actor_required" } });
+    const accepted = await broker.execute({ ...request, actor: { type: "system", subject: "system:provider-detector" } });
+    expect(accepted.error?.code).toBeUndefined();
+    expect(accepted).toMatchObject({ status: "succeeded" });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(getResponse).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    expect(putResponse).not.toHaveBeenCalled();
   });
 
   it("enforces capability, scope, fixed operation, no arbitrary HTTP, and idempotency", async () => {

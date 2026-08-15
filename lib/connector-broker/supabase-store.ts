@@ -18,8 +18,12 @@ import type {
   OAuthLifecycleAudit,
   OAuthLifecycleStore,
   OAuthTransaction,
+  ProviderDetectorDefinition,
+  ProviderDetectorStore,
+  ProviderDetectorClaim,
   WebhookReplayStore
 } from "loopgraph/runtime";
+import { providerDetectorClaimSchema, providerDetectorScheduleId } from "loopgraph/runtime";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
 
 type AdminClient = NonNullable<ReturnType<typeof createSupabaseAdminClient>>;
@@ -32,7 +36,8 @@ export class SupabaseConnectorBrokerStore implements
   ConnectorAccessPolicy,
   ConnectorPreparedActionStore,
   OAuthLifecycleStore,
-  WebhookReplayStore {
+  WebhookReplayStore,
+  ProviderDetectorStore {
   constructor(private readonly client: AdminClient) {}
 
   static fromEnvironment() {
@@ -521,6 +526,146 @@ export class SupabaseConnectorBrokerStore implements
     if (error) throw error;
   }
 
+  async syncSchedules(input: { definitions: ProviderDetectorDefinition[]; now: string }) {
+    const providerIds = [...new Set(input.definitions.map((definition) => definition.providerId))];
+    const installations: Record<string, unknown>[] = [];
+    for (let offset = 0; ; offset += 1_000) {
+      const { data, error } = await this.client.from("connector_installations")
+        .select("*")
+        .in("provider_id", providerIds)
+        .order("id")
+        .range(offset, offset + 999);
+      if (error) throw error;
+      installations.push(...(data ?? []));
+      if ((data ?? []).length < 1_000) break;
+    }
+    const activeRows: Array<Record<string, unknown> & { id: string }> = [];
+    const inactiveIds: string[] = [];
+    const activeIdsByDefinition = new Map<ProviderDetectorDefinition, string[]>();
+    for (const raw of installations) {
+      const installation = mapInstallation(raw);
+      const enabled = installation.status === "active" && installation.allowedCapabilities.includes("provider.events.emit");
+      for (const definition of input.definitions.filter((candidate) => candidate.providerId === installation.providerId)) {
+        const id = providerDetectorScheduleId(installation, definition.detectorKey);
+        if (!enabled) {
+          inactiveIds.push(id);
+          continue;
+        }
+        activeRows.push({
+          id,
+          organization_id: installation.tenant.organizationId,
+          project_key: installation.tenant.projectKey,
+          installation_id: installation.id,
+          provider_id: definition.providerId,
+          detector_key: definition.detectorKey,
+          operation: definition.operation,
+          event_type: definition.eventType,
+          subject_type: definition.subjectType,
+          cadence_minutes: definition.cadenceMinutes,
+          window_minutes: definition.windowMinutes,
+          overlap_minutes: definition.overlapMinutes,
+          next_run_at: input.now,
+          created_at: input.now,
+          updated_at: input.now
+        });
+        activeIdsByDefinition.set(definition, [...(activeIdsByDefinition.get(definition) ?? []), id]);
+      }
+    }
+    for (const rows of chunks(activeRows, 500)) {
+      const { error } = await this.client.from("provider_detector_schedules").upsert(rows, {
+        onConflict: "id",
+        ignoreDuplicates: true
+      });
+      if (error) throw error;
+    }
+    for (const [definition, ids] of activeIdsByDefinition) {
+      for (const batch of chunks(ids, 500)) {
+        const { error } = await this.client.from("provider_detector_schedules").update({
+          operation: definition.operation,
+          event_type: definition.eventType,
+          subject_type: definition.subjectType,
+          cadence_minutes: definition.cadenceMinutes,
+          window_minutes: definition.windowMinutes,
+          overlap_minutes: definition.overlapMinutes,
+          updated_at: input.now
+        }).in("id", batch);
+        if (error) throw error;
+      }
+    }
+    for (const batch of chunks(activeRows.map((row) => row.id), 500)) {
+      const { error } = await this.client.from("provider_detector_schedules").update({
+        status: "active",
+        run_state: "idle",
+        available_at: input.now,
+        lease_token_hash: null,
+        lease_until: null,
+        updated_at: input.now
+      }).in("id", batch).eq("status", "disabled");
+      if (error) throw error;
+    }
+    for (const batch of chunks(inactiveIds, 500)) {
+      const { error } = await this.client.from("provider_detector_schedules").update({
+        status: "disabled",
+        run_state: "idle",
+        lease_token_hash: null,
+        lease_until: null,
+        updated_at: input.now
+      }).in("id", batch);
+      if (error) throw error;
+    }
+    return activeRows.length;
+  }
+
+  async claimDue(input: { limit: number; leaseSeconds: number; now: string }) {
+    const { data, error } = await this.client.rpc("claim_provider_detector_schedules", {
+      p_limit: input.limit,
+      p_lease_seconds: input.leaseSeconds,
+      p_now: input.now
+    });
+    if (error) throw error;
+    return (data ?? []).map((row: Record<string, unknown>) => providerDetectorClaimSchema.parse({
+      scheduleId: row.schedule_id,
+      runId: row.run_id,
+      tenant: { organizationId: row.organization_id, projectKey: row.project_key },
+      installationId: row.installation_id,
+      providerId: row.provider_id,
+      detectorKey: row.detector_key,
+      operation: row.operation,
+      eventType: row.event_type,
+      subjectType: row.subject_type,
+      windowStart: row.window_start,
+      windowEnd: row.window_end,
+      attemptCount: row.attempt_count,
+      leaseToken: row.lease_token
+    }));
+  }
+
+  async finalize(input: {
+    claim: ProviderDetectorClaim;
+    outcome: "forwarded" | "no_change" | "retry" | "dead_letter";
+    brokerReceiptId?: string;
+    resultHash?: string;
+    eventIds?: string[];
+    errorCode?: string;
+    retryAt?: string;
+    completedAt: string;
+  }) {
+    const { data, error } = await this.client.rpc("finalize_provider_detector_schedule", {
+      p_schedule_id: input.claim.scheduleId,
+      p_run_id: input.claim.runId,
+      p_lease_token: input.claim.leaseToken,
+      p_outcome: input.outcome,
+      p_broker_receipt_id: input.brokerReceiptId ?? null,
+      p_result_hash: input.resultHash ?? null,
+      p_event_ids: input.eventIds ?? [],
+      p_error_code: input.errorCode ?? null,
+      p_retry_at: input.retryAt ?? null,
+      p_completed_at: input.completedAt
+    });
+    if (error) throw error;
+    return data === true;
+  }
+
   private async appendAudit(event: {
     eventType: string;
     outcome: "accepted" | "denied" | "error";
@@ -638,4 +783,10 @@ function mapPreparedAction(row: Record<string, unknown>) {
     approvalRequired: row.approval_required,
     riskClass: row.risk_class
   });
+}
+
+function chunks<T>(values: T[], size: number) {
+  const result: T[][] = [];
+  for (let offset = 0; offset < values.length; offset += size) result.push(values.slice(offset, offset + size));
+  return result;
 }

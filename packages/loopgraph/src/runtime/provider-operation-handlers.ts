@@ -664,18 +664,32 @@ function registerEngineeringHandlers(handlers: Map<string, ConnectorOperationHan
 }
 
 function registerWarehouseHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
-  const bigQueryOperations = ["company-metrics.query", "finance-forecast.query", "capacity-plan.query"] as const;
+  const bigQueryOperations = [
+    ["company-metrics.query", "company-metrics.query"],
+    ["finance-forecast.query", "finance-forecast.query"],
+    ["capacity-plan.query", "capacity-plan.query"],
+    ["company-metrics.detect", "company-metrics.query"],
+    ["finance-forecast.detect", "finance-forecast.query"],
+    ["capacity-plan.detect", "capacity-plan.query"]
+  ] as const;
   const snowflakeOperations = [
-    "company-metrics.query", "finance-forecast.query", "capacity-plan.query",
-    "finance_forecast.query", "operating_metrics.query", "capacity_plan.query"
+    ["company-metrics.query", "company-metrics.query"],
+    ["finance-forecast.query", "finance-forecast.query"],
+    ["capacity-plan.query", "capacity-plan.query"],
+    ["finance_forecast.query", "finance_forecast.query"],
+    ["operating_metrics.query", "operating_metrics.query"],
+    ["capacity_plan.query", "capacity_plan.query"],
+    ["company-metrics.detect", "company-metrics.query"],
+    ["finance-forecast.detect", "finance-forecast.query"],
+    ["capacity-plan.detect", "capacity-plan.query"]
   ] as const;
 
-  for (const operation of bigQueryOperations) {
+  for (const [operation, templateOperation] of bigQueryOperations) {
     handlers.set(operationKey("bigquery", operation), async (context) => {
       const input = warehouseQueryInput.parse(context.request.input);
       const credential = await revealCredential(context);
       const projectId = gcpProjectId.parse(credential.projectId);
-      const template = warehouseTemplate(credential, operation, "bigquery");
+      const template = warehouseTemplate(credential, templateOperation, "bigquery");
       const maximumBytesBilled = z.string().regex(/^[1-9]\d{0,18}$/).parse(credential.maximumBytesBilled);
       const response = await fixedFetch(fetcher, `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}/queries`, {
         method: "POST",
@@ -695,10 +709,10 @@ function registerWarehouseHandlers(handlers: Map<string, ConnectorOperationHandl
         throw new ConnectorBrokerError("provider_query_pending", "BigQuery did not complete the bounded query inside the broker window.", true, true);
       }
       return {
-        providerObjectRef: `bigquery:project:${projectId}:template:${operation}`,
+        providerObjectRef: `bigquery:project:${projectId}:template:${templateOperation}`,
         sourceTimestamp: new Date().toISOString(),
         responseStatusClass: statusClass(response.status),
-        templateId: operation,
+        templateId: templateOperation,
         totalRows: stringField(body, "totalRows"),
         totalBytesProcessed: stringField(body, "totalBytesProcessed"),
         schema: selectFields(objectField(body, "schema"), ["fields"]),
@@ -707,11 +721,11 @@ function registerWarehouseHandlers(handlers: Map<string, ConnectorOperationHandl
     });
   }
 
-  for (const operation of snowflakeOperations) {
+  for (const [operation, templateOperation] of snowflakeOperations) {
     handlers.set(operationKey("snowflake", operation), async (context) => {
       const input = warehouseQueryInput.parse(context.request.input);
       const credential = await revealCredential(context);
-      const template = warehouseTemplate(credential, operation, "snowflake");
+      const template = warehouseTemplate(credential, templateOperation, "snowflake");
       const base = trustedInstanceUrl(credential, /(?:^|\.)snowflakecomputing\.com$/);
       const requestId = stableRequestUuid(context.request.idempotencyKey);
       const url = new URL("/api/v2/statements", base);
@@ -740,10 +754,10 @@ function registerWarehouseHandlers(handlers: Map<string, ConnectorOperationHandl
         throw new ConnectorBrokerError("provider_query_pending", "Snowflake did not complete the bounded query inside the broker window.", true, true);
       }
       return {
-        providerObjectRef: `snowflake:template:${operation}:request:${requestId}`,
+        providerObjectRef: `snowflake:template:${templateOperation}:request:${requestId}`,
         sourceTimestamp: new Date().toISOString(),
         responseStatusClass: statusClass(response.status),
-        templateId: operation,
+        templateId: templateOperation,
         statementHandle: stringField(body, "statementHandle"),
         resultSetMetaData: selectFields(objectField(body, "resultSetMetaData"), ["numRows", "format", "rowType"]),
         rows: Array.isArray(body.data) ? body.data.slice(0, input.limit) : []

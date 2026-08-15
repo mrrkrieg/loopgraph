@@ -18,6 +18,10 @@ const warehouseProviderExpansionMigrationPath = path.join(
   process.cwd(),
   "supabase/migrations/20260813133306_expand_warehouse_connector_providers.sql"
 );
+const providerDetectorMigrationPath = path.join(
+  process.cwd(),
+  "supabase/migrations/20260813200615_provider_detector_scheduler.sql"
+);
 
 describe("enterprise connector broker migration", () => {
   it("persists only non-secret control-plane, replay, receipt, and revocation state", async () => {
@@ -105,5 +109,19 @@ describe("enterprise connector broker migration", () => {
     expect(sql).toContain("drop constraint if exists connector_installations_provider_check");
     for (const providerId of ["bigquery", "snowflake"]) expect(sql).toContain(`'${providerId}'`);
     expect(sql).toContain("bounded operation");
+  });
+
+  it("leases warehouse detector windows durably without exposing rows or credentials", async () => {
+    const sql = await readFile(providerDetectorMigrationPath, "utf8");
+    expect(sql).toContain("public.provider_detector_schedules");
+    expect(sql).toContain("public.provider_detector_runs");
+    expect(sql).toContain("for update of schedule skip locked");
+    expect(sql).toContain("lease_token_hash = encode(extensions.digest");
+    expect(sql).toContain("current_run_id = p_run_id");
+    expect(sql).toContain("checkpoint_at = pending_window_end");
+    expect(sql).toContain("status = 'paused', run_state = 'dead_letter'");
+    expect(sql).toContain("revoke all on table public.provider_detector_schedules from public, anon, authenticated");
+    expect(sql).toContain("to service_role");
+    expect(sql).not.toMatch(/\b(access_token|refresh_token|client_secret|raw_payload|provider_rows)\s+(?:text|jsonb)/i);
   });
 });

@@ -58,7 +58,7 @@ flowchart LR
 
 | Component | Responsibility |
 |---|---|
-| **Hermes Connector Broker** | Verifies provider events, protects credentials, normalizes payloads, and exposes only capability-scoped provider operations |
+| **Hermes Connector Broker** | Verifies provider events, protects credentials, runs leased bounded detectors for non-webhook sources, normalizes payloads, and exposes only capability-scoped provider operations |
 | **Hermes Brain** | Determines what business problem occurred, which company object is affected, and which loop—or human review—should respond |
 | **Loopgraph** | Defines the topology and LoopSpecs, validates routing and readiness, enforces policy, records execution, and evaluates outcomes |
 
@@ -411,6 +411,8 @@ Local discovery and simulation work without provider credentials. A hosted compa
 4. workload-identity issuers, principals, exact capability grants, and optional trusted mTLS confirmation;
 5. staging validation, alerts, revocation drills, backup and restore rehearsal, and independent audit retention.
 
+Warehouse sources use a durable scheduled-detector path: fixed read-only templates produce explicitly material observations, signed events reach Hermes, and checkpoints advance only after delivery. Raw query rows remain process-local. See the [provider detector scheduler](docs/PROVIDER-DETECTOR-SCHEDULER.md).
+
 Use **Settings → Integrations** to review provider consent and scopes, inspect health, rotate or revoke credentials, manage workload grants, activate kill switches, and disconnect providers. See [Hosted security](docs/HOSTED-SECURITY.md) and [Production operations](docs/PRODUCTION-OPERATIONS.md).
 
 ## Runnable examples
@@ -480,6 +482,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 - [Hermes examples](docs/HERMES-EXAMPLES.md)
 - [Company loop library](docs/COMPANY-LOOP-LIBRARY.md)
 - [Provider onboarding](docs/HERMES-PROVIDER-ONBOARDING.md)
+- [Provider detector scheduler](docs/PROVIDER-DETECTOR-SCHEDULER.md)
 
 ### Core concepts
 

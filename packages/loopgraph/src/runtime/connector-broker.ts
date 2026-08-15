@@ -124,14 +124,17 @@ export class HermesConnectorBroker {
     if (Date.parse(request.issuedAt) > now + 30_000 || Date.parse(request.expiresAt) < now) {
       return this.failure(request, started, "denied", "request_expired", "Connector request is expired or not active.");
     }
-    const duplicate = await this.dependencies.idempotency.getResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey });
-    if (duplicate) {
-      if (!responseMatchesRequest(duplicate, request)) {
-        const response = this.failure(request, started, "denied", "idempotency_conflict", "Idempotency key was already used for a different connector request.");
-        await this.dependencies.audit.append(response.receipt);
-        return response;
+    const ephemeralDetector = request.capability === "provider.events.emit";
+    if (!ephemeralDetector) {
+      const duplicate = await this.dependencies.idempotency.getResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey });
+      if (duplicate) {
+        if (!responseMatchesRequest(duplicate, request)) {
+          const response = this.failure(request, started, "denied", "idempotency_conflict", "Idempotency key was already used for a different connector request.");
+          await this.dependencies.audit.append(response.receipt);
+          return response;
+        }
+        return duplicate;
       }
-      return duplicate;
     }
 
     const installation = await this.dependencies.installations.get({
@@ -169,6 +172,13 @@ export class HermesConnectorBroker {
     if (descriptor.capability === "provider.data.read" && !request.context) {
       return this.persistFailure(request, started, "denied", "invocation_context_required", "Provider reads require a complete LoopSpec and company-object context.");
     }
+    if (descriptor.capability === "provider.events.emit" &&
+      (request.actor.type !== "system" || request.actor.subject !== "system:provider-detector")) {
+      return this.persistFailure(request, started, "denied", "system_actor_required", "Provider detectors can only be invoked by the authenticated scheduler workload.");
+    }
+    if (descriptor.capability === "provider.events.emit" && request.context) {
+      return this.persistFailure(request, started, "denied", "detector_context_forbidden", "Provider detectors run before Hermes selects a loop and cannot accept a loop invocation context.");
+    }
     if (descriptor.write) {
       return this.persistFailure(request, started, "denied", "prepare_commit_required", "Provider writes must use the fingerprint-bound prepare and commit protocol.");
     }
@@ -180,25 +190,27 @@ export class HermesConnectorBroker {
       return this.persistFailure(request, started, "denied", "operation_unavailable", "Provider operation is not installed in this broker.");
     }
 
-    const reservation = await this.dependencies.idempotency.reserve({
-      ...request.tenant,
-      idempotencyKey: request.idempotencyKey,
-      requestHash: requestFingerprint(request),
-      leaseUntil: new Date(this.now().getTime() + 5 * 60 * 1_000).toISOString()
-    });
-    if (reservation !== "claimed") {
-      const response = this.failure(
-        request,
-        started,
-        "denied",
-        reservation === "conflict" ? "idempotency_conflict" : "request_in_progress",
-        reservation === "conflict"
-          ? "Idempotency key was already used for a different connector request."
-          : "An identical connector request is already in progress.",
-        reservation === "busy"
-      );
-      await this.dependencies.audit.append(response.receipt);
-      return response;
+    if (!ephemeralDetector) {
+      const reservation = await this.dependencies.idempotency.reserve({
+        ...request.tenant,
+        idempotencyKey: request.idempotencyKey,
+        requestHash: requestFingerprint(request),
+        leaseUntil: new Date(this.now().getTime() + 5 * 60 * 1_000).toISOString()
+      });
+      if (reservation !== "claimed") {
+        const response = this.failure(
+          request,
+          started,
+          "denied",
+          reservation === "conflict" ? "idempotency_conflict" : "request_in_progress",
+          reservation === "conflict"
+            ? "Idempotency key was already used for a different connector request."
+            : "An identical connector request is already in progress.",
+          reservation === "busy"
+        );
+        await this.dependencies.audit.append(response.receipt);
+        return response;
+      }
     }
 
     try {
@@ -221,10 +233,10 @@ export class HermesConnectorBroker {
         result,
         receipt
       });
-      await Promise.all([
-        this.dependencies.audit.append(receipt),
-        this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response })
-      ]);
+      await this.dependencies.audit.append(receipt);
+      if (!ephemeralDetector) {
+        await this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response });
+      }
       return response;
     } catch (error) {
       const known = error instanceof ConnectorBrokerError ? error : undefined;
@@ -516,10 +528,10 @@ export class HermesConnectorBroker {
     retryable = false
   ) {
     const response = this.failure(request, started, outcome, code, message, retryable);
-    await Promise.all([
-      this.dependencies.audit.append(response.receipt),
-      this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response })
-    ]);
+    await this.dependencies.audit.append(response.receipt);
+    if (request.capability !== "provider.events.emit") {
+      await this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response });
+    }
     return response;
   }
 

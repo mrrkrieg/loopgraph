@@ -33,6 +33,7 @@ export type MachineCapability =
   | "schedule.connector_oauth"
   | "schedule.connector_revocations"
   | "schedule.connector_webhooks"
+  | "schedule.connector_detectors"
   | "schedule.hermes_design"
   | "schedule.hermes_callbacks"
   | "schedule.management"
