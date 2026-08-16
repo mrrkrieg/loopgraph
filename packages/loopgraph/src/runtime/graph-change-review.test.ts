@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { contentHash } from "../core";
 import type {
   DesignRun,
   GraphChangeSet,
@@ -46,6 +47,7 @@ describe("accountable Hermes graph review", () => {
       approvedChangeIds: ["change_improve"],
       evidenceRefs: [
         `design-run:${records.designRun.id}`,
+        `design-output:${records.designRun.outputHash}`,
         "loop-design-proposal:proposal_improve"
       ]
     }), expect.any(Object));
@@ -149,6 +151,7 @@ function fixtures() {
     validationSummary: { valid: true, errors: [] },
     proposals: [{ proposalId: "proposal_improve" }]
   } as unknown as LoopDesignProposalSet;
+  designRun.outputHash = `out_${contentHash(proposalSet)}`;
   return { changeSet, opportunity, task, designRun, proposalSet };
 }
 

@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
 import {
+  applyGraphChangeAction,
   decideGraphChangeAction,
   initialGraphChangeDecisionState
 } from "@/app/operate/changes/actions";
@@ -61,6 +62,37 @@ export function GraphChangeDecisionForm({
   );
 }
 
+export function GraphChangeApplyForm({ changeSetId }: { changeSetId: string }) {
+  const [state, action] = useActionState(
+    applyGraphChangeAction,
+    initialGraphChangeDecisionState
+  );
+  return (
+    <form action={action} className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 p-4">
+      <input name="changeSetId" type="hidden" value={changeSetId} />
+      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-900/60">
+        Approved and ready
+      </div>
+      <p className="mt-2 text-sm leading-6 text-emerald-950/75">
+        Application snapshots the current graph, reloads the exact approval and Hermes design from storage, then commits one atomic topology transaction. It does not activate write-capable tools beyond the loop&apos;s governed rollout mode.
+      </p>
+      <ApplyButton />
+      {state.message ? (
+        <p
+          aria-live="polite"
+          className={`mt-3 rounded-md px-3 py-2 text-sm ${
+            state.status === "success"
+              ? "border border-emerald-300 bg-white text-emerald-950"
+              : "border border-red-200 bg-red-50 text-red-950"
+          }`}
+        >
+          {state.message}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
 function DecisionButtons({ canApprove }: { canApprove: boolean }) {
   const { pending } = useFormStatus();
   return (
@@ -84,5 +116,18 @@ function DecisionButtons({ canApprove }: { canApprove: boolean }) {
         Reject without applying
       </button>
     </div>
+  );
+}
+
+function ApplyButton() {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      className="mt-3 rounded-md bg-emerald-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+      disabled={pending}
+      type="submit"
+    >
+      {pending ? "Applying approved change…" : "Apply approved graph change"}
+    </button>
   );
 }
