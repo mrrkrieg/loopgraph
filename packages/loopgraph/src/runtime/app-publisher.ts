@@ -44,7 +44,7 @@ import {
   type LoopPackValidationIssue
 } from "./app-pack-loader";
 import { FileAppInstallationStore } from "./app-installation-store";
-import { LocalAppMarketplace } from "./app-marketplace";
+import { LocalAppMarketplace, catalogSnapshotDigestFromRecords } from "./app-marketplace";
 import {
   PUBLISHED_CATALOG_FILE,
   PUBLISHED_CATALOG_SCHEMA_VERSION,
@@ -292,6 +292,12 @@ export class LoopgraphAppPublisher {
       if (loaded.manifest.metadata.publisher.id !== "loopgraph" && loaded.manifest.metadata.publisher.verified) {
         issues.push({ severity: "error", code: "publisher_self_verification", message: "Third-party publishers cannot mark themselves verified" });
       }
+      if (loaded.manifest.metadata.publisher.id !== "loopgraph" && loaded.manifest.metadata.id.startsWith("loopgraph.")) {
+        issues.push({ severity: "error", code: "publisher_namespace_reserved", message: "The loopgraph. app namespace is reserved for bundled official apps" });
+      }
+      if (loaded.manifest.metadata.publisher.id !== "loopgraph" && !loaded.manifest.metadata.id.startsWith(`${loaded.manifest.metadata.publisher.id}.`)) {
+        issues.push({ severity: "error", code: "publisher_namespace_mismatch", message: `Third-party app IDs must begin with ${loaded.manifest.metadata.publisher.id}.` });
+      }
       if (loaded.manifest.metadata.publisher.id !== "loopgraph" && loaded.manifest.metadata.visibility === "official") {
         issues.push({ severity: "error", code: "official_visibility_reserved", message: "Official visibility is reserved for the Loopgraph publisher" });
       }
@@ -410,6 +416,7 @@ export class LoopgraphAppPublisher {
     catalogId: string;
     catalogRoot: string;
     release: PublishedCatalogRelease;
+    snapshotDigest: string;
     sourceId: string;
     idempotent: boolean;
   }> {
@@ -464,6 +471,10 @@ export class LoopgraphAppPublisher {
         updatedAt: timestamp
       });
       await atomicWriteJson(path.join(catalogRoot, PUBLISHED_CATALOG_FILE), catalog);
+      const snapshotDigest = catalogSnapshotDigestFromRecords({
+        artifacts: catalog.releases.map(({ appId, version, digest }) => ({ appId, version, digest })),
+        publishedCatalog: catalog
+      });
       const sourceId = `catalog.${catalogId}`;
       const sources = await this.marketplace.listCatalogSources();
       const existingSource = sources.find((source) => source.id === sourceId);
@@ -478,7 +489,7 @@ export class LoopgraphAppPublisher {
         trustedPublisherKeys
       });
       await this.marketplace.refreshCatalogSource(sourceId);
-      return { catalogId, catalogRoot, release, sourceId, idempotent };
+      return { catalogId, catalogRoot, release, snapshotDigest, sourceId, idempotent };
     } finally {
       await lock.close();
       await rm(lockPath, { force: true });
