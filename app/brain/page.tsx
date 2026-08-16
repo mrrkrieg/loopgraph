@@ -3,6 +3,15 @@ import { isHostedPreview } from "@/lib/hosted-preview";
 import { getSemanticTopology } from "@/lib/loop-engineering-builder/workspace";
 import { getGraphAuthoringContext } from "../../lib/loopgraph-runtime/graph-authoring-store-resolver";
 import { contentHash } from "loopgraph/core";
+import {
+  projectGraphEditorTransactionReceipts,
+  graphEditorTransactionReceipt
+} from "loopgraph/runtime";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
+  getLoopOpportunityStore
+} from "../../lib/loopgraph-runtime/storage-resolver";
 
 type BrainPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -26,12 +35,21 @@ export default async function BrainPage({ searchParams }: BrainPageProps) {
     graphAuthoringStore.getLayout(),
     graphAuthoringStore.list()
   ]);
+  const transactionReceipts = hostedPreview
+    ? transactions.map(graphEditorTransactionReceipt)
+    : await projectGraphEditorTransactionReceipts({
+        transactions,
+        opportunityStore: getLoopOpportunityStore({
+          projectRoot: getActiveLoopgraphProjectRoot()
+        }),
+        designStore: getHermesDesignStore()
+      });
 
   return (
     <BrainPageShell
       includeCatalogLoops={includeCatalogLoops}
       initialLayout={layout}
-      initialTransactions={transactions}
+      initialTransactions={transactionReceipts}
       previewMode={previewMode}
       topology={topology}
       topologyHash={contentHash({ nodes: topology.nodes, edges: topology.edges })}

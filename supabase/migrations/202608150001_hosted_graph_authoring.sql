@@ -140,7 +140,9 @@ begin
   loop
     if jsonb_typeof(v_operation) is distinct from 'object'
       or nullif(v_operation->>'kind', '') is null
-      or v_operation->>'kind' not in ('move_node', 'propose_node', 'propose_edge') then
+      or v_operation->>'kind' not in (
+        'move_node', 'propose_node', 'propose_edge', 'propose_lifecycle'
+      ) then
       raise exception 'invalid graph editor operation';
     end if;
     if v_operation->>'kind' = 'move_node' then
@@ -175,7 +177,7 @@ begin
         or length(v_operation->>'purpose') > 2000 then
         raise exception 'invalid graph editor node proposal';
       end if;
-    else
+    elsif v_operation->>'kind' = 'propose_edge' then
       v_semantic := true;
       if nullif(v_operation->>'sourceId', '') is null
         or length(v_operation->>'sourceId') > 240
@@ -188,6 +190,41 @@ begin
         or nullif(v_operation->>'reason', '') is null
         or length(v_operation->>'reason') > 2000 then
         raise exception 'invalid graph editor edge proposal';
+      end if;
+    else
+      v_semantic := true;
+      if nullif(v_operation->>'mode', '') is null
+        or v_operation->>'mode' not in ('improve', 'split', 'merge', 'retire')
+        or jsonb_typeof(v_operation->'targetNodeIds') is distinct from 'array'
+        or nullif(v_operation->>'reason', '') is null
+        or length(v_operation->>'reason') > 2000 then
+        raise exception 'invalid graph editor lifecycle proposal';
+      end if;
+      if jsonb_array_length(v_operation->'targetNodeIds') not between 1 and 10 then
+        raise exception 'invalid graph editor lifecycle proposal';
+      end if;
+      if exists (
+        select 1
+          from jsonb_array_elements(v_operation->'targetNodeIds') as target(value)
+         where jsonb_typeof(target.value) is distinct from 'string'
+            or length(target.value #>> '{}') not between 1 and 240
+      ) then
+        raise exception 'invalid graph editor lifecycle proposal';
+      end if;
+      if (
+        select count(*) <> count(distinct target.value #>> '{}')
+          from jsonb_array_elements(v_operation->'targetNodeIds') as target(value)
+      ) then
+        raise exception 'invalid graph editor lifecycle proposal';
+      end if;
+      if (
+          v_operation->>'mode' = 'merge'
+          and jsonb_array_length(v_operation->'targetNodeIds') < 2
+        ) or (
+          v_operation->>'mode' <> 'merge'
+          and jsonb_array_length(v_operation->'targetNodeIds') <> 1
+        ) then
+        raise exception 'invalid graph editor lifecycle proposal';
       end if;
     end if;
   end loop;

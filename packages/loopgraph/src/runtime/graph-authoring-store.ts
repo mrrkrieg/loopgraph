@@ -6,6 +6,7 @@ import { contentHash, graphEditorOperationSchema, graphEditorTransactionSchema, 
 export type GraphLayoutOverrides = Record<string, { x: number; y: number }>;
 
 export type SubmitGraphEditorTransactionInput = {
+  transactionId?: string;
   workspaceId: string;
   companyId: string;
   actorId: string;
@@ -74,7 +75,7 @@ export function createGraphEditorTransaction(
   );
   const semantic = operations.some((operation) => operation.kind !== "move_node");
   return graphEditorTransactionSchema.parse({
-    id: `graph_edit_${randomUUID()}`,
+    id: input.transactionId ?? `graph_edit_${randomUUID()}`,
     workspaceId: input.workspaceId,
     companyId: input.companyId,
     actorId: input.actorId,
