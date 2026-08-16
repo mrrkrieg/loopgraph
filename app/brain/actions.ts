@@ -150,9 +150,16 @@ export async function submitBrainGraphEditAction(formData: FormData) {
       }, stores);
       proposalLifecycle.push({
         opportunityId: result.opportunity.id,
+        kind: result.opportunity.kind,
+        status: result.opportunity.status,
+        title: result.opportunity.title,
+        department: result.opportunity.department,
+        targetLoopIds: result.opportunity.targetLoopIds,
         graphChangeSetId: result.graphChangeSet.id,
+        graphChangeSetStatus: result.graphChangeSet.status,
         designTaskId: result.designTask.id,
         discoverySessionId: result.designTask.sessionId,
+        updatedAt: result.opportunity.updatedAt,
         nextAction: result.nextAction
       });
     }
