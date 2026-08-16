@@ -1,6 +1,6 @@
 # Topology guide
 
-Topology is Loopgraph's **operating map**: a derived view of company loops, departments, runtime traces, escalation cases, and review pressure. It is not the source of truth — `loopgraph.yaml` and LoopSpecs are.
+Topology is Loopgraph's **operating map**: a derived view of Hermes Brain, company loops, departments, routing signals, evidence returns, runtime traces, escalation cases, and review pressure. Runnable behavior still comes from versioned LoopSpecs and approved semantic graph transactions.
 
 ## What to use it for
 
@@ -8,6 +8,7 @@ Topology is Loopgraph's **operating map**: a derived view of company loops, depa
 2. **Triage** — filter by department, attention, open cases, failed runs, or high hidden labor.
 3. **Inspect** — select a node and read health, connections, and runtime status in the Inspector.
 4. **Act** — use Inspector and Trace links to open loop detail, runs, reviews, cases, or management.
+5. **Author** — drag nodes to save a visual layout or propose a loop/connection from the graph editor.
 
 ## Recommended workflow
 
@@ -46,10 +47,17 @@ Create or configure loops via **New Loop**, then return to Topology to see them 
 
 URL params are bookmarkable, e.g. `/topology?node=loop:catalog_strategic-account-escalation&attention=1`.
 
-## What Topology does not do (V1)
+## Governed graph editing
 
-- Drag-and-drop loop authoring
-- Live execute or pause from the canvas
-- Full context provenance inspector (see trace detail pages instead)
+Moving nodes creates a layout-only backend receipt and never changes routing. Proposing a node or edge creates an immutable `proposal_pending` receipt. In hosted mode the receipt is scoped to the authenticated organization and project, records the operator, and is written through a membership-checking database function. Hermes must turn a semantic proposal into a valid design; the normal approval, rehearsal, readiness, and promotion gates still apply before the topology becomes runnable.
+
+The editor intentionally does not:
+
+- mutate an active routing graph directly;
+- live execute, pause, approve, or promote work from the canvas;
+- accept arbitrary edge kinds or unbounded graph payloads;
+- expose provider secrets or raw company records.
+
+Use the Hermes activity trace pages for full routing and execution provenance.
 
 See [DAN-WALKTHROUGH.md](./DAN-WALKTHROUGH.md) for the full governance demo.

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { SemanticTopology } from "@/lib/loopgraph-core/graph";
-import type { GraphEditorOperation } from "loopgraph/core";
+import type { GraphEditorOperation, GraphEditorTransaction } from "loopgraph/core";
 import type { GraphLayoutOverrides } from "loopgraph/runtime";
 import {
   buildBrainGraph,
@@ -56,6 +56,7 @@ export function LoopgraphBrainView({
   actions,
   includeCatalogLoops = false,
   initialLayout = {},
+  initialTransactions = [],
   previewMode = false,
   topologyHash,
   topology
@@ -63,6 +64,7 @@ export function LoopgraphBrainView({
   actions?: BrainGraphActions;
   includeCatalogLoops?: boolean;
   initialLayout?: GraphLayoutOverrides;
+  initialTransactions?: GraphEditorTransaction[];
   previewMode?: boolean;
   topologyHash: string;
   topology: SemanticTopology;
@@ -84,6 +86,9 @@ export function LoopgraphBrainView({
   const [editing, setEditing] = useState(false);
   const [pendingMoves, setPendingMoves] = useState<Record<string, { x: number; y: number }>>({});
   const [editMessage, setEditMessage] = useState<string>();
+  const [recentTransactions, setRecentTransactions] = useState(() =>
+    initialTransactions.slice(0, 5).map(summarizeTransaction)
+  );
   const [isSubmitting, startSubmitting] = useTransition();
   const baseGraph = useMemo(
     () => buildBrainGraph({
@@ -157,6 +162,12 @@ export function LoopgraphBrainView({
         setEditMessage(result.status === "layout_applied"
           ? `Layout saved (${result.id}).`
           : `Proposal submitted (${result.id}). Hermes design and approval are required before it becomes runnable.`);
+        setRecentTransactions((current) => [{
+          id: result.id,
+          status: result.status,
+          operationCount: operations.length,
+          createdAt: new Date().toISOString()
+        }, ...current.filter((item) => item.id !== result.id)].slice(0, 5));
         if (result.status === "layout_applied") setPendingMoves({});
       } catch (error) {
         setEditMessage(error instanceof Error ? error.message : "Graph edit failed");
@@ -198,15 +209,17 @@ export function LoopgraphBrainView({
             storyPreset={storyPreset}
           />
         </div>
-        {!previewMode && actions?.submitGraphEdit ? (
+        {!previewMode && !includeCatalogLoops && actions?.submitGraphEdit ? (
           <GraphEditorPanel
             editing={editing}
             isSubmitting={isSubmitting}
             message={editMessage}
             nodes={graph.nodes}
+            pendingMoveCount={Object.keys(pendingMoves).length}
             onEditingChange={setEditing}
             onSaveLayout={() => submitOperations(Object.entries(pendingMoves).map(([nodeId, position]) => ({ kind: "move_node" as const, nodeId, ...position })))}
             onSubmit={submitOperations}
+            recentTransactions={recentTransactions}
             selectedId={effectiveSelectedId}
           />
         ) : null}
@@ -239,7 +252,7 @@ export function LoopgraphBrainView({
   );
 }
 
-function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChange, onSaveLayout, onSubmit, selectedId }: {
+function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChange, onSaveLayout, onSubmit, pendingMoveCount, recentTransactions, selectedId }: {
   editing: boolean;
   isSubmitting: boolean;
   message?: string;
@@ -247,14 +260,17 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
   onEditingChange: (value: boolean) => void;
   onSaveLayout: () => void;
   onSubmit: (operations: GraphEditorOperation[]) => void;
+  pendingMoveCount: number;
+  recentTransactions: Array<{ id: string; status: string; operationCount: number; createdAt: string }>;
   selectedId?: string;
 }) {
   const [targetId, setTargetId] = useState("");
+  const [relation, setRelation] = useState<"brain_routes_to" | "department_contains_loop" | "learning_returns_to">("learning_returns_to");
   const [loopLabel, setLoopLabel] = useState("");
   const [departmentId, setDepartmentId] = useState("product");
   const [purpose, setPurpose] = useState("");
   return (
-    <div className="absolute right-4 top-4 z-20 w-80 rounded-md border border-line bg-white/95 p-3 text-xs shadow-lg backdrop-blur">
+    <div className="absolute right-4 top-36 z-20 max-h-[calc(100%-10rem)] w-80 max-w-[calc(100%-2rem)] overflow-y-auto rounded-md border border-line bg-white/95 p-3 text-xs shadow-lg backdrop-blur md:top-4 md:max-h-[calc(100%-2rem)]">
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="font-semibold text-ink">Graph editor</div>
@@ -263,7 +279,7 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
         <button className="rounded-md bg-ink px-3 py-2 font-semibold text-white" onClick={() => onEditingChange(!editing)} type="button">{editing ? "Done" : "Edit"}</button>
       </div>
       {editing ? <div className="mt-3 space-y-3 border-t border-line pt-3">
-        <button className="w-full rounded-md border border-ink px-3 py-2 font-semibold disabled:opacity-40" disabled={isSubmitting} onClick={onSaveLayout} type="button">Save moved nodes</button>
+        <button className="w-full rounded-md border border-ink px-3 py-2 font-semibold disabled:opacity-40" disabled={isSubmitting || pendingMoveCount === 0} onClick={onSaveLayout} type="button">Save moved nodes ({pendingMoveCount})</button>
         <div className="space-y-2 rounded-md bg-paper p-2">
           <div className="font-semibold">Propose a connection</div>
           <div className="text-ink/55">Source: {selectedId ?? "select a node"}</div>
@@ -271,7 +287,12 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
             <option value="">Choose target</option>
             {nodes.filter((node) => node.id !== selectedId).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
           </select>
-          <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!selectedId || !targetId || isSubmitting} onClick={() => onSubmit([{ kind: "propose_edge", sourceId: selectedId!, targetId, relation: "learning_returns_to", reason: "User-authored connection requiring Hermes validation." }])} type="button">Submit connection proposal</button>
+          <select className="w-full rounded border border-line bg-white p-2" onChange={(event) => setRelation(event.target.value as typeof relation)} value={relation}>
+            <option value="brain_routes_to">Hermes routes to</option>
+            <option value="department_contains_loop">Department owns loop</option>
+            <option value="learning_returns_to">Evidence returns to</option>
+          </select>
+          <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!selectedId || !targetId || isSubmitting} onClick={() => onSubmit([{ kind: "propose_edge", sourceId: selectedId!, targetId, relation, reason: "User-authored connection requiring Hermes validation." }])} type="button">Submit connection proposal</button>
         </div>
         <div className="space-y-2 rounded-md bg-paper p-2">
           <div className="font-semibold">Propose a workflow loop</div>
@@ -281,9 +302,25 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
           <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!loopLabel.trim() || !departmentId.trim() || !purpose.trim() || isSubmitting} onClick={() => onSubmit([{ kind: "propose_node", temporaryId: `draft:${Date.now()}`, nodeType: "workflow_loop", label: loopLabel, departmentId, purpose }])} type="button">Submit loop proposal</button>
         </div>
       </div> : null}
-      {message ? <div className="mt-3 rounded border border-line bg-paper p-2 leading-5 text-ink/65">{message}</div> : null}
+      {message ? <div aria-live="polite" className="mt-3 rounded border border-line bg-paper p-2 leading-5 text-ink/65">{message}</div> : null}
+      {recentTransactions.length > 0 ? <div className={`mt-3 border-t border-line pt-3 ${editing ? "" : "hidden sm:block"}`}>
+        <div className="font-semibold">Recent backend receipts</div>
+        <div className="mt-2 space-y-2">{recentTransactions.map((transaction) => <div className="rounded border border-line px-2 py-1.5" key={transaction.id}>
+          <div className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px]">{transaction.id}</span><span className="whitespace-nowrap text-[10px] font-semibold uppercase text-ink/45">{transaction.status.replace(/_/g, " ")}</span></div>
+          <div className="mt-1 text-[10px] text-ink/45">{transaction.operationCount} operation{transaction.operationCount === 1 ? "" : "s"} · {new Date(transaction.createdAt).toLocaleString()}</div>
+        </div>)}</div>
+      </div> : null}
     </div>
   );
+}
+
+function summarizeTransaction(transaction: GraphEditorTransaction) {
+  return {
+    id: transaction.id,
+    status: transaction.status,
+    operationCount: transaction.operations.length,
+    createdAt: transaction.createdAt
+  };
 }
 
 function PreviewTraceGuide({ storyPreset }: { storyPreset: BrainGraphStoryPreset }) {

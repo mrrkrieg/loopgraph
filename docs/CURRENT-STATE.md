@@ -22,7 +22,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - High-reasoning design receives a bounded `LoopDesignContext`; deterministic local design remains a fallback.
 - Accepted proposals compile into versioned LoopSpecs, routing cards, connection requirements, graph nodes, and three starter fixtures.
 - The company graph visualizes `Hermes Brain → Department → Loop` plus routing signals, evidence returns, opportunities, and graph changes.
-- The local graph editor submits backend transactions for layout moves and governed semantic node/edge proposals; semantic edits never bypass approval or promotion.
+- The local and hosted graph editor submits backend transactions for layout moves and governed semantic node/edge proposals. Hosted receipts are tenant/project scoped, actor-bound, immutable, and visible in the editor; semantic edits never bypass Hermes design, approval, readiness, or promotion.
 - Local workspaces show only their registered loops; the hosted preview can show a rich demonstration graph.
 
 ### Automatic opportunity detection

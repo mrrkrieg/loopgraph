@@ -5,7 +5,10 @@ import Link from "next/link";
 import type { BrainGraphEdge, BrainGraphNode } from "./graph-types";
 
 export type BrainGraphActions = {
-  submitGraphEdit?: (formData: FormData) => Promise<{ id: string; status: string }>;
+  submitGraphEdit?: (formData: FormData) => Promise<{
+    id: string;
+    status: "layout_applied" | "proposal_pending" | "rejected";
+  }>;
   validateLoop?: (formData: FormData) => void | Promise<void>;
   simulateFixture?: (formData: FormData) => void | Promise<void>;
   simulateManualEvent?: (formData: FormData) => void | Promise<void>;

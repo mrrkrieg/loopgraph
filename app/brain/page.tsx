@@ -1,8 +1,7 @@
 import { BrainPageShell } from "@/components/brain/brain-page-shell";
 import { isHostedPreview } from "@/lib/hosted-preview";
 import { getSemanticTopology } from "@/lib/loop-engineering-builder/workspace";
-import { FileGraphAuthoringStore, getLoopgraphRoot } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import { getGraphAuthoringContext } from "../../lib/loopgraph-runtime/graph-authoring-store-resolver";
 import { contentHash } from "loopgraph/core";
 
 type BrainPageProps = {
@@ -22,14 +21,17 @@ export default async function BrainPage({ searchParams }: BrainPageProps) {
     brainLabel: "Hermes Brain",
     hierarchyMode: "hermes_brain"
   });
-  const layout = await new FileGraphAuthoringStore(
-    getLoopgraphRoot(getActiveLoopgraphProjectRoot())
-  ).getLayout();
+  const { store: graphAuthoringStore } = await getGraphAuthoringContext("workspace.read");
+  const [layout, transactions] = await Promise.all([
+    graphAuthoringStore.getLayout(),
+    graphAuthoringStore.list()
+  ]);
 
   return (
     <BrainPageShell
       includeCatalogLoops={includeCatalogLoops}
       initialLayout={layout}
+      initialTransactions={transactions}
       previewMode={previewMode}
       topology={topology}
       topologyHash={contentHash({ nodes: topology.nodes, edges: topology.edges })}

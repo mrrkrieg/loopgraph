@@ -5,14 +5,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getActiveLoopgraphProjectRoot } from "../../lib/loopgraph-runtime/storage-resolver";
 import {
-  FileGraphAuthoringStore,
-  getLoopgraphRoot,
   simulateLoopForHermes,
   validateLoopForHermes
 } from "loopgraph/runtime";
 import { contentHash, graphEditorOperationSchema } from "loopgraph/core";
 import { getSemanticTopology } from "../../lib/loop-engineering-builder/workspace";
-import { isHostedAuthRequired } from "../../lib/auth/hosted-config";
+import { getGraphAuthoringContext } from "../../lib/loopgraph-runtime/graph-authoring-store-resolver";
 
 export async function validateBrainLoopAction(formData: FormData) {
   const loopId = requiredFormString(formData, "loopId");
@@ -83,9 +81,6 @@ export async function simulateBrainLoopManualEventAction(formData: FormData) {
 }
 
 export async function submitBrainGraphEditAction(formData: FormData) {
-  if (isHostedAuthRequired()) {
-    throw new Error("Direct graph authoring is local-only. Hosted semantic changes must use the authenticated graph change and approval API.");
-  }
   const raw = requiredFormString(formData, "operations");
   if (raw.length > 100_000) throw new Error("Graph edit payload exceeds 100KB");
   const value = JSON.parse(raw) as unknown;
@@ -99,11 +94,11 @@ export async function submitBrainGraphEditAction(formData: FormData) {
   const topologyHash = contentHash({ nodes: topology.nodes, edges: topology.edges });
   const suppliedHash = requiredFormString(formData, "expectedTopologyHash");
   if (suppliedHash !== topologyHash) throw new Error("The company topology changed. Refresh before submitting this graph edit.");
-  const projectRoot = getActiveLoopgraphProjectRoot();
-  const transaction = await new FileGraphAuthoringStore(getLoopgraphRoot(projectRoot)).submit({
-    workspaceId: process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "local",
-    companyId: process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim() || "local",
-    actorId: "loopgraph-ui",
+  const authoring = await getGraphAuthoringContext("loops.write");
+  const transaction = await authoring.store.submit({
+    workspaceId: authoring.workspaceId,
+    companyId: authoring.companyId,
+    actorId: authoring.actorId,
     expectedTopologyHash: topologyHash,
     operations
   });

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "loopgraph/core";
+import { contentHash, LOOPGRAPH_API_VERSION, LOOP_KIND } from "loopgraph/core";
 import { getLoopRunsForHermes } from "loopgraph/runtime";
 import { getSemanticTopology } from "../../lib/loop-engineering-builder/workspace";
 import { resetStorageAdapterCache } from "../../lib/loopgraph-runtime/storage-resolver";
@@ -12,6 +12,12 @@ import {
   submitBrainGraphEditAction,
   validateBrainLoopAction
 } from "./actions";
+
+const getGraphAuthoringContext = vi.hoisted(() => vi.fn());
+
+vi.mock("../../lib/loopgraph-runtime/graph-authoring-store-resolver", () => ({
+  getGraphAuthoringContext
+}));
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn()
@@ -151,14 +157,41 @@ describe("brain graph loop actions", () => {
     expect(runs.count).toBe(0);
   });
 
-  it("fails closed for direct hosted graph-authoring actions", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon");
-    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+  it("submits authenticated graph-authoring actions through the resolved backend store", async () => {
+    const { projectRoot } = await createHermesLoopProject();
+    vi.stubEnv("LOOPGRAPH_PROJECT_ROOT", projectRoot);
+    process.env.LOOPGRAPH_PROJECT_ROOT = projectRoot;
+    const topology = await getSemanticTopology(undefined, {
+      includeCatalogLoops: false,
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain"
+    });
+    const topologyHash = contentHash({ nodes: topology.nodes, edges: topology.edges });
+    const submit = vi.fn().mockResolvedValue({
+      id: "graph_edit_hosted_1",
+      status: "layout_applied"
+    });
+    getGraphAuthoringContext.mockResolvedValue({
+      store: { persistence: "distributed", submit, getLayout: vi.fn(), list: vi.fn() },
+      workspaceId: "main",
+      companyId: "123e4567-e89b-12d3-a456-426614174000",
+      actorId: "123e4567-e89b-12d3-a456-426614174001"
+    });
     const formData = new FormData();
     formData.set("operations", JSON.stringify([{ kind: "move_node", nodeId: "brain", x: 0, y: 0 }]));
-    formData.set("expectedTopologyHash", "aaaaaaaaaaaaaaaa");
-    await expect(submitBrainGraphEditAction(formData)).rejects.toThrow("local-only");
+    formData.set("expectedTopologyHash", topologyHash);
+
+    await expect(submitBrainGraphEditAction(formData)).resolves.toEqual({
+      id: "graph_edit_hosted_1",
+      status: "layout_applied"
+    });
+    expect(getGraphAuthoringContext).toHaveBeenCalledWith("loops.write");
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "main",
+      companyId: "123e4567-e89b-12d3-a456-426614174000",
+      actorId: "123e4567-e89b-12d3-a456-426614174001",
+      expectedTopologyHash: topologyHash
+    }));
   });
 });
 

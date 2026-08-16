@@ -177,7 +177,7 @@ Open the local company graph:
 npm run loopgraph -- studio --project . --start
 ```
 
-The printed URL opens the editable Hermes Brain topology. Layout changes are saved as graph transactions; semantic additions and connections remain governed proposals until they pass design, approval, readiness, and promotion checks.
+The printed URL opens the editable Hermes Brain topology. Local and hosted workspaces both save layout changes as backend graph transactions. Hosted receipts are tenant/project scoped and bound to the authenticated operator. Semantic additions and connections remain governed proposals until they pass Hermes design, approval, readiness, and promotion checks.
 
 For event rehearsal, workers, outcome measurements, controllers, and hosted deployment, continue with the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
 
