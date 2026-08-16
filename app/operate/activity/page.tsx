@@ -109,6 +109,7 @@ export default async function AgentActivityPage({
                     eyebrow={row.observedOutcomeCount > 0 ? "Outcome evidence" : "Current state"}
                     title={row.observedOutcomeCount > 0 ? `${row.observedOutcomeCount} observed` : humanize(row.jobStatus)}
                     detail={row.latestSummary ?? formatOperatingDate(row.updatedAt)}
+                    href={`/operate/activity/${encodeURIComponent(row.routeJobId)}`}
                     tone={row.needsAttention ? "red" : "green"}
                   />
                 </div>
@@ -159,7 +160,7 @@ export default async function AgentActivityPage({
           </form>
 
           <div className="mt-4 overflow-x-auto">
-            <table className="min-w-[920px] w-full border-collapse text-left text-sm">
+            <table className="min-w-[1000px] w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-line text-xs uppercase tracking-[0.12em] text-ink/40">
                   <th className="px-2 py-3">Signal</th>
@@ -168,6 +169,7 @@ export default async function AgentActivityPage({
                   <th className="px-2 py-3">Work</th>
                   <th className="px-2 py-3">Status</th>
                   <th className="px-2 py-3">Updated</th>
+                  <th className="px-2 py-3">Trace</th>
                 </tr>
               </thead>
               <tbody>
@@ -179,6 +181,7 @@ export default async function AgentActivityPage({
                     <td className="px-2 py-3 text-ink/65">{row.completedTaskCount}/{row.taskCount} tasks · {row.toolCallCount} tools · {row.outputCount} outputs</td>
                     <td className="px-2 py-3"><StatusPill>{humanize(row.jobStatus)}</StatusPill></td>
                     <td className="px-2 py-3 text-xs text-ink/50">{formatOperatingDate(row.updatedAt)}</td>
+                    <td className="px-2 py-3"><Link className="text-xs font-semibold text-signal hover:underline" href={`/operate/activity/${encodeURIComponent(row.routeJobId)}`}>Open trace</Link></td>
                   </tr>
                 ))}
               </tbody>
@@ -190,7 +193,7 @@ export default async function AgentActivityPage({
   );
 }
 
-function FlowCard({ eyebrow, title, detail, tone }: { eyebrow: string; title: string; detail: string; tone: "blue" | "dark" | "orange" | "purple" | "green" | "red" }) {
+function FlowCard({ eyebrow, title, detail, tone, href }: { eyebrow: string; title: string; detail: string; tone: "blue" | "dark" | "orange" | "purple" | "green" | "red"; href?: string }) {
   const tones = {
     blue: "border-blue-200 bg-blue-50",
     dark: "border-ink bg-ink text-white",
@@ -199,13 +202,15 @@ function FlowCard({ eyebrow, title, detail, tone }: { eyebrow: string; title: st
     green: "border-emerald-200 bg-emerald-50",
     red: "border-red-200 bg-red-50"
   } as const;
-  return (
+  const content = (
     <div className={`min-h-28 rounded-lg border p-3 shadow-sm ${tones[tone]}`}>
       <div className={`text-[10px] font-semibold uppercase tracking-[0.13em] ${tone === "dark" ? "text-white/55" : "text-ink/40"}`}>{eyebrow}</div>
       <div className="mt-1.5 text-sm font-semibold leading-5">{title}</div>
       <div className={`mt-2 line-clamp-3 text-xs leading-4 ${tone === "dark" ? "text-white/65" : "text-ink/55"}`}>{detail}</div>
+      {href ? <div className="mt-2 text-[11px] font-semibold">Open trace →</div> : null}
     </div>
   );
+  return href ? <Link className="rounded-lg focus:outline-none focus:ring-2 focus:ring-signal" href={href}>{content}</Link> : content;
 }
 
 function FlowArrow({ label }: { label: string }) {

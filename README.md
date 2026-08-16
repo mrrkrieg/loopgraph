@@ -465,6 +465,7 @@ Implemented today:
 - Hermes-guided discovery and structured LoopSpec generation;
 - editable, governed company topology and semantic graph transactions;
 - durable event routing, route jobs, execution assignments, and receipts;
+- per-assignment Hermes traces that join the routing reason, selected loop, bounded agent work, approvals, outputs, outcomes, corrections, and learning receipts without exposing raw provider records or tool payloads;
 - local simulation and generated positive, missing-context, and risk fixtures;
 - department loop and Hermes operating-skill libraries;
 - outcomes, continuous improvement opportunities, controller decisions, and net-value evidence;

@@ -7,7 +7,11 @@ import type {
 } from "../core";
 import type { StorageAdapter } from "../sdk/adapters";
 import { FileStorageAdapter } from "../sdk/storage";
-import { loadEventRoutingOperations, type EventRoutingOperationsReadModel } from "./event-routing-read-model";
+import {
+  loadEventRoutingOperations,
+  type EventRoutingOperationsReadModel,
+  type EventRoutingOperationsRow
+} from "./event-routing-read-model";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
 import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
@@ -94,6 +98,74 @@ export type AgentOperationsReadModel = {
   };
 };
 
+export type AgentOperationsTraceDetail = {
+  schemaVersion: "agent-operations-trace/v1alpha1";
+  generatedAt: string;
+  activity: AgentOperationsActivityRow;
+  routing: {
+    action: EventRoutingOperationsRow["action"];
+    confidence?: number;
+    catalogVersion?: string;
+    policyVersion?: string;
+    needsHumanChoice: boolean;
+    needsCorrection: boolean;
+    selectedRoutes: Array<{
+      loopId: string;
+      loopLabel: string;
+      role: string;
+      confidence: number;
+      reasonSummary: string;
+      evidenceRefCount: number;
+      priority: number;
+    }>;
+    alternatives: EventRoutingOperationsRow["decisionDetail"]["alternatives"];
+    timeline: EventRoutingOperationsRow["correlationTimeline"];
+  };
+  execution: {
+    timeline: Array<{
+      id: string;
+      sequence: number;
+      eventType: HermesExecutionEvent["eventType"];
+      occurredAt: string;
+      summary?: string;
+      task?: { id: string; label: string; owner?: string };
+      tool?: { callId: string; toolKey: string };
+      approval?: { id: string; status: string; requestedRole?: string };
+      output?: { id: string; type: string; label: string };
+      outcome?: { metricKey: string; value: number; unit?: string };
+      error?: { code: string; retryable: boolean };
+    }>;
+    tasks: Array<{
+      id: string;
+      label: string;
+      owner?: string;
+      status: string;
+      summary?: string;
+      startedAt?: string;
+      completedAt?: string;
+      errorCode?: string;
+    }>;
+    toolCalls: Array<{
+      id: string;
+      toolKey: string;
+      status: string;
+      startedAt: string;
+      completedAt?: string;
+    }>;
+    approvals: Array<{
+      id: string;
+      status: string;
+      role: string;
+      createdAt: string;
+      decidedAt?: string;
+    }>;
+    outputs: Array<{ id: string; type: string }>;
+    outcomes: Array<{ name: string; value: number; unit?: string; observed: boolean }>;
+    verification: Array<{ verifierId: string; passed: boolean; summary: string }>;
+    errors: Array<{ code: string; at: string }>;
+  };
+};
+
 export async function loadAgentOperationsReadModel(input: AgentOperationsFilters & {
   projectRoot?: string;
   now?: Date;
@@ -160,6 +232,132 @@ export async function loadAgentOperationsReadModel(input: AgentOperationsFilters
     agents: decoratedAgents,
     activity,
     topology: buildTopology(activity)
+  };
+}
+
+export async function loadAgentOperationsTraceDetail(input: {
+  routeJobId: string;
+  projectRoot?: string;
+  now?: Date;
+  routingStore?: RoutingStore;
+  operationsStore?: HermesOperationsStore;
+  storage?: StorageAdapter;
+  loopSpecStore?: LoopSpecRegistryStore;
+}): Promise<AgentOperationsTraceDetail | null> {
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const root = getLoopgraphRoot(projectRoot);
+  const routingStore = input.routingStore ?? new FileRoutingStore(root);
+  const operationsStore = input.operationsStore ?? new FileHermesOperationsStore(root);
+  const storage = input.storage ?? new FileStorageAdapter(root);
+  const job = await routingStore.getRouteJob(input.routeJobId);
+  if (!job) return null;
+
+  const [routing, agents, executionEvents, trace] = await Promise.all([
+    loadEventRoutingOperations({
+      projectRoot,
+      eventId: job.eventId,
+      limit: 50,
+      store: routingStore,
+      loopSpecStore: input.loopSpecStore,
+      now: input.now
+    }),
+    operationsStore.listAgentInstances(),
+    operationsStore.listExecutionEvents({ routeJobId: job.id, limit: 1_000 }),
+    storage.getRun(job.runId)
+  ]);
+  const routingRow = routing.rows.find((row) => row.decisionDetail.routeJobs.some((candidate) => candidate.id === job.id));
+  if (!routingRow) return null;
+  const activity = buildActivity({
+    routing,
+    traceById: new Map(trace ? [[trace.id, trace]] : []),
+    agentById: new Map(agents.map((agent) => [agent.id, agent])),
+    eventsByJob: new Map([[job.id, executionEvents]]),
+    catalogByLoop: new Map(routing.routingCatalog.map((item) => [item.loopId, item]))
+  }).find((row) => row.routeJobId === job.id);
+  if (!activity) return null;
+
+  return buildAgentOperationsTraceDetail({
+    activity,
+    routing: routingRow,
+    executionEvents,
+    trace,
+    generatedAt: (input.now ?? new Date()).toISOString()
+  });
+}
+
+export function buildAgentOperationsTraceDetail(input: {
+  activity: AgentOperationsActivityRow;
+  routing: EventRoutingOperationsRow;
+  executionEvents: HermesExecutionEvent[];
+  trace: LoopRunTrace | null;
+  generatedAt: string;
+}): AgentOperationsTraceDetail {
+  const trace = input.trace;
+  return {
+    schemaVersion: "agent-operations-trace/v1alpha1",
+    generatedAt: input.generatedAt,
+    activity: input.activity,
+    routing: {
+      action: input.routing.action,
+      ...(input.routing.confidence !== undefined ? { confidence: input.routing.confidence } : {}),
+      ...(input.routing.decisionDetail.catalogVersion ? { catalogVersion: input.routing.decisionDetail.catalogVersion } : {}),
+      ...(input.routing.decisionDetail.policyVersion ? { policyVersion: input.routing.decisionDetail.policyVersion } : {}),
+      needsHumanChoice: input.routing.needsHumanChoice,
+      needsCorrection: input.routing.needsCorrection,
+      selectedRoutes: input.routing.decisionDetail.selectedRoutes.map((route) => ({
+        loopId: route.loopId,
+        loopLabel: route.loopLabel,
+        role: route.role,
+        confidence: route.confidence,
+        reasonSummary: route.reasonSummary,
+        evidenceRefCount: route.evidenceRefs.length,
+        priority: route.priority
+      })),
+      alternatives: input.routing.decisionDetail.alternatives,
+      timeline: input.routing.correlationTimeline
+    },
+    execution: {
+      timeline: [...input.executionEvents]
+        .sort((left, right) => left.sequence - right.sequence)
+        .map(projectExecutionEvent),
+      tasks: (trace?.taskRuns ?? []).map((task) => ({
+        id: task.id,
+        label: task.label,
+        ...(task.owner ? { owner: task.owner } : {}),
+        status: task.status,
+        ...(task.summary ? { summary: task.summary } : {}),
+        ...(task.startedAt ? { startedAt: task.startedAt } : {}),
+        ...(task.completedAt ? { completedAt: task.completedAt } : {}),
+        ...(task.error?.code ? { errorCode: task.error.code } : {})
+      })),
+      toolCalls: (trace?.toolCalls ?? []).map((tool) => ({
+        id: tool.id,
+        toolKey: tool.toolKey,
+        status: tool.status,
+        startedAt: tool.startedAt,
+        ...(tool.completedAt ? { completedAt: tool.completedAt } : {})
+      })),
+      approvals: (trace?.humanReviews ?? []).map((approval) => ({
+        id: approval.id,
+        status: approval.status,
+        role: approval.role,
+        createdAt: approval.createdAt,
+        ...(approval.decidedAt ? { decidedAt: approval.decidedAt } : {})
+      })),
+      outputs: (trace?.outputs ?? []).map((output) => ({ id: output.id, type: output.type })),
+      outcomes: (trace?.metrics ?? []).map((metric) => ({
+        name: metric.name,
+        value: metric.value,
+        ...(metric.unit ? { unit: metric.unit } : {}),
+        observed: metric.observed
+      })),
+      verification: (trace?.verificationResults ?? []).map((verification) => ({
+        verifierId: verification.verifierId,
+        passed: verification.passed,
+        summary: verification.summary
+      })),
+      errors: (trace?.errors ?? []).map((error) => ({ code: error.code, at: error.at }))
+    }
   };
 }
 
@@ -248,6 +446,40 @@ function buildTopology(activity: AgentOperationsActivityRow[]): AgentOperationsR
     }
   }
   return { nodes: [...nodes.values()], edges: [...edges.values()] };
+}
+
+function projectExecutionEvent(event: HermesExecutionEvent): AgentOperationsTraceDetail["execution"]["timeline"][number] {
+  return {
+    id: event.id,
+    sequence: event.sequence,
+    eventType: event.eventType,
+    occurredAt: event.occurredAt,
+    ...(event.summary ? { summary: event.summary } : {}),
+    ...(event.task ? {
+      task: {
+        id: event.task.id,
+        label: event.task.label,
+        ...(event.task.owner ? { owner: event.task.owner } : {})
+      }
+    } : {}),
+    ...(event.tool ? { tool: { callId: event.tool.callId, toolKey: event.tool.toolKey } } : {}),
+    ...(event.approval ? {
+      approval: {
+        id: event.approval.id,
+        status: event.approval.status,
+        ...(event.approval.requestedRole ? { requestedRole: event.approval.requestedRole } : {})
+      }
+    } : {}),
+    ...(event.output ? { output: { id: event.output.id, type: event.output.type, label: event.output.label } } : {}),
+    ...(event.outcome ? {
+      outcome: {
+        metricKey: event.outcome.metricKey,
+        value: event.outcome.value,
+        ...(event.outcome.unit ? { unit: event.outcome.unit } : {})
+      }
+    } : {}),
+    ...(event.error ? { error: { code: event.error.code, retryable: event.error.retryable } } : {})
+  };
 }
 
 function groupEventsByJob(events: HermesExecutionEvent[]): Map<string, HermesExecutionEvent[]> {
