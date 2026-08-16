@@ -311,9 +311,9 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_sign", description: "Create and verify a detached Ed25519 signature over the exact immutable pack digest.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_publish", description: "Publish a signed immutable version into a trusted project-local private catalog and refresh marketplace metadata.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_release_status", description: "Deprecate or revoke an exact published app version and propagate that status into marketplace resolution.", readOnly: false, idempotent: true, destructive: true },
-  { name: "loopgraph_marketplace_sources_get", description: "List configured official, local, and private signed marketplace sources and their trust policy.", readOnly: true, idempotent: true, destructive: false },
-  { name: "loopgraph_marketplace_source_add", description: "Register an explicit catalog source; signed sources must pin exact publisher public keys.", readOnly: false, idempotent: true, destructive: false },
-  { name: "loopgraph_marketplace_source_refresh", description: "Revalidate and refresh one configured catalog source into the local marketplace index.", readOnly: false, idempotent: true, destructive: false }
+  { name: "loopgraph_marketplace_sources_get", description: "List configured official, local, signed GitHub, and private marketplace sources with their trust policy.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_marketplace_source_add", description: "Register an explicit catalog source; GitHub sources must pin a commit, snapshot digest, and exact publisher public keys.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_marketplace_source_refresh", description: "Synchronize, revalidate, and refresh one configured catalog source into the local marketplace index without installing it.", readOnly: false, idempotent: true, destructive: false }
 ] as const satisfies ReadonlyArray<{
   name: LoopgraphAppToolName;
   description: string;
@@ -329,7 +329,11 @@ export async function callLoopgraphAppTool(
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
   const projectRoot = path.resolve(typeof raw.projectRoot === "string" ? raw.projectRoot : options.projectRoot ?? process.cwd());
-  const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "apps", "marketplace"));
+  const marketplace = new LocalAppMarketplace(
+    path.join(projectRoot, ".loopgraph", "apps", "marketplace"),
+    undefined,
+    { trustedGitHosts: trustedGitHostsFromEnvironment() }
+  );
   if (!APP_PUBLISHER_TOOL_NAMES.has(name)) await marketplace.refreshAllCatalogSources();
 
   if (name === "loopgraph_marketplace_search") {
@@ -685,6 +689,18 @@ async function resolveIdentity(projectRoot: string, workspaceInput: unknown, com
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function trustedGitHostsFromEnvironment(): string[] | undefined {
+  const value = process.env.LOOPGRAPH_TRUSTED_GIT_HOSTS;
+  if (!value) return undefined;
+  const hosts = Array.from(new Set(value.split(",").map((host) => host.trim().toLowerCase()).filter(Boolean)));
+  for (const host of hosts) {
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*$/.test(host)) {
+      throw new Error(`Invalid LOOPGRAPH_TRUSTED_GIT_HOSTS entry: ${host}`);
+    }
+  }
+  return hosts.length > 0 ? hosts : undefined;
 }
 
 async function readPackDocument(root: string, relativePath: string): Promise<unknown> {

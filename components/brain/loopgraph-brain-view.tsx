@@ -3,8 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import type { SemanticTopology } from "@/lib/loopgraph-core/graph";
-import type { GraphEditorOperation, GraphEditorTransaction } from "loopgraph/core";
-import type { GraphLayoutOverrides } from "loopgraph/runtime";
+import type { GraphEditorOperation } from "loopgraph/core";
+import type {
+  GraphEditorProposalLifecycleReference,
+  GraphEditorTransactionReceipt,
+  GraphLayoutOverrides
+} from "loopgraph/runtime";
 import {
   buildBrainGraph,
   filterBrainGraphByDepth,
@@ -14,6 +18,10 @@ import { GraphControls } from "./graph-controls";
 import { GraphDiagnostics } from "./graph-diagnostics";
 import { NodeInspector } from "./node-inspector";
 import { ObsidianGraphCanvas } from "./obsidian-graph-canvas";
+import {
+  applyProposalLifecycleOverlay,
+  pendingGraphProposalLifecycles
+} from "./proposal-lifecycle-overlay";
 import type { BrainGraphMode, BrainGraphSettings, BrainGraphStoryPreset } from "./graph-types";
 import type { BrainGraphActions } from "./node-inspector";
 
@@ -65,7 +73,7 @@ export function LoopgraphBrainView({
   actions?: BrainGraphActions;
   includeCatalogLoops?: boolean;
   initialLayout?: GraphLayoutOverrides;
-  initialTransactions?: GraphEditorTransaction[];
+  initialTransactions?: GraphEditorTransactionReceipt[];
   previewMode?: boolean;
   topologyHash: string;
   topology: SemanticTopology;
@@ -90,16 +98,23 @@ export function LoopgraphBrainView({
   const [recentTransactions, setRecentTransactions] = useState(() =>
     initialTransactions.slice(0, 5).map(summarizeTransaction)
   );
+  const [proposalLifecycles, setProposalLifecycles] = useState(() =>
+    initialTransactions.flatMap((receipt) => receipt.proposalLifecycle)
+  );
   const [isSubmitting, startSubmitting] = useTransition();
-  const baseGraph = useMemo(
-    () => buildBrainGraph({
+  const pendingProposalLifecycles = useMemo(
+    () => pendingGraphProposalLifecycles(proposalLifecycles),
+    [proposalLifecycles]
+  );
+  const baseGraph = useMemo(() => applyProposalLifecycleOverlay({
+    graph: buildBrainGraph({
       topology,
       includeCatalogLoops,
       previewStory: previewMode,
       ...settings
     }),
-    [includeCatalogLoops, previewMode, settings, topology]
-  );
+    lifecycles: pendingProposalLifecycles
+  }), [includeCatalogLoops, pendingProposalLifecycles, previewMode, settings, topology]);
   const storyBaseGraph = useMemo(() => {
     if (storyPreset !== "product_path") {
       return baseGraph;
@@ -161,24 +176,29 @@ export function LoopgraphBrainView({
         formData.set("operations", JSON.stringify(operations));
         const result = await actions.submitGraphEdit!(formData);
         const lifecycle = result.proposalLifecycle[0];
+        const lifecycleCount = result.proposalLifecycle.length;
         setEditMessage(result.status === "layout_applied"
           ? `Layout saved (${result.id}).`
           : lifecycle?.nextAction === "answer_questions"
-            ? `Proposal submitted (${result.id}). Hermes opened design task ${lifecycle.designTaskId}; answer the requested evidence questions before design continues.`
+            ? `${lifecycleCount} proposal${lifecycleCount === 1 ? "" : "s"} submitted (${result.id}). Hermes opened the governed design lifecycle; answer the requested evidence questions before design continues.`
             : lifecycle?.nextAction === "review_proposal"
-              ? `Proposal submitted (${result.id}). Change set ${lifecycle.graphChangeSetId} is ready for accountable review.`
-              : `Proposal submitted (${result.id}). Hermes design task ${lifecycle?.designTaskId ?? "is queued"}; approval is still required before it becomes runnable.`);
+              ? `${lifecycleCount} proposal${lifecycleCount === 1 ? "" : "s"} submitted (${result.id}). The governed change set is ready for accountable review.`
+              : `${lifecycleCount} proposal${lifecycleCount === 1 ? "" : "s"} submitted (${result.id}). Hermes design is queued; approval is still required before anything becomes runnable.`);
         setRecentTransactions((current) => [{
           id: result.id,
           status: result.status,
           operationCount: operations.length,
           createdAt: new Date().toISOString(),
-          opportunityId: lifecycle?.opportunityId,
-          graphChangeSetId: lifecycle?.graphChangeSetId,
-          designTaskId: lifecycle?.designTaskId,
-          discoverySessionId: lifecycle?.discoverySessionId,
-          nextAction: lifecycle?.nextAction
+          proposalLifecycle: result.proposalLifecycle
         }, ...current.filter((item) => item.id !== result.id)].slice(0, 5));
+        setProposalLifecycles((current) => [
+          ...result.proposalLifecycle,
+          ...current.filter((item) =>
+            !result.proposalLifecycle.some((incoming) =>
+              incoming.opportunityId === item.opportunityId
+            )
+          )
+        ]);
         if (result.status === "layout_applied") setPendingMoves({});
       } catch (error) {
         setEditMessage(error instanceof Error ? error.message : "Graph edit failed");
@@ -235,6 +255,15 @@ export function LoopgraphBrainView({
           />
         ) : null}
         {previewMode ? <PreviewTraceGuide storyPreset={storyPreset} /> : null}
+        {!previewMode && pendingProposalLifecycles.length > 0 ? (
+          <div className="absolute left-4 top-24 z-10 max-w-sm rounded-md border border-amber-300 bg-amber-50/95 px-3 py-2 text-xs leading-5 text-amber-950 shadow-sm backdrop-blur">
+            <span className="font-semibold">
+              {pendingProposalLifecycles.length} pending Hermes graph proposal{pendingProposalLifecycles.length === 1 ? "" : "s"}
+            </span>
+            <span className="ml-1">Amber rings mark affected live loops. Proposals do not change routing until approved and applied.</span>
+            <Link className="ml-2 font-semibold underline underline-offset-2" href="/operate/changes">Review changes</Link>
+          </div>
+        ) : null}
         <div className="absolute bottom-4 left-4 z-10 max-w-xl space-y-2">
           <div className="rounded-md border border-line bg-white/95 px-3 py-2 text-xs font-medium text-ink/65 shadow-sm backdrop-blur">
             {breadcrumb.join(" / ")}
@@ -277,11 +306,7 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
     status: string;
     operationCount: number;
     createdAt: string;
-    opportunityId?: string;
-    graphChangeSetId?: string;
-    designTaskId?: string;
-    discoverySessionId?: string;
-    nextAction?: "answer_questions" | "await_hermes" | "review_proposal";
+    proposalLifecycle: GraphEditorProposalLifecycleReference[];
   }>;
   selectedId?: string;
 }) {
@@ -290,7 +315,21 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
   const [loopLabel, setLoopLabel] = useState("");
   const [departmentId, setDepartmentId] = useState("product");
   const [purpose, setPurpose] = useState("");
+  const [lifecycleMode, setLifecycleMode] = useState<"improve" | "split" | "merge" | "retire">("improve");
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [mergeTargetId, setMergeTargetId] = useState("");
   const sourceNode = nodes.find((node) => node.id === selectedId);
+  const selectedWorkflow = sourceNode?.type === "workflow_loop" && sourceNode.loopId
+    ? sourceNode
+    : undefined;
+  const mergeTargets = selectedWorkflow
+    ? nodes.filter((node) =>
+      node.type === "workflow_loop" &&
+      Boolean(node.loopId) &&
+      node.id !== selectedWorkflow.id &&
+      node.departmentId === selectedWorkflow.departmentId
+    )
+    : [];
   const validSource = relation === "brain_routes_to"
     ? sourceNode?.type === "company_brain"
     : relation === "department_contains_loop"
@@ -346,16 +385,71 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
           <textarea className="w-full rounded border border-line bg-white p-2" onChange={(event) => setPurpose(event.target.value)} placeholder="Problem this loop should solve" value={purpose} />
           <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!loopLabel.trim() || !departmentId.trim() || !purpose.trim() || isSubmitting} onClick={() => onSubmit([{ kind: "propose_node", temporaryId: `draft:${Date.now()}`, nodeType: "workflow_loop", label: loopLabel, departmentId, purpose }])} type="button">Submit loop proposal</button>
         </div>
+        <div className="space-y-2 rounded-md bg-paper p-2">
+          <div className="font-semibold">Change an existing loop</div>
+          <div className="text-ink/55">
+            {selectedWorkflow
+              ? `Selected: ${selectedWorkflow.label}`
+              : "Select a registered workflow loop on the map."}
+          </div>
+          <select
+            aria-label="Lifecycle change"
+            className="w-full rounded border border-line bg-white p-2"
+            onChange={(event) => {
+              setLifecycleMode(event.target.value as typeof lifecycleMode);
+              setMergeTargetId("");
+            }}
+            value={lifecycleMode}
+          >
+            <option value="improve">Improve this loop</option>
+            <option value="split">Split into focused loops</option>
+            <option value="merge">Merge with another loop</option>
+            <option value="retire">Retire this loop</option>
+          </select>
+          {lifecycleMode === "merge" ? <select
+            aria-label="Loop to merge"
+            className="w-full rounded border border-line bg-white p-2"
+            disabled={!selectedWorkflow}
+            onChange={(event) => setMergeTargetId(event.target.value)}
+            value={mergeTargetId}
+          >
+            <option value="">Choose a loop in the same department</option>
+            {mergeTargets.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
+          </select> : null}
+          <textarea
+            aria-label="Lifecycle change reason"
+            className="w-full rounded border border-line bg-white p-2"
+            onChange={(event) => setLifecycleReason(event.target.value)}
+            placeholder="Why should Hermes make this change? Include the problem and expected outcome."
+            value={lifecycleReason}
+          />
+          <div className="text-[11px] leading-4 text-ink/55">
+            Hermes checks current evidence and missing context before creating a governed change set. This does not alter the live loop.
+          </div>
+          <button
+            className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40"
+            disabled={!selectedWorkflow || !lifecycleReason.trim() || (lifecycleMode === "merge" && !mergeTargetId) || isSubmitting}
+            onClick={() => onSubmit([{
+              kind: "propose_lifecycle",
+              mode: lifecycleMode,
+              targetNodeIds: lifecycleMode === "merge"
+                ? [selectedWorkflow!.id, mergeTargetId]
+                : [selectedWorkflow!.id],
+              reason: lifecycleReason
+            }])}
+            type="button"
+          >Submit lifecycle proposal</button>
+        </div>
       </div> : null}
       {message ? <div aria-live="polite" className="mt-3 rounded border border-line bg-paper p-2 leading-5 text-ink/65">{message}</div> : null}
       {recentTransactions.length > 0 ? <div className={`mt-3 border-t border-line pt-3 ${editing ? "" : "hidden sm:block"}`}>
         <div className="font-semibold">Recent backend receipts</div>
         <div className="mt-2 space-y-2">{recentTransactions.map((transaction) => <div className="rounded border border-line px-2 py-1.5" key={transaction.id}>
           <div className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px]">{transaction.id}</span><span className="whitespace-nowrap text-[10px] font-semibold uppercase text-ink/45">{transaction.status.replace(/_/g, " ")}</span></div>
-          <div className="mt-1 text-[10px] text-ink/45">{transaction.operationCount} operation{transaction.operationCount === 1 ? "" : "s"} · {new Date(transaction.createdAt).toLocaleString()}</div>
-          {transaction.graphChangeSetId ? <div className="mt-2 flex flex-wrap gap-2">
-            <Link className="font-semibold text-ink underline underline-offset-2" href="/operate/changes">Review change</Link>
-            {transaction.nextAction === "answer_questions" && transaction.discoverySessionId ? <Link className="font-semibold text-ink underline underline-offset-2" href={`/discovery/questions?sessionId=${encodeURIComponent(transaction.discoverySessionId)}`}>Answer Hermes</Link> : null}
+          <div className="mt-1 text-[10px] text-ink/45">{transaction.operationCount} operation{transaction.operationCount === 1 ? "" : "s"} · {transaction.proposalLifecycle.length} governed proposal{transaction.proposalLifecycle.length === 1 ? "" : "s"} · {new Date(transaction.createdAt).toLocaleString()}</div>
+          {transaction.proposalLifecycle.some((lifecycle) => lifecycle.graphChangeSetId) ? <div className="mt-2 flex flex-wrap gap-2">
+            <Link className="font-semibold text-ink underline underline-offset-2" href="/operate/changes">Review {transaction.proposalLifecycle.length === 1 ? "change" : "changes"}</Link>
+            {transaction.proposalLifecycle.filter((lifecycle) => lifecycle.nextAction === "answer_questions" && lifecycle.discoverySessionId).map((lifecycle, index) => <Link className="font-semibold text-ink underline underline-offset-2" href={`/discovery/questions?sessionId=${encodeURIComponent(lifecycle.discoverySessionId!)}`} key={lifecycle.opportunityId}>Answer Hermes{transaction.proposalLifecycle.length === 1 ? "" : ` ${index + 1}`}</Link>)}
           </div> : null}
         </div>)}</div>
       </div> : null}
@@ -363,12 +457,13 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
   );
 }
 
-function summarizeTransaction(transaction: GraphEditorTransaction) {
+function summarizeTransaction(transaction: GraphEditorTransactionReceipt) {
   return {
-    id: transaction.id,
-    status: transaction.status,
-    operationCount: transaction.operations.length,
-    createdAt: transaction.createdAt
+    id: transaction.transaction.id,
+    status: transaction.transaction.status,
+    operationCount: transaction.transaction.operations.length,
+    createdAt: transaction.transaction.createdAt,
+    proposalLifecycle: transaction.proposalLifecycle
   };
 }
 

@@ -6,8 +6,10 @@ import {
   submitBrainGraphEditAction,
   validateBrainLoopAction
 } from "@/app/brain/actions";
-import type { GraphEditorTransaction } from "loopgraph/core";
-import type { GraphLayoutOverrides } from "loopgraph/runtime";
+import type {
+  GraphEditorTransactionReceipt,
+  GraphLayoutOverrides
+} from "loopgraph/runtime";
 import { LoopgraphBrainView } from "./loopgraph-brain-view";
 
 export function BrainPageShell({
@@ -20,7 +22,7 @@ export function BrainPageShell({
 }: {
   includeCatalogLoops?: boolean;
   initialLayout?: GraphLayoutOverrides;
-  initialTransactions?: GraphEditorTransaction[];
+  initialTransactions?: GraphEditorTransactionReceipt[];
   previewMode?: boolean;
   topologyHash: string;
   topology: SemanticTopology;
