@@ -463,7 +463,7 @@ Loopgraph is in active early development.
 Implemented today:
 
 - Hermes-guided discovery and structured LoopSpec generation;
-- editable, governed company topology and semantic graph transactions;
+- editable, governed company topology with add, connect, improve, split, merge, and retire proposals;
 - durable event routing, route jobs, execution assignments, and receipts;
 - local simulation and generated positive, missing-context, and risk fixtures;
 - department loop and Hermes operating-skill libraries;

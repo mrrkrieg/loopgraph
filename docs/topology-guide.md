@@ -8,7 +8,7 @@ Topology is Loopgraph's **operating map**: a derived view of Hermes Brain, compa
 2. **Triage** — filter by department, attention, open cases, failed runs, or high hidden labor.
 3. **Inspect** — select a node and read health, connections, and runtime status in the Inspector.
 4. **Act** — use Inspector and Trace links to open loop detail, runs, reviews, cases, or management.
-5. **Author** — drag nodes to save a visual layout or propose a loop/connection from the graph editor.
+5. **Author** — drag nodes to save a visual layout, propose a loop/connection, or propose improving, splitting, merging, or retiring an existing loop.
 
 ## Recommended workflow
 
@@ -49,7 +49,7 @@ URL params are bookmarkable, e.g. `/topology?node=loop:catalog_strategic-account
 
 ## Governed graph editing
 
-Moving nodes creates a layout-only backend receipt and never changes routing. Proposing a workflow loop or valid workflow connection creates an immutable `proposal_pending` receipt, an explainable loop opportunity, and a versioned graph change set, then starts or reuses a durable Hermes design task. If the company context is incomplete, the editor points to the exact discovery questions that block design. In hosted mode every receipt is scoped to the authenticated organization and project, records the operator, and is written through a membership-checking database function. The normal approval, rehearsal, readiness, and promotion gates still apply before the topology becomes runnable.
+Moving nodes creates a layout-only backend receipt and never changes routing. Proposing a workflow loop, valid workflow connection, or lifecycle change creates an immutable `proposal_pending` receipt, an explainable loop opportunity, and a versioned graph change set, then starts or reuses a durable Hermes design task. Lifecycle changes support **improve**, **split**, **merge**, and **retire**; merges are limited to registered loops with the same accountable department. If the company context is incomplete, the editor points to the exact discovery questions that block design. In hosted mode every receipt is scoped to the authenticated organization and project, records the operator, and is written through a membership-checking database function. The normal approval, rehearsal, readiness, and promotion gates still apply before the topology becomes runnable.
 
 The relationship selector is semantic rather than decorative: `Hermes routes to` must connect Hermes Brain to a workflow loop, `Department owns loop` must connect a department to a workflow loop, and `Evidence returns to` must start from a workflow loop. Unsupported edges are rejected before persistence because Loopgraph cannot compile them into an accountable loop change.
 

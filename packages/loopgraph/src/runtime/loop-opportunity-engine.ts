@@ -74,7 +74,7 @@ export type GraphEditorProposalIntent = {
   companyId: string;
   actorId: string;
   department: string;
-  kind: "create_loop" | "improve_loop";
+  kind: LoopOpportunityKind;
   problemType: string;
   title: string;
   summary: string;
@@ -317,9 +317,28 @@ export async function startGraphEditorProposalLifecycle(
   }
   const department = normalizeDepartmentType(input.department) ?? "custom";
   const targetLoopIds = unique(input.targetLoopIds ?? []);
-  if (input.kind === "improve_loop" && targetLoopIds.length === 0) {
-    throw new Error("A graph connection proposal must identify a workflow loop to improve");
+  if (input.kind !== "create_loop" && targetLoopIds.length === 0) {
+    throw new Error("A graph lifecycle proposal must identify a workflow loop");
   }
+  if (input.kind === "merge_loops" && targetLoopIds.length < 2) {
+    throw new Error("A graph merge proposal must identify at least two workflow loops");
+  }
+  if (
+    input.kind !== "create_loop" &&
+    input.kind !== "merge_loops" &&
+    targetLoopIds.length !== 1
+  ) {
+    throw new Error(`A ${input.kind} proposal must identify exactly one workflow loop`);
+  }
+  const workspace = options.loopSpecStore
+    ? (await options.loopSpecStore.getWorkspace(projectRoot)).workspace
+    : await readLoopgraphWorkspace(projectRoot);
+  assertGraphEditorProposalTargets({
+    kind: input.kind,
+    targetLoopIds,
+    department,
+    workspace
+  });
   const store = resolveOpportunityStore(projectRoot, options.opportunityStore);
   const sourceRef = `graph-editor:${input.transactionId}:${input.operationKey}`;
   const fingerprint = contentHash({
@@ -389,9 +408,6 @@ export async function startGraphEditorProposalLifecycle(
   });
   await store.saveOpportunity(opportunity);
 
-  const workspace = options.loopSpecStore
-    ? (await options.loopSpecStore.getWorkspace(projectRoot)).workspace
-    : await readLoopgraphWorkspace(projectRoot);
   let graphChangeSet = await proposeGraphChangeSet({
     projectRoot,
     workspace,
@@ -451,6 +467,41 @@ export async function startGraphEditorProposalLifecycle(
     designTask: dispatch.task,
     nextAction: designTaskNextAction(dispatch.task.status)
   };
+}
+
+function assertGraphEditorProposalTargets(input: {
+  kind: LoopOpportunityKind;
+  targetLoopIds: string[];
+  department: DepartmentType;
+  workspace: LoopgraphWorkspaceRegistry;
+}): void {
+  if (input.kind === "create_loop") {
+    if (input.targetLoopIds.length > 0) {
+      throw new Error("A create-loop proposal cannot target an existing workflow loop");
+    }
+    return;
+  }
+  const registeredById = new Map(
+    input.workspace.registeredSpecs.map((entry) => [entry.id, entry])
+  );
+  const missing = input.targetLoopIds.filter((loopId) => !registeredById.has(loopId));
+  if (missing.length > 0) {
+    throw new Error(`Graph lifecycle proposal references unregistered loops: ${missing.join(", ")}`);
+  }
+  const currentDepartments = new Set(
+    input.targetLoopIds.map((loopId) => registeredById.get(loopId)!.department)
+  );
+  if (input.kind === "merge_loops" && currentDepartments.size !== 1) {
+    throw new Error("Graph lifecycle proposal cannot merge loops across department ownership");
+  }
+  if (
+    ["split_loop", "merge_loops", "retire_loop"].includes(input.kind) &&
+    !currentDepartments.has(input.department)
+  ) {
+    throw new Error(
+      `Graph lifecycle proposal department does not own its targets: ${input.targetLoopIds.join(", ")}`
+    );
+  }
 }
 
 export async function listLoopOpportunities(

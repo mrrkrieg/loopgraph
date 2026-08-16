@@ -44,6 +44,32 @@ export function buildGraphEditorProposalIntents(input: {
       });
       return;
     }
+    if (operation.kind === "propose_lifecycle") {
+      const workflows = operation.targetNodeIds.map((nodeId) => {
+        const node = requireNode(nodes, nodeId);
+        if (!isWorkflow(node) || !node.loopId || !node.department) {
+          throw new Error(
+            `Lifecycle proposals must target registered workflow loops: ${node.label}`
+          );
+        }
+        return node;
+      });
+      const departments = new Set(workflows.map((node) => node.department));
+      if (departments.size !== 1) {
+        throw new Error("Lifecycle proposals cannot merge workflow loops across departments");
+      }
+      const labels = workflows.map((node) => node.label);
+      intents.push({
+        ...common,
+        department: workflows[0].department!,
+        kind: lifecycleOpportunityKind(operation.mode),
+        problemType: `graph_lifecycle_${operation.mode}`,
+        title: lifecycleTitle(operation.mode, labels),
+        summary: `${operation.reason} Proposed lifecycle change: ${operation.mode} ${labels.join(" + ")}.`,
+        targetLoopIds: workflows.map((node) => node.loopId!)
+      });
+      return;
+    }
 
     const source = requireNode(nodes, operation.sourceId);
     const target = requireNode(nodes, operation.targetId);
@@ -102,6 +128,30 @@ function workflowForRelation(
 
 function isWorkflow(node: TopologyNode): boolean {
   return node.type === "workflow_loop" || node.type === "task_loop";
+}
+
+function lifecycleOpportunityKind(
+  mode: "improve" | "split" | "merge" | "retire"
+): GraphEditorProposalIntent["kind"] {
+  return {
+    improve: "improve_loop",
+    split: "split_loop",
+    merge: "merge_loops",
+    retire: "retire_loop"
+  }[mode] as GraphEditorProposalIntent["kind"];
+}
+
+function lifecycleTitle(
+  mode: "improve" | "split" | "merge" | "retire",
+  labels: string[]
+): string {
+  const verb = {
+    improve: "Improve",
+    split: "Split",
+    merge: "Merge",
+    retire: "Retire"
+  }[mode];
+  return `${verb} ${labels.join(" + ")}`;
 }
 
 function slug(value: string): string {
