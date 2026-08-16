@@ -65,8 +65,12 @@ export type MarketplaceAppDetail = {
   provenance: {
     verified: boolean;
     digestMatches: boolean;
+    sourceId: string;
     sourceType: string;
     sourceUri: string;
+    sourceRef?: string;
+    snapshotDigest: string;
+    trustPolicy: "official_only" | "signed" | "explicit_local";
   };
   graphPreview: AppGraphPreview;
   loops: Array<{

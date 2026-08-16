@@ -82,7 +82,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Official and private LoopPacks are strict, immutable, content-digested data artifacts that compile into existing governed runtime primitives.
 - The browser, Hermes MCP tools, and CLI share marketplace search, exact install planning, connection and mapping readiness, atomic install, conformance, replay, promotion recommendation, pause/resume, update, rollback, detach, and uninstall services.
 - Signed GitHub catalog taps synchronize only from an allowlisted HTTPS Git host and require an exact commit, canonical catalog snapshot digest, and pinned Ed25519 publisher keys. Remote content is validated in staging before atomic cache promotion and never installs or activates an app by itself.
-- The hosted multi-tenant marketplace control plane remains separate from the immutable GitHub transport.
+- Every indexed App version records its exact catalog source, transport, URI/ref, snapshot digest, trust policy, and synchronization time. Catalog refresh removes only versions owned by that source, preserves mirrors from other sources, and rejects one semantic version resolving to different immutable digests.
+- A tenant-scoped hosted marketplace registry now stores publisher/app ownership, immutable signed versions, file digests, dependencies, connector requirements, presets, evaluation records, release signatures, and explicit private-catalog grants behind RLS. Namespace claims are race-safe, reserved trust identities cannot be self-asserted, and authenticated readers receive safe column projections. Publisher submissions remain pending until a service-role verifier proves that the whole artifact, manifest, file index, and immutable stored projections match; activation, deprecation, revocation, and private sharing are separate bounded operations. Artifact byte upload/download, the verifier worker, signed delivery URLs, HTTP search endpoints, and installation handoff remain the next hosted marketplace layer.
 
 ### Verification
 
@@ -159,6 +160,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
+6. Implement the hosted marketplace artifact verifier/delivery service and connect its RLS-safe
+   search/read boundary to the existing local staging, conformance, and atomic install pipeline.
 
 ## Key documentation
 
@@ -181,3 +184,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md)
 - [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
 - [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md)
+- [Hosted marketplace registry](./HOSTED-MARKETPLACE-REGISTRY.md)
