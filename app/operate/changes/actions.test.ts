@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   isPublicPreview: vi.fn(() => false),
   getWorkspaceDatabase: vi.fn(),
   review: vi.fn(),
+  apply: vi.fn(),
   revalidatePath: vi.fn(),
   getActiveLoopgraphProjectRoot: vi.fn(() => "/tmp/review-project"),
   store: {}
@@ -25,10 +26,12 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getSemanticGraphStore: () => mocks.store
 }));
 vi.mock("loopgraph/runtime", () => ({
+  applyApprovedHermesGraphChangeSet: mocks.apply,
   reviewHermesGraphChangeSet: mocks.review
 }));
 
 import {
+  applyGraphChangeAction,
   decideGraphChangeAction,
   initialGraphChangeDecisionState
 } from "./actions";
@@ -43,6 +46,7 @@ describe("graph change decision action", () => {
       role: "operator"
     });
     mocks.review.mockResolvedValue({ receipt: { id: "approval_1" } });
+    mocks.apply.mockResolvedValue({ transaction: { id: "transaction_1" } });
   });
 
   it("derives the hosted actor and records an approval through the governed service", async () => {
@@ -102,5 +106,41 @@ describe("graph change decision action", () => {
     });
     expect(mocks.getWorkspaceDatabase).not.toHaveBeenCalled();
     expect(mocks.review).not.toHaveBeenCalled();
+  });
+
+  it("derives the graph operator and lets the runtime select all application artifacts", async () => {
+    const formData = new FormData();
+    formData.set("changeSetId", "graph_change_1");
+    formData.set("approvalReceiptId", "caller_must_not_choose");
+    formData.set("designRunId", "caller_must_not_choose");
+
+    await expect(applyGraphChangeAction(
+      initialGraphChangeDecisionState,
+      formData
+    )).resolves.toEqual({
+      status: "success",
+      message: expect.stringContaining("transaction_1")
+    });
+    expect(mocks.getWorkspaceDatabase).toHaveBeenCalledWith("loops.write");
+    expect(mocks.apply).toHaveBeenCalledWith({
+      projectRoot: "/tmp/review-project",
+      changeSetId: "graph_change_1",
+      initiatedBy: "operator_1"
+    }, expect.any(Object));
+  });
+
+  it("keeps graph application disabled in the public preview", async () => {
+    mocks.isPublicPreview.mockReturnValue(true);
+    const formData = new FormData();
+    formData.set("changeSetId", "graph_change_1");
+
+    await expect(applyGraphChangeAction(
+      initialGraphChangeDecisionState,
+      formData
+    )).resolves.toEqual({
+      status: "error",
+      message: "The public Loopgraph preview is read-only"
+    });
+    expect(mocks.apply).not.toHaveBeenCalled();
   });
 });

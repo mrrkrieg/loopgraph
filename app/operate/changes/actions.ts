@@ -11,7 +11,10 @@ import {
   getLoopSpecRegistryStore,
   getSemanticGraphStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
-import { reviewHermesGraphChangeSet } from "loopgraph/runtime";
+import {
+  applyApprovedHermesGraphChangeSet,
+  reviewHermesGraphChangeSet
+} from "loopgraph/runtime";
 
 export type GraphChangeDecisionState = {
   status: "idle" | "success" | "error";
@@ -69,6 +72,47 @@ export async function decideGraphChangeAction(
     return {
       status: "error",
       message: error instanceof Error ? error.message : "Graph decision failed"
+    };
+  }
+}
+
+export async function applyGraphChangeAction(
+  _previous: GraphChangeDecisionState,
+  formData: FormData
+): Promise<GraphChangeDecisionState> {
+  try {
+    if (isPublicHostedPreviewEnvironment()) {
+      throw new Error("The public Loopgraph preview is read-only");
+    }
+    const changeSetId = requiredFormString(formData, "changeSetId", 512);
+    const database = await getWorkspaceDatabase("loops.write");
+    if (database.hosted && (!database.userId || !database.role)) {
+      throw new Error("The authenticated graph operator is unavailable");
+    }
+    const projectRoot = getActiveLoopgraphProjectRoot();
+    const result = await applyApprovedHermesGraphChangeSet({
+      projectRoot,
+      changeSetId,
+      initiatedBy: database.userId ?? "loopgraph-ui"
+    }, {
+      store: getSemanticGraphStore({ projectRoot }),
+      opportunityStore: getLoopOpportunityStore({ projectRoot }),
+      designStore: getDiscoveryDesignStore(),
+      hermesDesignStore: getHermesDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore({ projectRoot })
+    });
+    revalidatePath("/brain");
+    revalidatePath("/loops");
+    revalidatePath("/operate/changes");
+    revalidatePath("/operate/opportunities");
+    return {
+      status: "success",
+      message: `Committed graph transaction ${result.transaction.id}. New or changed loops remain governed by their configured rollout modes.`
+    };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Graph application failed"
     };
   }
 }

@@ -98,6 +98,19 @@ describe("semantic graph transactions", () => {
       evidenceRefs: ["review:add-marketing"],
       now: new Date("2026-07-29T12:20:00.000Z")
     });
+    await expect(applyGraphChangeSet({
+      projectRoot: fixture.projectRoot,
+      changeSetId: changeSet.id,
+      approvalReceiptId: approval.receipt.id,
+      expectedApprovalEvidenceRefs: ["review:different-design"],
+      designRunId: fixture.designRunId,
+      acceptedProposalIds: [
+        "proposal_marketing_ads",
+        "proposal_marketing_content_creation"
+      ],
+      initiatedBy: "owner_1",
+      now: new Date("2026-07-29T12:20:30.000Z")
+    })).rejects.toThrow("not bound to the expected Hermes design evidence");
     const applied = await applyGraphChangeSet({
       projectRoot: fixture.projectRoot,
       changeSetId: changeSet.id,

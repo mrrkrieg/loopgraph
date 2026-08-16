@@ -48,6 +48,8 @@ export type ChangeReviewView = {
   designStatus?: string;
   canApprove: boolean;
   approvalBlockedReason?: string;
+  canApply: boolean;
+  applicationBlockedReason?: string;
   approvalDecision?: string;
   approvalActor?: string;
   transactionStatus?: string;
@@ -263,6 +265,10 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
       const canApprove = set.status === "proposed" &&
         task?.status === "completed" &&
         Boolean(designRunId);
+      const canApply = set.status === "approved" &&
+        approval?.decision === "approved" &&
+        Boolean(set.designRunId) &&
+        set.changes.length === 1;
       const transaction = (set.appliedTransactionId
         ? transactionById.get(set.appliedTransactionId)
         : undefined) ?? transactionByChangeSet.get(set.id);
@@ -288,6 +294,13 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
           changeSetStatus: set.status,
           taskStatus: task?.status,
           designRunId
+        }),
+        canApply,
+        applicationBlockedReason: applicationBlockedReason({
+          changeSetStatus: set.status,
+          changeCount: set.changes.length,
+          approvalDecision: approval?.decision,
+          designRunId: set.designRunId
         }),
         approvalDecision: approval ? humanize(approval.decision) : undefined,
         approvalActor: approval?.actorId,
@@ -583,6 +596,7 @@ export function buildHostedOperatingPreview(): OperatingViewData {
         requiresExplicitApproval: true,
         designStatus: "Completed",
         canApprove: false,
+        canApply: false,
         approvalBlockedReason: "The public preview is read-only.",
         updatedAt: "2026-07-28T17:42:00.000Z"
       },
@@ -604,6 +618,7 @@ export function buildHostedOperatingPreview(): OperatingViewData {
         requiresExplicitApproval: true,
         designStatus: "Completed",
         canApprove: false,
+        canApply: false,
         approvalDecision: "Approved",
         approvalActor: "support-director",
         updatedAt: "2026-07-28T16:02:00.000Z"
@@ -626,6 +641,7 @@ export function buildHostedOperatingPreview(): OperatingViewData {
         requiresExplicitApproval: true,
         designStatus: "Completed",
         canApprove: false,
+        canApply: false,
         approvalDecision: "Approved",
         approvalActor: "growth-lead",
         transactionStatus: "Committed",
@@ -862,6 +878,25 @@ function approvalBlockedReason(input: {
   }
   if (!input.designRunId) {
     return "The completed Hermes task is missing its immutable design run.";
+  }
+  return undefined;
+}
+
+function applicationBlockedReason(input: {
+  changeSetStatus: string;
+  changeCount: number;
+  approvalDecision?: string;
+  designRunId?: string;
+}): string | undefined {
+  if (input.changeSetStatus !== "approved") return undefined;
+  if (input.approvalDecision !== "approved") {
+    return "No accountable approval receipt is attached to this change set.";
+  }
+  if (!input.designRunId) {
+    return "The approval is missing its immutable Hermes design run.";
+  }
+  if (input.changeCount !== 1) {
+    return "This change set needs an explicit operation-to-proposal mapping before UI application.";
   }
   return undefined;
 }

@@ -74,6 +74,7 @@ export * from "./graph-authoring-store";
 export * from "./graph-authoring-proposal";
 export * from "./graph-authoring-read-model";
 export * from "./graph-change-review";
+export * from "./graph-change-application";
 export * from "./department-golden-suites";
 export * from "./connection-plan";
 export * from "./connection-tools";

@@ -76,15 +76,17 @@ export async function reviewHermesGraphChangeSet(
 
   let reviewableChangeSet = changeSet;
   let designRunId: string | undefined;
+  let designOutputHash: string | undefined;
   let proposalIds: string[] = [];
   if (input.decision === "approved") {
-    const readiness = await requireCompletedHermesDesign({
+    const readiness = await resolveCompletedHermesGraphDesign({
       changeSet,
       opportunity,
       hermesDesignStore,
       designStore
     });
     designRunId = readiness.designRunId;
+    designOutputHash = readiness.outputHash;
     proposalIds = readiness.proposalIds;
     if (changeSet.designRunId !== designRunId) {
       reviewableChangeSet = graphChangeSetSchema.parse({
@@ -110,9 +112,10 @@ export async function reviewHermesGraphChangeSet(
     actorRole: input.actorRole,
     policyVersion: input.policyVersion,
     reason: input.reason,
-    evidenceRefs: input.decision === "approved" && designRunId
+    evidenceRefs: input.decision === "approved" && designRunId && designOutputHash
       ? [
           `design-run:${designRunId}`,
+          `design-output:${designOutputHash}`,
           ...proposalIds.map((proposalId) => `loop-design-proposal:${proposalId}`)
         ]
       : [],
@@ -127,11 +130,12 @@ export async function reviewHermesGraphChangeSet(
   return {
     ...result,
     designRunId,
+    designOutputHash,
     proposalIds
   };
 }
 
-async function requireCompletedHermesDesign(input: {
+export async function resolveCompletedHermesGraphDesign(input: {
   changeSet: GraphChangeSet;
   opportunity: NonNullable<Awaited<ReturnType<LoopOpportunityStore["getOpportunity"]>>>;
   hermesDesignStore: HermesDesignStore;
@@ -176,6 +180,10 @@ async function requireCompletedHermesDesign(input: {
   if (!proposalSet.validationSummary.valid || proposalSet.proposals.length === 0) {
     throw new Error("Hermes proposal set has not passed Loopgraph validation");
   }
+  const outputHash = `out_${contentHash(proposalSet)}`;
+  if (!designRun.outputHash || designRun.outputHash !== outputHash) {
+    throw new Error("Hermes design output hash does not match the stored proposal content");
+  }
   const proposalIds = proposalSet.proposals.map((proposal) => proposal.proposalId).sort();
   if (
     proposalIds.length !== designRun.finalProposalIds.length ||
@@ -183,5 +191,5 @@ async function requireCompletedHermesDesign(input: {
   ) {
     throw new Error("Hermes design run and proposal set identities do not match");
   }
-  return { designRunId, proposalIds };
+  return { designRunId, proposalIds, outputHash };
 }
