@@ -22,6 +22,7 @@ import {
   selectDiscoveryDepartments,
   startHermesDiscoverySession
 } from "./discovery-session";
+import type { DiscoveryDesignStore } from "./discovery-design-store";
 import {
   getHermesDesignTask,
   startHermesDesignTask,
@@ -41,6 +42,7 @@ import {
   readLoopgraphWorkspace,
   type LoopgraphWorkspaceRegistry
 } from "./workspace";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 
 export type OpportunityThresholds = {
   qualify: number;
@@ -63,6 +65,28 @@ export type ScanLoopOpportunitiesResult = {
   opportunities: LoopOpportunity[];
   graphChangeSets: GraphChangeSet[];
   designDispatches: HermesDesignDispatchResult[];
+};
+
+export type GraphEditorProposalIntent = {
+  transactionId: string;
+  operationKey: string;
+  workspaceId: string;
+  companyId: string;
+  actorId: string;
+  department: string;
+  kind: LoopOpportunityKind;
+  problemType: string;
+  title: string;
+  summary: string;
+  targetLoopIds?: string[];
+  createdAt: string;
+};
+
+export type GraphEditorProposalLifecycleResult = {
+  opportunity: LoopOpportunity;
+  graphChangeSet: GraphChangeSet;
+  designTask: NonNullable<HermesDesignDispatchResult["task"]>;
+  nextAction: "answer_questions" | "await_hermes" | "review_proposal";
 };
 
 type OpportunityGroup = {
@@ -105,6 +129,8 @@ export async function scanLoopOpportunities(
     routingStore?: RoutingStore;
     outcomeStore?: OutcomeStore;
     designStore?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
     opportunityStore?: LoopOpportunityStore;
   } = {}
 ): Promise<ScanLoopOpportunitiesResult> {
@@ -112,7 +138,9 @@ export async function scanLoopOpportunities(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const thresholds = normalizeThresholds(input.thresholds);
-  const workspace = await readLoopgraphWorkspace(projectRoot);
+  const workspace = options.loopSpecStore
+    ? (await options.loopSpecStore.getWorkspace(projectRoot)).workspace
+    : await readLoopgraphWorkspace(projectRoot);
   const routingStore = options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
   const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
   const opportunityStore =
@@ -192,7 +220,8 @@ export async function scanLoopOpportunities(
       opportunity,
       existingId: opportunity.graphChangeSetId,
       now,
-      store: opportunityStore
+      store: opportunityStore,
+      loopSpecStore: options.loopSpecStore
     });
     if (existingTask) {
       changeSet = graphChangeSetSchema.parse({
@@ -217,7 +246,8 @@ export async function scanLoopOpportunities(
         projectRoot,
         workspace,
         opportunity,
-        now
+        now,
+        store: options.discoveryStore
       });
       const dispatch = await startHermesDesignTask({
         projectRoot,
@@ -228,7 +258,11 @@ export async function scanLoopOpportunities(
         originOpportunityId: opportunity.id,
         requestedBy: "loopgraph-opportunity-engine",
         now
-      }, { store: options.designStore });
+      }, {
+        store: options.designStore,
+        discoveryStore: options.discoveryStore,
+        loopSpecStore: options.loopSpecStore
+      });
       designDispatches.push(dispatch);
       opportunity = loopOpportunitySchema.parse({
         ...opportunity,
@@ -260,6 +294,214 @@ export async function scanLoopOpportunities(
     graphChangeSets,
     designDispatches
   };
+}
+
+/**
+ * Turns an explicit graph-editor proposal into the same durable opportunity,
+ * change-set, discovery, and Hermes design lifecycle used by automatically
+ * detected company problems. The content-derived identities make retries safe.
+ */
+export async function startGraphEditorProposalLifecycle(
+  input: GraphEditorProposalIntent & { projectRoot?: string },
+  options: {
+    designStore?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
+    opportunityStore?: LoopOpportunityStore;
+  } = {}
+): Promise<GraphEditorProposalLifecycleResult> {
+  const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
+  const now = new Date(input.createdAt);
+  if (Number.isNaN(now.getTime())) {
+    throw new Error("Graph editor proposal timestamp is invalid");
+  }
+  const department = normalizeDepartmentType(input.department) ?? "custom";
+  const targetLoopIds = unique(input.targetLoopIds ?? []);
+  if (input.kind !== "create_loop" && targetLoopIds.length === 0) {
+    throw new Error("A graph lifecycle proposal must identify a workflow loop");
+  }
+  if (input.kind === "merge_loops" && targetLoopIds.length < 2) {
+    throw new Error("A graph merge proposal must identify at least two workflow loops");
+  }
+  if (
+    input.kind !== "create_loop" &&
+    input.kind !== "merge_loops" &&
+    targetLoopIds.length !== 1
+  ) {
+    throw new Error(`A ${input.kind} proposal must identify exactly one workflow loop`);
+  }
+  const workspace = options.loopSpecStore
+    ? (await options.loopSpecStore.getWorkspace(projectRoot)).workspace
+    : await readLoopgraphWorkspace(projectRoot);
+  assertGraphEditorProposalTargets({
+    kind: input.kind,
+    targetLoopIds,
+    department,
+    workspace
+  });
+  const store = resolveOpportunityStore(projectRoot, options.opportunityStore);
+  const sourceRef = `graph-editor:${input.transactionId}:${input.operationKey}`;
+  const fingerprint = contentHash({
+    sourceRef,
+    workspaceId: input.workspaceId,
+    companyId: input.companyId,
+    department,
+    kind: input.kind,
+    targetLoopIds
+  });
+  const opportunityId = `opportunity_${contentHash({ sourceRef, fingerprint })}`;
+  const existing = await store.getOpportunity(opportunityId);
+  if (existing?.status === "dismissed" || existing?.status === "implemented") {
+    return requireGraphEditorLifecycle(existing, projectRoot, options);
+  }
+  const signal = loopOpportunitySignalSchema.parse({
+    id: `signal_${contentHash({ sourceRef })}`,
+    type: "improvement_signal",
+    sourceRef,
+    workspaceId: input.workspaceId,
+    companyId: input.companyId,
+    occurredAt: now.toISOString(),
+    summary: input.summary,
+    severity: "medium",
+    problemType: input.problemType,
+    evidenceRefs: [`graph-editor:${input.transactionId}`],
+    metrics: {}
+  });
+  let opportunity = loopOpportunitySchema.parse({
+    schemaVersion: LOOP_OPPORTUNITY_SCHEMA_VERSION,
+    id: opportunityId,
+    fingerprint,
+    generation: 1,
+    workspaceId: input.workspaceId,
+    companyId: input.companyId,
+    department,
+    kind: input.kind,
+    status: existing?.status ?? "qualified",
+    problemType: input.problemType,
+    title: input.title,
+    summary: input.summary,
+    targetLoopIds,
+    problemIds: [],
+    signalIds: [signal.id],
+    signals: [signal],
+    score: {
+      total: 100,
+      recurrence: 10,
+      businessImpact: 25,
+      coverageGap: input.kind === "create_loop" ? 25 : 10,
+      evidenceConfidence: 15,
+      humanFriction: 0,
+      riskPenalty: 0,
+      explanation: [
+        "An authenticated operator explicitly proposed this graph change.",
+        "Hermes must still collect missing context, design the LoopSpec, and pass normal approval gates."
+      ]
+    },
+    thresholds: { qualify: 0, autoDesign: 0 },
+    discoverySessionId: existing?.discoverySessionId,
+    designTaskId: existing?.designTaskId,
+    graphChangeSetId: existing?.graphChangeSetId,
+    firstObservedAt: existing?.firstObservedAt ?? now.toISOString(),
+    lastObservedAt: now.toISOString(),
+    createdAt: existing?.createdAt ?? now.toISOString(),
+    updatedAt: now.toISOString()
+  });
+  await store.saveOpportunity(opportunity);
+
+  let graphChangeSet = await proposeGraphChangeSet({
+    projectRoot,
+    workspace,
+    opportunity,
+    existingId: opportunity.graphChangeSetId,
+    now,
+    store,
+    loopSpecStore: options.loopSpecStore
+  });
+  opportunity = loopOpportunitySchema.parse({
+    ...opportunity,
+    graphChangeSetId: graphChangeSet.id,
+    updatedAt: now.toISOString()
+  });
+  await store.saveOpportunity(opportunity);
+
+  const session = await ensureOpportunityDiscoverySession({
+    projectRoot,
+    workspace,
+    opportunity,
+    now,
+    store: options.discoveryStore
+  });
+  const dispatch = await startHermesDesignTask({
+    projectRoot,
+    sessionId: session.id,
+    department,
+    reason: input.kind === "create_loop" ? "loop_opportunity" : "improvement",
+    originOpportunityId: opportunity.id,
+    requestedBy: input.actorId,
+    now
+  }, {
+    store: options.designStore,
+    discoveryStore: options.discoveryStore,
+    loopSpecStore: options.loopSpecStore
+  });
+  opportunity = loopOpportunitySchema.parse({
+    ...opportunity,
+    status: opportunityStatusFromTask(dispatch.task.status) ?? "design_requested",
+    discoverySessionId: session.id,
+    designTaskId: dispatch.task.id,
+    updatedAt: now.toISOString()
+  });
+  graphChangeSet = graphChangeSetSchema.parse({
+    ...graphChangeSet,
+    designTaskId: dispatch.task.id,
+    designRunId: dispatch.task.designRunIds.at(-1) ?? graphChangeSet.designRunId,
+    updatedAt: now.toISOString()
+  });
+  await Promise.all([
+    store.saveOpportunity(opportunity),
+    store.saveGraphChangeSet(graphChangeSet)
+  ]);
+  return {
+    opportunity,
+    graphChangeSet,
+    designTask: dispatch.task,
+    nextAction: designTaskNextAction(dispatch.task.status)
+  };
+}
+
+function assertGraphEditorProposalTargets(input: {
+  kind: LoopOpportunityKind;
+  targetLoopIds: string[];
+  department: DepartmentType;
+  workspace: LoopgraphWorkspaceRegistry;
+}): void {
+  if (input.kind === "create_loop") {
+    if (input.targetLoopIds.length > 0) {
+      throw new Error("A create-loop proposal cannot target an existing workflow loop");
+    }
+    return;
+  }
+  const registeredById = new Map(
+    input.workspace.registeredSpecs.map((entry) => [entry.id, entry])
+  );
+  const missing = input.targetLoopIds.filter((loopId) => !registeredById.has(loopId));
+  if (missing.length > 0) {
+    throw new Error(`Graph lifecycle proposal references unregistered loops: ${missing.join(", ")}`);
+  }
+  const currentDepartments = new Set(
+    input.targetLoopIds.map((loopId) => registeredById.get(loopId)!.department)
+  );
+  if (input.kind === "merge_loops" && currentDepartments.size !== 1) {
+    throw new Error("Graph lifecycle proposal cannot merge loops across department ownership");
+  }
+  if (
+    ["split_loop", "merge_loops", "retire_loop"].includes(input.kind) &&
+    !currentDepartments.has(input.department)
+  ) {
+    throw new Error(
+      `Graph lifecycle proposal department does not own its targets: ${input.targetLoopIds.join(", ")}`
+    );
+  }
 }
 
 export async function listLoopOpportunities(
@@ -705,13 +947,16 @@ async function proposeGraphChangeSet(input: {
   existingId?: string;
   now: Date;
   store: LoopOpportunityStore;
+  loopSpecStore?: LoopSpecRegistryStore;
 }): Promise<GraphChangeSet> {
   const nowIso = input.now.toISOString();
   const existing = input.existingId
     ? await input.store.getGraphChangeSet(input.existingId)
     : undefined;
   const operation = graphOperation(input.opportunity.kind);
-  const baseGraphHash = (await readWorkspaceGraphState(input.projectRoot)).graphHash;
+  const baseGraphHash = (
+    await readWorkspaceGraphState(input.projectRoot, input.loopSpecStore)
+  ).graphHash;
   const changes = [{
     id: `change_${contentHash({ opportunityId: input.opportunity.id, operation })}`,
     operation,
@@ -780,13 +1025,19 @@ async function ensureOpportunityDiscoverySession(input: {
   workspace: LoopgraphWorkspaceRegistry;
   opportunity: LoopOpportunity;
   now: Date;
+  store?: DiscoveryDesignStore;
 }) {
   const sessionId = input.opportunity.discoverySessionId ??
     `session_${contentHash({ opportunityId: input.opportunity.id })}`;
-  let session = await getDiscoverySession(sessionId, input.projectRoot);
+  let session = await getDiscoverySession(
+    sessionId,
+    input.projectRoot,
+    input.store
+  );
   if (!session) {
     session = await startHermesDiscoverySession({
       projectRoot: input.projectRoot,
+      store: input.store,
       sessionId,
       companyId: input.opportunity.companyId,
       companyName: input.workspace.displayName,
@@ -797,6 +1048,7 @@ async function ensureOpportunityDiscoverySession(input: {
   if (!session.selectedDepartmentIds.includes(input.opportunity.department)) {
     session = await selectDiscoveryDepartments({
       projectRoot: input.projectRoot,
+      store: input.store,
       sessionId: session.id,
       departments: unique([...session.selectedDepartmentIds, input.opportunity.department]),
       activeDepartment: input.opportunity.department,
@@ -806,19 +1058,73 @@ async function ensureOpportunityDiscoverySession(input: {
     });
   }
   const profile = session.companyProfile;
+  const bottlenecks = profile
+    ? unique([...profile.bottlenecks, input.opportunity.summary])
+    : [];
+  const recurringWork = profile
+    ? unique([...profile.recurringWork, input.opportunity.problemType])
+    : [];
+  if (
+    profile &&
+    contentHash(bottlenecks) === contentHash(profile.bottlenecks) &&
+    contentHash(recurringWork) === contentHash(profile.recurringWork)
+  ) {
+    return session;
+  }
   const updated = BusinessDiscoverySessionSchema.parse({
     ...session,
     companyProfile: profile ? {
       ...profile,
-      bottlenecks: unique([...profile.bottlenecks, input.opportunity.summary]),
-      recurringWork: unique([...profile.recurringWork, input.opportunity.problemType])
+      bottlenecks,
+      recurringWork
     } : profile,
     revision: session.revision + 1,
     updatedAt: (input.now ?? new Date()).toISOString()
   });
   return saveDiscoverySession(updated, input.projectRoot, {
+    store: input.store,
     expectedRevision: session.revision
   });
+}
+
+async function requireGraphEditorLifecycle(
+  opportunity: LoopOpportunity,
+  projectRoot: string,
+  options: {
+    designStore?: HermesDesignStore;
+    discoveryStore?: DiscoveryDesignStore;
+    loopSpecStore?: LoopSpecRegistryStore;
+    opportunityStore?: LoopOpportunityStore;
+  }
+): Promise<GraphEditorProposalLifecycleResult> {
+  const store = resolveOpportunityStore(projectRoot, options.opportunityStore);
+  const graphChangeSet = opportunity.graphChangeSetId
+    ? await store.getGraphChangeSet(opportunity.graphChangeSetId)
+    : undefined;
+  const designTask = opportunity.designTaskId
+    ? await getHermesDesignTask(opportunity.designTaskId, projectRoot, options.designStore)
+    : undefined;
+  if (!graphChangeSet || !designTask) {
+    throw new Error(
+      `Graph editor proposal lifecycle is incomplete: ${opportunity.id}`
+    );
+  }
+  return {
+    opportunity,
+    graphChangeSet,
+    designTask,
+    nextAction: designTaskNextAction(designTask.status)
+  };
+}
+
+function designTaskNextAction(
+  status: HermesDesignDispatchResult["task"]["status"]
+): GraphEditorProposalLifecycleResult["nextAction"] {
+  if (status === "completed") return "review_proposal";
+  if (status === "needs_input" || status === "needs_repair") {
+    return "answer_questions";
+  }
+  return "await_hermes";
 }
 
 export async function saveGraphChangeSet(

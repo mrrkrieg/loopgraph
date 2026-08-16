@@ -2,10 +2,16 @@
 
 import React from "react";
 import Link from "next/link";
+import type { GraphEditorProposalLifecycleReference } from "loopgraph/runtime";
 import type { BrainGraphEdge, BrainGraphNode } from "./graph-types";
+import type { PendingGraphChange } from "./proposal-lifecycle-overlay";
 
 export type BrainGraphActions = {
-  submitGraphEdit?: (formData: FormData) => Promise<{ id: string; status: string }>;
+  submitGraphEdit?: (formData: FormData) => Promise<{
+    id: string;
+    status: "layout_applied" | "proposal_pending" | "rejected";
+    proposalLifecycle: GraphEditorProposalLifecycleReference[];
+  }>;
   validateLoop?: (formData: FormData) => void | Promise<void>;
   simulateFixture?: (formData: FormData) => void | Promise<void>;
   simulateManualEvent?: (formData: FormData) => void | Promise<void>;
@@ -41,6 +47,7 @@ export function NodeInspector({
   const metrics = stringList(node.metadata?.metrics);
   const routine = stringList(node.metadata?.routine);
   const verification = stringList(node.metadata?.verification);
+  const pendingChanges = pendingGraphChanges(node);
 
   return (
     <aside className="h-full overflow-auto border-l border-line bg-white p-5">
@@ -78,6 +85,10 @@ export function NodeInspector({
         </div>
       ) : null}
 
+      {pendingChanges.length > 0 ? (
+        <PendingGraphChanges changes={pendingChanges} />
+      ) : null}
+
       <LoopRunControls actions={actions} node={node} />
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -99,6 +110,58 @@ export function NodeInspector({
       </div>
     </aside>
   );
+}
+
+function PendingGraphChanges({ changes }: { changes: PendingGraphChange[] }) {
+  return (
+    <div className="mt-5 rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em]">Pending Hermes graph changes</div>
+      <p className="mt-2 text-sm leading-6">
+        These are governed proposals. This loop remains live and unchanged until an authorized reviewer approves and applies a change set.
+      </p>
+      <div className="mt-3 space-y-3">
+        {changes.map((change) => (
+          <div className="rounded-md border border-amber-200 bg-white/75 p-3" key={change.opportunityId}>
+            <div className="font-semibold">{change.title}</div>
+            <div className="mt-1 text-xs text-amber-900/75">
+              {change.kind.replace(/_/g, " ")} · {(change.graphChangeSetStatus ?? change.status).replace(/_/g, " ")}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3 text-xs">
+              {change.nextAction === "answer_questions" && change.discoverySessionId ? (
+                <Link
+                  className="font-semibold underline underline-offset-2"
+                  href={`/discovery/questions?sessionId=${encodeURIComponent(change.discoverySessionId)}`}
+                >
+                  Answer Hermes
+                </Link>
+              ) : null}
+              <Link className="font-semibold underline underline-offset-2" href="/operate/changes">
+                Review change set
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function pendingGraphChanges(node: BrainGraphNode): PendingGraphChange[] {
+  const value = node.metadata?.pendingGraphChanges;
+  if (!Array.isArray(value)) return [];
+  return value.filter(isPendingGraphChange);
+}
+
+function isPendingGraphChange(value: unknown): value is PendingGraphChange {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.opportunityId === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.status === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.department === "string" &&
+    typeof candidate.updatedAt === "string" &&
+    typeof candidate.nextAction === "string";
 }
 
 function LoopRunControls({

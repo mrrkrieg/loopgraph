@@ -679,7 +679,7 @@ for (const releaseAction of ["deprecate", "revoke"] as const) {
 
 apps
   .command("sources")
-  .description("List official, local, and private signed marketplace sources")
+  .description("List official, local, signed GitHub, and private marketplace sources")
   .option("--project <root>", "Explicit project root", process.cwd())
   .action(async (options: { project: string }) => {
     await printAppTool("loopgraph_marketplace_sources_get", { projectRoot: options.project });
@@ -687,7 +687,7 @@ apps
 
 apps
   .command("source-add")
-  .description("Register a catalog source from a JSON contract; signed sources must pin exact public keys")
+  .description("Register a catalog source from JSON; GitHub sources must pin a commit, snapshot digest, and exact public keys")
   .requiredOption("--file <path>", "Marketplace catalog source JSON")
   .option("--project <root>", "Explicit project root", process.cwd())
   .action(async (options: { file: string; project: string }) => {

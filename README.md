@@ -177,7 +177,7 @@ Open the local company graph:
 npm run loopgraph -- studio --project . --start
 ```
 
-The printed URL opens the editable Hermes Brain topology. Layout changes are saved as graph transactions; semantic additions and connections remain governed proposals until they pass design, approval, readiness, and promotion checks.
+The printed URL opens the editable Hermes Brain topology. Local and hosted workspaces both save layout changes as backend graph transactions. Hosted receipts are tenant/project scoped and bound to the authenticated operator. Proposing a loop, valid workflow connection, or improve/split/merge/retire lifecycle change automatically opens a durable opportunity, versioned graph change set, and Hermes design task. The graph reloads those correlations from durable records, marks affected live loops with an amber pending-change ring, and gives operators the exact Hermes-question or accountable-review handoff in the loop inspector. The review surface can approve or reject the exact change set, but approval fails closed until the completed Hermes task, immutable design run, validated proposal identities, and proposal-content hash all agree. Application is a separate operator action: the server reloads the content-bound approval and Hermes artifacts, snapshots the current graph, rejects stale state, and commits or rolls back one atomic topology transaction. The ring is explicitly a proposal overlay: it never changes routing or presents a draft edge as live topology. If context is missing, Hermes asks only the blocking questions; nothing becomes runnable until design, accountable approval, readiness, and promotion checks pass.
 
 For event rehearsal, workers, outcome measurements, controllers, and hosted deployment, continue with the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
 
@@ -316,7 +316,11 @@ npm run loopgraph -- app deprecate acme.customer-success.customer-risk \
   --message "Use the reviewed v2 contract."
 ```
 
-The private catalog implementation is local-first and project-confined. It is appropriate for development and customer-controlled filesystem synchronization; the hosted multi-tenant marketplace, organization identity, remote key custody, billing, and enterprise retention plane remain separate deployment work.
+Private catalogs can remain project-confined. Signed catalogs can also be synchronized from a GitHub repository. A GitHub source must pin an exact commit, the canonical `snapshotDigest` returned by publishing, and exact Ed25519 publisher public keys. Loopgraph checks out the repository into an untrusted staging directory, verifies the full catalog, and only then promotes it into an immutable local cache. Branches, tags, credential-bearing URLs, unsigned packs, digest mismatches, and untrusted keys fail closed. The default transport supports public repositories; private repository authentication requires a workload-identity or broker-backed synchronizer. See [Signed GitHub App catalogs](docs/GITHUB-APP-CATALOGS.md).
+
+Every marketplace version carries its exact source ID, transport, URI, commit when applicable, snapshot digest, trust policy, and synchronization time. Refreshing a catalog replaces only versions owned by that source; mirrored versions from other sources survive, while the same semantic version with a different digest fails as an immutable conflict. Marketplace cards and App detail show source and trust rather than hiding distribution provenance.
+
+The hosted multi-tenant marketplace, organization identity, remote key custody, billing, revocation fan-out, and enterprise retention plane remain separate deployment work.
 
 ## Department loop library
 
@@ -463,7 +467,7 @@ Loopgraph is in active early development.
 Implemented today:
 
 - Hermes-guided discovery and structured LoopSpec generation;
-- editable, governed company topology and semantic graph transactions;
+- editable, governed company topology with add, connect, improve, split, merge, and retire proposals;
 - durable event routing, route jobs, execution assignments, and receipts;
 - local simulation and generated positive, missing-context, and risk fixtures;
 - department loop and Hermes operating-skill libraries;

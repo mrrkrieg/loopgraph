@@ -22,7 +22,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - High-reasoning design receives a bounded `LoopDesignContext`; deterministic local design remains a fallback.
 - Accepted proposals compile into versioned LoopSpecs, routing cards, connection requirements, graph nodes, and three starter fixtures.
 - The company graph visualizes `Hermes Brain → Department → Loop` plus routing signals, evidence returns, opportunities, and graph changes.
-- The local graph editor submits backend transactions for layout moves and governed semantic node/edge proposals; semantic edits never bypass approval or promotion.
+- The local and hosted graph editor submits backend transactions for layout moves and governed semantic node, edge, and loop-lifecycle proposals. Users can propose improving, splitting, merging, or retiring registered loops without mutating the active graph; cross-department merges are rejected. Hosted receipts are tenant/project scoped, actor-bound, immutable, and visible in the editor. A compilable semantic proposal automatically opens an idempotent opportunity, graph change set, discovery session, and Hermes design task; invalid decorative edges fail before a receipt is stored. On reload, the editor reconstructs every transaction-to-opportunity/design correlation from durable tenant-matched records, overlays pending changes on every affected registered loop, and restores the exact Hermes-question and change-review handoffs. The operating review page records approve/reject decisions with the authenticated operator identity. Approval fails closed unless the completed Hermes task, immutable design run, validated proposal set, and tenant/opportunity scope agree; rejection can stop unwanted work before design finishes. Application is a separate permissioned action that accepts only the change-set ID from the browser, derives the receipt/design/proposals server-side, rechecks the content binding under the graph lock, snapshots the graph, and atomically commits or restores it. New loops retain their governed rollout mode rather than becoming unrestricted automations. Pending overlays are derived read models only: they add no live node or edge and disappear when the opportunity/change set reaches a terminal state. Semantic edits never bypass Hermes design, approval, readiness, or promotion.
 - Local workspaces show only their registered loops; the hosted preview can show a rich demonstration graph.
 
 ### Automatic opportunity detection
@@ -77,6 +77,14 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Learning joins connector bindings, scheduled jobs, samples, outcomes, guardrails, missing evidence, and reconciliation repairs.
 - Value keeps observed, modeled, and incomplete net savings separate and shows every hidden cost subtracted.
 - Hosted preview records are explicitly illustrative. A local install reads only its active project and presents guided empty states until Hermes produces real records.
+
+### App marketplace and installation
+
+- Official and private LoopPacks are strict, immutable, content-digested data artifacts that compile into existing governed runtime primitives.
+- The browser, Hermes MCP tools, and CLI share marketplace search, exact install planning, connection and mapping readiness, atomic install, conformance, replay, promotion recommendation, pause/resume, update, rollback, detach, and uninstall services.
+- Signed GitHub catalog taps synchronize only from an allowlisted HTTPS Git host and require an exact commit, canonical catalog snapshot digest, and pinned Ed25519 publisher keys. Remote content is validated in staging before atomic cache promotion and never installs or activates an app by itself.
+- Every indexed App version records its exact catalog source, transport, URI/ref, snapshot digest, trust policy, and synchronization time. Catalog refresh removes only versions owned by that source, preserves mirrors from other sources, and rejects one semantic version resolving to different immutable digests.
+- A tenant-scoped hosted marketplace registry now stores publisher/app ownership, immutable signed versions, file digests, dependencies, connector requirements, presets, evaluation records, release signatures, and explicit private-catalog grants behind RLS. Namespace claims are race-safe, reserved trust identities cannot be self-asserted, and authenticated readers receive safe column projections. Publisher submissions remain pending until a service-role verifier proves that the whole artifact, manifest, file index, and immutable stored projections match; activation, deprecation, revocation, and private sharing are separate bounded operations. Artifact byte upload/download, the verifier worker, signed delivery URLs, HTTP search endpoints, and installation handoff remain the next hosted marketplace layer.
 
 ### Verification
 
@@ -153,6 +161,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
+6. Implement the hosted marketplace artifact verifier/delivery service and connect its RLS-safe
+   search/read boundary to the existing local staging, conformance, and atomic install pipeline.
 
 ## Key documentation
 
@@ -175,3 +185,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md)
 - [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
 - [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md)
+- [Hosted marketplace registry](./HOSTED-MARKETPLACE-REGISTRY.md)

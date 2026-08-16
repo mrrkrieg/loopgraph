@@ -21,6 +21,8 @@ export function MarketplaceAppCard({ entry }: { entry: MarketplaceSearchEntry })
         <Fact label="Stacks" value={`${latest.presets.length} presets`} />
         <Fact label="Maturity" value={latest.maturity.replace(/_/g, " ")} />
         <Fact label="Version" value={`v${latest.version}`} />
+        <Fact label="Source" value={latest.source.sourceType.replace(/_/g, " ")} />
+        <Fact label="Trust" value={latest.provenanceVerified ? "verified" : "local only"} />
       </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {latest.presets.map((preset) => (
