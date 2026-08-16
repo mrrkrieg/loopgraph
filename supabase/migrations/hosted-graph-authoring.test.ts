@@ -49,6 +49,11 @@ describe("hosted graph authoring migration", () => {
     expect(sql).toContain("nullif(v_operation->>'nodeType', '') is null");
     expect(sql).toContain("nullif(v_operation->>'departmentId', '') is null");
     expect(sql).toContain("nullif(v_operation->>'relation', '') is null");
+    expect(sql).toContain("'propose_lifecycle'");
+    expect(sql).toContain("v_operation->>'mode' not in ('improve', 'split', 'merge', 'retire')");
+    expect(sql).toContain("jsonb_typeof(v_operation->'targetNodeIds') is distinct from 'array'");
+    expect(sql).toContain("jsonb_array_length(v_operation->'targetNodeIds') not between 1 and 10");
+    expect(sql).toContain("invalid graph editor lifecycle proposal");
     expect(sql).toContain("v_created_at is null");
   });
 });

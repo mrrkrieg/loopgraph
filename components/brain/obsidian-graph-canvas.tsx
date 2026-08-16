@@ -256,10 +256,11 @@ export function ObsidianGraphCanvas({
             const focused = neighborIds.size === 0 || neighborIds.has(node.id);
             const showFullLabel = showLabels && (focused || ["company_brain", "management_loop", "department_loop", "workflow_loop"].includes(node.type));
             const appNode = node.metadata?.appNode === true;
+            const pendingChangeCount = positiveInteger(node.metadata?.pendingGraphChangeCount);
             const lines = compactLabel(node.label, node.radius);
             return (
               <g
-                aria-label={node.label}
+                aria-label={`${node.label}${pendingChangeCount > 0 ? `, ${pendingChangeCount} pending graph change${pendingChangeCount === 1 ? "" : "s"}` : ""}`}
                 className="cursor-pointer outline-none transition-opacity duration-150"
                 key={node.id}
                 opacity={focused ? 1 : 0.24}
@@ -288,6 +289,37 @@ export function ObsidianGraphCanvas({
                 />
                 {node.status === "blocked" || node.status === "needs_attention" ? (
                   <circle fill="none" r={node.radius + 5} stroke={node.status === "blocked" ? "#dc2626" : "#f97316"} strokeWidth="2" />
+                ) : null}
+                {pendingChangeCount > 0 ? (
+                  <>
+                    <circle
+                      fill="none"
+                      r={node.radius + 7}
+                      stroke="#d97706"
+                      strokeDasharray="5 4"
+                      strokeWidth="2.5"
+                    />
+                    <circle
+                      cx={node.radius * 0.72}
+                      cy={-node.radius * 0.72}
+                      fill="#d97706"
+                      r="10"
+                      stroke="#ffffff"
+                      strokeWidth="2"
+                    />
+                    <text
+                      dominantBaseline="middle"
+                      fill="#ffffff"
+                      fontSize="9"
+                      fontWeight="800"
+                      pointerEvents="none"
+                      textAnchor="middle"
+                      x={node.radius * 0.72}
+                      y={-node.radius * 0.72}
+                    >
+                      {pendingChangeCount > 9 ? "9+" : pendingChangeCount}
+                    </text>
+                  </>
                 ) : null}
                 <text
                   dominantBaseline="middle"
@@ -349,6 +381,12 @@ function truncate(value: string, max: number) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function positiveInteger(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : 0;
 }
 
 function isLoopNode(node: BrainGraphNode) {

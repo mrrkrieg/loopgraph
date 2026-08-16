@@ -82,6 +82,8 @@ describe("Loopgraph App publisher", () => {
     expect(first.idempotent).toBe(false);
     expect(second.idempotent).toBe(true);
     expect(first.release.digest).toBe(signed.digest);
+    expect(first.snapshotDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(second.snapshotDigest).toBe(first.snapshotDigest);
 
     await publisher.setReleaseStatus({
       catalogId: "acme.private",
@@ -115,6 +117,16 @@ describe("Loopgraph App publisher", () => {
     const report = await publisher.validateApp(initialized.packRoot);
     expect(report.ok).toBe(false);
     expect(report.issues.map((issue) => issue.code)).toContain("publisher_self_verification");
+
+    await writeFile(manifestPath, raw.replace("acme.product.private-app", "loopgraph.product.lookalike-official-app"));
+    const reservedReport = await publisher.validateApp(initialized.packRoot);
+    expect(reservedReport.ok).toBe(false);
+    expect(reservedReport.issues.map((issue) => issue.code)).toContain("publisher_namespace_reserved");
+
+    await writeFile(manifestPath, raw.replace("acme.product.private-app", "other.product.unscoped-private-app"));
+    const unscopedReport = await publisher.validateApp(initialized.packRoot);
+    expect(unscopedReport.ok).toBe(false);
+    expect(unscopedReport.issues.map((issue) => issue.code)).toContain("publisher_namespace_mismatch");
   });
 
   it("captures installed behavior but never copies company configuration values", async () => {

@@ -12,6 +12,7 @@ import {
   packRelativePathSchema,
   type LoopPackArtifact,
   type LoopPackManifest,
+  type MarketplaceArtifactSource,
   type MarketplaceAppVersion,
   type PublisherTrustKey
 } from "../core/app-platform";
@@ -287,7 +288,8 @@ export async function extractLoopPackArchive(archivePath: string, destinationRoo
 export function marketplaceVersionFromArtifact(
   artifact: LoopPackArtifact,
   artifactUri: string,
-  maturity: MarketplaceAppVersion["maturity"] = "concept"
+  maturity: MarketplaceAppVersion["maturity"],
+  source: MarketplaceArtifactSource
 ): MarketplaceAppVersion {
   const manifest = artifact.manifest;
   return {
@@ -305,6 +307,7 @@ export function marketplaceVersionFromArtifact(
     maturity,
     deprecated: false,
     artifactUri,
+    source,
     provenanceVerified: Boolean(artifact.provenance.signature) || artifact.provenance.sourceType === "official"
   };
 }

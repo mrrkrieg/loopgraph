@@ -62,6 +62,46 @@ describe("graph editor proposal intents", () => {
       topology: topology()
     })).toThrow("must connect Hermes Brain to a workflow loop");
   });
+
+  it.each([
+    ["improve", "improve_loop", ["loop:feedback-clustering"]],
+    ["split", "split_loop", ["loop:feedback-clustering"]],
+    ["merge", "merge_loops", ["loop:feedback-clustering", "loop:release-learning"]],
+    ["retire", "retire_loop", ["loop:feedback-clustering"]]
+  ] as const)("turns a %s proposal into the matching loop lifecycle intent", (
+    mode,
+    kind,
+    targetNodeIds
+  ) => {
+    const [intent] = buildGraphEditorProposalIntents({
+      transaction: graphTransaction([{
+        kind: "propose_lifecycle",
+        mode,
+        targetNodeIds: [...targetNodeIds],
+        reason: "Observed outcomes show that the current ownership boundary needs revision."
+      }]),
+      topology: topology()
+    });
+
+    expect(intent).toEqual(expect.objectContaining({
+      department: "product",
+      kind,
+      problemType: `graph_lifecycle_${mode}`,
+      targetLoopIds: targetNodeIds.map((id) => id.replace("loop:", ""))
+    }));
+  });
+
+  it("rejects lifecycle proposals that combine loops from different departments", () => {
+    expect(() => buildGraphEditorProposalIntents({
+      transaction: graphTransaction([{
+        kind: "propose_lifecycle",
+        mode: "merge",
+        targetNodeIds: ["loop:feedback-clustering", "loop:lead-qualification"],
+        reason: "These loops look similar but have different accountable owners."
+      }]),
+      topology: topology()
+    })).toThrow("cannot merge workflow loops across departments");
+  });
 });
 
 function graphTransaction(
@@ -95,6 +135,20 @@ function topology(): SemanticTopology {
       label: "Feedback Clustering",
       loopId: "feedback-clustering",
       department: "product"
+    }),
+    node({
+      id: "loop:release-learning",
+      type: "workflow_loop",
+      label: "Release Learning",
+      loopId: "release-learning",
+      department: "product"
+    }),
+    node({
+      id: "loop:lead-qualification",
+      type: "workflow_loop",
+      label: "Lead Qualification",
+      loopId: "lead-qualification",
+      department: "sales"
     })
   ];
   return {
