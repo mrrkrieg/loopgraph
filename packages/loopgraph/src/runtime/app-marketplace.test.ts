@@ -6,7 +6,8 @@ import { loadLoopPackDirectory } from "./app-pack-loader";
 import {
   LocalAppMarketplace,
   catalogSnapshotDigest,
-  type GitHubCatalogSynchronizer
+  type GitHubCatalogSynchronizer,
+  type HostedCatalogSynchronizer
 } from "./app-marketplace";
 import { LoopgraphAppPublisher } from "./app-publisher";
 import {
@@ -167,6 +168,148 @@ describe("local app marketplace", () => {
     });
     const cached = await restarted.getAppArtifact("acme.sales.account-review", "0.1.0", loaded.artifact.digest);
     expect(cached.artifact.digest).toBe(loaded.artifact.digest);
+  });
+
+  it("stages one exact signed hosted release and reuses its immutable cache", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-hosted-catalog-"));
+    temporaryDirectories.push(projectRoot);
+    const publisher = new LoopgraphAppPublisher(projectRoot);
+    const initialized = await publisher.initializeApp({
+      destination: "apps/product-review",
+      appId: "acme.product.review",
+      name: "Product Review",
+      department: "product",
+      publisherId: "acme"
+    });
+    const key = await publisher.generatePublisherKey({
+      publisherId: "acme",
+      keyId: "acme.hosted.primary"
+    });
+    await publisher.signApp({ packRoot: initialized.packRoot, keyId: key.keyId });
+    const published = await publisher.publishApp({
+      packRoot: initialized.packRoot,
+      catalogId: "acme.hosted"
+    });
+    const loaded = await loadLoopPackDirectory(initialized.packRoot, {
+      requireSignature: true,
+      trustedPublisherKeys: [{
+        publisherId: key.publisherId,
+        keyId: key.keyId,
+        algorithm: key.algorithm,
+        publicKey: key.publicKey
+      }]
+    });
+    let synchronizationCount = 0;
+    const synchronize: HostedCatalogSynchronizer["synchronize"] = async (
+      _source,
+      destination
+    ) => {
+      synchronizationCount += 1;
+      await cp(published.catalogRoot, destination, { recursive: true });
+      return { resolvedRef: loaded.manifest.metadata.version };
+    };
+    const stateRoot = path.join(projectRoot, "consumer-marketplace");
+    const source = {
+      schemaVersion: "loopgraph-marketplace/v1alpha1" as const,
+      id: "hosted.acme-product-review",
+      type: "hosted" as const,
+      uri:
+        `hosted://marketplace/${loaded.manifest.metadata.id}/` +
+        `${loaded.manifest.metadata.version}/${loaded.artifact.digest.slice("sha256:".length)}`,
+      pinnedRef: loaded.manifest.metadata.version,
+      expectedDigest: loaded.artifact.digest,
+      enabled: true,
+      trustPolicy: "signed" as const,
+      trustedPublisherKeys: [{
+        publisherId: key.publisherId,
+        keyId: key.keyId,
+        algorithm: key.algorithm,
+        publicKey: key.publicKey
+      }]
+    };
+    const marketplace = new LocalAppMarketplace(stateRoot, packsRoot, {
+      hostedSynchronizer: { synchronize }
+    });
+    await marketplace.addCatalogSource(source);
+    await marketplace.refreshCatalogSource(source.id);
+    const app = await marketplace.getApp(loaded.manifest.metadata.id);
+    expect(app?.versions[0]).toMatchObject({
+      digest: loaded.artifact.digest,
+      provenanceVerified: true,
+      source: {
+        sourceId: source.id,
+        sourceType: "hosted",
+        sourceUri: source.uri,
+        sourceRef: loaded.manifest.metadata.version,
+        trustPolicy: "signed"
+      }
+    });
+    expect(synchronizationCount).toBe(1);
+
+    const restarted = new LocalAppMarketplace(stateRoot, packsRoot);
+    await expect(restarted.getAppArtifact(
+      loaded.manifest.metadata.id,
+      loaded.manifest.metadata.version,
+      loaded.artifact.digest
+    )).resolves.toMatchObject({ artifact: { digest: loaded.artifact.digest } });
+    await restarted.refreshCatalogSource(source.id);
+    expect(synchronizationCount).toBe(1);
+    await expect(restarted.getAppArtifact(
+      loaded.manifest.metadata.id,
+      loaded.manifest.metadata.version,
+      loaded.artifact.digest
+    )).resolves.toMatchObject({ artifact: { digest: loaded.artifact.digest } });
+
+    await writeFile(
+      path.join(app!.versions[0]!.artifactUri.slice("file://".length), "README.md"),
+      "tampered hosted cache\n"
+    );
+    await expect(restarted.refreshAllCatalogSources()).resolves.toEqual(
+      expect.any(Array)
+    );
+    await expect(restarted.getAppArtifact(
+      loaded.manifest.metadata.id,
+      loaded.manifest.metadata.version,
+      loaded.artifact.digest
+    )).rejects.toThrow(/digest/i);
+  });
+
+  it("rejects hosted source metadata whose URI does not match its immutable pins", async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-hosted-pins-"));
+    temporaryDirectories.push(stateRoot);
+    const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
+    await expect(marketplace.addCatalogSource({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "hosted.invalid-pins",
+      type: "hosted",
+      uri: `hosted://marketplace/acme.product.review/1.0.0/${"b".repeat(64)}`,
+      pinnedRef: "1.0.1",
+      expectedDigest: `sha256:${"a".repeat(64)}`,
+      enabled: true,
+      trustPolicy: "signed",
+      trustedPublisherKeys: [{
+        publisherId: "acme",
+        keyId: "acme.primary",
+        algorithm: "ed25519",
+        publicKey: "public-key-material-that-is-long-enough"
+      }]
+    })).rejects.toThrow(/immutable source pins/i);
+    await expect(marketplace.addCatalogSource({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "hosted.reserved-publisher",
+      type: "hosted",
+      uri: `hosted://marketplace/loopgraph.product.lookalike/1.0.0/${"a".repeat(64)}`,
+      pinnedRef: "1.0.0",
+      expectedDigest: `sha256:${"a".repeat(64)}`,
+      enabled: true,
+      trustPolicy: "signed",
+      trustedPublisherKeys: [{
+        publisherId: "loopgraph",
+        keyId: "loopgraph.attacker",
+        algorithm: "ed25519",
+        publicKey: "public-key-material-that-is-long-enough"
+      }]
+    })).rejects.toThrow(/reserved loopgraph publisher namespace/i);
   });
 
   it("keeps catalog versions source-owned and rejects immutable cross-source conflicts", async () => {

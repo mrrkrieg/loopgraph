@@ -13,6 +13,7 @@ sequenceDiagram
   participant S as "Private object storage"
   participant R as "RLS registry"
   participant V as "Verifier worker"
+  participant B as "Browser server bridge"
   participant I as "Governed installer"
   P->>A: "Request digest-bound upload (MFA)"
   A->>S: "Mint non-upsert signed upload"
@@ -24,10 +25,13 @@ sequenceDiagram
   V->>S: "Read opaque object with service identity"
   V->>V: "Verify archive, file digests, manifest, and signature"
   V->>R: "Attest exact stored projections or reject"
-  I->>A: "Request exact visible digest"
-  A->>R: "Authorize through user-bound RLS"
-  A->>S: "Mint 60-second download"
-  A-->>I: "60-second signed storage capability"
+  B->>R: "Search tenant-visible metadata"
+  B->>A: "Select exact app/version/digest"
+  A->>R: "Re-authorize through user-bound RLS"
+  A->>S: "Read exact object server-side"
+  A->>A: "Re-verify archive and publisher key"
+  A-->>I: "Content-addressed signed local cache"
+  I->>I: "Existing plan, conformance, review, atomic apply"
 ```
 
 The browser has no direct storage policy. The upload endpoint requires the
@@ -36,6 +40,12 @@ The browser has no direct storage policy. The upload endpoint requires the
 visibility before a service client looks up the opaque delivery key.
 The key is never returned as a reusable catalog field, although Supabase's
 signed capability URL may visibly contain its scoped storage path.
+
+The browser server bridge does not use the signed URL endpoint for
+installation. They fetch the selected object server-side after the same RLS
+cross-check, verify its archive/file/signature identity again, and promote it
+into a content-addressed project cache. The signed URL remains an explicit
+short-lived download API for authorized clients.
 
 ## HTTP contract
 
@@ -84,8 +94,16 @@ release has reached a final `active` or `rejected` verification state.
 
 ## Remaining handoff
 
-This delivery service exposes verified bytes but does not yet make the hosted
-catalog the default browser/MCP/CLI catalog. The next slice should merge hosted
-search results with configured local/GitHub sources, download an exact digest
-into a temporary staging directory, re-run local verification, and pass that
-directory to the existing conformance, review, and atomic install transaction.
+The authenticated browser server bridge now merges RLS-visible hosted
+metadata with local, official, and GitHub catalog results. It downloads only a
+selected exact release, promotes it only after local schema/content/signature
+verification, and sends it through the existing detail, mapping, installation
+plan, conformance, and atomic-apply services. Cached hosted releases are
+re-authorized before use; releases no longer visible to the tenant are evicted.
+
+Direct CLI and Hermes MCP processes still need an authenticated tenant-session
+transport before they can discover or fetch hosted releases independently.
+They continue to support official, local, and signed GitHub catalogs, and they
+can use a hosted artifact already staged by the server bridge. Live staging
+must additionally validate cross-replica cache policy, revocation latency, and
+multi-user behavior.

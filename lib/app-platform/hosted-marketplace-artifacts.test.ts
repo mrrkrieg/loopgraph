@@ -111,6 +111,55 @@ describe("hosted marketplace artifact delivery", () => {
     })).rejects.toThrow("untrusted signed URL");
   });
 
+  it("downloads verified bytes for server staging only after RLS and key cross-checks", async () => {
+    const visible = {
+      app_id: identity.appId,
+      version: identity.version,
+      artifact_digest: identity.artifactDigest,
+      release_status: "active",
+      verified_at: "2026-08-16T12:00:00.000Z"
+    };
+    const userQuery = queryReturning(visible);
+    const releaseQuery = queryReturning({ ...visible, artifact_object_key: objectKey });
+    const signatureQuery = queryReturning({
+      publisher_id: "acme",
+      algorithm: "ed25519",
+      key_id: "acme.primary",
+      public_key: "public-key-material-that-is-long-enough"
+    });
+    const download = vi.fn().mockResolvedValue({
+      data: new Blob(["verified archive"], { type: "application/json" }),
+      error: null
+    });
+    const adminFrom = vi.fn((table: string) =>
+      table === "marketplace_release_signatures" ? signatureQuery : releaseQuery
+    );
+    const service = new HostedMarketplaceArtifactService(
+      { from: vi.fn(() => userQuery) } as unknown as SupabaseClient,
+      {
+        from: adminFrom,
+        storage: { from: vi.fn(() => ({ download })) }
+      } as unknown as SupabaseClient,
+      "https://example.supabase.co"
+    );
+
+    const staged = await service.downloadVerifiedArtifact({
+      appId: identity.appId,
+      version: identity.version,
+      artifactDigest: identity.artifactDigest
+    });
+
+    expect(new TextDecoder().decode(staged.bytes)).toBe("verified archive");
+    expect(staged.publisherKey).toEqual({
+      publisherId: "acme",
+      algorithm: "ed25519",
+      keyId: "acme.primary",
+      publicKey: "public-key-material-that-is-long-enough"
+    });
+    expect(userQuery.maybeSingle).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledWith(objectKey);
+  });
+
   it("derives an immutable digest-addressed object key", () => {
     expect(hostedMarketplaceArtifactObjectKey(identity)).toBe(objectKey);
   });

@@ -320,7 +320,15 @@ Private catalogs can remain project-confined. Signed catalogs can also be synchr
 
 Every marketplace version carries its exact source ID, transport, URI, commit when applicable, snapshot digest, trust policy, and synchronization time. Refreshing a catalog replaces only versions owned by that source; mirrored versions from other sources survive, while the same semantic version with a different digest fails as an immutable conflict. Marketplace cards and App detail show source and trust rather than hiding distribution provenance.
 
-The hosted multi-tenant marketplace, organization identity, remote key custody, billing, revocation fan-out, and enterprise retention plane remain separate deployment work.
+Hosted deployments add a tenant-scoped private marketplace behind organization
+RLS. Search remains metadata-only; when an operator opens or plans a
+hosted app, the server fetches only that exact verified release, validates its
+archive, file digests, identity, and publisher signature again, and atomically
+promotes it into a content-addressed project cache. The existing readiness,
+conformance, review, and atomic-install path then runs unchanged, with provider
+writes still blocked. Cached hosted releases are re-authorized before use and
+evicted when they are revoked or no longer shared with the tenant. See
+[Hosted marketplace installation](docs/HOSTED-MARKETPLACE-INSTALL.md).
 
 ## Department loop library
 
