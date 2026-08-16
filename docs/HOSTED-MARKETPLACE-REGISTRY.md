@@ -120,11 +120,12 @@ Before production use:
 6. Back up and restore the registry, then confirm digest, signature, access,
    and lifecycle history remains intact.
 
-## Intentionally still separate
+## Delivery layer
 
-This migration does not upload or download artifact bytes, mint signed URLs,
-run the verification worker, expose marketplace HTTP routes, or connect the
-hosted registry to the local installation service. Those are separate trust
-boundaries. The next layer must add a capability-scoped artifact service that
-checks RLS-visible release eligibility, emits short-lived single-purpose URLs,
-and re-verifies the digest before local staging and atomic installation.
+The follow-on migration and server boundary now provide private object storage,
+RLS-bound search, MFA-gated upload/publication, leased verification, and
+short-lived exact-digest downloads. See
+[Hosted marketplace delivery](./HOSTED-MARKETPLACE-DELIVERY.md).
+
+Connecting downloaded hosted releases to the existing browser/MCP/CLI
+conformance and atomic installation transaction remains a separate handoff.

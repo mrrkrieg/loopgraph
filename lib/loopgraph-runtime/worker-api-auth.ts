@@ -22,6 +22,7 @@ export type MachineCapability =
   | "hermes.agent_heartbeat"
   | "hermes.execution_events"
   | "measurements.collect"
+  | "marketplace.verify"
   | "observability.read"
   | "provider.github_forward"
   | "provider.connector_broker"
@@ -37,7 +38,8 @@ export type MachineCapability =
   | "schedule.hermes_design"
   | "schedule.hermes_callbacks"
   | "schedule.management"
-  | "schedule.measurements";
+  | "schedule.measurements"
+  | "schedule.marketplace_verifier";
 
 export type GuardOptions = {
   environmentVariable: string;

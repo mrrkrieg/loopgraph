@@ -21,6 +21,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/marketplace-verifier",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/connector-broker/v1/workers/oauth-refresh",
       "schedule": "*/5 * * * *"
     },

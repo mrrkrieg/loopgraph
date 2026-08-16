@@ -39,9 +39,62 @@ const accessResultSchema = z.object({
   created: z.boolean()
 }).strict();
 
+const searchRowSchema = z.object({
+  app_id: z.string().min(3).max(160),
+  version: z.string().min(1).max(100),
+  artifact_digest: artifactDigestSchema,
+  snapshot_digest: artifactDigestSchema,
+  release_status: z.enum(["active", "deprecated"]),
+  app_metadata: z.unknown(),
+  version_payload: z.unknown(),
+  published_at: z.string(),
+  verified_at: z.string().min(1),
+  status_message: z.string().nullable(),
+  status_updated_at: z.string().nullable(),
+  relevance_score: z.number().int().min(1).max(100),
+  matched_terms: z.array(z.enum(["id", "name", "summary", "description"]))
+}).strict();
+
+const verificationJobSchema = z.object({
+  jobId: z.string().uuid(),
+  appId: z.string().min(3).max(160),
+  version: z.string().min(1).max(100),
+  attempts: z.number().int().min(1).max(25),
+  leaseToken: z.string().uuid(),
+  leaseExpiresAt: z.string().min(1),
+  releaseStatus: z.enum(["pending_verification", "active", "rejected"]),
+  artifactDigest: artifactDigestSchema,
+  manifestDigest: artifactDigestSchema,
+  fileIndexDigest: artifactDigestSchema,
+  snapshotDigest: artifactDigestSchema,
+  artifactObjectKey: z.string().min(1).max(512),
+  manifestPayload: z.unknown(),
+  fileIndexPayload: z.unknown(),
+  signature: z.object({
+    publisherId: z.string().min(1).max(160),
+    algorithm: z.enum(["ed25519", "ecdsa-p256-sha256"]),
+    keyId: z.string().min(3).max(160),
+    publicKey: z.string().min(32).max(8192),
+    value: z.string().min(32).max(16384)
+  }).strict()
+}).strict();
+
+const verificationJobResultSchema = z.object({
+  jobId: z.string().uuid(),
+  status: z.enum(["pending", "completed", "failed"]),
+  attempts: z.number().int().min(1).max(25),
+  errorCode: z.string().nullable()
+}).strict();
+
 export type HostedMarketplaceReleaseStatus =
   (typeof RELEASE_STATUSES)[number];
 export type HostedMarketplaceReleaseResult = z.infer<typeof releaseResultSchema>;
+export type HostedMarketplaceSearchResult = {
+  app: MarketplaceApp;
+  score: number;
+  matchedTerms: Array<"id" | "name" | "summary" | "description">;
+};
+export type HostedMarketplaceVerificationJob = z.infer<typeof verificationJobSchema>;
 
 export type PublishPrivateMarketplaceVersionInput = {
   app: MarketplaceApp;
@@ -230,6 +283,39 @@ export class SupabaseMarketplaceRegistryStore {
     return app;
   }
 
+  async searchVisibleApps(input: {
+    query?: string;
+    department?: string;
+    capability?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<HostedMarketplaceSearchResult[]> {
+    const limit = boundedInteger(input.limit, 20, 1, 100);
+    const offset = boundedInteger(input.offset, 0, 0, 10_000);
+    const { data, error } = await this.supabase.rpc(
+      "search_visible_marketplace_apps",
+      {
+        p_query: boundedText(input.query, 160),
+        p_department: boundedText(input.department, 120),
+        p_capability: boundedText(input.capability, 240),
+        p_limit: limit,
+        p_offset: offset
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to search visible marketplace apps: ${error.message}`);
+    }
+    return z.array(searchRowSchema).parse(data ?? []).map((row) => {
+      const [app] = buildMarketplaceApps([row as unknown as VersionRow]);
+      if (!app) throw new Error("Hosted marketplace search returned an empty app");
+      return {
+        app,
+        score: row.relevance_score,
+        matchedTerms: row.matched_terms
+      };
+    });
+  }
+
   async listOwnedReleases(appId?: string): Promise<HostedMarketplaceReleaseSummary[]> {
     let appQuery = this.supabase
       .from("marketplace_apps")
@@ -356,6 +442,76 @@ export class SupabaseMarketplaceReleaseVerifier {
       throw new Error(`Failed to attest hosted marketplace release: ${error.message}`);
     }
     return releaseResultSchema.parse(data);
+  }
+
+  async reject(input: {
+    appId: string;
+    version: string;
+    verificationReceiptDigest: string;
+    reasonCode: string;
+  }): Promise<HostedMarketplaceReleaseResult> {
+    const receiptDigest = artifactDigestSchema.parse(input.verificationReceiptDigest);
+    if (!/^[a-z][a-z0-9_]{2,79}$/.test(input.reasonCode)) {
+      throw new Error("Marketplace verification rejection requires a safe reason code");
+    }
+    const { data, error } = await this.supabase.rpc(
+      "reject_hosted_marketplace_release",
+      {
+        p_app_id: input.appId,
+        p_version: input.version,
+        p_verification_receipt_digest: receiptDigest,
+        p_reason_code: input.reasonCode
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to reject hosted marketplace release: ${error.message}`);
+    }
+    return releaseResultSchema.parse(data);
+  }
+}
+
+/** Service-role-only leased verification queue. */
+export class SupabaseMarketplaceVerificationJobStore {
+  constructor(private readonly supabase: SupabaseClient) {}
+
+  async claim(input: {
+    workerId: string;
+    limit?: number;
+    leaseSeconds?: number;
+  }): Promise<HostedMarketplaceVerificationJob[]> {
+    const { data, error } = await this.supabase.rpc(
+      "claim_hosted_marketplace_verification_jobs",
+      {
+        p_worker_id: input.workerId,
+        p_limit: boundedInteger(input.limit, 5, 1, 25),
+        p_lease_seconds: boundedInteger(input.leaseSeconds, 300, 30, 1800)
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to claim hosted marketplace verification jobs: ${error.message}`);
+    }
+    return z.array(verificationJobSchema).parse(data ?? []);
+  }
+
+  async finish(input: {
+    jobId: string;
+    leaseToken: string;
+    outcome: "completed" | "retry" | "failed";
+    errorCode?: string;
+  }): Promise<z.infer<typeof verificationJobResultSchema>> {
+    const { data, error } = await this.supabase.rpc(
+      "finish_hosted_marketplace_verification_job",
+      {
+        p_job_id: input.jobId,
+        p_lease_token: input.leaseToken,
+        p_outcome: input.outcome,
+        p_error_code: input.errorCode ?? null
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to finish hosted marketplace verification job: ${error.message}`);
+    }
+    return verificationJobResultSchema.parse(data);
   }
 }
 
@@ -533,6 +689,28 @@ function asObject(value: unknown): Record<string, unknown> {
     throw new Error("Hosted marketplace row contains invalid JSON metadata");
   }
   return value as Record<string, unknown>;
+}
+
+function boundedText(value: string | undefined, maximum: number) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (normalized.length > maximum) {
+    throw new Error(`Hosted marketplace search text exceeds ${maximum} characters`);
+  }
+  return normalized;
+}
+
+function boundedInteger(
+  value: number | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number
+) {
+  const resolved = value ?? fallback;
+  if (!Number.isInteger(resolved) || resolved < minimum || resolved > maximum) {
+    throw new Error(`Hosted marketplace integer must be between ${minimum} and ${maximum}`);
+  }
+  return resolved;
 }
 
 function compareSemanticVersions(left: string, right: string): number {

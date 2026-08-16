@@ -83,7 +83,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - The browser, Hermes MCP tools, and CLI share marketplace search, exact install planning, connection and mapping readiness, atomic install, conformance, replay, promotion recommendation, pause/resume, update, rollback, detach, and uninstall services.
 - Signed GitHub catalog taps synchronize only from an allowlisted HTTPS Git host and require an exact commit, canonical catalog snapshot digest, and pinned Ed25519 publisher keys. Remote content is validated in staging before atomic cache promotion and never installs or activates an app by itself.
 - Every indexed App version records its exact catalog source, transport, URI/ref, snapshot digest, trust policy, and synchronization time. Catalog refresh removes only versions owned by that source, preserves mirrors from other sources, and rejects one semantic version resolving to different immutable digests.
-- A tenant-scoped hosted marketplace registry now stores publisher/app ownership, immutable signed versions, file digests, dependencies, connector requirements, presets, evaluation records, release signatures, and explicit private-catalog grants behind RLS. Namespace claims are race-safe, reserved trust identities cannot be self-asserted, and authenticated readers receive safe column projections. Publisher submissions remain pending until a service-role verifier proves that the whole artifact, manifest, file index, and immutable stored projections match; activation, deprecation, revocation, and private sharing are separate bounded operations. Artifact byte upload/download, the verifier worker, signed delivery URLs, HTTP search endpoints, and installation handoff remain the next hosted marketplace layer.
+- A tenant-scoped hosted marketplace registry stores publisher/app ownership, immutable signed versions, file digests, dependencies, connector requirements, presets, evaluation records, release signatures, and explicit private-catalog grants behind RLS. Its private delivery layer now adds department/capability search, MFA-gated digest-addressed uploads, a private 100 MiB object bucket, leased service-role verification, safe rejection codes, crash reconciliation, and 60-second exact-release downloads. Raw signatures and standalone storage-key fields never cross the service boundary; the signed storage capability may contain its scoped path and expires after 60 seconds. Connecting those verified downloads to the existing browser/MCP/CLI conformance and atomic install transaction remains the next marketplace handoff.
 
 ### Verification
 
@@ -160,8 +160,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
-6. Implement the hosted marketplace artifact verifier/delivery service and connect its RLS-safe
-   search/read boundary to the existing local staging, conformance, and atomic install pipeline.
+6. Connect the hosted marketplace's RLS-safe search and verified download boundary to the existing
+   browser/MCP/CLI local staging, conformance, and atomic install pipeline.
 
 ## Key documentation
 
@@ -185,3 +185,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
 - [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md)
 - [Hosted marketplace registry](./HOSTED-MARKETPLACE-REGISTRY.md)
+- [Hosted marketplace delivery](./HOSTED-MARKETPLACE-DELIVERY.md)
