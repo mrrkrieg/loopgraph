@@ -71,6 +71,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 - One focused **Operate** navigation entry opens Agent Activity, Opportunities, Change Review, Controller, Learning, and Value views.
 - Agent Activity visualizes the complete incoming signal → Hermes Brain → business problem → department loop → Hermes runtime → tasks/tools/approvals → outcome path and supports operational filtering.
+- Every accepted assignment can be opened as a governed execution trace. The trace preserves why Hermes selected the loop, ordered execution events, approval state, governed outputs, outcome evidence, verification, corrections, and the shared-learning timeline while deliberately omitting raw provider records, tool arguments/results, artifact locations, evidence locations, and review comments.
 - Opportunities explain recurrence, impact, evidence, risk, status, and the associated graph change.
 - Change Review joins exact semantic operations to accountable approval and transaction receipts.
 - Controller runs expose triggers, decisions, failed policy rules, checkpoints, and safety ceilings.

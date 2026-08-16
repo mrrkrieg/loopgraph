@@ -1,5 +1,12 @@
-import type { AgentOperationsFilters, AgentOperationsReadModel } from "loopgraph/runtime";
-import { loadAgentOperationsReadModel } from "loopgraph/runtime";
+import type {
+  AgentOperationsFilters,
+  AgentOperationsReadModel,
+  AgentOperationsTraceDetail
+} from "loopgraph/runtime";
+import {
+  loadAgentOperationsReadModel,
+  loadAgentOperationsTraceDetail
+} from "loopgraph/runtime";
 import { isHostedPreview } from "@/lib/hosted-preview";
 import {
   getActiveLoopgraphProjectRoot,
@@ -20,6 +27,28 @@ export async function getAgentOperationsViewData(filters: AgentOperationsFilters
     data: await loadAgentOperationsReadModel({
       projectRoot,
       ...filters,
+      routingStore: getRoutingStore(),
+      operationsStore: getHermesOperationsStore(),
+      storage: getStorageAdapter(),
+      loopSpecStore: getLoopSpecRegistryStore({ projectRoot })
+    })
+  };
+}
+
+export async function getAgentOperationsTraceViewData(routeJobId: string): Promise<{
+  mode: "preview" | "local";
+  data: AgentOperationsTraceDetail | null;
+}> {
+  if (isHostedPreview()) {
+    const row = buildAgentOperationsPreview().activity.find((item) => item.routeJobId === routeJobId);
+    return { mode: "preview", data: row ? buildPreviewTrace(row) : null };
+  }
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  return {
+    mode: "local",
+    data: await loadAgentOperationsTraceDetail({
+      routeJobId,
+      projectRoot,
       routingStore: getRoutingStore(),
       operationsStore: getHermesOperationsStore(),
       storage: getStorageAdapter(),
@@ -139,6 +168,59 @@ function previewAgent(id: string, name: string, environment: "production", capab
     updatedAt: "2026-07-31T15:59:48.000Z",
     healthy: true,
     secondsSinceHeartbeat: 12
+  };
+}
+
+function buildPreviewTrace(row: AgentOperationsReadModel["activity"][number]): AgentOperationsTraceDetail {
+  const completed = row.jobStatus === "completed";
+  const waiting = row.jobStatus === "waiting_review";
+  const failed = row.jobStatus === "failed";
+  const selectedAt = "2026-07-31T15:30:04.000Z";
+  return {
+    schemaVersion: "agent-operations-trace/v1alpha1",
+    generatedAt: "2026-07-31T16:00:00.000Z",
+    activity: row,
+    routing: {
+      action: "route",
+      confidence: 0.91,
+      catalogVersion: "preview-catalog-v1",
+      policyVersion: "company-routing-policy-v1",
+      needsHumanChoice: false,
+      needsCorrection: false,
+      selectedRoutes: [{
+        loopId: row.loopId,
+        loopLabel: row.loopLabel,
+        role: "primary",
+        confidence: 0.91,
+        reasonSummary: `${row.eventType} matched the active ${row.loopLabel} routing contract with the required company context.`,
+        evidenceRefCount: 3,
+        priority: 100
+      }],
+      alternatives: [],
+      timeline: [
+        { id: `${row.eventId}:receipt`, at: "2026-07-31T15:30:00.000Z", stage: "event_receipt", label: "Signal received", detail: `${row.source} submitted ${row.eventType}.`, status: "accepted" },
+        { id: `${row.eventId}:problem`, at: "2026-07-31T15:30:02.000Z", stage: "business_problem", label: "Business problem identified", detail: row.problemSummary ?? "Hermes created a company problem from the incoming evidence.", status: "open" },
+        { id: `${row.eventId}:decision`, at: selectedAt, stage: "hermes_decision", label: "Hermes selected a route", detail: `${row.loopLabel} was the one eligible primary loop.`, status: "valid" },
+        { id: `${row.routeJobId}:job`, at: "2026-07-31T15:30:05.000Z", stage: "route_job", label: "Work assigned", detail: `${row.agentName ?? "Hermes runtime"} accepted the governed assignment.`, status: row.jobStatus },
+        ...(completed ? [{ id: `${row.runId}:outcome`, at: row.updatedAt, stage: "outcome_recorded" as const, label: "Outcome returned", detail: row.latestSummary ?? "Observed evidence returned to Hermes.", status: "observed" }] : [])
+      ]
+    },
+    execution: {
+      timeline: [
+        { id: `${row.runId}:received`, sequence: 0, eventType: "assignment.received", occurredAt: "2026-07-31T15:30:05.000Z", summary: "Hermes accepted the content-bound assignment." },
+        { id: `${row.runId}:started`, sequence: 1, eventType: "run.started", occurredAt: "2026-07-31T15:30:06.000Z", summary: "Execution began with the approved connector and policy boundary." },
+        ...(row.taskCount > 0 ? [{ id: `${row.runId}:task`, sequence: 2, eventType: completed ? "task.completed" as const : failed ? "task.failed" as const : "task.started" as const, occurredAt: row.updatedAt, summary: row.latestSummary, task: { id: "task-primary", label: `Operate ${row.loopLabel}` }, ...(failed ? { error: { code: "PROVIDER_ACCESS_EXPIRED", retryable: true } } : {}) }] : []),
+        ...(waiting ? [{ id: `${row.runId}:approval`, sequence: 3, eventType: "approval.requested" as const, occurredAt: row.updatedAt, summary: "A customer-impacting action requires an accountable owner.", approval: { id: "approval-preview", status: "requested", requestedRole: "owner" } }] : []),
+        ...(completed ? [{ id: `${row.runId}:outcome`, sequence: 4, eventType: "outcome.observed" as const, occurredAt: row.updatedAt, summary: row.latestSummary, outcome: { metricKey: "time_to_resolution_seconds", value: 41, unit: "seconds" } }] : [])
+      ],
+      tasks: row.taskCount > 0 ? [{ id: "task-primary", label: `Operate ${row.loopLabel}`, status: completed ? "completed" : failed ? "failed" : waiting ? "waiting_review" : "running", summary: row.latestSummary }] : [],
+      toolCalls: Array.from({ length: row.toolCallCount }, (_, index) => ({ id: `tool-${index + 1}`, toolKey: index === 0 ? "company_context.read" : "provider.read", status: failed && index === row.toolCallCount - 1 ? "failed" : "completed", startedAt: "2026-07-31T15:30:07.000Z", completedAt: row.updatedAt })),
+      approvals: waiting ? [{ id: "approval-preview", status: "open", role: "owner", createdAt: row.updatedAt }] : [],
+      outputs: Array.from({ length: row.outputCount }, (_, index) => ({ id: `output-${index + 1}`, type: "governed_artifact" })),
+      outcomes: completed ? [{ name: "time_to_resolution_seconds", value: 41, unit: "seconds", observed: true }] : [],
+      verification: completed ? [{ verifierId: "outcome-evidence", passed: true, summary: "The completion signal and observed outcome were recorded." }] : [],
+      errors: failed ? [{ code: "PROVIDER_ACCESS_EXPIRED", at: row.updatedAt }] : []
+    }
   };
 }
 
