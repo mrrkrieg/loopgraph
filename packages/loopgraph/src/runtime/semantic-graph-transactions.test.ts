@@ -19,7 +19,7 @@ import {
 import { loadLoopSpecFromPath } from "./loader";
 import { saveGraphChangeSet } from "./loop-opportunity-engine";
 import { runLoopPromotionRehearsal } from "./promotion-rehearsal";
-import { readWorkspaceGraphState } from "./semantic-graph-state";
+import { graphChangeSetHash, readWorkspaceGraphState } from "./semantic-graph-state";
 import { FileSemanticGraphStore } from "./semantic-graph-store";
 import {
   applyGraphChangeSet,
@@ -37,6 +37,46 @@ import { FileRoutingStore } from "./routing-store";
 import { readLoopgraphWorkspace } from "./workspace";
 
 describe("semantic graph transactions", () => {
+  it("rechecks the exact Hermes-reviewed change and design under the approval lock", async () => {
+    const fixture = await marketingDesignFixture();
+    const changeSet = await createChangeSet({
+      projectRoot: fixture.projectRoot,
+      operation: "add",
+      targetLoopIds: [],
+      proposedLoopCount: 2,
+      designRunId: fixture.designRunId,
+      id: "change_set_content_bound"
+    });
+    const common = {
+      projectRoot: fixture.projectRoot,
+      changeSetId: changeSet.id,
+      decision: "approved" as const,
+      actorId: "owner_1",
+      actorRole: "company_owner",
+      policyVersion: "graph-policy/v1",
+      reason: "Approve only the exact Hermes-reviewed content.",
+      now: new Date("2026-07-29T12:19:00.000Z")
+    };
+
+    await expect(approveGraphChangeSet({
+      ...common,
+      expectedChangeSetHash: "changed_after_review",
+      expectedDesignRunId: fixture.designRunId
+    })).rejects.toThrow("changed after Hermes design review");
+
+    await expect(approveGraphChangeSet({
+      ...common,
+      expectedChangeSetHash: graphChangeSetHash(changeSet),
+      expectedDesignRunId: "different_design_run"
+    })).rejects.toThrow("not bound to the reviewed Hermes design run");
+
+    await expect(approveGraphChangeSet({
+      ...common,
+      expectedChangeSetHash: graphChangeSetHash(changeSet),
+      expectedDesignRunId: fixture.designRunId
+    })).resolves.toMatchObject({ receipt: { decision: "approved" } });
+  });
+
   it("applies an approved add against an exact graph hash and rejects a stale change", async () => {
     const fixture = await marketingDesignFixture();
     const changeSet = await createChangeSet({
@@ -58,6 +98,19 @@ describe("semantic graph transactions", () => {
       evidenceRefs: ["review:add-marketing"],
       now: new Date("2026-07-29T12:20:00.000Z")
     });
+    await expect(applyGraphChangeSet({
+      projectRoot: fixture.projectRoot,
+      changeSetId: changeSet.id,
+      approvalReceiptId: approval.receipt.id,
+      expectedApprovalEvidenceRefs: ["review:different-design"],
+      designRunId: fixture.designRunId,
+      acceptedProposalIds: [
+        "proposal_marketing_ads",
+        "proposal_marketing_content_creation"
+      ],
+      initiatedBy: "owner_1",
+      now: new Date("2026-07-29T12:20:30.000Z")
+    })).rejects.toThrow("not bound to the expected Hermes design evidence");
     const applied = await applyGraphChangeSet({
       projectRoot: fixture.projectRoot,
       changeSetId: changeSet.id,
