@@ -82,6 +82,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Official and private LoopPacks are strict, immutable, content-digested data artifacts that compile into existing governed runtime primitives.
 - The browser, Hermes MCP tools, and CLI share marketplace search, exact install planning, connection and mapping readiness, atomic install, conformance, replay, promotion recommendation, pause/resume, update, rollback, detach, and uninstall services.
 - Signed GitHub catalog taps synchronize only from an allowlisted HTTPS Git host and require an exact commit, canonical catalog snapshot digest, and pinned Ed25519 publisher keys. Remote content is validated in staging before atomic cache promotion and never installs or activates an app by itself.
+- Every indexed App version records its exact catalog source, transport, URI/ref, snapshot digest, trust policy, and synchronization time. Catalog refresh removes only versions owned by that source, preserves mirrors from other sources, and rejects one semantic version resolving to different immutable digests.
 - The hosted multi-tenant marketplace control plane remains separate from the immutable GitHub transport.
 
 ### Verification

@@ -354,6 +354,16 @@ export const loopPackArtifactSchema = z.object({
   }).strict()
 }).strict();
 
+export const marketplaceArtifactSourceSchema = z.object({
+  sourceId: appIdSchema,
+  sourceType: z.enum(["official", "filesystem", "github", "hosted"]),
+  sourceUri: z.string().min(1),
+  sourceRef: z.string().min(1).optional(),
+  snapshotDigest: artifactDigestSchema,
+  trustPolicy: z.enum(["official_only", "signed", "explicit_local"]),
+  synchronizedAt: isoDateTimeSchema
+}).strict();
+
 export const marketplaceAppVersionSchema = z.object({
   schemaVersion: z.literal(MARKETPLACE_SCHEMA_VERSION),
   appId: appIdSchema,
@@ -372,6 +382,7 @@ export const marketplaceAppVersionSchema = z.object({
   revokedAt: isoDateTimeSchema.optional(),
   revocationReason: z.string().min(1).optional(),
   artifactUri: z.string().min(1),
+  source: marketplaceArtifactSourceSchema,
   provenanceVerified: z.boolean().default(false)
 }).strict();
 
@@ -997,6 +1008,7 @@ export type LoopPackSignature = z.infer<typeof loopPackSignatureSchema>;
 export type PublisherTrustKey = z.infer<typeof publisherTrustKeySchema>;
 export type MarketplaceApp = z.infer<typeof marketplaceAppSchema>;
 export type MarketplaceAppVersion = z.infer<typeof marketplaceAppVersionSchema>;
+export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSourceSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
@@ -1032,6 +1044,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     LoopPackArtifact: zodToJsonSchema(loopPackArtifactSchema, "LoopPackArtifact") as Record<string, unknown>,
     LoopPackSignature: zodToJsonSchema(loopPackSignatureSchema, "LoopPackSignature") as Record<string, unknown>,
     PublisherTrustKey: zodToJsonSchema(publisherTrustKeySchema, "PublisherTrustKey") as Record<string, unknown>,
+    MarketplaceArtifactSource: zodToJsonSchema(marketplaceArtifactSourceSchema, "MarketplaceArtifactSource") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,

@@ -132,6 +132,7 @@ export class LocalAppMarketplace {
     if (source.type === "hosted") {
       throw new Error("Hosted marketplace transport is not available in the local-first registry; use a synchronized filesystem cache");
     }
+    const synchronizedAt = new Date().toISOString();
 
     const prepared = source.type === "github"
       ? await this.prepareGitHubCatalogRoot(source)
@@ -162,16 +163,16 @@ export class LocalAppMarketplace {
       publishedReleaseKey(release.appId, release.version, release.digest),
       release
     ]));
+    const snapshotDigest = catalogSnapshotDigest({
+      artifacts: loadedPacks.map((entry) => entry.artifact),
+      publishedCatalog
+    });
 
     if (source.type === "github") {
       try {
         if (loadedPacks.length === 0) throw new Error("GitHub catalog does not contain any LoopPacks");
-        const digest = catalogSnapshotDigest({
-          artifacts: loadedPacks.map((entry) => entry.artifact),
-          publishedCatalog
-        });
-        if (digest !== source.expectedDigest) {
-          throw new Error(`GitHub catalog snapshot digest mismatch: expected ${source.expectedDigest}, received ${digest}`);
+        if (snapshotDigest !== source.expectedDigest) {
+          throw new Error(`GitHub catalog snapshot digest mismatch: expected ${source.expectedDigest}, received ${snapshotDigest}`);
         }
         sourceRoot = await promotePreparedCatalogRoot(prepared);
       } catch (error) {
@@ -197,7 +198,16 @@ export class LocalAppMarketplace {
           }
         },
         `file://${location}`,
-        "tested"
+        "tested",
+        {
+          sourceId: source.id,
+          sourceType: source.type,
+          sourceUri: source.uri,
+          sourceRef: source.pinnedRef,
+          snapshotDigest,
+          trustPolicy: source.trustPolicy,
+          synchronizedAt
+        }
       );
       marketplaceVersion.provenanceVerified = source.trustPolicy === "signed"
         ? Boolean(loadedArtifact.provenance.signature)
@@ -237,11 +247,9 @@ export class LocalAppMarketplace {
         throw new Error(`Marketplace app ${appId} is owned by publisher ${existing.publisher.id} and cannot be replaced by ${publisherId}`);
       }
     }
-    const sourceAppIds = new Set(grouped.keys());
-    const retained = current.apps.filter((app) => !sourceAppIds.has(app.id));
     for (const entry of versions) {
       const id = entry.artifact.manifest.metadata.id;
-      const key = artifactKey(id, entry.artifact.manifest.metadata.version, entry.artifact.digest);
+      const key = artifactKey(id, entry.artifact.manifest.metadata.version, entry.artifact.digest, source.id);
       this.artifactLocations.set(key, entry.location);
       this.artifactTrust.set(key, {
         requireSignature: source.trustPolicy === "signed",
@@ -249,9 +257,31 @@ export class LocalAppMarketplace {
       });
     }
     const refreshed = Array.from(grouped.values()).map((entries) => marketplaceAppFromVersions(entries));
-    const apps = [...retained, ...refreshed].sort((left, right) => left.name.localeCompare(right.name));
-    await this.writeIndex({ schemaVersion: MARKETPLACE_SCHEMA_VERSION, apps, refreshedAt: new Date().toISOString() });
-    await this.addCatalogSource({ ...source, refreshedAt: new Date().toISOString() });
+    const refreshedById = new Map(refreshed.map((app) => [app.id, app]));
+    const currentById = new Map(current.apps.map((app) => [app.id, app]));
+    const appIds = new Set([...currentById.keys(), ...refreshedById.keys()]);
+    const apps = Array.from(appIds).flatMap((appId) => {
+      const existing = currentById.get(appId);
+      const incoming = refreshedById.get(appId);
+      const incomingVersions = new Set((incoming?.versions ?? []).map((version) => version.version));
+      const retainedVersions = (existing?.versions ?? []).filter((version) =>
+        version.source.sourceId !== source.id &&
+        !(version.source.sourceId.startsWith("legacy-") && incomingVersions.has(version.version))
+      );
+      const mergedVersions = mergeMarketplaceVersions(appId, [...retainedVersions, ...(incoming?.versions ?? [])]);
+      if (mergedVersions.length === 0) return [];
+      const latestVersion = mergedVersions[0]!.version;
+      const base = incoming?.latestVersion === latestVersion ? incoming : existing ?? incoming;
+      if (!base) throw new Error(`Marketplace app metadata is unavailable for ${appId}`);
+      return [marketplaceAppSchema.parse({
+        ...base,
+        latestVersion,
+        versions: mergedVersions,
+        readmeUri: `${mergedVersions[0]!.artifactUri}/README.md`
+      })];
+    }).sort((left, right) => left.name.localeCompare(right.name));
+    await this.writeIndex({ schemaVersion: MARKETPLACE_SCHEMA_VERSION, apps, refreshedAt: synchronizedAt });
+    await this.addCatalogSource({ ...source, refreshedAt: synchronizedAt });
     return refreshed;
   }
 
@@ -331,28 +361,36 @@ export class LocalAppMarketplace {
     const versions = app.versions
       .filter((version) => !version.revokedAt && !version.deprecated)
       .filter((version) => versionRange === "latest" || satisfiesVersionRange(version.version, versionRange))
-      .sort((left, right) => compareVersionStrings(right.version, left.version));
+      .sort(compareMarketplaceVersions);
     if (versions.length === 0) throw new Error(`No eligible version of ${appId} satisfies ${versionRange}`);
     return versions[0];
   }
 
   async getAppArtifact(appId: string, version: string, expectedDigest?: string) {
-    const appVersion = (await this.listAppVersions(appId)).find((candidate) => candidate.version === version);
-    if (!appVersion) throw new Error(`Marketplace version not found: ${appId}@${version}`);
-    if (expectedDigest && appVersion.digest !== expectedDigest) throw new Error("Requested artifact digest does not match marketplace metadata");
-    const key = artifactKey(appId, version, appVersion.digest);
+    const candidates = (await this.listAppVersions(appId))
+      .filter((candidate) => candidate.version === version)
+      .sort(compareMarketplaceVersions);
+    if (candidates.length === 0) throw new Error(`Marketplace version not found: ${appId}@${version}`);
+    const appVersion = expectedDigest
+      ? candidates.find((candidate) => candidate.digest === expectedDigest)
+      : candidates[0];
+    if (!appVersion) throw new Error("Requested artifact digest does not match marketplace metadata");
+    const key = artifactKey(appId, version, appVersion.digest, appVersion.source.sourceId);
     let location = this.artifactLocations.get(key);
     if (!location && appVersion.artifactUri.startsWith("file://")) location = appVersion.artifactUri.slice("file://".length);
     if (!location) throw new Error("Artifact is not available in the local marketplace cache");
     let trust = this.artifactTrust.get(key);
     if (!trust) {
-      const source = (await this.listCatalogSources()).find((candidate) => {
+      const sources = await this.listCatalogSources();
+      const sourceMatchesLocation = (candidate: MarketplaceCatalogSource) => {
         if (candidate.type === "hosted") return false;
         const sourceRoot = candidate.type === "github"
           ? githubCatalogCacheRoot(this.stateRoot, candidate)
           : resolveSourceRoot(candidate);
         return isWithin(sourceRoot, location!);
-      });
+      };
+      const source = sources.find((candidate) => candidate.id === appVersion.source.sourceId && sourceMatchesLocation(candidate)) ??
+        sources.find(sourceMatchesLocation);
       if (source) {
         trust = { requireSignature: source.trustPolicy === "signed", trustedPublisherKeys: source.trustedPublisherKeys };
         this.artifactTrust.set(key, trust);
@@ -366,11 +404,18 @@ export class LocalAppMarketplace {
   async verifyAppProvenance(appId: string, version: string): Promise<{
     verified: boolean;
     digestMatches: boolean;
+    sourceId: string;
     sourceType: string;
+    sourceUri: string;
+    sourceRef?: string;
+    snapshotDigest: string;
+    trustPolicy: MarketplaceCatalogSource["trustPolicy"];
     signaturePresent: boolean;
     reasons: string[];
   }> {
-    const appVersion = (await this.listAppVersions(appId)).find((candidate) => candidate.version === version);
+    const appVersion = (await this.listAppVersions(appId))
+      .filter((candidate) => candidate.version === version)
+      .sort(compareMarketplaceVersions)[0];
     if (!appVersion) throw new Error(`Marketplace version not found: ${appId}@${version}`);
     const loaded = await this.getAppArtifact(appId, version, appVersion.digest);
     const digestMatches = loaded.artifact.digest === appVersion.digest;
@@ -384,7 +429,12 @@ export class LocalAppMarketplace {
     return {
       verified: digestMatches && appVersion.provenanceVerified && (signaturePresent || official),
       digestMatches,
-      sourceType: loaded.artifact.provenance.sourceType,
+      sourceId: appVersion.source.sourceId,
+      sourceType: appVersion.source.sourceType,
+      sourceUri: appVersion.source.sourceUri,
+      sourceRef: appVersion.source.sourceRef,
+      snapshotDigest: appVersion.source.snapshotDigest,
+      trustPolicy: appVersion.source.trustPolicy,
       signaturePresent,
       reasons
     };
@@ -401,7 +451,7 @@ export class LocalAppMarketplace {
     }
     return {
       schemaVersion: MARKETPLACE_SCHEMA_VERSION,
-      apps: value.apps.map((app) => marketplaceAppSchema.parse(app)),
+      apps: value.apps.map((app) => marketplaceAppSchema.parse(withLegacyMarketplaceSources(app))),
       refreshedAt: value.refreshedAt
     };
   }
@@ -581,7 +631,7 @@ function marketplaceAppFromVersions(
   entries: Array<{ artifact: LoopPackArtifact; marketplaceVersion: MarketplaceAppVersion }>
 ): MarketplaceApp {
   const versions = entries.map((entry) => entry.marketplaceVersion)
-    .sort((left, right) => compareVersionStrings(right.version, left.version));
+    .sort(compareMarketplaceVersions);
   const latestEntry = entries.find((entry) => entry.marketplaceVersion.version === versions[0].version) ?? entries[0];
   const metadata = latestEntry.artifact.manifest.metadata;
   return marketplaceAppSchema.parse({
@@ -601,12 +651,97 @@ function marketplaceAppFromVersions(
   });
 }
 
+function mergeMarketplaceVersions(appId: string, versions: MarketplaceAppVersion[]): MarketplaceAppVersion[] {
+  const identities = new Map<string, MarketplaceAppVersion>();
+  const digestsByVersion = new Map<string, Set<string>>();
+  for (const version of versions) {
+    const digests = digestsByVersion.get(version.version) ?? new Set<string>();
+    digests.add(version.digest);
+    digestsByVersion.set(version.version, digests);
+    const identity = `${version.source.sourceId}#${version.version}#${version.digest}`;
+    identities.set(identity, version);
+  }
+  for (const [version, digests] of digestsByVersion) {
+    if (digests.size > 1) {
+      throw new Error(`Immutable marketplace version conflict for ${appId}@${version}: catalogs contain different artifact digests`);
+    }
+  }
+  const mirrors = new Map<string, MarketplaceAppVersion[]>();
+  for (const version of identities.values()) {
+    const mirrorKey = `${version.version}#${version.digest}`;
+    mirrors.set(mirrorKey, [...(mirrors.get(mirrorKey) ?? []), version]);
+  }
+  return Array.from(mirrors.values())
+    .flatMap(normalizeMirroredReleaseStatus)
+    .sort(compareMarketplaceVersions);
+}
+
+function normalizeMirroredReleaseStatus(versions: MarketplaceAppVersion[]): MarketplaceAppVersion[] {
+  const authorityRank = Math.min(...versions.map(marketplaceSourceRank));
+  const authorities = versions
+    .filter((version) => marketplaceSourceRank(version) === authorityRank)
+    .sort((left, right) => left.source.sourceId.localeCompare(right.source.sourceId));
+  const revocation = authorities
+    .filter((version) => version.revokedAt)
+    .sort((left, right) => left.revokedAt!.localeCompare(right.revokedAt!) || left.source.sourceId.localeCompare(right.source.sourceId))[0];
+  const deprecation = authorities.find((version) => version.deprecated);
+
+  return versions.map((version) => ({
+    ...version,
+    deprecated: deprecation ? true : version.deprecated,
+    deprecationMessage: deprecation?.deprecationMessage ?? version.deprecationMessage,
+    revokedAt: revocation?.revokedAt ?? version.revokedAt,
+    revocationReason: revocation?.revocationReason ?? version.revocationReason
+  }));
+}
+
+function compareMarketplaceVersions(left: MarketplaceAppVersion, right: MarketplaceAppVersion): number {
+  return compareVersionStrings(right.version, left.version) ||
+    marketplaceSourceRank(left) - marketplaceSourceRank(right) ||
+    left.source.sourceId.localeCompare(right.source.sourceId);
+}
+
+function marketplaceSourceRank(version: MarketplaceAppVersion): number {
+  if (version.source.sourceType === "official") return 0;
+  if (version.source.trustPolicy === "signed") return 1;
+  if (version.source.sourceType === "filesystem") return 2;
+  return 3;
+}
+
+function withLegacyMarketplaceSources(app: unknown): unknown {
+  if (!isObjectRecord(app) || !Array.isArray(app.versions)) return app;
+  return {
+    ...app,
+    versions: app.versions.map((version) => {
+      if (!isObjectRecord(version) || isObjectRecord(version.source)) return version;
+      const artifactUri = typeof version.artifactUri === "string" ? version.artifactUri : "legacy://unknown";
+      const digest = typeof version.digest === "string" ? version.digest : canonicalAppDigest(version);
+      const synchronizedAt = typeof version.publishedAt === "string" ? version.publishedAt : new Date(0).toISOString();
+      return {
+        ...version,
+        source: {
+          sourceId: `legacy-${canonicalAppDigest({ artifactUri }).slice("sha256:".length, "sha256:".length + 16)}`,
+          sourceType: artifactUri.startsWith("file://") ? "filesystem" : "hosted",
+          sourceUri: artifactUri,
+          snapshotDigest: digest,
+          trustPolicy: "explicit_local",
+          synchronizedAt
+        }
+      };
+    })
+  };
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function tokenize(value: string): string[] {
   return Array.from(new Set(value.toLowerCase().split(/[^a-z0-9._-]+/).filter((term) => term.length > 1)));
 }
 
-function artifactKey(appId: string, version: string, digest: string): string {
-  return `${appId}@${version}#${digest}`;
+function artifactKey(appId: string, version: string, digest: string, sourceId: string): string {
+  return `${sourceId}:${appId}@${version}#${digest}`;
 }
 
 function compareVersionStrings(left: string, right: string): number {
