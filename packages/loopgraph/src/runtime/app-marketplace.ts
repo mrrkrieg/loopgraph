@@ -1,9 +1,12 @@
-import { access, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import {
   MARKETPLACE_SCHEMA_VERSION,
+  canonicalAppDigest,
   marketplaceAppSchema,
   marketplaceCatalogSourceSchema,
   type LoopPackArtifact,
@@ -13,7 +16,13 @@ import {
   type PublisherTrustKey
 } from "../core";
 import { loadLoopPackDirectory, marketplaceVersionFromArtifact, satisfiesVersionRange } from "./app-pack-loader";
-import { publishedReleaseKey, readPublishedCatalog } from "./app-publisher-catalog";
+import {
+  publishedReleaseKey,
+  readPublishedCatalog,
+  type PublishedCatalog
+} from "./app-publisher-catalog";
+
+const execFileAsync = promisify(execFile);
 
 type MarketplaceIndex = {
   schemaVersion: typeof MARKETPLACE_SCHEMA_VERSION;
@@ -22,6 +31,21 @@ type MarketplaceIndex = {
 };
 
 const activeMarketplaceRefreshes = new Map<string, Promise<MarketplaceApp[]>>();
+
+export interface GitHubCatalogSynchronizer {
+  synchronize(source: MarketplaceCatalogSource, destination: string): Promise<{ resolvedRef: string }>;
+}
+
+export type LocalAppMarketplaceOptions = {
+  githubSynchronizer?: GitHubCatalogSynchronizer;
+  trustedGitHosts?: string[];
+};
+
+type PreparedCatalogRoot = {
+  root: string;
+  finalRoot?: string;
+  stagingRoot?: string;
+};
 
 export type MarketplaceSearchInput = {
   query?: string;
@@ -46,7 +70,8 @@ export class LocalAppMarketplace {
 
   constructor(
     private readonly stateRoot: string,
-    private readonly bundledPacksRoot?: string
+    private readonly bundledPacksRoot?: string,
+    private readonly options: LocalAppMarketplaceOptions = {}
   ) {
     this.sourcesPath = path.join(stateRoot, "marketplace-sources.json");
     this.indexPath = path.join(stateRoot, "marketplace-index.json");
@@ -82,6 +107,7 @@ export class LocalAppMarketplace {
     if (source.type === "github" && (!source.pinnedRef || !source.expectedDigest)) {
       throw new Error("GitHub catalog sources must pin both a ref and expected digest");
     }
+    if (source.type === "github") validateGitHubCatalogSource(source, this.options.trustedGitHosts);
     if (source.trustPolicy === "signed" && source.trustedPublisherKeys.length === 0) {
       throw new Error("Signed catalog sources must pin at least one trusted publisher public key");
     }
@@ -107,47 +133,83 @@ export class LocalAppMarketplace {
       throw new Error("Hosted marketplace transport is not available in the local-first registry; use a synchronized filesystem cache");
     }
 
-    const sourceRoot = resolveSourceRoot(source);
-    const packDirectories = await discoverPackDirectories(sourceRoot);
-    const publishedCatalog = await readPublishedCatalog(sourceRoot);
+    const prepared = source.type === "github"
+      ? await this.prepareGitHubCatalogRoot(source)
+      : { root: resolveSourceRoot(source) };
+    let sourceRoot = prepared.root;
+    let packDirectories: string[];
+    let publishedCatalog: PublishedCatalog | undefined;
+    const loadedPacks: Array<{ artifact: LoopPackArtifact; location: string }> = [];
+    try {
+      packDirectories = await discoverPackDirectories(sourceRoot);
+      publishedCatalog = await readPublishedCatalog(sourceRoot);
+      for (const directory of packDirectories) {
+        const loaded = await loadLoopPackDirectory(directory, {
+          requireSignature: source.trustPolicy === "signed",
+          trustedPublisherKeys: source.trustedPublisherKeys
+        });
+        validateCatalogArtifactOwnership(source, loaded.artifact);
+        if (source.type !== "github" && source.expectedDigest && packDirectories.length === 1 && loaded.artifact.digest !== source.expectedDigest) {
+          throw new Error(`Catalog source digest mismatch: expected ${source.expectedDigest}, received ${loaded.artifact.digest}`);
+        }
+        loadedPacks.push({ artifact: loaded.artifact, location: directory });
+      }
+    } catch (error) {
+      await cleanupPreparedCatalogRoot(prepared);
+      throw error;
+    }
     const releases = new Map((publishedCatalog?.releases ?? []).map((release) => [
       publishedReleaseKey(release.appId, release.version, release.digest),
       release
     ]));
-    const versions: Array<{ artifact: LoopPackArtifact; location: string; marketplaceVersion: MarketplaceAppVersion }> = [];
-    for (const directory of packDirectories) {
-      const loaded = await loadLoopPackDirectory(directory, {
-        requireSignature: source.trustPolicy === "signed",
-        trustedPublisherKeys: source.trustedPublisherKeys
-      });
-      if (source.expectedDigest && packDirectories.length === 1 && loaded.artifact.digest !== source.expectedDigest) {
-        throw new Error(`Catalog source digest mismatch: expected ${source.expectedDigest}, received ${loaded.artifact.digest}`);
+
+    if (source.type === "github") {
+      try {
+        if (loadedPacks.length === 0) throw new Error("GitHub catalog does not contain any LoopPacks");
+        const digest = catalogSnapshotDigest({
+          artifacts: loadedPacks.map((entry) => entry.artifact),
+          publishedCatalog
+        });
+        if (digest !== source.expectedDigest) {
+          throw new Error(`GitHub catalog snapshot digest mismatch: expected ${source.expectedDigest}, received ${digest}`);
+        }
+        sourceRoot = await promotePreparedCatalogRoot(prepared);
+      } catch (error) {
+        await cleanupPreparedCatalogRoot(prepared);
+        throw error;
       }
-      const artifactUri = `file://${directory}`;
+    }
+
+    const versions: Array<{ artifact: LoopPackArtifact; location: string; marketplaceVersion: MarketplaceAppVersion }> = [];
+    for (const entry of loadedPacks) {
+      const location = prepared.finalRoot
+        ? path.join(sourceRoot, path.relative(prepared.root, entry.location))
+        : entry.location;
+      const loadedArtifact = entry.artifact;
       const marketplaceVersion = marketplaceVersionFromArtifact(
         {
-          ...loaded.artifact,
+          ...loadedArtifact,
           provenance: {
-            ...loaded.artifact.provenance,
+            ...loadedArtifact.provenance,
             sourceType: source.type,
             sourceUri: source.uri,
             sourceRef: source.pinnedRef
           }
         },
-        artifactUri,
+        `file://${location}`,
         "tested"
       );
       marketplaceVersion.provenanceVerified = source.trustPolicy === "signed"
-        ? Boolean(loaded.artifact.provenance.signature)
-        : source.trustPolicy === "official_only" && loaded.manifest.metadata.publisher.id === "loopgraph" && loaded.manifest.metadata.publisher.verified;
+        ? Boolean(loadedArtifact.provenance.signature)
+        : source.trustPolicy === "official_only" && loadedArtifact.manifest.metadata.publisher.id === "loopgraph" && loadedArtifact.manifest.metadata.publisher.verified;
       const release = releases.get(publishedReleaseKey(
-        loaded.manifest.metadata.id,
-        loaded.manifest.metadata.version,
-        loaded.artifact.digest
+        loadedArtifact.manifest.metadata.id,
+        loadedArtifact.manifest.metadata.version,
+        loadedArtifact.digest
       ));
       versions.push({
-        artifact: loaded.artifact,
-        location: directory,
+        artifact: loadedArtifact,
+        location,
         marketplaceVersion: {
           ...marketplaceVersion,
           deprecated: release?.status === "deprecated",
@@ -158,13 +220,27 @@ export class LocalAppMarketplace {
       });
     }
 
-    const current = await this.readIndex();
-    const sourceAppIds = new Set(versions.map((entry) => entry.artifact.manifest.metadata.id));
-    const retained = current.apps.filter((app) => !sourceAppIds.has(app.id));
     const grouped = new Map<string, typeof versions>();
     for (const entry of versions) {
       const id = entry.artifact.manifest.metadata.id;
       grouped.set(id, [...(grouped.get(id) ?? []), entry]);
+    }
+    const current = await this.readIndex();
+    for (const [appId, entries] of grouped) {
+      const publisherIds = new Set(entries.map((entry) => entry.artifact.manifest.metadata.publisher.id));
+      if (publisherIds.size !== 1) {
+        throw new Error(`Catalog source ${source.id} contains multiple publishers for app ${appId}`);
+      }
+      const publisherId = entries[0]!.artifact.manifest.metadata.publisher.id;
+      const existing = current.apps.find((app) => app.id === appId);
+      if (existing && existing.publisher.id !== publisherId) {
+        throw new Error(`Marketplace app ${appId} is owned by publisher ${existing.publisher.id} and cannot be replaced by ${publisherId}`);
+      }
+    }
+    const sourceAppIds = new Set(grouped.keys());
+    const retained = current.apps.filter((app) => !sourceAppIds.has(app.id));
+    for (const entry of versions) {
+      const id = entry.artifact.manifest.metadata.id;
       const key = artifactKey(id, entry.artifact.manifest.metadata.version, entry.artifact.digest);
       this.artifactLocations.set(key, entry.location);
       this.artifactTrust.set(key, {
@@ -177,6 +253,25 @@ export class LocalAppMarketplace {
     await this.writeIndex({ schemaVersion: MARKETPLACE_SCHEMA_VERSION, apps, refreshedAt: new Date().toISOString() });
     await this.addCatalogSource({ ...source, refreshedAt: new Date().toISOString() });
     return refreshed;
+  }
+
+  private async prepareGitHubCatalogRoot(source: MarketplaceCatalogSource): Promise<PreparedCatalogRoot> {
+    validateGitHubCatalogSource(source, this.options.trustedGitHosts);
+    const finalRoot = githubCatalogCacheRoot(this.stateRoot, source);
+    if (await pathExists(finalRoot)) return { root: finalRoot };
+    const stagingRoot = `${finalRoot}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+    await mkdir(path.dirname(finalRoot), { recursive: true });
+    const synchronizer = this.options.githubSynchronizer ?? new GitCliHubCatalogSynchronizer(this.options.trustedGitHosts);
+    try {
+      const result = await synchronizer.synchronize(source, stagingRoot);
+      if (result.resolvedRef.toLowerCase() !== source.pinnedRef!.toLowerCase()) {
+        throw new Error(`GitHub catalog resolved ${result.resolvedRef}, expected pinned commit ${source.pinnedRef}`);
+      }
+      return { root: stagingRoot, stagingRoot, finalRoot };
+    } catch (error) {
+      await rm(stagingRoot, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   async refreshAllCatalogSources(): Promise<MarketplaceApp[]> {
@@ -253,7 +348,10 @@ export class LocalAppMarketplace {
     if (!trust) {
       const source = (await this.listCatalogSources()).find((candidate) => {
         if (candidate.type === "hosted") return false;
-        return isWithin(resolveSourceRoot(candidate), location!);
+        const sourceRoot = candidate.type === "github"
+          ? githubCatalogCacheRoot(this.stateRoot, candidate)
+          : resolveSourceRoot(candidate);
+        return isWithin(sourceRoot, location!);
       });
       if (source) {
         trust = { requireSignature: source.trustPolicy === "signed", trustedPublisherKeys: source.trustedPublisherKeys };
@@ -311,6 +409,136 @@ export class LocalAppMarketplace {
   private async writeIndex(index: MarketplaceIndex): Promise<void> {
     await atomicWriteJson(this.indexPath, index);
   }
+}
+
+export class GitCliHubCatalogSynchronizer implements GitHubCatalogSynchronizer {
+  constructor(private readonly trustedGitHosts?: string[]) {}
+
+  async synchronize(source: MarketplaceCatalogSource, destination: string): Promise<{ resolvedRef: string }> {
+    validateGitHubCatalogSource(source, this.trustedGitHosts);
+    await mkdir(destination, { recursive: false, mode: 0o700 });
+    await runGit(["init", "--quiet"], destination);
+    await runGit(["remote", "add", "origin", source.uri], destination);
+    await runGit(["fetch", "--quiet", "--depth", "1", "--no-tags", "origin", source.pinnedRef!], destination);
+    await runGit(["checkout", "--quiet", "--detach", "FETCH_HEAD"], destination);
+    const { stdout } = await runGit(["rev-parse", "HEAD"], destination);
+    const resolvedRef = stdout.trim();
+    await rm(path.join(destination, ".git"), { recursive: true, force: true });
+    return { resolvedRef };
+  }
+}
+
+export function catalogSnapshotDigest(input: {
+  artifacts: LoopPackArtifact[];
+  publishedCatalog?: PublishedCatalog;
+}): string {
+  return catalogSnapshotDigestFromRecords({
+    artifacts: input.artifacts.map((artifact) => ({
+      appId: artifact.manifest.metadata.id,
+      version: artifact.manifest.metadata.version,
+      digest: artifact.digest
+    })),
+    publishedCatalog: input.publishedCatalog
+  });
+}
+
+export function catalogSnapshotDigestFromRecords(input: {
+  artifacts: Array<{ appId: string; version: string; digest: string }>;
+  publishedCatalog?: PublishedCatalog;
+}): string {
+  return canonicalAppDigest({
+    artifacts: input.artifacts
+      .map((artifact) => ({ ...artifact }))
+      .sort((left, right) => `${left.appId}@${left.version}`.localeCompare(`${right.appId}@${right.version}`)),
+    releases: (input.publishedCatalog?.releases ?? [])
+      .slice()
+      .sort((left, right) => publishedReleaseKey(left.appId, left.version, left.digest).localeCompare(publishedReleaseKey(right.appId, right.version, right.digest)))
+  });
+}
+
+function validateGitHubCatalogSource(source: MarketplaceCatalogSource, trustedGitHosts?: string[]): void {
+  if (source.type !== "github") throw new Error("GitHub synchronization requires a GitHub catalog source");
+  if (source.trustPolicy !== "signed") throw new Error("GitHub catalog sources must use signed publisher trust");
+  if (!source.pinnedRef || !/^[a-f0-9]{40,64}$/i.test(source.pinnedRef)) {
+    throw new Error("GitHub catalog sources must pin an exact 40- or 64-character commit hash");
+  }
+  if (!source.expectedDigest) throw new Error("GitHub catalog sources must pin the canonical catalog snapshot digest");
+  let url: URL;
+  try {
+    url = new URL(source.uri);
+  } catch {
+    throw new Error("GitHub catalog URI must be an absolute HTTPS repository URL");
+  }
+  const allowedHosts = new Set((trustedGitHosts?.length ? trustedGitHosts : ["github.com"]).map((host) => host.toLowerCase()));
+  if (url.protocol !== "https:" || !allowedHosts.has(url.hostname.toLowerCase())) {
+    throw new Error(`GitHub catalog URI must use HTTPS on a trusted Git host (${Array.from(allowedHosts).join(", ")})`);
+  }
+  if (url.username || url.password || url.search || url.hash || url.port) {
+    throw new Error("GitHub catalog URI cannot contain credentials, a custom port, query parameters, or a fragment");
+  }
+  if (!/^\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/.test(url.pathname)) {
+    throw new Error("GitHub catalog URI must identify exactly one owner/repository path");
+  }
+}
+
+function validateCatalogArtifactOwnership(source: MarketplaceCatalogSource, artifact: LoopPackArtifact): void {
+  const appId = artifact.manifest.metadata.id;
+  const publisher = artifact.manifest.metadata.publisher;
+  if (source.type === "github" && (appId.startsWith("loopgraph.") || publisher.id === "loopgraph" || publisher.verified)) {
+    throw new Error(`The Loopgraph app and verified publisher namespaces are reserved for the bundled official catalog (${appId})`);
+  }
+  if (source.type === "github" && !appId.startsWith(`${publisher.id}.`)) {
+    throw new Error(`GitHub catalog app ${appId} must use its publisher namespace (${publisher.id}.)`);
+  }
+}
+
+function githubCatalogCacheRoot(stateRoot: string, source: MarketplaceCatalogSource): string {
+  const cacheKey = canonicalAppDigest({ uri: source.uri, pinnedRef: source.pinnedRef })
+    .slice("sha256:".length, "sha256:".length + 24);
+  return path.join(stateRoot, "catalog-cache", source.id, cacheKey);
+}
+
+async function promotePreparedCatalogRoot(prepared: PreparedCatalogRoot): Promise<string> {
+  if (!prepared.finalRoot || !prepared.stagingRoot) return prepared.root;
+  try {
+    await rename(prepared.stagingRoot, prepared.finalRoot);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (!(await pathExists(prepared.finalRoot)) || !["EEXIST", "ENOTEMPTY"].includes(code ?? "")) throw error;
+    await rm(prepared.stagingRoot, { recursive: true, force: true });
+  }
+  return prepared.finalRoot;
+}
+
+async function cleanupPreparedCatalogRoot(prepared: PreparedCatalogRoot): Promise<void> {
+  if (prepared.stagingRoot) await rm(prepared.stagingRoot, { recursive: true, force: true });
+}
+
+async function runGit(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith("GIT_") || key === "SSH_ASKPASS") delete env[key];
+  }
+  const result = await execFileAsync("git", [
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "protocol.ext.allow=never",
+    "-c", "protocol.file.allow=never",
+    "-c", "credential.helper=",
+    ...args
+  ], {
+    cwd,
+    env: {
+      ...env,
+      GIT_ASKPASS: "",
+      GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_TERMINAL_PROMPT: "0",
+      SSH_ASKPASS: ""
+    },
+    timeout: 60_000,
+    maxBuffer: 2 * 1024 * 1024
+  });
+  return { stdout: result.stdout, stderr: result.stderr };
 }
 
 async function resolveBundledPacksRoot(): Promise<string> {

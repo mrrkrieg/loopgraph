@@ -1,8 +1,15 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { LocalAppMarketplace } from "./app-marketplace";
+import { loadLoopPackDirectory } from "./app-pack-loader";
+import {
+  LocalAppMarketplace,
+  catalogSnapshotDigest,
+  type GitHubCatalogSynchronizer
+} from "./app-marketplace";
+import { LoopgraphAppPublisher } from "./app-publisher";
+import { readPublishedCatalog } from "./app-publisher-catalog";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -70,6 +77,100 @@ describe("local app marketplace", () => {
       enabled: true,
       trustPolicy: "signed"
     })).rejects.toThrow(/pin/i);
+  });
+
+  it("synchronizes a signed GitHub catalog by exact commit and snapshot digest", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-github-catalog-"));
+    temporaryDirectories.push(projectRoot);
+    const publisher = new LoopgraphAppPublisher(projectRoot);
+    const initialized = await publisher.initializeApp({
+      destination: "apps/account-review",
+      appId: "acme.sales.account-review",
+      name: "Account Review",
+      department: "sales",
+      publisherId: "acme"
+    });
+    const key = await publisher.generatePublisherKey({ publisherId: "acme", keyId: "acme.github.primary" });
+    await publisher.signApp({ packRoot: initialized.packRoot, keyId: key.keyId });
+    const published = await publisher.publishApp({ packRoot: initialized.packRoot, catalogId: "acme.github" });
+    const catalog = await readPublishedCatalog(published.catalogRoot);
+    const loaded = await loadLoopPackDirectory(initialized.packRoot, {
+      requireSignature: true,
+      trustedPublisherKeys: [{ publisherId: key.publisherId, keyId: key.keyId, algorithm: key.algorithm, publicKey: key.publicKey }]
+    });
+    const expectedDigest = catalogSnapshotDigest({ artifacts: [loaded.artifact], publishedCatalog: catalog });
+    const pinnedRef = "0123456789abcdef0123456789abcdef01234567";
+    const synchronize: GitHubCatalogSynchronizer["synchronize"] = async (_source, destination) => {
+      await cp(published.catalogRoot, destination, { recursive: true });
+      return { resolvedRef: pinnedRef };
+    };
+    const stateRoot = path.join(projectRoot, "consumer-marketplace");
+    const marketplace = new LocalAppMarketplace(stateRoot, packsRoot, {
+      githubSynchronizer: { synchronize }
+    });
+    await marketplace.addCatalogSource({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "acme-github",
+      type: "github",
+      uri: "https://github.com/acme/loopgraph-apps.git",
+      pinnedRef,
+      expectedDigest,
+      enabled: true,
+      trustPolicy: "signed",
+      trustedPublisherKeys: [{ publisherId: key.publisherId, keyId: key.keyId, algorithm: key.algorithm, publicKey: key.publicKey }]
+    });
+
+    const apps = await marketplace.refreshCatalogSource("acme-github");
+    expect(apps.map((app) => app.id)).toEqual(["acme.sales.account-review"]);
+    expect(apps[0]?.versions[0]).toMatchObject({
+      digest: loaded.artifact.digest,
+      provenanceVerified: true,
+      artifactUri: expect.stringContaining("/catalog-cache/acme-github/")
+    });
+
+    const restarted = new LocalAppMarketplace(stateRoot, packsRoot, {
+      githubSynchronizer: { synchronize }
+    });
+    const cached = await restarted.getAppArtifact("acme.sales.account-review", "0.1.0", loaded.artifact.digest);
+    expect(cached.artifact.digest).toBe(loaded.artifact.digest);
+  });
+
+  it("rejects mutable, credential-bearing, unsigned, and digest-mismatched GitHub sources", async () => {
+    const stateRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-marketplace-"));
+    temporaryDirectories.push(stateRoot);
+    const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
+    const base = {
+      schemaVersion: "loopgraph-marketplace/v1alpha1" as const,
+      id: "company-github-catalog",
+      type: "github" as const,
+      uri: "https://github.com/acme/catalog.git",
+      pinnedRef: "0123456789abcdef0123456789abcdef01234567",
+      expectedDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      enabled: true,
+      trustPolicy: "signed" as const,
+      trustedPublisherKeys: [{
+        publisherId: "acme",
+        keyId: "acme.primary",
+        algorithm: "ed25519" as const,
+        publicKey: "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\n-----END PUBLIC KEY-----"
+      }]
+    };
+    await expect(marketplace.addCatalogSource({ ...base, pinnedRef: "main" })).rejects.toThrow(/commit hash/i);
+    await expect(marketplace.addCatalogSource({ ...base, uri: "https://token@github.com/acme/catalog.git" })).rejects.toThrow(/credentials/i);
+    await expect(marketplace.addCatalogSource({ ...base, trustPolicy: "explicit_local" })).rejects.toThrow(/signed/i);
+
+    const sourceRoot = path.join(stateRoot, "source");
+    await cp(path.join(packsRoot, "official", "sales", "qualify-route-inbound-leads"), sourceRoot, { recursive: true });
+    const mismatched = new LocalAppMarketplace(stateRoot, packsRoot, {
+      githubSynchronizer: {
+        async synchronize(_source, destination) {
+          await cp(sourceRoot, destination, { recursive: true });
+          return { resolvedRef: base.pinnedRef };
+        }
+      }
+    });
+    await mismatched.addCatalogSource(base);
+    await expect(mismatched.refreshCatalogSource(base.id)).rejects.toThrow(/signature|digest/i);
   });
 
   it("requires signed catalogs to pin an exact publisher public key", async () => {

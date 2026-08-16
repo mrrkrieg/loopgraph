@@ -316,7 +316,9 @@ npm run loopgraph -- app deprecate acme.customer-success.customer-risk \
   --message "Use the reviewed v2 contract."
 ```
 
-The private catalog implementation is local-first and project-confined. It is appropriate for development and customer-controlled filesystem synchronization; the hosted multi-tenant marketplace, organization identity, remote key custody, billing, and enterprise retention plane remain separate deployment work.
+Private catalogs can remain project-confined. Signed catalogs can also be synchronized from a GitHub repository. A GitHub source must pin an exact commit, the canonical `snapshotDigest` returned by publishing, and exact Ed25519 publisher public keys. Loopgraph checks out the repository into an untrusted staging directory, verifies the full catalog, and only then promotes it into an immutable local cache. Branches, tags, credential-bearing URLs, unsigned packs, digest mismatches, and untrusted keys fail closed. The default transport supports public repositories; private repository authentication requires a workload-identity or broker-backed synchronizer. See [Signed GitHub App catalogs](docs/GITHUB-APP-CATALOGS.md).
+
+The hosted multi-tenant marketplace, organization identity, remote key custody, billing, revocation fan-out, and enterprise retention plane remain separate deployment work.
 
 ## Department loop library
 
