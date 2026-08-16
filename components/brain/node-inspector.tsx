@@ -8,6 +8,13 @@ export type BrainGraphActions = {
   submitGraphEdit?: (formData: FormData) => Promise<{
     id: string;
     status: "layout_applied" | "proposal_pending" | "rejected";
+    proposalLifecycle: Array<{
+      opportunityId: string;
+      graphChangeSetId: string;
+      designTaskId: string;
+      discoverySessionId: string;
+      nextAction: "answer_questions" | "await_hermes" | "review_proposal";
+    }>;
   }>;
   validateLoop?: (formData: FormData) => void | Promise<void>;
   simulateFixture?: (formData: FormData) => void | Promise<void>;

@@ -49,7 +49,9 @@ URL params are bookmarkable, e.g. `/topology?node=loop:catalog_strategic-account
 
 ## Governed graph editing
 
-Moving nodes creates a layout-only backend receipt and never changes routing. Proposing a node or edge creates an immutable `proposal_pending` receipt. In hosted mode the receipt is scoped to the authenticated organization and project, records the operator, and is written through a membership-checking database function. Hermes must turn a semantic proposal into a valid design; the normal approval, rehearsal, readiness, and promotion gates still apply before the topology becomes runnable.
+Moving nodes creates a layout-only backend receipt and never changes routing. Proposing a workflow loop or valid workflow connection creates an immutable `proposal_pending` receipt, an explainable loop opportunity, and a versioned graph change set, then starts or reuses a durable Hermes design task. If the company context is incomplete, the editor points to the exact discovery questions that block design. In hosted mode every receipt is scoped to the authenticated organization and project, records the operator, and is written through a membership-checking database function. The normal approval, rehearsal, readiness, and promotion gates still apply before the topology becomes runnable.
+
+The relationship selector is semantic rather than decorative: `Hermes routes to` must connect Hermes Brain to a workflow loop, `Department owns loop` must connect a department to a workflow loop, and `Evidence returns to` must start from a workflow loop. Unsupported edges are rejected before persistence because Loopgraph cannot compile them into an accountable loop change.
 
 The editor intentionally does not:
 

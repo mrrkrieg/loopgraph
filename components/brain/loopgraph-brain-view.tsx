@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import type { SemanticTopology } from "@/lib/loopgraph-core/graph";
 import type { GraphEditorOperation, GraphEditorTransaction } from "loopgraph/core";
 import type { GraphLayoutOverrides } from "loopgraph/runtime";
@@ -159,14 +160,24 @@ export function LoopgraphBrainView({
         formData.set("expectedTopologyHash", topologyHash);
         formData.set("operations", JSON.stringify(operations));
         const result = await actions.submitGraphEdit!(formData);
+        const lifecycle = result.proposalLifecycle[0];
         setEditMessage(result.status === "layout_applied"
           ? `Layout saved (${result.id}).`
-          : `Proposal submitted (${result.id}). Hermes design and approval are required before it becomes runnable.`);
+          : lifecycle?.nextAction === "answer_questions"
+            ? `Proposal submitted (${result.id}). Hermes opened design task ${lifecycle.designTaskId}; answer the requested evidence questions before design continues.`
+            : lifecycle?.nextAction === "review_proposal"
+              ? `Proposal submitted (${result.id}). Change set ${lifecycle.graphChangeSetId} is ready for accountable review.`
+              : `Proposal submitted (${result.id}). Hermes design task ${lifecycle?.designTaskId ?? "is queued"}; approval is still required before it becomes runnable.`);
         setRecentTransactions((current) => [{
           id: result.id,
           status: result.status,
           operationCount: operations.length,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          opportunityId: lifecycle?.opportunityId,
+          graphChangeSetId: lifecycle?.graphChangeSetId,
+          designTaskId: lifecycle?.designTaskId,
+          discoverySessionId: lifecycle?.discoverySessionId,
+          nextAction: lifecycle?.nextAction
         }, ...current.filter((item) => item.id !== result.id)].slice(0, 5));
         if (result.status === "layout_applied") setPendingMoves({});
       } catch (error) {
@@ -261,7 +272,17 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
   onSaveLayout: () => void;
   onSubmit: (operations: GraphEditorOperation[]) => void;
   pendingMoveCount: number;
-  recentTransactions: Array<{ id: string; status: string; operationCount: number; createdAt: string }>;
+  recentTransactions: Array<{
+    id: string;
+    status: string;
+    operationCount: number;
+    createdAt: string;
+    opportunityId?: string;
+    graphChangeSetId?: string;
+    designTaskId?: string;
+    discoverySessionId?: string;
+    nextAction?: "answer_questions" | "await_hermes" | "review_proposal";
+  }>;
   selectedId?: string;
 }) {
   const [targetId, setTargetId] = useState("");
@@ -269,6 +290,20 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
   const [loopLabel, setLoopLabel] = useState("");
   const [departmentId, setDepartmentId] = useState("product");
   const [purpose, setPurpose] = useState("");
+  const sourceNode = nodes.find((node) => node.id === selectedId);
+  const validSource = relation === "brain_routes_to"
+    ? sourceNode?.type === "company_brain"
+    : relation === "department_contains_loop"
+      ? sourceNode?.type === "department_loop"
+      : sourceNode?.type === "workflow_loop";
+  const eligibleTargets = nodes.filter((node) => {
+    if (node.id === selectedId) return false;
+    if (relation === "brain_routes_to" || relation === "department_contains_loop") {
+      return node.type === "workflow_loop";
+    }
+    return ["company_brain", "department_loop", "workflow_loop"].includes(node.type);
+  });
+  const validTarget = eligibleTargets.some((node) => node.id === targetId);
   return (
     <div className="absolute right-4 top-36 z-20 max-h-[calc(100%-10rem)] w-80 max-w-[calc(100%-2rem)] overflow-y-auto rounded-md border border-line bg-white/95 p-3 text-xs shadow-lg backdrop-blur md:top-4 md:max-h-[calc(100%-2rem)]">
       <div className="flex items-center justify-between gap-2">
@@ -285,14 +320,24 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
           <div className="text-ink/55">Source: {selectedId ?? "select a node"}</div>
           <select className="w-full rounded border border-line bg-white p-2" onChange={(event) => setTargetId(event.target.value)} value={targetId}>
             <option value="">Choose target</option>
-            {nodes.filter((node) => node.id !== selectedId).map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
+            {eligibleTargets.map((node) => <option key={node.id} value={node.id}>{node.label}</option>)}
           </select>
-          <select className="w-full rounded border border-line bg-white p-2" onChange={(event) => setRelation(event.target.value as typeof relation)} value={relation}>
+          <select className="w-full rounded border border-line bg-white p-2" onChange={(event) => {
+            setRelation(event.target.value as typeof relation);
+            setTargetId("");
+          }} value={relation}>
             <option value="brain_routes_to">Hermes routes to</option>
             <option value="department_contains_loop">Department owns loop</option>
             <option value="learning_returns_to">Evidence returns to</option>
           </select>
-          <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!selectedId || !targetId || isSubmitting} onClick={() => onSubmit([{ kind: "propose_edge", sourceId: selectedId!, targetId, relation, reason: "User-authored connection requiring Hermes validation." }])} type="button">Submit connection proposal</button>
+          {!validSource ? <div className="text-[11px] leading-4 text-ink/55">
+            {relation === "brain_routes_to"
+              ? "Select Hermes Brain as the source."
+              : relation === "department_contains_loop"
+                ? "Select a department as the source."
+                : "Select a workflow loop as the source."}
+          </div> : null}
+          <button className="w-full rounded bg-ink p-2 font-semibold text-white disabled:opacity-40" disabled={!selectedId || !validSource || !validTarget || isSubmitting} onClick={() => onSubmit([{ kind: "propose_edge", sourceId: selectedId!, targetId, relation, reason: "User-authored connection requiring Hermes validation." }])} type="button">Submit connection proposal</button>
         </div>
         <div className="space-y-2 rounded-md bg-paper p-2">
           <div className="font-semibold">Propose a workflow loop</div>
@@ -308,6 +353,10 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
         <div className="mt-2 space-y-2">{recentTransactions.map((transaction) => <div className="rounded border border-line px-2 py-1.5" key={transaction.id}>
           <div className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px]">{transaction.id}</span><span className="whitespace-nowrap text-[10px] font-semibold uppercase text-ink/45">{transaction.status.replace(/_/g, " ")}</span></div>
           <div className="mt-1 text-[10px] text-ink/45">{transaction.operationCount} operation{transaction.operationCount === 1 ? "" : "s"} · {new Date(transaction.createdAt).toLocaleString()}</div>
+          {transaction.graphChangeSetId ? <div className="mt-2 flex flex-wrap gap-2">
+            <Link className="font-semibold text-ink underline underline-offset-2" href="/operate/changes">Review change</Link>
+            {transaction.nextAction === "answer_questions" && transaction.discoverySessionId ? <Link className="font-semibold text-ink underline underline-offset-2" href={`/discovery/questions?sessionId=${encodeURIComponent(transaction.discoverySessionId)}`}>Answer Hermes</Link> : null}
+          </div> : null}
         </div>)}</div>
       </div> : null}
     </div>
