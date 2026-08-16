@@ -255,8 +255,16 @@ describe("brain graph loop actions", () => {
       actorId
     });
     startGraphEditorProposalLifecycle.mockResolvedValue({
-      opportunity: { id: "opportunity_graph_edit_1" },
-      graphChangeSet: { id: "graph_change_graph_edit_1" },
+      opportunity: {
+        id: "opportunity_graph_edit_1",
+        kind: "create_loop",
+        status: "design_requested",
+        title: "Design Product Signal Review",
+        department: "product",
+        targetLoopIds: [],
+        updatedAt: "2026-08-15T12:00:00.000Z"
+      },
+      graphChangeSet: { id: "graph_change_graph_edit_1", status: "proposed" },
       designTask: { id: "hermes_task_graph_edit_1", sessionId: "discovery_graph_edit_1" },
       nextAction: "answer_questions"
     });
@@ -270,9 +278,16 @@ describe("brain graph loop actions", () => {
       status: "proposal_pending",
       proposalLifecycle: [{
         opportunityId: "opportunity_graph_edit_1",
+        kind: "create_loop",
+        status: "design_requested",
+        title: "Design Product Signal Review",
+        department: "product",
+        targetLoopIds: [],
         graphChangeSetId: "graph_change_graph_edit_1",
+        graphChangeSetStatus: "proposed",
         designTaskId: "hermes_task_graph_edit_1",
         discoverySessionId: "discovery_graph_edit_1",
+        updatedAt: "2026-08-15T12:00:00.000Z",
         nextAction: "answer_questions"
       }]
     });

@@ -18,6 +18,10 @@ import { GraphControls } from "./graph-controls";
 import { GraphDiagnostics } from "./graph-diagnostics";
 import { NodeInspector } from "./node-inspector";
 import { ObsidianGraphCanvas } from "./obsidian-graph-canvas";
+import {
+  applyProposalLifecycleOverlay,
+  pendingGraphProposalLifecycles
+} from "./proposal-lifecycle-overlay";
 import type { BrainGraphMode, BrainGraphSettings, BrainGraphStoryPreset } from "./graph-types";
 import type { BrainGraphActions } from "./node-inspector";
 
@@ -94,16 +98,23 @@ export function LoopgraphBrainView({
   const [recentTransactions, setRecentTransactions] = useState(() =>
     initialTransactions.slice(0, 5).map(summarizeTransaction)
   );
+  const [proposalLifecycles, setProposalLifecycles] = useState(() =>
+    initialTransactions.flatMap((receipt) => receipt.proposalLifecycle)
+  );
   const [isSubmitting, startSubmitting] = useTransition();
-  const baseGraph = useMemo(
-    () => buildBrainGraph({
+  const pendingProposalLifecycles = useMemo(
+    () => pendingGraphProposalLifecycles(proposalLifecycles),
+    [proposalLifecycles]
+  );
+  const baseGraph = useMemo(() => applyProposalLifecycleOverlay({
+    graph: buildBrainGraph({
       topology,
       includeCatalogLoops,
       previewStory: previewMode,
       ...settings
     }),
-    [includeCatalogLoops, previewMode, settings, topology]
-  );
+    lifecycles: pendingProposalLifecycles
+  }), [includeCatalogLoops, pendingProposalLifecycles, previewMode, settings, topology]);
   const storyBaseGraph = useMemo(() => {
     if (storyPreset !== "product_path") {
       return baseGraph;
@@ -180,6 +191,14 @@ export function LoopgraphBrainView({
           createdAt: new Date().toISOString(),
           proposalLifecycle: result.proposalLifecycle
         }, ...current.filter((item) => item.id !== result.id)].slice(0, 5));
+        setProposalLifecycles((current) => [
+          ...result.proposalLifecycle,
+          ...current.filter((item) =>
+            !result.proposalLifecycle.some((incoming) =>
+              incoming.opportunityId === item.opportunityId
+            )
+          )
+        ]);
         if (result.status === "layout_applied") setPendingMoves({});
       } catch (error) {
         setEditMessage(error instanceof Error ? error.message : "Graph edit failed");
@@ -236,6 +255,15 @@ export function LoopgraphBrainView({
           />
         ) : null}
         {previewMode ? <PreviewTraceGuide storyPreset={storyPreset} /> : null}
+        {!previewMode && pendingProposalLifecycles.length > 0 ? (
+          <div className="absolute left-4 top-24 z-10 max-w-sm rounded-md border border-amber-300 bg-amber-50/95 px-3 py-2 text-xs leading-5 text-amber-950 shadow-sm backdrop-blur">
+            <span className="font-semibold">
+              {pendingProposalLifecycles.length} pending Hermes graph proposal{pendingProposalLifecycles.length === 1 ? "" : "s"}
+            </span>
+            <span className="ml-1">Amber rings mark affected live loops. Proposals do not change routing until approved and applied.</span>
+            <Link className="ml-2 font-semibold underline underline-offset-2" href="/operate/changes">Review changes</Link>
+          </div>
+        ) : null}
         <div className="absolute bottom-4 left-4 z-10 max-w-xl space-y-2">
           <div className="rounded-md border border-line bg-white/95 px-3 py-2 text-xs font-medium text-ink/65 shadow-sm backdrop-blur">
             {breadcrumb.join(" / ")}

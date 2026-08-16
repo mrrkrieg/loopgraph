@@ -70,9 +70,16 @@ describe("graph authoring receipt projection", () => {
       transaction,
       proposalLifecycle: [{
         opportunityId: lifecycle.opportunity.id,
+        kind: "create_loop",
+        status: "design_requested",
+        title: "Design Product Signal Review",
+        department: "product",
+        targetLoopIds: [],
         graphChangeSetId: lifecycle.graphChangeSet.id,
+        graphChangeSetStatus: "proposed",
         designTaskId: lifecycle.designTask.id,
         discoverySessionId: lifecycle.designTask.sessionId,
+        updatedAt: "2026-08-15T12:00:00.000Z",
         nextAction: "answer_questions"
       }]
     });
