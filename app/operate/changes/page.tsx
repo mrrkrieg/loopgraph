@@ -7,6 +7,7 @@ import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { StatusPill } from "@/components/status-pill";
+import { GraphChangeDecisionForm } from "@/components/operate/graph-change-decision-form";
 import { getOperatingViewData } from "@/lib/loopgraph-runtime/operating-view-data";
 
 export default async function ChangeReviewPage() {
@@ -60,6 +61,7 @@ export default async function ChangeReviewPage() {
                       <StatusPill>{change.operation}</StatusPill>
                       <StatusPill>{change.status}</StatusPill>
                       {change.requiresExplicitApproval ? <StatusPill>Explicit approval</StatusPill> : null}
+                      {change.designStatus ? <StatusPill>Hermes: {change.designStatus}</StatusPill> : null}
                     </div>
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
                       <div className="rounded-md border border-line bg-paper p-4">
@@ -71,6 +73,13 @@ export default async function ChangeReviewPage() {
                         <p className="mt-2 text-sm leading-6 text-ink/70">{change.expectedOutcome}</p>
                       </div>
                     </div>
+                    {data.mode === "local" && change.primaryChange && change.status === "Proposed" ? (
+                      <GraphChangeDecisionForm
+                        blockedReason={change.approvalBlockedReason}
+                        canApprove={change.canApprove}
+                        changeSetId={change.changeSetId}
+                      />
+                    ) : null}
                   </div>
                   <dl className="grid content-start gap-3 text-sm">
                     <ReceiptRow label="Evidence" value={`${change.evidenceCount} references`} />

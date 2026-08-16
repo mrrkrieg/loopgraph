@@ -61,6 +61,8 @@ import {
 export type GraphApprovalInput = {
   projectRoot?: string;
   changeSetId: string;
+  expectedChangeSetHash?: string;
+  expectedDesignRunId?: string;
   decision: "approved" | "rejected";
   approvedChangeIds?: string[];
   actorId: string;
@@ -238,6 +240,22 @@ export async function approveGraphChangeSet(
       projectRoot,
       options.opportunityStore
     );
+    if (
+      input.expectedChangeSetHash &&
+      graphChangeSetHash(changeSet) !== input.expectedChangeSetHash
+    ) {
+      throw new Error(
+        `Graph change set ${changeSet.id} changed after Hermes design review`
+      );
+    }
+    if (
+      input.expectedDesignRunId &&
+      changeSet.designRunId !== input.expectedDesignRunId
+    ) {
+      throw new Error(
+        `Graph change set ${changeSet.id} is not bound to the reviewed Hermes design run`
+      );
+    }
     if (!["proposed", "approved"].includes(changeSet.status)) {
       throw new Error(`Graph change set ${changeSet.id} cannot be reviewed from status=${changeSet.status}`);
     }
