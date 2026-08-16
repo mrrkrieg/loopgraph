@@ -2,19 +2,14 @@
 
 import React from "react";
 import Link from "next/link";
+import type { GraphEditorProposalLifecycleReference } from "loopgraph/runtime";
 import type { BrainGraphEdge, BrainGraphNode } from "./graph-types";
 
 export type BrainGraphActions = {
   submitGraphEdit?: (formData: FormData) => Promise<{
     id: string;
     status: "layout_applied" | "proposal_pending" | "rejected";
-    proposalLifecycle: Array<{
-      opportunityId: string;
-      graphChangeSetId: string;
-      designTaskId: string;
-      discoverySessionId: string;
-      nextAction: "answer_questions" | "await_hermes" | "review_proposal";
-    }>;
+    proposalLifecycle: GraphEditorProposalLifecycleReference[];
   }>;
   validateLoop?: (formData: FormData) => void | Promise<void>;
   simulateFixture?: (formData: FormData) => void | Promise<void>;

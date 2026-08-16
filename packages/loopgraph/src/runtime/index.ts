@@ -72,6 +72,7 @@ export * from "./provider-fixtures";
 export * from "./provider-detector-scheduler";
 export * from "./graph-authoring-store";
 export * from "./graph-authoring-proposal";
+export * from "./graph-authoring-read-model";
 export * from "./department-golden-suites";
 export * from "./connection-plan";
 export * from "./connection-tools";

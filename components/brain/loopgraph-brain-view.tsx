@@ -3,8 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import type { SemanticTopology } from "@/lib/loopgraph-core/graph";
-import type { GraphEditorOperation, GraphEditorTransaction } from "loopgraph/core";
-import type { GraphLayoutOverrides } from "loopgraph/runtime";
+import type { GraphEditorOperation } from "loopgraph/core";
+import type {
+  GraphEditorProposalLifecycleReference,
+  GraphEditorTransactionReceipt,
+  GraphLayoutOverrides
+} from "loopgraph/runtime";
 import {
   buildBrainGraph,
   filterBrainGraphByDepth,
@@ -65,7 +69,7 @@ export function LoopgraphBrainView({
   actions?: BrainGraphActions;
   includeCatalogLoops?: boolean;
   initialLayout?: GraphLayoutOverrides;
-  initialTransactions?: GraphEditorTransaction[];
+  initialTransactions?: GraphEditorTransactionReceipt[];
   previewMode?: boolean;
   topologyHash: string;
   topology: SemanticTopology;
@@ -161,23 +165,20 @@ export function LoopgraphBrainView({
         formData.set("operations", JSON.stringify(operations));
         const result = await actions.submitGraphEdit!(formData);
         const lifecycle = result.proposalLifecycle[0];
+        const lifecycleCount = result.proposalLifecycle.length;
         setEditMessage(result.status === "layout_applied"
           ? `Layout saved (${result.id}).`
           : lifecycle?.nextAction === "answer_questions"
-            ? `Proposal submitted (${result.id}). Hermes opened design task ${lifecycle.designTaskId}; answer the requested evidence questions before design continues.`
+            ? `${lifecycleCount} proposal${lifecycleCount === 1 ? "" : "s"} submitted (${result.id}). Hermes opened the governed design lifecycle; answer the requested evidence questions before design continues.`
             : lifecycle?.nextAction === "review_proposal"
-              ? `Proposal submitted (${result.id}). Change set ${lifecycle.graphChangeSetId} is ready for accountable review.`
-              : `Proposal submitted (${result.id}). Hermes design task ${lifecycle?.designTaskId ?? "is queued"}; approval is still required before it becomes runnable.`);
+              ? `${lifecycleCount} proposal${lifecycleCount === 1 ? "" : "s"} submitted (${result.id}). The governed change set is ready for accountable review.`
+              : `${lifecycleCount} proposal${lifecycleCount === 1 ? "" : "s"} submitted (${result.id}). Hermes design is queued; approval is still required before anything becomes runnable.`);
         setRecentTransactions((current) => [{
           id: result.id,
           status: result.status,
           operationCount: operations.length,
           createdAt: new Date().toISOString(),
-          opportunityId: lifecycle?.opportunityId,
-          graphChangeSetId: lifecycle?.graphChangeSetId,
-          designTaskId: lifecycle?.designTaskId,
-          discoverySessionId: lifecycle?.discoverySessionId,
-          nextAction: lifecycle?.nextAction
+          proposalLifecycle: result.proposalLifecycle
         }, ...current.filter((item) => item.id !== result.id)].slice(0, 5));
         if (result.status === "layout_applied") setPendingMoves({});
       } catch (error) {
@@ -277,11 +278,7 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
     status: string;
     operationCount: number;
     createdAt: string;
-    opportunityId?: string;
-    graphChangeSetId?: string;
-    designTaskId?: string;
-    discoverySessionId?: string;
-    nextAction?: "answer_questions" | "await_hermes" | "review_proposal";
+    proposalLifecycle: GraphEditorProposalLifecycleReference[];
   }>;
   selectedId?: string;
 }) {
@@ -352,10 +349,10 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
         <div className="font-semibold">Recent backend receipts</div>
         <div className="mt-2 space-y-2">{recentTransactions.map((transaction) => <div className="rounded border border-line px-2 py-1.5" key={transaction.id}>
           <div className="flex items-center justify-between gap-2"><span className="truncate font-mono text-[10px]">{transaction.id}</span><span className="whitespace-nowrap text-[10px] font-semibold uppercase text-ink/45">{transaction.status.replace(/_/g, " ")}</span></div>
-          <div className="mt-1 text-[10px] text-ink/45">{transaction.operationCount} operation{transaction.operationCount === 1 ? "" : "s"} · {new Date(transaction.createdAt).toLocaleString()}</div>
-          {transaction.graphChangeSetId ? <div className="mt-2 flex flex-wrap gap-2">
-            <Link className="font-semibold text-ink underline underline-offset-2" href="/operate/changes">Review change</Link>
-            {transaction.nextAction === "answer_questions" && transaction.discoverySessionId ? <Link className="font-semibold text-ink underline underline-offset-2" href={`/discovery/questions?sessionId=${encodeURIComponent(transaction.discoverySessionId)}`}>Answer Hermes</Link> : null}
+          <div className="mt-1 text-[10px] text-ink/45">{transaction.operationCount} operation{transaction.operationCount === 1 ? "" : "s"} · {transaction.proposalLifecycle.length} governed proposal{transaction.proposalLifecycle.length === 1 ? "" : "s"} · {new Date(transaction.createdAt).toLocaleString()}</div>
+          {transaction.proposalLifecycle.some((lifecycle) => lifecycle.graphChangeSetId) ? <div className="mt-2 flex flex-wrap gap-2">
+            <Link className="font-semibold text-ink underline underline-offset-2" href="/operate/changes">Review {transaction.proposalLifecycle.length === 1 ? "change" : "changes"}</Link>
+            {transaction.proposalLifecycle.filter((lifecycle) => lifecycle.nextAction === "answer_questions" && lifecycle.discoverySessionId).map((lifecycle, index) => <Link className="font-semibold text-ink underline underline-offset-2" href={`/discovery/questions?sessionId=${encodeURIComponent(lifecycle.discoverySessionId!)}`} key={lifecycle.opportunityId}>Answer Hermes{transaction.proposalLifecycle.length === 1 ? "" : ` ${index + 1}`}</Link>)}
           </div> : null}
         </div>)}</div>
       </div> : null}
@@ -363,12 +360,13 @@ function GraphEditorPanel({ editing, isSubmitting, message, nodes, onEditingChan
   );
 }
 
-function summarizeTransaction(transaction: GraphEditorTransaction) {
+function summarizeTransaction(transaction: GraphEditorTransactionReceipt) {
   return {
-    id: transaction.id,
-    status: transaction.status,
-    operationCount: transaction.operations.length,
-    createdAt: transaction.createdAt
+    id: transaction.transaction.id,
+    status: transaction.transaction.status,
+    operationCount: transaction.transaction.operations.length,
+    createdAt: transaction.transaction.createdAt,
+    proposalLifecycle: transaction.proposalLifecycle
   };
 }
 
