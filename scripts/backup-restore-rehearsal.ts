@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,6 +45,11 @@ const target = parseRecoveryDatabaseUrl(
   await readRecoveryDatabaseUrl("LOOPGRAPH_REHEARSAL_RESTORE_DB_URL"),
   "LOOPGRAPH_REHEARSAL_RESTORE_DB_URL"
 );
+const sourceIdentityDigest = identityDigest(source.identity);
+const targetIdentityDigest = identityDigest(target.identity);
+if (sourceIdentityDigest !== required("LOOPGRAPH_EXPECTED_SOURCE_DB_IDENTITY_DIGEST")) {
+  throw new Error("Backup source does not match the protected production database identity");
+}
 const expectedTargetMarker = validateRehearsalTargetMarker(
   required("LOOPGRAPH_REHEARSAL_TARGET_MARKER")
 );
@@ -189,6 +195,8 @@ try {
     postgresMajor: sourceMajor,
     sourceHost: source.hostname,
     targetHost: target.hostname,
+    sourceIdentityDigest,
+    targetIdentityDigest,
     criticalTables,
     auditIntegrity,
     evidenceRecordCounts,
@@ -275,6 +283,10 @@ function parseInteger(value: string, label: string) {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed)) throw new Error(`${label} exceeds the safe integer range`);
   return parsed;
+}
+
+function identityDigest(value: string) {
+  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
 function required(name: string) {

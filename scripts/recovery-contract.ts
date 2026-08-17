@@ -170,7 +170,12 @@ export function compareRecoveryFingerprints(
     ) {
       throw new Error(`Recovery fingerprint mismatch for ${table}`);
     }
-    return { table, rowCount: targetValue.rowCount, matched: true as const };
+    return {
+      table,
+      rowCount: targetValue.rowCount,
+      sha256: targetValue.sha256,
+      matched: true as const
+    };
   });
 }
 

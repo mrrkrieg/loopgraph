@@ -24,7 +24,14 @@ describe("staging deployment validation", () => {
           "loopgraph_security_audit_head_sequence 42"
         ].join("\n"));
       }
-      return json({ integrity: { valid: true }, events: [{ secret: "not-in-receipt" }] });
+      return json({
+        integrity: {
+          valid: true,
+          headSequence: 43,
+          headHash: "a".repeat(64)
+        },
+        events: [{ secret: "not-in-receipt" }]
+      });
     });
 
     const receipt = await validateStagingDeployment({
@@ -39,8 +46,11 @@ describe("staging deployment validation", () => {
     });
 
     expect(receipt).toMatchObject({
-      schemaVersion: "staging-validation/v2",
-      target: "staging.loopgraph.test",
+      schemaVersion: "staging-validation/v3",
+      targetOrigin: "https://staging.loopgraph.test",
+      organizationId: "123e4567-e89b-42d3-a456-426614174000",
+      projectKey: "main",
+      auditCheckpoint: { headSequence: 43, headHash: "a".repeat(64) },
       results: [
         { name: "readiness", ok: true },
         { name: "operational_metrics", ok: true },

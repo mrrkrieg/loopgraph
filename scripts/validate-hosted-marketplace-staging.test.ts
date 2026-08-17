@@ -26,6 +26,7 @@ describe("hosted marketplace staging gate", () => {
   it("proves exact delivery, isolation, revocation, replay, and audit evidence", async () => {
     const seenRequestIds = new Set<string>();
     let replayRequestId = "";
+    let auditPage = 0;
     const fetcher = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
       const url = new URL(input instanceof URL ? input : String(input));
       const headers = new Headers(init?.headers);
@@ -43,9 +44,23 @@ describe("hosted marketplace staging gate", () => {
       }
       if (url.pathname === "/api/operations/audit-export") {
         expect(authorization).toBe(`Bearer ${tokens.observability}`);
-        expect(url.searchParams.get("after")).toBe("41");
+        auditPage += 1;
+        if (auditPage === 1) {
+          expect(url.searchParams.get("after")).toBe("41");
+          expect(url.searchParams.has("through")).toBe(false);
+          return json({
+            throughSequence: 43,
+            integrity: { valid: true, headHash: "e".repeat(64) },
+            events: [],
+            hasMore: true,
+            nextCursor: 42
+          });
+        }
+        expect(url.searchParams.get("after")).toBe("42");
+        expect(url.searchParams.get("through")).toBe("43");
         return json({
-          integrity: { valid: true },
+          throughSequence: 43,
+          integrity: { valid: true, headHash: "e".repeat(64) },
           events: [{
             event_type: "machine.request.authorized",
             capability: "marketplace.consume",
@@ -77,9 +92,16 @@ describe("hosted marketplace staging gate", () => {
     });
 
     expect(receipt).toMatchObject({
-      schemaVersion: "hosted-marketplace-staging-validation/v1",
-      target: "staging.loopgraph.test",
-      app: { id: config.appId, version: config.version, artifactDigest: config.artifactDigest }
+      schemaVersion: "hosted-marketplace-staging-validation/v2",
+      targetOrigin: "https://staging.loopgraph.test",
+      organizationId: config.organizationId,
+      projectKey: config.projectKey,
+      app: { id: config.appId, version: config.version, artifactDigest: config.artifactDigest },
+      auditEvidence: {
+        afterSequence: 41,
+        throughSequence: 43,
+        headHash: "e".repeat(64)
+      }
     });
     expect(receipt.checks.map((check) => check.name)).toEqual([
       "unauthenticated_denial",

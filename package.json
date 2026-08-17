@@ -43,6 +43,8 @@
     "validate:marketplace-staging": "tsx scripts/validate-hosted-marketplace-staging.ts",
     "rehearse:restore": "tsx scripts/backup-restore-rehearsal.ts",
     "audit:drain": "tsx scripts/export-audit-retention.ts",
+    "release:evidence:build": "tsx scripts/production-evidence-manifest.ts",
+    "release:evidence:verify": "tsx scripts/production-evidence-manifest.ts --verify",
     "generate:app-catalog": "node scripts/generate-official-app-catalog.mjs",
     "check:app-catalog": "node scripts/generate-official-app-catalog.mjs --check",
     "build:package": "npm run build -w loopgraph",

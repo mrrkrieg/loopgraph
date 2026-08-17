@@ -44,6 +44,12 @@ The sender independently rejects:
 - an empty page that claims more work; and
 - a final event hash different from the verified checkpoint.
 
+For a production release, the sender also reads the exact `staging-validation/v3` and
+`hosted-marketplace-staging-validation/v2` receipts. It rejects a different source origin, tenant,
+or project, then proves both named sequence/hash checkpoints while traversing the pinned chain. A
+checkpoint older than the protected predecessor state fails closed because it can no longer be
+independently replayed by the current drain.
+
 ## Receiver endpoint
 
 `LOOPGRAPH_AUDIT_RETENTION_URL` is an HTTPS origin without credentials, query, fragment, or path.
@@ -82,8 +88,10 @@ minimum retention duration. The acknowledgement digest becomes the predecessor o
 A replayed older local receipt therefore fails at the independently stateful receiver instead of
 silently rewinding retention.
 
-The final `audit-drain/v2` receipt contains the selected chain head and last signed external
-acknowledgement. Store it outside the application database. A protected runner should set
+The final `audit-drain/v3` receipt contains the selected chain head, the two exact verified release
+checkpoints, and the last signed external acknowledgement. Store it outside the application database.
+The production manifest recomputes the acknowledgement digest instead of trusting the supplied digest.
+A protected runner should set
 `LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE` to a private persistent volume. Loopgraph accepts a missing file
 on the first run, verifies it as the predecessor on later runs, and atomically replaces it with mode
 `0600` only after every destination acknowledgement has passed. The receiver remains authoritative:
@@ -105,6 +113,8 @@ LOOPGRAPH_AUDIT_RETENTION_KEY_ID=retention_ed25519_2026_01
 LOOPGRAPH_AUDIT_SOURCE_TOKEN_FILE=/var/run/secrets/loopgraph/audit-source.jwt
 LOOPGRAPH_AUDIT_RETENTION_TOKEN_FILE=/var/run/secrets/retention/audit-writer.jwt
 LOOPGRAPH_AUDIT_RETENTION_PUBLIC_KEY_FILE=/var/run/trust/retention/ed25519-public.pem
+LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE=/var/run/release/staging-validation-receipt.json
+LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE=/var/run/release/marketplace-validation-receipt.json
 # Optional for one rotation window while the previous receipt still uses the old key:
 LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_KEY_ID=retention_ed25519_2025_04
 LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_PUBLIC_KEY_FILE=/var/run/trust/retention/ed25519-previous.pem

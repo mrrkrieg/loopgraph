@@ -522,6 +522,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md)
 - [Enterprise connector security](docs/ENTERPRISE-CONNECTOR-SECURITY.md)
 - [Production operations](docs/PRODUCTION-OPERATIONS.md)
+- [Production promotion evidence](docs/PRODUCTION-PROMOTION-EVIDENCE.md)
 - [Independent audit retention protocol](docs/AUDIT-RETENTION-PROTOCOL.md)
 
 For the implementation-to-test evidence map, see the [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md).
