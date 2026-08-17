@@ -57,6 +57,34 @@ Allowed buckets are `read`, `write`, `compute`, and `admin`; limits are bounded 
 windows to `1..3600` seconds. Apply
 `supabase/migrations/202608170005_user_api_quotas.sql` before enabling hosted authentication.
 
+For the protected staging gate, configure a small `admin` policy only for the staging organization:
+
+```sql
+insert into public.user_api_quota_policy_overrides (
+  organization_id,
+  bucket,
+  rate_limit,
+  window_seconds
+) values (
+  '<staging-organization-uuid>',
+  'admin',
+  3,
+  1
+)
+on conflict (organization_id, bucket) do update
+set rate_limit = excluded.rate_limit,
+    window_seconds = excluded.window_seconds,
+    updated_at = now();
+```
+
+`npm run validate:staging` then uses three private, short-lived projected Supabase sessions to prove
+that no session receives `401`, an active foreign member receives `403`, a suspended member receives
+`403`, and the active target member receives exactly three allowed responses followed by `429` with
+bounded rate headers. If the runner encounters a partially consumed window it waits once, for at
+most the configured bound, and retries from a fresh window. The `staging-validation/v4` receipt
+records only the bucket, configured limit, allowed count, denial status, and retry delay; session
+cookies and response bodies are deliberately excluded.
+
 ## Machine routes
 
 Middleware explicitly recognizes Hermes agent registration/heartbeats/execution events, Hermes

@@ -1,6 +1,6 @@
 # Production operations
 
-Loopgraph production promotion is evidence-gated. A successful build is necessary but not sufficient: the exact prebuilt artifact must pass staging readiness, operational metrics, and audit-integrity checks before a protected production environment may promote it.
+Loopgraph production promotion is evidence-gated. A successful build is necessary but not sufficient: the exact prebuilt artifact must pass staging readiness, operational metrics, audit integrity, browser-session tenant isolation, suspended-membership denial, and real user-quota saturation before a protected production environment may promote it.
 
 ## Required controls
 
@@ -9,7 +9,7 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
 - `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
-- `npm run validate:staging` now uses the projected observability workload identity too. Its receipt contains status and control summaries only; it no longer accepts a reusable observability token or copies audit/metrics response bodies into release evidence.
+- `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
 - `npm run release:evidence:build` binds the current run's four receipts to one deployment, tenant/project, database identity, and exact marketplace artifact. `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any substituted, stale, or mixed receipt.
 
 ## Release evidence
@@ -48,6 +48,29 @@ The staging identity administrator prepares four principals before approving the
 The token file variables are absolute paths on an isolated, ephemeral self-hosted runner. Files must
 be regular, non-symlink paths with mode `0600`; the gate rejects group/world-readable tokens. Rotate
 all four identities after the exercise and preserve the provider-side issuance/revocation audit record.
+
+## Hosted user-boundary staging matrix
+
+The same protected runner also receives three independently issued, short-lived Supabase session
+bundles. Each file is strict JSON containing only `access_token` and `refresh_token`, is mounted at an
+absolute regular non-symlink path, and has mode `0600`:
+
+1. `LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE` belongs to an active member of the exact staging organization.
+2. `LOOPGRAPH_STAGING_FOREIGN_USER_SESSION_FILE` belongs to an active user in a different organization.
+3. `LOOPGRAPH_STAGING_SUSPENDED_USER_SESSION_FILE` belongs to a valid user whose target membership is suspended.
+
+Configure `LOOPGRAPH_STAGING_SUPABASE_URL` and the public
+`LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY` so the validator can exchange each bundle for the same
+cookie format used by the browser. Never put a session JSON value in a GitHub variable, command
+argument, artifact, or workflow log. The protected runner's identity/bootstrap system must project
+and rotate these files before the job starts.
+
+Use a staging-only service-role migration/administration step to set the `admin` bucket to a small,
+bounded window such as three requests per second. Set
+`LOOPGRAPH_STAGING_USER_API_ADMIN_QUOTA_LIMIT=3` and
+`LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS=5` to the same reviewed policy. The gate waits at
+most once for a partially consumed window and fails if the reset is absent, unexpectedly long, or
+does not start a fresh window. Do not lower production tenant limits merely to satisfy this check.
 
 ## Restore rehearsal cadence
 

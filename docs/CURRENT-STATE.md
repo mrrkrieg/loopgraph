@@ -159,11 +159,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 1. Apply the new evidence/entity migrations to staging and prove cross-replica measurement claims,
    immutable conflicts, entity aliases, and restore behavior against a real hosted database.
-2. Apply the hosted user-quota migration to staging and run saturation, membership-removal, and
-   cross-tenant denial tests against the real database. The repository now classifies all current
-   independently authenticated Hermes/worker/marketplace routes before browser auth and applies
-   fail-closed, database-owned per-user/per-tenant quotas to user APIs; live deployment proof is
-   still external.
+2. Apply the hosted user-quota migration and staging-only `admin` override, project the three
+   short-lived user sessions into the protected runner, and run the supplied
+   `staging-validation/v4` gate against the real database. The repository now compiles exact
+   unauthenticated, cross-tenant, suspended-membership, and quota-saturation results into production
+   promotion evidence; only the environment-specific live receipt remains external.
 3. Configure a real independent audit-retention receiver and alert manager, then run the included
    protected audit drain, staging validation, and isolated backup/restore rehearsal on every target
    environment. The code now requires workload-authenticated export, a stable verified checkpoint,
