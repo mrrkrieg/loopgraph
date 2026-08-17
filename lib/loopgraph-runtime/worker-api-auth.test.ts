@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   authorizeCronApiRequest,
   authorizeObservabilityApiRequest,
-  authorizeWorkerApiRequest
+  authorizeWorkerApiRequest,
+  resolveDurableWorkloadGrantScope
 } from "./worker-api-auth";
 
 const originalToken = process.env.LOOPGRAPH_WORKER_API_TOKEN;
@@ -28,6 +29,34 @@ afterEach(() => {
 });
 
 describe("route-job HTTP API authorization", () => {
+  it("does not let provider headers weaken a marketplace durable grant", () => {
+    const request = new Request("https://example.test/api/marketplace/client/catalog", {
+      headers: {
+        "x-loopgraph-provider-capability": "provider.github.issues.read",
+        "x-loopgraph-connection-id": "github-prod"
+      }
+    });
+
+    expect(resolveDurableWorkloadGrantScope(request, "marketplace.consume")).toEqual({
+      capability: "marketplace.consume",
+      connectionId: null
+    });
+  });
+
+  it("retains fine-grained provider grant selection for provider operations", () => {
+    const request = new Request("https://example.test/api/integrations/broker", {
+      headers: {
+        "x-loopgraph-provider-capability": "provider.github.issues.read",
+        "x-loopgraph-connection-id": "github-prod"
+      }
+    });
+
+    expect(resolveDurableWorkloadGrantScope(request, "provider.connector_broker")).toEqual({
+      capability: "provider.github.issues.read",
+      connectionId: "github-prod"
+    });
+  });
+
   it("fails closed without a configured token even for a localhost URL", async () => {
     delete process.env.LOOPGRAPH_WORKER_API_TOKEN;
 

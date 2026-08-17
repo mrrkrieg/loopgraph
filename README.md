@@ -330,6 +330,13 @@ writes still blocked. Cached hosted releases are re-authorized before use and
 evicted when they are revoked or no longer shared with the tenant. See
 [Hosted marketplace installation](docs/HOSTED-MARKETPLACE-INSTALL.md).
 
+Hermes MCP and managed CLI runners can access the same private catalog with
+short-lived ambient OIDC workload identity and a durable, tenant-scoped
+`marketplace.consume` grant. The client never receives a Supabase service key
+or provider token, never treats its cache as authorization, and re-verifies the
+exact signed archive before the normal governed install path. See
+[hosted marketplace access for Hermes and CLI](docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.
