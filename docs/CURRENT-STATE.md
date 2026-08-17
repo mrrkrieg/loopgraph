@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 ## One-line summary
 
@@ -11,6 +11,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ### Hermes setup and discovery
 
 - A clean local install starts with no demo loops.
+- `loopgraph setup` now prepares the empty workspace, project-local Hermes contract, synchronized route manifest, and Studio plan through one safe path; `--activate` is explicit because it updates Hermes registrations.
+- `loopgraph start` now owns the local Studio plus an exclusive, gracefully stopped supervisor for route synchronization, connector checks, measurement scheduling, route jobs, opportunity scans, app update checks, controller scheduling, and aggregate health. Component cadences prevent expensive reconciliation work from running at the fast worker poll rate, errors are secret-redacted, and status is atomically persisted for the Brain UI.
 - `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
 - `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph skill from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
 - Hermes immediately presents canonical departments and guides the user through five compact question bundles.
@@ -176,6 +178,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ## Key documentation
 
 - [Hermes quickstart](./HERMES-QUICKSTART.md)
+- [Local supervisor](./LOCAL-SUPERVISOR.md)
 - [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md)
 - [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md)
 - [Semantic graph transactions](./SEMANTIC-GRAPH-TRANSACTIONS.md)

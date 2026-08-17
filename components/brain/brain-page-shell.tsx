@@ -17,6 +17,7 @@ export function BrainPageShell({
   initialLayout = {},
   initialTransactions = [],
   previewMode = false,
+  supervisor,
   topologyHash,
   topology
 }: {
@@ -24,6 +25,7 @@ export function BrainPageShell({
   initialLayout?: GraphLayoutOverrides;
   initialTransactions?: GraphEditorTransactionReceipt[];
   previewMode?: boolean;
+  supervisor?: SupervisorView;
   topologyHash: string;
   topology: SemanticTopology;
 }) {
@@ -55,7 +57,8 @@ export function BrainPageShell({
           ) : (
             <>
               <StatusChip>Registered LoopSpecs</StatusChip>
-              <StatusChip>Ready</StatusChip>
+              <StatusChip>{supervisor?.running ? "Supervisor running" : "Supervisor stopped"}</StatusChip>
+              <StatusChip>{supervisor?.status ? `Health ${supervisor.status.health}` : "Not checked"}</StatusChip>
               <StatusChip>{isHermes ? "Hermes routing" : "Demo mode"}</StatusChip>
               <StatusChip>{includeCatalogLoops ? "Catalog visible" : "Catalog hidden"}</StatusChip>
             </>
@@ -71,6 +74,7 @@ export function BrainPageShell({
         </div>
       </div>
       {previewMode ? <PreviewStoryStrip /> : null}
+      {!previewMode ? <SupervisorStrip supervisor={supervisor} /> : null}
       <LoopgraphBrainView
         actions={{
           submitGraphEdit: submitBrainGraphEditAction,
@@ -88,6 +92,39 @@ export function BrainPageShell({
     </div>
   );
 }
+
+function SupervisorStrip({
+  supervisor
+}: {
+  supervisor?: SupervisorView;
+}) {
+  const status = supervisor?.status;
+  const action = status?.recommendedAction;
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line bg-white px-4 py-3 text-sm text-ink/65 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <span className="font-semibold text-ink">
+          {supervisor?.running ? "Local supervisor is running." : status ? "Local supervisor is stopped." : "Local supervisor has not run yet."}
+        </span>{" "}
+        {status
+          ? `Last cycle ${status.health} at ${new Date(status.checkedAt).toLocaleString()}.`
+          : "Run setup once, then start the worker, scheduler, route sync, controller, and health checks together."}
+      </div>
+      <div className="font-mono text-xs text-ink/55">
+        {action ?? "loopgraph start"}
+      </div>
+    </div>
+  );
+}
+
+type SupervisorView = {
+  running: boolean;
+  status?: {
+    health: "healthy" | "degraded" | "blocked";
+    checkedAt: string;
+    recommendedAction?: string;
+  };
+};
 
 function PreviewStoryStrip() {
   return (

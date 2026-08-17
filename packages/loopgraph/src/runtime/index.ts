@@ -101,6 +101,7 @@ export * from "./loop-materialization";
 export * from "./loop-spec-store";
 export * from "./loop-tools";
 export * from "./studio";
+export * from "./local-supervisor";
 export * from "./app-pack-loader";
 export * from "./app-pack-compiler";
 export * from "./app-marketplace";

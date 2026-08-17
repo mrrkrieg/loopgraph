@@ -32,7 +32,11 @@ import {
   testHermesWebhookFixture
 } from "../runtime/hermes-webhooks";
 import { initLoopgraphWorkspace, inspectLoopgraphWorkspace } from "../runtime/workspace";
-import { prepareLoopgraphStudio, type LoopgraphStudioPlan } from "../runtime/studio";
+import {
+  prepareLoopgraphStudio,
+  resolveLoopgraphSourceCheckoutRoot,
+  type LoopgraphStudioPlan
+} from "../runtime/studio";
 import {
   runHermesLocalRouteTest,
   runHermesRoutingEvaluation,
@@ -81,6 +85,12 @@ import {
   cliCredentialFileFromEnvironment,
   profileFromTokens
 } from "../runtime/cli-device-auth";
+import {
+  prepareLocalLoopgraph,
+  runLocalLoopgraphSupervisor,
+  type LocalLoopgraphSetupResult,
+  type LocalSupervisorStatus
+} from "../runtime/local-supervisor";
 
 const HERO_TEMPLATES = [
   {
@@ -119,12 +129,13 @@ function parseIntegerOption(value: string): number {
 
 const cliEntryFile = fileURLToPath(import.meta.url);
 const packageRoot = resolvePackageRoot(cliEntryFile);
+const studioSourceRoot = resolveLoopgraphSourceCheckoutRoot(packageRoot, cliEntryFile);
 const templatesRoot = path.join(packageRoot, "templates");
 
 const program = new Command();
 const storage = getStorageAdapter({ rootDir: getLoopgraphRoot(process.cwd()) });
 
-program.name("loopgraph").description("Loopgraph validate/simulate CLI");
+program.name("loopgraph").description("Install, operate, and improve governed company loops through Hermes Brain");
 
 async function runHermesSetup(options: { project: string; scope: string; json?: boolean; activate?: boolean }): Promise<void> {
   const scope = parseHermesScope(options.scope);
@@ -161,6 +172,137 @@ async function runHermesDoctor(options: { project: string }): Promise<void> {
   console.log(JSON.stringify(result, null, 2));
   if (!result.ok) process.exit(1);
 }
+
+program
+  .command("setup")
+  .description("Prepare an empty local workspace, install the project-local Hermes integration, and synchronize safe routes")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--name <name>", "Workspace display name")
+  .option("--activate", "Register generated MCP servers and the Loopgraph skill with Hermes")
+  .option("--host <host>", "Host for the local Studio launch plan", "localhost")
+  .option("--port <port>", "Port for the local Studio launch plan", "3000")
+  .option("--json", "Print the setup result as JSON")
+  .action(async (options: {
+    project: string;
+    name?: string;
+    activate?: boolean;
+    host: string;
+    port: string;
+    json?: boolean;
+  }) => {
+    const result = await prepareLocalLoopgraph({
+      projectRoot: path.resolve(options.project),
+      displayName: options.name,
+      activateHermes: Boolean(options.activate),
+      cliEntryPath: cliEntryFile,
+      nodeCommand: process.execPath,
+      host: options.host,
+      port: options.port,
+      searchRoots: studioSourceRoot ? [studioSourceRoot] : []
+    });
+    if (options.json) console.log(JSON.stringify(result, null, 2));
+    else printLocalSetupResult(result);
+    if (!result.readyToStart) process.exitCode = 1;
+  });
+
+program
+  .command("start")
+  .description("Run the local Loopgraph supervisor and, from a repository clone, the Hermes Brain Studio")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--host <host>", "Host for the local Next.js Studio", "localhost")
+  .option("--port <port>", "Port for the local Next.js Studio", "3000")
+  .option("--interval <seconds>", "Fast worker/controller polling interval", "5")
+  .option("--worker-limit <count>", "Maximum route jobs claimed per cycle", "20")
+  .option("--controller-limit <count>", "Maximum controller triggers claimed per cycle", "20")
+  .option("--once", "Run one complete health and work cycle, then exit")
+  .option("--no-studio", "Run the supervisor without starting the local Studio UI")
+  .option("--json", "Print cycle status as JSON (newline-delimited while watching)")
+  .action(async (options: {
+    project: string;
+    host: string;
+    port: string;
+    interval: string;
+    workerLimit: string;
+    controllerLimit: string;
+    once?: boolean;
+    studio: boolean;
+    json?: boolean;
+  }) => {
+    const projectRoot = path.resolve(options.project);
+    const intervalSeconds = parsePositiveInteger(options.interval, "Supervisor interval seconds");
+    const workerLimit = parsePositiveInteger(options.workerLimit, "Supervisor worker limit");
+    const controllerLimit = parsePositiveInteger(options.controllerLimit, "Supervisor controller limit");
+    const controller = new AbortController();
+    const stop = () => controller.abort();
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    let studioProcess: ReturnType<typeof spawn> | undefined;
+    let previousSummary = "";
+
+    try {
+      const studio = await prepareLoopgraphStudio({
+        projectRoot,
+        host: options.host,
+        port: options.port,
+        searchRoots: studioSourceRoot ? [studioSourceRoot] : []
+      });
+      const shouldStartStudio = options.studio && !options.once;
+      if (shouldStartStudio && studio.start) {
+        studioProcess = spawnStudioServer(studio);
+        if (!options.json) console.log(`Loopgraph Studio: ${studio.url}`);
+      } else if (shouldStartStudio && !studio.start && !options.json) {
+        console.warn("Studio UI unavailable from this package installation; starting the supervisor headlessly.");
+      }
+      if (!options.json && !options.once) {
+        console.log(`Loopgraph supervisor: ${projectRoot}`);
+        console.log("Press Ctrl+C to stop all local services cleanly.");
+      }
+
+      const supervisor = runLocalLoopgraphSupervisor({
+        projectRoot,
+        once: Boolean(options.once),
+        intervalSeconds,
+        workerLimit,
+        controllerLimit,
+        signal: controller.signal
+      }, {
+        onCycle: (status) => {
+          if (options.json) {
+            console.log(JSON.stringify(status));
+            return;
+          }
+          const summary = localSupervisorSummary(status);
+          if (options.once || summary !== previousSummary) {
+            printLocalSupervisorStatus(status, Boolean(options.once));
+            previousSummary = summary;
+          }
+        }
+      });
+
+      if (!studioProcess) {
+        const finalStatus = await supervisor;
+        if (options.once && finalStatus.health === "blocked") process.exitCode = 1;
+      } else {
+        const studioExit = new Promise<never>((_resolve, reject) => {
+          studioProcess!.once("error", reject);
+          studioProcess!.once("exit", (code, signal) => {
+            if (controller.signal.aborted) return;
+            reject(new Error(signal
+              ? `Studio server stopped with signal ${signal}`
+              : `Studio server exited unexpectedly with code ${code ?? 0}`));
+          });
+        });
+        await Promise.race([supervisor, studioExit]);
+      }
+    } finally {
+      controller.abort();
+      process.removeListener("SIGINT", stop);
+      process.removeListener("SIGTERM", stop);
+      if (studioProcess && studioProcess.exitCode === null && studioProcess.signalCode === null) {
+        studioProcess.kill("SIGTERM");
+      }
+    }
+  });
 
 const workspace = program.command("workspace").description("Local Loopgraph workspace commands");
 const events = program.command("events").description("Hermes-normalized event utilities");
@@ -1575,11 +1717,7 @@ program
       projectRoot: path.resolve(options.project),
       host: options.host,
       port: options.port,
-      searchRoots: [
-        process.cwd(),
-        packageRoot,
-        path.resolve(packageRoot, "..", "..")
-      ]
+      searchRoots: studioSourceRoot ? [studioSourceRoot] : []
     });
 
     if (options.json) {
@@ -2395,6 +2533,53 @@ function printStudioPlan(plan: LoopgraphStudioPlan): void {
   }
 }
 
+function printLocalSetupResult(result: LocalLoopgraphSetupResult): void {
+  console.log(result.readyToStart ? "Loopgraph local workspace is ready" : "Loopgraph local setup needs attention");
+  console.log(`Project: ${result.projectRoot}`);
+  console.log(`Workspace: ${result.workspaceRoot}`);
+  console.log(`Registered loops: ${result.workspace.registeredSpecCount} (preview data disabled)`);
+  console.log(`Hermes: ${result.readyForHermes ? "activated and ready" : result.hermes.localReady ? "project integration prepared" : "needs attention"}`);
+  console.log(`Routes: ${result.routes.syncedRouteCount} synchronized`);
+  console.log(`Studio: ${result.studio.canStart ? result.studio.url : "headless supervisor only from this installation"}`);
+  console.log("");
+  console.log("Next");
+  for (const action of result.nextActions) console.log(`- ${action}`);
+  if (result.warnings.length > 0) {
+    console.log("");
+    console.log("Warnings");
+    for (const warning of result.warnings) console.log(`- ${warning}`);
+  }
+  console.log("");
+  console.log("Provider tokens remain in Hermes or an approved vault; Loopgraph stores only non-secret references and receipts.");
+}
+
+function printLocalSupervisorStatus(status: LocalSupervisorStatus, detailed: boolean): void {
+  console.log(`[${status.checkedAt}] Loopgraph ${status.health} · cycle ${status.cycle}`);
+  if (detailed) {
+    for (const component of status.components) {
+      console.log(`- ${component.name}: ${component.health} — ${component.summary}`);
+      if (component.error) console.log(`  ${component.error}`);
+    }
+    if (status.recommendedActions.length > 0) {
+      console.log("Recommended actions");
+      for (const action of status.recommendedActions) console.log(`- ${action}`);
+    }
+    console.log(`Status: ${status.statusPath}`);
+  }
+}
+
+function localSupervisorSummary(status: LocalSupervisorStatus): string {
+  return JSON.stringify({
+    health: status.health,
+    components: status.components.map((component) => ({
+      name: component.name,
+      health: component.health,
+      details: component.details,
+      error: component.error
+    }))
+  });
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
@@ -2416,14 +2601,7 @@ function openAuthorizationUrl(url: string): void {
 
 async function startStudioServer(plan: LoopgraphStudioPlan): Promise<void> {
   if (!plan.start) return;
-  const child = spawn(plan.start.command, plan.start.args, {
-    cwd: plan.start.cwd,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      ...plan.start.env
-    }
-  });
+  const child = spawnStudioServer(plan);
 
   await new Promise<void>((resolve, reject) => {
     child.on("error", reject);
@@ -2438,5 +2616,18 @@ async function startStudioServer(plan: LoopgraphStudioPlan): Promise<void> {
       }
       resolve();
     });
+  });
+}
+
+function spawnStudioServer(plan: LoopgraphStudioPlan): ReturnType<typeof spawn> {
+  if (!plan.start) throw new Error("Studio start plan is unavailable");
+  return spawn(plan.start.command, plan.start.args, {
+    cwd: plan.start.cwd,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      ...plan.start.env
+    },
+    shell: false
   });
 }

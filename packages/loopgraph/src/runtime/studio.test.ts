@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { findLoopgraphStudioAppRoot, prepareLoopgraphStudio } from "./studio";
+import {
+  findLoopgraphStudioAppRoot,
+  prepareLoopgraphStudio,
+  resolveLoopgraphSourceCheckoutRoot
+} from "./studio";
 
 async function createFakeStudioApp() {
   const appRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-studio-app-"));
@@ -53,5 +57,21 @@ describe("Loopgraph studio planner", () => {
     await mkdir(nested, { recursive: true });
 
     expect(findLoopgraphStudioAppRoot([nested])).toBe(appRoot);
+  });
+
+  it("only auto-starts Studio when the CLI is inside the source checkout package", async () => {
+    const appRoot = await createFakeStudioApp();
+    const sourcePackageRoot = path.join(appRoot, "packages", "loopgraph");
+    const sourceCli = path.join(sourcePackageRoot, "dist", "cli.js");
+    await mkdir(path.dirname(sourceCli), { recursive: true });
+    await writeFile(sourceCli, "");
+
+    expect(resolveLoopgraphSourceCheckoutRoot(sourcePackageRoot, sourceCli)).toBe(appRoot);
+
+    const installedPackageRoot = path.join(appRoot, "node_modules", "loopgraph");
+    const installedCli = path.join(installedPackageRoot, "dist", "cli.js");
+    await mkdir(path.dirname(installedCli), { recursive: true });
+    await writeFile(installedCli, "");
+    expect(resolveLoopgraphSourceCheckoutRoot(installedPackageRoot, installedCli)).toBeUndefined();
   });
 });

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import YAML from "yaml";
@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { LOOPGRAPH_MCP_STATIC_RESOURCE_URIS } from "../mcp/server";
 import { DEPARTMENT_OPERATING_SKILLS, DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION } from "../core";
 import {
+  activateHermesIntegration,
   doctorHermesIntegration,
   HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
   HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION,
@@ -275,7 +276,7 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_review_submit");
     expect(designSkill).toContain("loopgraph_case_resolve");
     expect(designSkill).toContain("loopgraph_graph_get");
-    expect(designSkill).toContain("loopgraph studio --project");
+    expect(designSkill).toContain("loopgraph start --project");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_plan");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_sync");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_doctor");
@@ -413,16 +414,16 @@ describe("Hermes integration installer", () => {
       },
       commandUsage: {
         fromClone: {
-          setup: "npm run loopgraph -- hermes setup --project . --activate",
+          setup: "npm run loopgraph -- setup --project . --activate",
           doctor: "npm run loopgraph -- hermes doctor --project .",
-          studio: "npm run loopgraph -- studio --project . --start",
+          studio: "npm run loopgraph -- start --project .",
           webhooksPlan: "npm run loopgraph -- hermes webhooks plan --project .",
           webhooksSync: "npm run loopgraph -- hermes webhooks sync --project .",
           webhooksDoctor: "npm run loopgraph -- hermes webhooks doctor --project .",
           eventTest: "npm run loopgraph -- events test --project . --fixture <event.json> --require-synced-manifest"
         },
         fromInstalledPackage: {
-          setup: "loopgraph hermes setup --project . --activate"
+          setup: "loopgraph setup --project . --activate"
         },
         firstHermesPrompt: "start Loopgraph"
       },
@@ -454,11 +455,36 @@ describe("Hermes integration installer", () => {
     });
 
     expect(result.activation).toMatchObject({ applied: true });
+    expect(result.activation?.receiptPath).toBe(path.join(projectRoot, ".loopgraph", "hermes", "activation.json"));
     expect(commands).toHaveLength(5);
     expect(commands.filter((command) => command.args.slice(0, 2).join(" ") === "mcp add")).toHaveLength(3);
     expect(commands).toContainEqual({ command: "hermes", args: ["skills", "tap", "add", "mrrkrieg/loopgraph"] });
     expect(commands).toContainEqual({ command: "hermes", args: ["skills", "install", "mrrkrieg/loopgraph/skills/loopgraph"] });
     expect(result.nextSteps).not.toContain("Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.");
+    const doctor = await doctorHermesIntegration({
+      projectRoot,
+      hermesVersionCheck: async () => "hermes 1.0.0"
+    });
+    expect(doctor.activation).toMatchObject({ applied: true, current: true });
+  });
+
+  it.skipIf(process.platform === "win32")("atomically replaces an activation receipt symlink without changing its target", async () => {
+    const projectRoot = await temporaryProjectRoot();
+    const install = await installHermesIntegration({
+      projectRoot,
+      cliEntryPath: path.join(projectRoot, "dist", "cli.js"),
+      nodeCommand: process.execPath
+    });
+    const outsidePath = path.join(projectRoot, "outside.txt");
+    await writeFile(outsidePath, "keep\n");
+    await symlink(outsidePath, install.activationReceiptPath);
+
+    await activateHermesIntegration(install, async () => undefined, new Date("2026-08-17T13:00:00.000Z"));
+
+    expect(await readFile(outsidePath, "utf8")).toBe("keep\n");
+    const receiptStat = await lstat(install.activationReceiptPath);
+    expect(receiptStat.isSymbolicLink()).toBe(false);
+    expect(receiptStat.mode & 0o777).toBe(0o600);
   });
 
   it("keeps setup local-ready while warning when the Hermes CLI is not installed", async () => {
@@ -524,7 +550,7 @@ describe("Hermes integration installer", () => {
       ok: false
     }));
     expect(result.warnings).toContain(
-      `Hermes integration metadata is incompatible; run \`loopgraph hermes setup --project ${JSON.stringify(projectRoot)}\` to refresh the project-local skills and MCP contract.`
+      `Hermes integration metadata is incompatible; run \`loopgraph setup --project <root>\` to refresh the project-local skills and MCP contract. Advanced recovery: \`loopgraph hermes setup --project ${JSON.stringify(projectRoot)}\`.`
     );
 
     const afterDoctor = await readJsonFile(installStatePath);

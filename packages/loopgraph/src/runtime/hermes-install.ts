@@ -1,4 +1,5 @@
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { execFile } from "node:child_process";
 import path from "node:path";
@@ -67,6 +68,7 @@ import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 import { LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 
 export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha8" as const;
+export const HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION = "hermes-loopgraph-activation/v1alpha1" as const;
 export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.7.0" as const;
 export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha5" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha5" as const;
@@ -167,6 +169,7 @@ export type HermesInstallResult = {
   projectRoot: string;
   scope: HermesInstallScope;
   installStatePath: string;
+  activationReceiptPath: string;
   mcpConfigPath: string;
   skillsDir: string;
   skillPaths: string[];
@@ -198,6 +201,12 @@ export type HermesDoctorResult = {
     catalogCount?: number;
   };
   compatibility: HermesCompatibilityStatus;
+  activation: {
+    receiptPath: string;
+    applied: boolean;
+    current: boolean;
+    appliedAt?: string;
+  };
   warnings: string[];
 };
 
@@ -259,6 +268,7 @@ export type HermesSetupResult = {
   activation?: {
     applied: boolean;
     commands: Array<{ command: string; args: string[] }>;
+    receiptPath: string;
   };
 };
 
@@ -296,6 +306,15 @@ type HermesInstallMetadata = {
     mcpResources: string[];
     warnings: string[];
   } | null;
+};
+
+type HermesActivationReceipt = {
+  schemaVersion: typeof HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION;
+  projectRootHash: string;
+  contractHash: string;
+  appliedAt: string;
+  mcpServerNames: string[];
+  skill: string;
 };
 
 export async function installHermesIntegration(options: HermesInstallOptions = {}): Promise<HermesInstallResult> {
@@ -343,6 +362,7 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
   const adminMcpServer = mcpServers[0]!;
   const mcpConfigPath = path.join(hermesRoot, "mcp.loopgraph.yaml");
   const installStatePath = path.join(hermesRoot, "install.json");
+  const activationReceiptPath = path.join(hermesRoot, "activation.json");
   const nowIso = (options.now ?? new Date()).toISOString();
 
   await initLoopgraphWorkspace({
@@ -502,6 +522,7 @@ export async function installHermesIntegration(options: HermesInstallOptions = {
     projectRoot,
     scope,
     installStatePath,
+    activationReceiptPath,
     mcpConfigPath,
     skillsDir,
     skillPaths: [designSkillPath, routerSkillPath, ...departmentSkillArtifacts.map((artifact) => artifact.path)],
@@ -523,6 +544,7 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
   const loopgraphRoot = getLoopgraphRoot(projectRoot);
   const hermesRoot = path.join(loopgraphRoot, "hermes");
   const installStatePath = path.join(hermesRoot, "install.json");
+  const activationReceiptPath = path.join(hermesRoot, "activation.json");
   const mcpConfigPath = path.join(hermesRoot, "mcp.loopgraph.yaml");
   const skillsDir = path.join(hermesRoot, "skills");
   const designSkillPath = path.join(skillsDir, "loopgraph", "SKILL.md");
@@ -559,14 +581,22 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
   const installed = artifacts.every((item) => item.exists);
   const installStateExists = artifacts.some((item) => item.path === installStatePath && item.exists);
   const installMetadata = await readHermesInstallMetadataRaw(installStatePath);
+  const currentInstallMetadata = await readHermesInstallMetadata(installStatePath);
   const compatibility = checkHermesCompatibility(installMetadata, projectRoot);
+  const activationReceipt = await readHermesActivationReceipt(activationReceiptPath);
+  const activationCurrent = Boolean(
+    activationReceipt &&
+    currentInstallMetadata &&
+    activationReceipt.projectRootHash === contentHash(projectRoot) &&
+    activationReceipt.contractHash === hermesActivationContractHash(currentInstallMetadata)
+  );
   const mcp = await runMcpDoctor(projectRoot);
   const warnings: string[] = [];
 
   if (!hermesVersion) warnings.push("Hermes CLI was not found on PATH; install Hermes before using the generated config.");
   if (!installed) warnings.push("Project-local Hermes integration artifacts are incomplete; run `loopgraph hermes setup --project <root>`.");
   if (installStateExists && !compatibility.ok) {
-    warnings.push(`Hermes integration metadata is incompatible; run \`${compatibility.upgradeCommand}\` to refresh the project-local skills and MCP contract.`);
+    warnings.push(`Hermes integration metadata is incompatible; run \`loopgraph setup --project <root>\` to refresh the project-local skills and MCP contract. Advanced recovery: \`${compatibility.upgradeCommand}\`.`);
   }
   for (const missingTool of mcp.missingTools) {
     warnings.push(`MCP server did not expose required tool: ${missingTool}`);
@@ -590,6 +620,12 @@ export async function doctorHermesIntegration(options: HermesDoctorOptions = {})
     artifacts,
     mcp,
     compatibility,
+    activation: {
+      receiptPath: activationReceiptPath,
+      applied: Boolean(activationReceipt),
+      current: activationCurrent,
+      ...(activationReceipt?.appliedAt ? { appliedAt: activationReceipt.appliedAt } : {})
+    },
     warnings
   };
 
@@ -614,24 +650,24 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
     hermesVersionCheck: options.hermesVersionCheck
   });
   const activation = options.activate
-    ? await activateHermesIntegration(install, options.commandRunner)
+    ? await activateHermesIntegration(install, options.commandRunner, options.now)
     : undefined;
   const localReady = doctor.ok;
   const hermesReady = localReady && doctor.hermesAvailable;
   const commandUsage = {
     fromClone: {
-      setup: "npm run loopgraph -- hermes setup --project . --activate",
+      setup: "npm run loopgraph -- setup --project . --activate",
       doctor: "npm run loopgraph -- hermes doctor --project .",
-      studio: "npm run loopgraph -- studio --project . --start",
+      studio: "npm run loopgraph -- start --project .",
       webhooksPlan: "npm run loopgraph -- hermes webhooks plan --project .",
       webhooksSync: "npm run loopgraph -- hermes webhooks sync --project .",
       webhooksDoctor: "npm run loopgraph -- hermes webhooks doctor --project .",
       eventTest: "npm run loopgraph -- events test --project . --fixture <event.json> --require-synced-manifest"
     },
     fromInstalledPackage: {
-      setup: "loopgraph hermes setup --project . --activate",
+      setup: "loopgraph setup --project . --activate",
       doctor: "loopgraph hermes doctor --project .",
-      studio: "loopgraph studio --project . --start",
+      studio: "loopgraph start --project .",
       webhooksPlan: "loopgraph hermes webhooks plan --project .",
       webhooksSync: "loopgraph hermes webhooks sync --project .",
       webhooksDoctor: "loopgraph hermes webhooks doctor --project .",
@@ -684,7 +720,8 @@ export async function setupHermesIntegration(options: HermesSetupOptions = {}): 
 
 export async function activateHermesIntegration(
   install: HermesInstallResult,
-  commandRunner: (command: string, args: string[]) => Promise<void> = runCommand
+  commandRunner: (command: string, args: string[]) => Promise<void> = runCommand,
+  now = new Date()
 ) {
   const commands: Array<{ command: string; args: string[] }> = [];
   for (const server of install.mcpServers) {
@@ -703,7 +740,18 @@ export async function activateHermesIntegration(
       throw new Error(`Hermes activation stopped at: ${rendered}. Project-local artifacts remain available for recovery. ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return { applied: true, commands };
+  const metadata = await readHermesInstallMetadata(install.installStatePath);
+  if (!metadata) throw new Error("Hermes activation completed, but the project-local install contract is missing.");
+  const receipt = {
+    schemaVersion: HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION,
+    projectRootHash: contentHash(install.projectRoot),
+    contractHash: hermesActivationContractHash(metadata),
+    appliedAt: now.toISOString(),
+    mcpServerNames: install.mcpServers.map((server) => server.name),
+    skill: "mrrkrieg/loopgraph/skills/loopgraph"
+  };
+  await writePrivateAtomicTextFile(install.activationReceiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
+  return { applied: true, commands, receiptPath: install.activationReceiptPath };
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
@@ -924,9 +972,63 @@ async function writeHermesInstallMetadata(
   await writeFile(installStatePath, `${JSON.stringify(metadata, null, 2)}\n`);
 }
 
+async function readHermesActivationReceipt(filePath: string): Promise<HermesActivationReceipt | undefined> {
+  try {
+    const value = JSON.parse(await readFile(filePath, "utf8")) as Record<string, unknown>;
+    if (
+      value.schemaVersion !== HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION ||
+      typeof value.projectRootHash !== "string" ||
+      typeof value.contractHash !== "string" ||
+      typeof value.appliedAt !== "string" ||
+      !Number.isFinite(Date.parse(value.appliedAt)) ||
+      !Array.isArray(value.mcpServerNames) ||
+      !value.mcpServerNames.every((name) => typeof name === "string") ||
+      typeof value.skill !== "string"
+    ) return undefined;
+    return value as HermesActivationReceipt;
+  } catch {
+    return undefined;
+  }
+}
+
+function hermesActivationContractHash(metadata: HermesInstallMetadata): string {
+  return contentHash({
+    projectRootHash: metadata.projectRootHash,
+    protocols: metadata.protocols,
+    mcpServers: metadata.mcpServers.map((server) => ({
+      name: server.name,
+      exposure: server.exposure,
+      transport: server.transport,
+      command: server.command,
+      args: server.args,
+      tools: server.tools,
+      configPath: server.configPath
+    })),
+    skills: metadata.skills.map((skill) => ({
+      name: skill.name,
+      version: skill.version,
+      protocol: skill.protocol,
+      path: skill.path,
+      assets: skill.assets ?? []
+    }))
+  });
+}
+
 async function writeTextFile(filePath: string, content: string): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, content);
+}
+
+async function writePrivateAtomicTextFile(filePath: string, content: string): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, content, { flag: "wx", mode: 0o600 });
+    await rename(temporary, filePath);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function updateLastDoctor(installStatePath: string, result: HermesDoctorResult): Promise<void> {
@@ -1024,7 +1126,7 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 24. Call \`loopgraph_hermes_webhooks_sync\` only after the user explicitly asks to write or refresh the project-local Hermes route manifest; it writes non-secret route metadata only.
 25. Call \`loopgraph_hermes_webhooks_doctor\` after sync or when the user asks whether Hermes route metadata is current.
 26. Call \`loopgraph_hermes_webhooks_test\` with a synthetic or redacted normalized fixture when the user asks to test whether a provider event would terminate at Hermes and route correctly in local shadow mode.
-27. Call \`loopgraph_graph_get\` after materialization and show the user the Hermes Brain -> Department -> Loop graph projection; tell the user they can run \`loopgraph studio --project ${projectRoot}\` to open the local graph; call \`loopgraph_loops_list\` when the user wants the registered loop inventory.
+27. Call \`loopgraph_graph_get\` after materialization and show the user the Hermes Brain -> Department -> Loop graph projection; tell the user they can run \`loopgraph start --project ${projectRoot}\` to operate the local supervisor and graph together; call \`loopgraph_loops_list\` when the user wants the registered loop inventory.
 28. Use \`loopgraph_runs_get\` when the user wants local run history, a review-ready run summary, or previously prepared action fingerprints.
 29. Before claiming a loop can run locally, call \`loopgraph_loops_validate\` for that registered \`loopId\`.
 30. Demonstrate a loop locally with \`loopgraph_loops_simulate\` using a generated starter fixture or explicit fixture object.

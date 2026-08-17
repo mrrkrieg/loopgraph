@@ -5,7 +5,8 @@ import { getGraphAuthoringContext } from "../../lib/loopgraph-runtime/graph-auth
 import { contentHash } from "loopgraph/core";
 import {
   projectGraphEditorTransactionReceipts,
-  graphEditorTransactionReceipt
+  graphEditorTransactionReceipt,
+  inspectLocalSupervisorRuntime
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
@@ -30,20 +31,36 @@ export default async function BrainPage({ searchParams }: BrainPageProps) {
     brainLabel: "Hermes Brain",
     hierarchyMode: "hermes_brain"
   });
+  const activeProjectRoot = getActiveLoopgraphProjectRoot();
   const { store: graphAuthoringStore } = await getGraphAuthoringContext("workspace.read");
-  const [layout, transactions] = await Promise.all([
+  const [layout, transactions, supervisorRuntime] = await Promise.all([
     graphAuthoringStore.getLayout(),
-    graphAuthoringStore.list()
+    graphAuthoringStore.list(),
+    hostedPreview ? Promise.resolve(undefined) : inspectLocalSupervisorRuntime(activeProjectRoot)
   ]);
   const transactionReceipts = hostedPreview
     ? transactions.map(graphEditorTransactionReceipt)
     : await projectGraphEditorTransactionReceipts({
         transactions,
         opportunityStore: getLoopOpportunityStore({
-          projectRoot: getActiveLoopgraphProjectRoot()
+          projectRoot: activeProjectRoot
         }),
         designStore: getHermesDesignStore()
       });
+  const supervisor = supervisorRuntime
+    ? {
+        running: supervisorRuntime.running,
+        ...(supervisorRuntime.status
+          ? {
+              status: {
+                health: supervisorRuntime.status.health,
+                checkedAt: supervisorRuntime.status.checkedAt,
+                recommendedAction: supervisorRuntime.status.recommendedActions[0]
+              }
+            }
+          : {})
+      }
+    : undefined;
 
   return (
     <BrainPageShell
@@ -51,6 +68,7 @@ export default async function BrainPage({ searchParams }: BrainPageProps) {
       initialLayout={layout}
       initialTransactions={transactionReceipts}
       previewMode={previewMode}
+      supervisor={supervisor}
       topology={topology}
       topologyHash={contentHash({ nodes: topology.nodes, edges: topology.edges })}
     />
