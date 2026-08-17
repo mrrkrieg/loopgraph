@@ -30,6 +30,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "pretest": "npm run sync:official-packs",
     "test": "vitest run",
     "sync:official-packs": "node scripts/sync-official-packs.mjs",
     "prepack": "npm run sync:official-packs",
