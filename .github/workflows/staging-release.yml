@@ -78,9 +78,40 @@ jobs:
           LOOPGRAPH_STAGING_MARKETPLACE_REVOKED_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_REVOKED_TOKEN_FILE }}"
           LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
 
+  audit-retention:
+    needs: [staging, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: audit-retention-staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run audit:drain > audit-retention-receipt.json
+        env:
+          LOOPGRAPH_AUDIT_SOURCE_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_AUDIT_RETENTION_URL: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_URL }}"
+          LOOPGRAPH_AUDIT_ORGANIZATION_ID: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_ORGANIZATION_ID }}"
+          LOOPGRAPH_AUDIT_PROJECT_KEY: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_PROJECT_KEY }}"
+          LOOPGRAPH_AUDIT_PAGE_SIZE: "${{ vars.LOOPGRAPH_AUDIT_PAGE_SIZE }}"
+          LOOPGRAPH_AUDIT_MIN_RETENTION_DAYS: "${{ vars.LOOPGRAPH_AUDIT_MIN_RETENTION_DAYS }}"
+          LOOPGRAPH_AUDIT_RETENTION_KEY_ID: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_KEY_ID }}"
+          LOOPGRAPH_AUDIT_SOURCE_TOKEN_FILE: "${{ vars.LOOPGRAPH_AUDIT_SOURCE_TOKEN_FILE }}"
+          LOOPGRAPH_AUDIT_RETENTION_TOKEN_FILE: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_TOKEN_FILE }}"
+          LOOPGRAPH_AUDIT_RETENTION_PUBLIC_KEY_FILE: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_PUBLIC_KEY_FILE }}"
+          LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_KEY_ID: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_KEY_ID }}"
+          LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_PUBLIC_KEY_FILE: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_PUBLIC_KEY_FILE }}"
+          LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE: "${{ vars.LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit-retention-receipt
+          path: audit-retention-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
   promote:
     if: ${{ inputs.promote_production }}
-    needs: [staging, marketplace]
+    needs: [staging, audit-retention]
     runs-on: ubuntu-latest
     environment: production
     steps:

@@ -7,13 +7,20 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `ops/slo.yaml` is the versioned SLO and alert contract. Route its metrics to an alerting system with paging ownership; the file is not an alert delivery system by itself.
 - `.github/workflows/staging-release.yml` builds once, deploys the prebuilt artifact to staging, validates it, and only promotes that verified deployment after protected-environment approval.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
-- `npm run audit:drain` exports verified audit-chain records to an independent retention endpoint. The destination must verify the timestamped HMAC and enforce its own immutable retention policy.
+- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
 - `npm run validate:staging` now uses the projected observability workload identity too. Its receipt contains status and control summaries only; it no longer accepts a reusable observability token or copies audit/metrics response bodies into release evidence.
 
 ## Release evidence
 
 Keep the workflow run, staging validation JSON, exact deployment URL, migration commit, database backup checkpoint, alert configuration revision, and most recent restore rehearsal receipt together. Missing evidence blocks production promotion; it must not be replaced with a checkbox.
+
+The signed `audit-drain/v2` receipt is mandatory for every production promotion. Preserve it outside
+the application database through the protected runner's `LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE`; the
+sender atomically advances this predecessor only after verification. Production promotion depends
+on the protected `audit-retention-staging` job; an unavailable
+receiver, stale predecessor, invalid signature, or insufficient immutability period fails the job.
+See [Independent audit retention protocol](./AUDIT-RETENTION-PROTOCOL.md).
 
 The marketplace receipt is also mandatory when marketplace delivery changed. Preserve its exact app
 ID, version, artifact digest, seven check results, and audit checkpoint. Do not preserve token files.

@@ -31,13 +31,16 @@ continuously export the chain head and events to a separately controlled retenti
 |---|---|---|
 | `GET /api/health/live` | Public, no details | Confirms the web process can respond |
 | `GET /api/health/ready` | Public, no dependency details | Returns `200` only when hosted configuration, tenant namespace, database, and audit RPC are ready |
-| `GET /api/operations/metrics` | Dedicated observability bearer credential | Prometheus-format readiness and security-control counters |
-| `GET /api/audit/export` | Signed-in organization `admin` or `owner` | Cursor-paged audit events plus database chain verification |
+| `GET /api/operations/metrics` | Workload identity with `observability.read` | Prometheus-format readiness and security-control counters |
+| `GET /api/operations/audit-export` | Workload identity with `observability.read` | Machine export bounded to one verified immutable checkpoint |
+| `GET /api/audit/export` | Signed-in organization `admin` or `owner` | Human export bounded to one verified immutable checkpoint |
 
 The public health responses intentionally exclude error messages, table names, connection data,
 tenant IDs, and metrics. Detailed readiness and counters stay behind the observability credential.
 
-Configure the scraper separately from workers:
+Production uses issuer-verified workload identity with a durable `observability.read` grant. Static
+tokens are a temporary compatibility path only and are disabled by default in production. Configure
+the scraper separately from workers:
 
 ```dotenv
 LOOPGRAPH_OBSERVABILITY_API_TOKEN=<long random secret>
@@ -51,17 +54,25 @@ durable replay receipt, and rate-window headers described in
 
 ## Audit export
 
-Only `admin` and `owner` memberships have `audit.read`. A page can contain at most 500 events:
+Only `admin` and `owner` memberships have human `audit.read`. A page can contain at most 500 events:
 
 ```text
 GET /api/audit/export?after=0&limit=100
 ```
 
-The response includes:
+The first response selects a fully verified chain head. Pass its `throughSequence` on subsequent
+pages so concurrent append activity remains for the next export:
+
+```text
+GET /api/audit/export?after=100&through=750&limit=100
+```
+
+The v2 response includes:
 
 - `nextCursor` for the following page;
 - exact `previous_hash` and `event_hash` values;
-- chain head and event count from a database-side full-chain verification;
+- selected and current chain heads plus the selected head hash and event count from a database-side
+  full-chain verification;
 - HTTP `409` if verification identifies a broken link.
 
 Do not place provider payloads, credentials, signatures, authorization headers, or customer
@@ -104,4 +115,5 @@ After applying migrations to staging:
 4. Make one accepted and one replayed machine request.
 5. Export the audit page as an administrator and confirm both decisions are present.
 6. Verify a repeated machine request returns `409` and a broken audit chain would block export.
-7. Export the final chain head to the independent retention destination.
+7. Run `npm run audit:drain` and verify the external Ed25519 acknowledgement, predecessor digest,
+   and immutable-until deadline. See [Independent audit retention protocol](./AUDIT-RETENTION-PROTOCOL.md).
