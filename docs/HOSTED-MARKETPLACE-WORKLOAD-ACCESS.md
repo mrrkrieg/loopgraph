@@ -110,3 +110,10 @@ revocation, cache corruption, multiple replicas, large bounded artifacts, and
 audit-retention export. Interactive human CLI login/device authorization is a
 separate UX layer; the implemented enterprise path is workload identity for
 Hermes and managed CLI runners.
+
+The executable first release of that matrix is `npm run validate:marketplace-staging`.
+It validates a private exact release with separate allowed, foreign-tenant,
+revoked-grant, and observability identities, then emits a secret-free JSON receipt.
+The protected staging workflow blocks production promotion unless all seven checks
+pass. Issuer key rotation, rate-limit saturation, backup/restore, and external
+retention remain separate operational drills.

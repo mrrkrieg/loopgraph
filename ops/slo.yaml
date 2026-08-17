@@ -29,6 +29,18 @@ objectives:
     target: 100
     indicator: successful_quarterly_restore_rehearsals / scheduled_quarterly_restore_rehearsals
     alert: { maximum_days_since_success: 100 }
+  - id: marketplace_tenant_isolation
+    target: 100
+    indicator: successful_foreign_tenant_denials / scheduled_marketplace_isolation_checks
+    alert: { consecutive_failures: 1 }
+  - id: marketplace_artifact_integrity
+    target: 100
+    indicator: exact_verified_marketplace_artifacts / scheduled_marketplace_artifact_checks
+    alert: { consecutive_failures: 1 }
+  - id: marketplace_revocation_effectiveness
+    target: 100
+    indicator: successful_revoked_workload_denials / scheduled_marketplace_revocation_checks
+    alert: { consecutive_failures: 1 }
 ownership:
   primary: platform-on-call
   security: security-owner

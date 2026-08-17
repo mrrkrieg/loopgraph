@@ -337,6 +337,12 @@ or provider token, never treats its cache as authorization, and re-verifies the
 exact signed archive before the normal governed install path. See
 [hosted marketplace access for Hermes and CLI](docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
 
+Production promotion can also require `npm run validate:marketplace-staging`.
+The protected gate uses separate projected allowed, foreign-tenant, revoked,
+and observability identities to prove exact signed delivery, isolation,
+revocation, replay rejection, and audit evidence before promotion. It emits a
+secret-free JSON receipt; it never accepts token text in configuration.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

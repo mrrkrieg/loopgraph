@@ -157,14 +157,18 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 2. Add scoped identities and durable request guards to remaining provider collectors, then add
    user-facing API quotas.
 3. Configure a real independent audit-retention receiver and alert manager, then run the included
-   staging validation and isolated backup/restore rehearsal on every target environment.
+   staging validation and isolated backup/restore rehearsal on every target environment. The
+   protected marketplace gate now produces exact artifact, tenant-isolation, durable-revocation,
+   replay, and audit-chain evidence; the repository does not yet contain a receipt from a real
+   staging deployment.
 4. Register provider applications and use Hermes-owned credentials to execute the supplied OAuth,
    webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
 6. Add interactive human CLI/device authorization on top of the implemented workload-identity
-   path; validate issuer rotation, revocation, rate limiting, and cross-replica cache behavior in
-   staging.
+   path; validate issuer rotation, rate-limit saturation, cross-replica cache behavior, and release
+   revocation in staging. Durable grant revocation, cross-tenant denial, replay rejection, exact
+   signed staging, and audit presence are now part of the executable marketplace gate.
 
 ## Key documentation
 

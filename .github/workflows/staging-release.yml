@@ -48,14 +48,39 @@ jobs:
         shell: bash
         run: echo "url=$(npx vercel deploy --prebuilt --token=\"${VERCEL_TOKEN}\")" >> "$GITHUB_OUTPUT"
         env: { VERCEL_TOKEN: "${{ secrets.VERCEL_TOKEN }}" }
+
+  marketplace:
+    needs: staging
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: marketplace-staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
       - run: npm run validate:staging
         env:
-          LOOPGRAPH_STAGING_URL: "${{ steps.deploy.outputs.url }}"
-          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN: "${{ secrets.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN }}"
+          LOOPGRAPH_STAGING_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_ORGANIZATION_ID: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_ORGANIZATION_ID }}"
+          LOOPGRAPH_STAGING_PROJECT_KEY: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_PROJECT_KEY }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: npm run validate:marketplace-staging
+        env:
+          LOOPGRAPH_STAGING_MARKETPLACE_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_AUDIENCE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_AUDIENCE }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_ORGANIZATION_ID: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_ORGANIZATION_ID }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_PROJECT_KEY: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_PROJECT_KEY }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_APP_ID: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_APP_ID }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_APP_VERSION: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_APP_VERSION }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_ARTIFACT_DIGEST: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_ARTIFACT_DIGEST }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_ALLOWED_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_ALLOWED_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_FOREIGN_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_FOREIGN_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_MARKETPLACE_REVOKED_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_REVOKED_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
 
   promote:
     if: ${{ inputs.promote_production }}
-    needs: staging
+    needs: [staging, marketplace]
     runs-on: ubuntu-latest
     environment: production
     steps:
