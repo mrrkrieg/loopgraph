@@ -4,31 +4,31 @@ const MACHINE_ROUTE_PREFIXES = [
   "/api/cron/",
   "/api/graph/transactions",
   "/api/measurements",
-  "/api/operations/metrics",
   "/api/webhooks/"
 ] as const;
 
+const MACHINE_ROUTE_PATHS = new Set([
+  "/api/auth/device/code",
+  "/api/auth/device/token",
+  "/api/auth/device/refresh",
+  "/api/auth/device/revoke",
+  "/api/hermes/agents",
+  "/api/hermes/design-dispatch/worker",
+  "/api/hermes/design-callbacks/worker",
+  "/api/hermes/executions/events",
+  "/api/marketplace/client/artifacts",
+  "/api/marketplace/client/catalog",
+  "/api/marketplace/verifier/worker",
+  "/api/operations/audit-export",
+  "/api/operations/metrics",
+  "/api/routing/worker"
+]);
+
 export function isMachineAuthenticatedRoute(pathname: string): boolean {
-  if ([
-    "/api/auth/device/code",
-    "/api/auth/device/token",
-    "/api/auth/device/refresh",
-    "/api/auth/device/revoke"
-  ].includes(pathname)) {
-    return true;
-  }
-  if (/^\/api\/hermes\/design-tasks\/[^/]+\/callback$/.test(pathname)) {
-    return true;
-  }
-  if (
-    pathname === "/api/hermes/design-dispatch/worker" ||
-    pathname === "/api/hermes/design-callbacks/worker"
-  ) {
-    return true;
-  }
-  if (pathname === "/api/routing/worker" || /^\/api\/routing\/jobs\/[^/]+$/.test(pathname)) {
-    return true;
-  }
+  if (MACHINE_ROUTE_PATHS.has(pathname)) return true;
+  if (/^\/api\/hermes\/agents\/[^/]+\/heartbeat$/.test(pathname)) return true;
+  if (/^\/api\/hermes\/design-tasks\/[^/]+\/callback$/.test(pathname)) return true;
+  if (/^\/api\/routing\/jobs\/[^/]+$/.test(pathname)) return true;
   return MACHINE_ROUTE_PREFIXES.some((prefix) =>
     prefix.endsWith("/") ? pathname.startsWith(prefix) : pathname === prefix
   );
