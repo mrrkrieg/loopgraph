@@ -14,9 +14,15 @@ const UUID_PATTERN =
 const PROJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export type StagingDeploymentReceipt = {
-  schemaVersion: "staging-validation/v2";
-  target: string;
+  schemaVersion: "staging-validation/v3";
+  targetOrigin: string;
+  organizationId: string;
+  projectKey: string;
   checkedAt: string;
+  auditCheckpoint: {
+    headSequence: number;
+    headHash: string;
+  };
   results: Array<{
     name: "readiness" | "operational_metrics" | "audit_integrity";
     status: number;
@@ -104,11 +110,20 @@ export async function validateStagingDeployment(
   if (!isRecord(audit) || !isRecord(audit.integrity) || audit.integrity.valid !== true) {
     throw new Error("Staging audit chain did not return integrity.valid=true");
   }
+  const headSequence = Number(audit.integrity.headSequence);
+  const headHash = audit.integrity.headHash;
+  if (!Number.isSafeInteger(headSequence) || headSequence < 0 ||
+      typeof headHash !== "string" || !/^[a-f0-9]{64}$/.test(headHash)) {
+    throw new Error("Staging audit chain returned an invalid checkpoint identity");
+  }
 
   return {
-    schemaVersion: "staging-validation/v2",
-    target: baseUrl.host,
+    schemaVersion: "staging-validation/v3",
+    targetOrigin: baseUrl.origin,
+    organizationId: config.organizationId,
+    projectKey: config.projectKey,
     checkedAt: now().toISOString(),
+    auditCheckpoint: { headSequence, headHash },
     results: [
       {
         name: "readiness",
@@ -163,9 +178,10 @@ function trustedStagingOrigin(value: string) {
     url.username ||
     url.password ||
     url.search ||
-    url.hash
+    url.hash ||
+    url.pathname !== "/"
   ) {
-    throw new Error("Staging URL must use HTTPS without credentials, query, or fragment state");
+    throw new Error("Staging URL must use HTTPS as one origin without credentials, path, query, or fragment state");
   }
   return url;
 }

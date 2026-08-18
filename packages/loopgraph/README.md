@@ -71,6 +71,25 @@ See [Hermes examples](../../docs/HERMES-EXAMPLES.md) for the Marketing reference
 
 ### Private hosted apps from Hermes or CLI
 
+For an interactive terminal, authorize once in the hosted browser. The CLI persists
+the origin and tenant binding, so later app commands do not require token or tenant
+environment variables:
+
+```bash
+npx loopgraph auth login \
+  --url https://loopgraph.example \
+  --audience https://loopgraph.example/marketplace
+
+npx loopgraph apps search "renewal risk" --department customer_success
+npx loopgraph auth logout
+```
+
+The session grants only `marketplace.consume`, uses a 15-minute access token with a
+rotating refresh token, and is stored in a `0600` current-user file. See the
+[interactive CLI authorization guide](../../docs/CLI-DEVICE-AUTHORIZATION.md).
+
+For Hermes or a managed CLI runner, use workload identity instead:
+
 Managed Hermes and CLI processes can use private hosted LoopPacks with a
 short-lived workload identity—never a Supabase service key or provider token:
 
@@ -84,7 +103,7 @@ export LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE=/absolute/path/to/projected.jwt
 npx loopgraph apps search "renewal risk" --department customer_success
 ```
 
-The hosted admin must grant that workload `marketplace.consume`. Existing app
+The hosted admin must grant the workload `marketplace.consume`. Existing app
 detail, planning, mapping, and apply tools then fetch only the selected release,
 recheck tenant visibility, verify its signature and file digests, and use the
 normal write-blocked installer. See the [workload access guide](../../docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).

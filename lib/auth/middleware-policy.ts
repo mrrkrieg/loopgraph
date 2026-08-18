@@ -9,6 +9,14 @@ const MACHINE_ROUTE_PREFIXES = [
 ] as const;
 
 export function isMachineAuthenticatedRoute(pathname: string): boolean {
+  if ([
+    "/api/auth/device/code",
+    "/api/auth/device/token",
+    "/api/auth/device/refresh",
+    "/api/auth/device/revoke"
+  ].includes(pathname)) {
+    return true;
+  }
   if (/^\/api\/hermes\/design-tasks\/[^/]+\/callback$/.test(pathname)) {
     return true;
   }
@@ -32,6 +40,10 @@ export function isUnsafeMethod(method: string): boolean {
 
 export function canRoleMutateHostedApi(role: unknown): boolean {
   return role === "operator" || role === "admin" || role === "owner";
+}
+
+export function isViewerSafeHostedMutation(pathname: string): boolean {
+  return pathname === "/api/auth/device/approve";
 }
 
 export function selectHostedMembership<T extends { organization_id: string }>(

@@ -102,6 +102,11 @@ export type AuditIntegrity = {
   headHash: string;
 };
 
+export type AuditExportCheckpoint = AuditIntegrity & {
+  headSequence: number;
+  currentHeadSequence: number;
+};
+
 const EMPTY_METRICS: OperationalMetrics = {
   machineRequests5m: 0,
   machineRateLimited5m: 0,
@@ -303,16 +308,24 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
 export async function exportSecurityAuditEvents(input: {
   organizationId: string;
   afterSequence: number;
+  throughSequence?: number;
   limit: number;
 }): Promise<SecurityAuditEvent[]> {
   const supabase = requiredAdminClient();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
-  const { data, error } = await supabase.rpc("export_security_audit_events", {
-    p_organization_id: input.organizationId,
-    p_project_key: projectKey,
-    p_after_sequence: Math.max(0, Math.floor(input.afterSequence)),
-    p_limit: Math.min(500, Math.max(1, Math.floor(input.limit)))
-  });
+  const bounded = input.throughSequence !== undefined;
+  const { data, error } = await supabase.rpc(
+    bounded ? "export_security_audit_events_bounded" : "export_security_audit_events",
+    {
+      p_organization_id: input.organizationId,
+      p_project_key: projectKey,
+      p_after_sequence: Math.max(0, Math.floor(input.afterSequence)),
+      ...(bounded
+        ? { p_through_sequence: Math.max(0, Math.floor(input.throughSequence!)) }
+        : {}),
+      p_limit: Math.min(500, Math.max(1, Math.floor(input.limit)))
+    }
+  );
   if (error) {
     emitOperationalLog({
       level: "error",
@@ -325,6 +338,56 @@ export async function exportSecurityAuditEvents(input: {
     throw new Error("Security audit export is unavailable.");
   }
   return Array.isArray(data) ? data as SecurityAuditEvent[] : [];
+}
+
+export async function getVerifiedSecurityAuditCheckpoint(input: {
+  organizationId: string;
+  throughSequence?: number;
+}): Promise<AuditExportCheckpoint> {
+  const supabase = requiredAdminClient();
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const { data, error } = await supabase.rpc("get_verified_security_audit_checkpoint", {
+    p_organization_id: input.organizationId,
+    p_project_key: projectKey,
+    p_through_sequence: input.throughSequence ?? null
+  });
+  if (error) {
+    emitOperationalLog({
+      level: "error",
+      event: "audit.checkpoint.failed",
+      outcome: "error",
+      organizationId: input.organizationId,
+      projectKey,
+      reason: "audit_checkpoint_rpc_failed"
+    });
+    throw new Error("Security audit checkpoint is unavailable.");
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!isRecord(row) || typeof row.valid !== "boolean") {
+    throw new Error("Audit checkpoint returned an invalid result.");
+  }
+  const headHash = typeof row.head_hash === "string" ? row.head_hash : "";
+  if (!/^[a-f0-9]{64}$/.test(headHash)) {
+    throw new Error("Audit checkpoint returned an invalid head hash.");
+  }
+  return {
+    valid: row.valid,
+    eventsChecked: strictAuditInteger(row.events_checked, "events_checked"),
+    headSequence: strictAuditInteger(row.head_sequence, "head_sequence"),
+    currentHeadSequence: strictAuditInteger(
+      row.current_head_sequence,
+      "current_head_sequence"
+    ),
+    headHash
+  };
+}
+
+function strictAuditInteger(value: unknown, field: string) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`Audit checkpoint returned an invalid ${field}.`);
+  }
+  return parsed;
 }
 
 export async function verifySecurityAuditChain(
