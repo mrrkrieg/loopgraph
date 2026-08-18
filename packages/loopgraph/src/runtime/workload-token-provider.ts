@@ -8,6 +8,18 @@ export interface WorkloadTokenProvider {
   getToken(input: WorkloadTokenRequest): Promise<string>;
 }
 
+export function hasAmbientWorkloadIdentity(env: NodeJS.ProcessEnv = process.env) {
+  return Boolean(
+    env.LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE ||
+    env.SPIFFE_JWT_SVID_FILE ||
+    env.GCE_METADATA_HOST ||
+    env.K_SERVICE ||
+    env.IDENTITY_ENDPOINT ||
+    env.MSI_ENDPOINT ||
+    (env.NODE_ENV !== "production" && env.LOOPGRAPH_DEV_WORKLOAD_IDENTITY_TOKEN)
+  );
+}
+
 export class AmbientWorkloadTokenProvider implements WorkloadTokenProvider {
   constructor(private readonly dependencies: { fetcher?: typeof fetch } = {}) {}
 

@@ -31,6 +31,8 @@ describe("recovery evidence contract", () => {
     for (const table of [
       "marketplace_app_versions",
       "workload_capability_grants",
+      "cli_access_sessions",
+      "cli_device_issuance_rate_windows",
       "connector_action_approvals",
       "provider_webhook_inbox",
       "security_audit_events",

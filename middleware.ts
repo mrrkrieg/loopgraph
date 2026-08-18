@@ -5,6 +5,7 @@ import {
   isMachineAuthenticatedRoute,
   isSameOriginRequest,
   isUnsafeMethod,
+  isViewerSafeHostedMutation,
   selectHostedMembership
 } from "@/lib/auth/middleware-policy";
 import {
@@ -111,6 +112,7 @@ export async function middleware(request: NextRequest) {
     if (
       request.nextUrl.pathname.startsWith("/api/") &&
       isUnsafeMethod(request.method) &&
+      !isViewerSafeHostedMutation(request.nextUrl.pathname) &&
       !canRoleMutateHostedApi(membership.role)
     ) {
       return secureResponse(NextResponse.json(

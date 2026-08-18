@@ -4,11 +4,17 @@ import {
   isMachineAuthenticatedRoute,
   isSameOriginRequest,
   isUnsafeMethod,
+  isViewerSafeHostedMutation,
   selectHostedMembership
 } from "./middleware-policy";
 
 describe("hosted middleware policy", () => {
   it("leaves independently authenticated machine endpoints to their route guards", () => {
+    expect(isMachineAuthenticatedRoute("/api/auth/device/code")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/auth/device/token")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/auth/device/refresh")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/auth/device/revoke")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/auth/device/approve")).toBe(false);
     expect(isMachineAuthenticatedRoute("/api/cron/controller")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/webhooks/github")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/graph/transactions")).toBe(true);
@@ -42,6 +48,8 @@ describe("hosted middleware policy", () => {
     expect(canRoleMutateHostedApi("admin")).toBe(true);
     expect(canRoleMutateHostedApi("owner")).toBe(true);
     expect(canRoleMutateHostedApi("unknown")).toBe(false);
+    expect(isViewerSafeHostedMutation("/api/auth/device/approve")).toBe(true);
+    expect(isViewerSafeHostedMutation("/api/marketplace/releases")).toBe(false);
   });
 
   it("authorizes against the selected organization instead of the first membership", () => {

@@ -105,6 +105,7 @@ export * from "./app-pack-loader";
 export * from "./app-pack-compiler";
 export * from "./app-marketplace";
 export * from "./hosted-marketplace-client";
+export * from "./cli-device-auth";
 export * from "./hosted-marketplace-cache";
 export * from "./company-context-service";
 export * from "./app-connector-service";
