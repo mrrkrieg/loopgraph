@@ -69,6 +69,24 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE:
         "${{ github.workspace }}/release-checkpoints/marketplace-validation-receipt.json"
     });
+    const stagingValidationStep = (jobs.marketplace.steps ?? []).find(
+      (step) => step.run?.includes("validate:staging")
+    );
+    expect(stagingValidationStep?.env).toMatchObject({
+      LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}",
+      LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY:
+        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY }}",
+      LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE }}",
+      LOOPGRAPH_STAGING_FOREIGN_USER_SESSION_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_FOREIGN_USER_SESSION_FILE }}",
+      LOOPGRAPH_STAGING_SUSPENDED_USER_SESSION_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_SUSPENDED_USER_SESSION_FILE }}",
+      LOOPGRAPH_STAGING_USER_API_ADMIN_QUOTA_LIMIT:
+        "${{ vars.LOOPGRAPH_STAGING_USER_API_ADMIN_QUOTA_LIMIT }}",
+      LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS:
+        "${{ vars.LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS }}"
+    });
     expect(source.match(/LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM/g)).toHaveLength(2);
   });
 });

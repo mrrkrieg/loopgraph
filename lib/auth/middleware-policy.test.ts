@@ -24,7 +24,19 @@ describe("hosted middleware policy", () => {
     expect(isMachineAuthenticatedRoute("/api/hermes/design-tasks/task_1/callback")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-dispatch/worker")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-callbacks/worker")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/hermes/agents")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/hermes/agents/agent_1/heartbeat")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/hermes/executions/events")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/marketplace/verifier/worker")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/marketplace/client/catalog")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/marketplace/client/artifacts")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/operations/audit-export")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/routing/worker")).toBe(true);
+    expect(isMachineAuthenticatedRoute("/api/routing/jobs/job_1")).toBe(true);
     expect(isMachineAuthenticatedRoute("/api/hermes/design-tasks")).toBe(false);
+    expect(isMachineAuthenticatedRoute("/api/hermes/agents/agent_1")).toBe(false);
+    expect(isMachineAuthenticatedRoute("/api/marketplace/apps")).toBe(false);
+    expect(isMachineAuthenticatedRoute("/api/audit/export")).toBe(false);
     expect(isMachineAuthenticatedRoute("/api/opportunities")).toBe(false);
   });
 

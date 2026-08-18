@@ -36,6 +36,7 @@ describe("recovery evidence contract", () => {
       "connector_action_approvals",
       "provider_webhook_inbox",
       "security_audit_events",
+      "user_api_quota_windows",
       "hermes_execution_events",
       "loop_controller_state",
       "graph_editor_transactions",

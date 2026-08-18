@@ -26,7 +26,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 
 | Receipt | What it binds |
 |---|---|
-| `staging-validation/v3` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, and verified audit checkpoint |
+| `staging-validation/v4` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, verified audit checkpoint, unauthenticated/foreign/suspended user denial, and one complete database-owned user quota window ending in `429` |
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
 | `backup-restore-rehearsal/v2` | Protected source database identity digest, distinct disposable target, matching PostgreSQL versions, exact row-count/SHA-256 fingerprints for every application table, restored audit integrity, and evidence-family counts |
 | `audit-drain/v3` | Exact staging origin and tenant, retained audit head, exact staging and marketplace sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
@@ -62,7 +62,16 @@ Use separate protected environments and runner identities.
 
 - marketplace organization, project, audience, app ID, version, and artifact digest;
 - projected mode-`0600` workload JWT paths for the allowed tenant, foreign tenant, revoked grant,
-  and observability reader.
+  and observability reader;
+- Supabase origin and publishable key plus projected mode-`0600` session-bundle paths for an active
+  target member, an active foreign-tenant member, and a suspended target member; and
+- a reviewed staging-only `admin` quota override and the exact expected limit (recommended: three
+  requests in a one-second window).
+
+Each session bundle contains only `access_token` and `refresh_token`. It is exchanged in memory for
+browser cookies and is never emitted in the staging receipt. The expected quota limit is bounded to
+`1..10`, and the maximum synchronization wait is bounded to 30 seconds. A mismatch between the
+configured expected limit and the database policy fails the release instead of weakening the check.
 
 The job emits validated non-secret scope and artifact identities as job outputs. Later jobs do not
 receive the token files or marketplace environment configuration.
@@ -110,7 +119,7 @@ credential is forwarded into production promotion.
 ## Operational boundary
 
 Repository tests validate schemas, content binding, freshness, mixed-evidence rejection, exact
-fingerprint coverage, and manifest reconstruction. A real workflow run is still required to prove
+user-boundary statuses, quota-window completeness, fingerprint coverage, and manifest reconstruction. A real workflow run is still required to prove
 the Vercel deployment, Supabase database, protected runner mounts, receiver key, immutable storage,
 GitHub attestation service, and environment approval all exist and are correctly configured.
 

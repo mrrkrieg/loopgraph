@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
       },
       scope: { organizationId, projectKey: "main", databaseIdentityDigest },
       evidence: {
-        staging: { summary: { checks: 3 } },
+        staging: { summary: { checks: 7, quotaBucket: "admin", quotaLimit: 3 } },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
         recovery: { summary: { criticalTables: RECOVERY_TABLES.length } },
         auditRetention: { summary: { throughSequence: 50 } }
@@ -128,6 +128,32 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(alteredCheckpoint, config))
       .toThrow(/exact release checkpoints/i);
+  });
+
+  it("rejects incomplete or inconsistent user-boundary quota evidence", () => {
+    const inconsistent = releaseReceipts();
+    inconsistent.staging = {
+      ...(inconsistent.staging as Record<string, unknown>),
+      quotaEvidence: {
+        bucket: "admin",
+        limit: 3,
+        allowedRequests: 2,
+        deniedStatus: 429,
+        retryAfterSeconds: 1
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(inconsistent, config))
+      .toThrow(/one exact configured window/i);
+
+    const wrongStatus = releaseReceipts();
+    const staging = wrongStatus.staging as { results: Array<Record<string, unknown>> };
+    wrongStatus.staging = {
+      ...staging,
+      results: staging.results.map((result) =>
+        result.name === "cross_tenant_user_denial" ? { ...result, status: 401 } : result)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
   });
 
   it("requires every claimed checkpoint to be inside the signed retained range", () => {
@@ -238,18 +264,28 @@ function releaseReceipts(): ProductionEvidenceReceipts {
   ).toString("base64url");
   return {
     staging: {
-      schemaVersion: "staging-validation/v3",
+      schemaVersion: "staging-validation/v4",
       targetOrigin: deploymentOrigin,
       organizationId,
       projectKey: "main",
       checkedAt,
       auditCheckpoint: { headSequence: 40, headHash: "4".repeat(64) },
-      results: ["readiness", "operational_metrics", "audit_integrity"].map((name) => ({
-        name,
-        status: 200,
-        ok: true,
-        detail: `${name} passed`
-      }))
+      results: [
+        { name: "readiness", status: 200 },
+        { name: "operational_metrics", status: 200 },
+        { name: "audit_integrity", status: 200 },
+        { name: "unauthenticated_user_denial", status: 401 },
+        { name: "cross_tenant_user_denial", status: 403 },
+        { name: "suspended_user_denial", status: 403 },
+        { name: "user_api_quota_saturation", status: 429 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` })),
+      quotaEvidence: {
+        bucket: "admin",
+        limit: 3,
+        allowedRequests: 3,
+        deniedStatus: 429,
+        retryAfterSeconds: 1
+      }
     },
     marketplace: {
       schemaVersion: "hosted-marketplace-staging-validation/v2",
