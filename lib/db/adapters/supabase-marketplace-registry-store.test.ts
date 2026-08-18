@@ -13,8 +13,10 @@ import {
 import { loadLoopPackDirectory } from "loopgraph/runtime";
 import {
   hostedMarketplaceArtifactAttestation,
+  SupabaseMarketplaceMachineRegistryStore,
   SupabaseMarketplaceRegistryStore,
-  SupabaseMarketplaceReleaseVerifier
+  SupabaseMarketplaceReleaseVerifier,
+  SupabaseMarketplaceVerificationJobStore
 } from "./supabase-marketplace-registry-store";
 
 const organizationId = "123e4567-e89b-12d3-a456-426614174000";
@@ -255,6 +257,146 @@ describe("Supabase hosted marketplace registry", () => {
       p_verification_receipt_digest: receiptDigest,
       p_accepted: true,
       p_reason: null
+    });
+  });
+
+  it("searches through the RLS-bound RPC and reconstructs safe app metadata", async () => {
+    const fixture = await marketplaceFixture();
+    const version = hostedVersion(fixture.version, "1.0.0", fixture.artifact.digest);
+    const appMetadata = { ...fixture.app } as Record<string, unknown>;
+    delete appMetadata.latestVersion;
+    delete appMetadata.versions;
+    const rpc = vi.fn().mockResolvedValue({
+      data: [{
+        ...versionRow(appMetadata, version, "active"),
+        relevance_score: 60,
+        matched_terms: ["name", "summary"]
+      }],
+      error: null
+    });
+    const store = new SupabaseMarketplaceRegistryStore(
+      { rpc, from: vi.fn() } as unknown as SupabaseClient,
+      organizationId
+    );
+
+    const results = await store.searchVisibleApps({
+      query: "feedback",
+      department: "product",
+      capability: "github.issues.read",
+      limit: 10,
+      offset: 0
+    });
+
+    expect(results).toMatchObject([{
+      app: { id: fixture.app.id, versions: [{ provenanceVerified: true }] },
+      score: 60,
+      matchedTerms: ["name", "summary"]
+    }]);
+    expect(rpc).toHaveBeenCalledWith("search_visible_marketplace_apps", {
+      p_query: "feedback",
+      p_department: "product",
+      p_capability: "github.issues.read",
+      p_limit: 10,
+      p_offset: 0
+    });
+    expect(JSON.stringify(results)).not.toContain("artifact_object_key");
+  });
+
+  it("uses organization-scoped service RPCs for workload catalog reads", async () => {
+    const fixture = await marketplaceFixture();
+    const version = hostedVersion(fixture.version, "1.0.0", fixture.artifact.digest);
+    const appMetadata = { ...fixture.app } as Record<string, unknown>;
+    delete appMetadata.latestVersion;
+    delete appMetadata.versions;
+    const row = versionRow(appMetadata, version, "active");
+    const rpc = vi.fn(async (name: string) => ({
+      data: name.startsWith("search_")
+        ? [{ ...row, relevance_score: 100, matched_terms: ["id"] }]
+        : [row],
+      error: null
+    }));
+    const store = new SupabaseMarketplaceMachineRegistryStore(
+      { rpc } as unknown as SupabaseClient,
+      organizationId
+    );
+
+    await expect(store.searchVisibleApps({ query: fixture.app.id }))
+      .resolves.toMatchObject([{ app: { id: fixture.app.id }, score: 100 }]);
+    await expect(store.getVisibleApp(fixture.app.id, { includeDeprecated: false }))
+      .resolves.toMatchObject({ id: fixture.app.id, versions: [{ version: "1.0.0" }] });
+    expect(rpc).toHaveBeenNthCalledWith(
+      1,
+      "search_marketplace_apps_for_organization",
+      expect.objectContaining({ p_organization_id: organizationId })
+    );
+    expect(rpc).toHaveBeenNthCalledWith(
+      2,
+      "list_marketplace_versions_for_organization",
+      {
+        p_organization_id: organizationId,
+        p_app_id: fixture.app.id,
+        p_include_deprecated: false
+      }
+    );
+  });
+
+  it("claims and completes verification work only through fenced service RPCs", async () => {
+    const job = {
+      jobId: "123e4567-e89b-42d3-a456-426614174100",
+      appId: "acme.product.feedback",
+      version: "1.0.0",
+      attempts: 1,
+      leaseToken: "123e4567-e89b-42d3-a456-426614174101",
+      leaseExpiresAt: "2026-08-16T12:05:00.000Z",
+      releaseStatus: "pending_verification",
+      artifactDigest: `sha256:${"a".repeat(64)}`,
+      manifestDigest: `sha256:${"b".repeat(64)}`,
+      fileIndexDigest: `sha256:${"c".repeat(64)}`,
+      snapshotDigest,
+      artifactObjectKey: `${organizationId}/marketplace/acme.product.feedback/1.0.0/pack.json`,
+      manifestPayload: {},
+      fileIndexPayload: [],
+      signature: {
+        publisherId: "acme",
+        algorithm: "ed25519",
+        keyId: "acme.primary",
+        publicKey: "public-key-material-that-is-long-enough",
+        value: "signature-material-that-is-long-enough"
+      }
+    };
+    const rpc = vi.fn(async (name: string) => name.startsWith("claim_")
+      ? { data: [job], error: null }
+      : {
+          data: {
+            jobId: job.jobId,
+            status: "completed",
+            attempts: 1,
+            errorCode: null
+          },
+          error: null
+        });
+    const jobs = new SupabaseMarketplaceVerificationJobStore(
+      { rpc } as unknown as SupabaseClient
+    );
+
+    await expect(jobs.claim({ workerId: "marketplace-worker", limit: 3 }))
+      .resolves.toEqual([job]);
+    await jobs.finish({
+      jobId: job.jobId,
+      leaseToken: job.leaseToken,
+      outcome: "completed"
+    });
+
+    expect(rpc).toHaveBeenNthCalledWith(1, "claim_hosted_marketplace_verification_jobs", {
+      p_worker_id: "marketplace-worker",
+      p_limit: 3,
+      p_lease_seconds: 300
+    });
+    expect(rpc).toHaveBeenNthCalledWith(2, "finish_hosted_marketplace_verification_job", {
+      p_job_id: job.jobId,
+      p_lease_token: job.leaseToken,
+      p_outcome: "completed",
+      p_error_code: null
     });
   });
 });

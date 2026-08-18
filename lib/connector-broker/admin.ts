@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import {
-  brokerCapabilitySchema,
+  workloadCapabilitySchema,
   connectorInstallationAdminSchema,
   connectorInstallationHasExpectedNamespace,
   connectorInstallationViewSchema,
@@ -328,7 +328,7 @@ export type WorkloadIdentityAdminView = {
   confirmationKeyBound: boolean;
   grants: Array<{
     id: string;
-    capability: z.infer<typeof brokerCapabilitySchema>;
+    capability: z.infer<typeof workloadCapabilitySchema>;
     connectionId?: string;
     environment: "development" | "staging" | "production";
     status: "active" | "disabled" | "revoked" | "expired";
@@ -374,7 +374,7 @@ export async function listWorkloadIdentities(database: WorkspaceDatabase): Promi
     confirmationKeyBound: Boolean(principal.confirmation_key_thumbprint),
     grants: (grants ?? []).filter((grant) => grant.credential_id === principal.credential_id).map((grant) => ({
       id: String(grant.id),
-      capability: brokerCapabilitySchema.parse(grant.capability),
+      capability: workloadCapabilitySchema.parse(grant.capability),
       connectionId: grant.connection_id ? String(grant.connection_id) : undefined,
       environment: grant.environment as WorkloadIdentityAdminView["environment"],
       status: grant.status as WorkloadIdentityAdminView["status"],
@@ -391,7 +391,7 @@ export async function upsertWorkloadIdentityGrant(input: {
   audience: string;
   environment: "development" | "staging" | "production";
   workloadType: string;
-  capability: z.infer<typeof brokerCapabilitySchema>;
+  capability: z.infer<typeof workloadCapabilitySchema>;
   connectionId?: string;
   expiresAt?: string;
   confirmationKeyThumbprint?: string;

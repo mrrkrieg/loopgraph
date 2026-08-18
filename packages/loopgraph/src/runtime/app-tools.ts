@@ -15,12 +15,15 @@ import {
   artifactDigestSchema,
   appSetupDefinitionSchema,
   marketplaceCatalogSourceSchema,
+  marketplaceAppSchema,
   providerSchemaFieldSchema,
-  type ConnectionInstance
+  type ConnectionInstance,
+  type MarketplaceApp
 } from "../core";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
+import { satisfiesVersionRange } from "./app-pack-loader";
 import { compileLoopPack } from "./app-pack-compiler";
 import { LoopgraphAppPublisher } from "./app-publisher";
 import { readConnectionInstances } from "./connector-registry";
@@ -36,6 +39,15 @@ import {
 } from "./app-connector-service";
 import { inspectLoopgraphWorkspace } from "./workspace";
 import { PROVIDER_ONBOARDING_CATALOG } from "./provider-onboarding";
+import { HostedMarketplaceClient } from "./hosted-marketplace-client";
+import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
+
+const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_get",
+  "loopgraph_app_install_plan",
+  "loopgraph_app_install_apply",
+  "loopgraph_app_field_mappings_get"
+]);
 
 export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_marketplace_search",
@@ -325,7 +337,12 @@ export const loopgraphAppToolDefinitions = [
 export async function callLoopgraphAppTool(
   name: LoopgraphAppToolName,
   input: unknown,
-  options: { projectRoot?: string; now?: Date; connections?: ConnectionInstance[] } = {}
+  options: {
+    projectRoot?: string;
+    now?: Date;
+    connections?: ConnectionInstance[];
+    hostedMarketplaceClient?: HostedMarketplaceClient | null;
+  } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
   const projectRoot = path.resolve(typeof raw.projectRoot === "string" ? raw.projectRoot : options.projectRoot ?? process.cwd());
@@ -335,11 +352,62 @@ export async function callLoopgraphAppTool(
     { trustedGitHosts: trustedGitHostsFromEnvironment() }
   );
   if (!APP_PUBLISHER_TOOL_NAMES.has(name)) await marketplace.refreshAllCatalogSources();
+  const hostedClient = APP_PUBLISHER_TOOL_NAMES.has(name)
+    ? undefined
+    : options.hostedMarketplaceClient === null
+      ? undefined
+      : options.hostedMarketplaceClient ?? HostedMarketplaceClient.fromEnvironment();
 
   if (name === "loopgraph_marketplace_search") {
     const parsed = marketplaceSearchInputSchema.parse({ ...raw, projectRoot });
-    const results = await marketplace.searchApps(parsed);
-    return { schemaVersion: "loopgraph-marketplace-search/v1alpha1", query: parsed.query, count: results.length, results };
+    const localResults = (await marketplace.searchApps(parsed))
+      .flatMap(withoutCachedHostedVersions);
+    if (!hostedClient) {
+      return { schemaVersion: "loopgraph-marketplace-search/v1alpha1", query: parsed.query, count: localResults.length, results: localResults };
+    }
+    const remoteResults = await hostedClient.search({
+      query: parsed.query,
+      department: parsed.department,
+      capability: parsed.capability,
+      limit: parsed.limit
+    });
+    const results = mergeMarketplaceSearchResults([
+      ...localResults,
+      ...remoteResults
+        .filter((entry) => parsed.includeDeprecated || !entry.app.versions[0]?.deprecated)
+        .filter((entry) => !parsed.maturity || entry.app.versions[0]?.maturity === parsed.maturity)
+        .map((entry) => ({
+          ...entry,
+          score: parsed.query ? entry.score / 100 : 1
+        }))
+    ]).slice(0, parsed.limit);
+    return {
+      schemaVersion: "loopgraph-marketplace-search/v1alpha1",
+      query: parsed.query,
+      count: results.length,
+      results,
+      sources: { local: localResults.length, hosted: remoteResults.length }
+    };
+  }
+  const remoteRequest = remoteHostedArtifactRequest(name, raw);
+  if (hostedClient && remoteRequest) {
+    const localVersions = await marketplace.listAppVersions(remoteRequest.appId);
+    const candidates = localVersions.filter((candidate) =>
+      (!remoteRequest.version || candidate.version === remoteRequest.version) &&
+      (!remoteRequest.versionRange || satisfiesVersionRange(candidate.version, remoteRequest.versionRange)) &&
+      (!remoteRequest.artifactDigest || candidate.digest === remoteRequest.artifactDigest)
+    );
+    if (
+      candidates.length === 0 ||
+      candidates.some((candidate) => candidate.source.sourceType === "hosted")
+    ) {
+      await ensureRemoteHostedMarketplaceArtifact({
+        client: hostedClient,
+        projectRoot,
+        ...remoteRequest,
+        includeDeprecated: remoteHostedReadMayUseDeprecated(name)
+      });
+    }
   }
   if (name === "loopgraph_app_get") {
     const parsed = appGetInputSchema.parse({ ...raw, projectRoot });
@@ -675,6 +743,125 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_resume") return service.resume(parsed.installationId, parsed.actor);
   const activation = appActivateInputSchema.parse({ ...raw, projectRoot, ...identity });
   return service.activate(activation.installationId, activation.mode as "shadow" | "recommend" | "execute_with_approval", activation.actor);
+}
+
+function remoteHostedArtifactRequest(
+  name: LoopgraphAppToolName,
+  input: Record<string, unknown>
+): {
+  appId: string;
+  version?: string;
+  versionRange?: string;
+  artifactDigest?: string;
+} | undefined {
+  if (!REMOTE_HOSTED_ARTIFACT_TOOLS.has(name)) return undefined;
+  const plan = isRecord(input.plan) ? input.plan : {};
+  const appId = stringValue(input.appId) ?? stringValue(plan.appId);
+  if (!appId) return undefined;
+  const requestedVersion = stringValue(input.version);
+  const versionRange = stringValue(input.versionRange);
+  const exactVersion = requestedVersion ??
+    (versionRange && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(versionRange)
+      ? versionRange
+      : undefined) ??
+    stringValue(plan.version);
+  return {
+    appId,
+    version: exactVersion,
+    ...(!exactVersion && versionRange ? { versionRange } : {}),
+    artifactDigest: stringValue(plan.artifactDigest)
+  };
+}
+
+function remoteHostedReadMayUseDeprecated(name: LoopgraphAppToolName) {
+  return name === "loopgraph_app_get" || name === "loopgraph_app_field_mappings_get";
+}
+
+function withoutCachedHostedVersions(entry: {
+  app: MarketplaceApp;
+  score: number;
+  matchedTerms: string[];
+}) {
+  const versions = entry.app.versions.filter((version) =>
+    version.source.sourceType !== "hosted"
+  );
+  if (versions.length === 0) return [];
+  const sorted = versions.sort((left, right) =>
+    compareSemanticVersions(right.version, left.version) ||
+    left.source.sourceId.localeCompare(right.source.sourceId)
+  );
+  return [{
+    ...entry,
+    app: marketplaceAppSchema.parse({
+      ...entry.app,
+      latestVersion: sorted[0]!.version,
+      versions: sorted,
+      readmeUri: `${sorted[0]!.artifactUri}/README.md`
+    })
+  }];
+}
+
+function mergeMarketplaceSearchResults(
+  entries: Array<{ app: MarketplaceApp; score: number; matchedTerms: string[] }>
+) {
+  const byId = new Map<string, { app: MarketplaceApp; score: number; matchedTerms: string[] }>();
+  for (const entry of entries) {
+    const current = byId.get(entry.app.id);
+    if (!current) {
+      byId.set(entry.app.id, entry);
+      continue;
+    }
+    if (current.app.publisher.id !== entry.app.publisher.id) {
+      throw new Error(`Marketplace publisher conflict for ${entry.app.id}`);
+    }
+    const versions = new Map<string, MarketplaceApp["versions"][number]>();
+    const digestByVersion = new Map<string, string>();
+    for (const version of [...current.app.versions, ...entry.app.versions]) {
+      const existingDigest = digestByVersion.get(version.version);
+      if (existingDigest && existingDigest !== version.digest) {
+        throw new Error(
+          `Immutable marketplace version conflict for ${entry.app.id}@${version.version}`
+        );
+      }
+      digestByVersion.set(version.version, version.digest);
+      versions.set(
+        `${version.version}#${version.digest}#${version.source.sourceId}`,
+        version
+      );
+    }
+    const mergedVersions = [...versions.values()].sort((left, right) =>
+      compareSemanticVersions(right.version, left.version) ||
+      left.source.sourceId.localeCompare(right.source.sourceId)
+    );
+    const latestVersion = mergedVersions[0]!.version;
+    const metadata = entry.app.latestVersion === latestVersion ? entry.app : current.app;
+    byId.set(entry.app.id, {
+      app: marketplaceAppSchema.parse({
+        ...metadata,
+        latestVersion,
+        versions: mergedVersions
+      }),
+      score: Math.max(current.score, entry.score),
+      matchedTerms: [...new Set([...current.matchedTerms, ...entry.matchedTerms])]
+    });
+  }
+  return [...byId.values()].sort((left, right) =>
+    right.score - left.score || left.app.name.localeCompare(right.app.name)
+  );
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function compareSemanticVersions(left: string, right: string) {
+  const leftParts = left.split(/[.+-]/).slice(0, 3).map(Number);
+  const rightParts = right.split(/[.+-]/).slice(0, 3).map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return left.localeCompare(right);
 }
 
 async function resolveIdentity(projectRoot: string, workspaceInput: unknown, companyInput: unknown): Promise<{ workspaceId: string; companyId: string }> {
