@@ -21,11 +21,11 @@ Peer dependencies: `zod`, `yaml`. Optional: `openai` (for execute mode).
 ### Hermes Agent company brain
 
 ```bash
-npx loopgraph workspace init --project .
-npx loopgraph hermes install --project .
-npx loopgraph hermes doctor --project .
-npx loopgraph studio --project .
+npx loopgraph setup --project . --activate
+npx loopgraph start --project . --no-studio
 ```
+
+The package does not bundle the Next.js Studio, so `start` runs the local supervisor headlessly. From the full repository clone, omit `--no-studio` to start the Hermes Brain UI and supervisor together. Use `npx loopgraph start --project . --once` for one complete health and work cycle.
 
 Then start Hermes with:
 
@@ -144,6 +144,8 @@ Wire `StorageAdapter` (Postgres, files, etc.) and call `runLoop()` from a cron o
 
 | Command | Description |
 |---------|-------------|
+| `setup` | Prepare an empty workspace, Hermes contract, safe routes, and Studio plan |
+| `start` | Supervise routes, connections, measurements, workers, opportunities, app updates, controller, and aggregate health |
 | `validate <spec>` | Validate `loopgraph.yaml` |
 | `simulate <spec> --fixture <file>` | Deterministic fixture run |
 | `trace <runId>` | Inspect a saved trace |

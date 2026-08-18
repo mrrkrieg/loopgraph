@@ -27,6 +27,8 @@ export const RECOVERY_TABLES = [
   "security_audit_events",
   "machine_request_receipts",
   "machine_rate_limit_windows",
+  "user_api_quota_policy_overrides",
+  "user_api_quota_windows",
   "cli_device_authorizations",
   "cli_device_issuance_rate_windows",
   "cli_device_decision_rate_windows",

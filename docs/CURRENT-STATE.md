@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 ## One-line summary
 
@@ -11,6 +11,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ### Hermes setup and discovery
 
 - A clean local install starts with no demo loops.
+- `loopgraph setup` now prepares the empty workspace, project-local Hermes contract, synchronized route manifest, and Studio plan through one safe path; `--activate` is explicit because it updates Hermes registrations.
+- `loopgraph start` now owns the local Studio plus an exclusive, gracefully stopped supervisor for route synchronization, connector checks, measurement scheduling, route jobs, opportunity scans, app update checks, controller scheduling, and aggregate health. Component cadences prevent expensive reconciliation work from running at the fast worker poll rate, errors are secret-redacted, and status is atomically persisted for the Brain UI.
 - `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
 - `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph skill from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
 - Hermes immediately presents canonical departments and guides the user through five compact question bundles.
@@ -157,8 +159,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 1. Apply the new evidence/entity migrations to staging and prove cross-replica measurement claims,
    immutable conflicts, entity aliases, and restore behavior against a real hosted database.
-2. Add scoped identities and durable request guards to remaining provider collectors, then add
-   user-facing API quotas.
+2. Apply the hosted user-quota migration and staging-only `admin` override, project the three
+   short-lived user sessions into the protected runner, and run the supplied
+   `staging-validation/v4` gate against the real database. The repository now compiles exact
+   unauthenticated, cross-tenant, suspended-membership, and quota-saturation results into production
+   promotion evidence; only the environment-specific live receipt remains external.
 3. Configure a real independent audit-retention receiver and alert manager, then run the included
    protected audit drain, staging validation, and isolated backup/restore rehearsal on every target
    environment. The code now requires workload-authenticated export, a stable verified checkpoint,
@@ -176,6 +181,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ## Key documentation
 
 - [Hermes quickstart](./HERMES-QUICKSTART.md)
+- [Local supervisor](./LOCAL-SUPERVISOR.md)
 - [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md)
 - [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md)
 - [Semantic graph transactions](./SEMANTIC-GRAPH-TRANSACTIONS.md)
@@ -193,6 +199,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Continuous loop controller](./CONTINUOUS-LOOP-CONTROLLER.md)
 - [Hosted runtime namespaces](./HOSTED-RUNTIME-NAMESPACES.md)
 - [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
+- [Hosted user API quotas](./USER-API-QUOTAS.md)
 - [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md)
 - [Hosted marketplace registry](./HOSTED-MARKETPLACE-REGISTRY.md)
 - [Hosted marketplace delivery](./HOSTED-MARKETPLACE-DELIVERY.md)

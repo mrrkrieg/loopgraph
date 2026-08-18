@@ -93,6 +93,21 @@ export function findLoopgraphStudioAppRoot(searchRoots: string[]): string | unde
   return candidates.find(isLoopgraphStudioAppRoot);
 }
 
+export function resolveLoopgraphSourceCheckoutRoot(packageRoot: string, cliEntryPath: string): string | undefined {
+  const resolvedPackageRoot = path.resolve(packageRoot);
+  const repositoryRoot = path.resolve(resolvedPackageRoot, "..", "..");
+  const expectedPackageRoot = path.join(repositoryRoot, "packages", "loopgraph");
+  const cliRelativePath = path.relative(resolvedPackageRoot, path.resolve(cliEntryPath));
+  if (
+    expectedPackageRoot !== resolvedPackageRoot ||
+    cliRelativePath === "" ||
+    cliRelativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(cliRelativePath) ||
+    !isLoopgraphStudioAppRoot(repositoryRoot)
+  ) return undefined;
+  return repositoryRoot;
+}
+
 export function isLoopgraphStudioAppRoot(candidate: string): boolean {
   return existsSync(path.join(candidate, "package.json")) &&
     existsSync(path.join(candidate, "app", "brain", "page.tsx"));

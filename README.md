@@ -158,10 +158,10 @@ git clone https://github.com/mrrkrieg/loopgraph.git
 cd loopgraph
 npm ci --no-audit
 npm run audit:prod
-npm run loopgraph -- hermes setup --project . --activate
+npm run loopgraph -- setup --project . --activate
 ```
 
-The setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, updates the local Hermes configuration, and runs doctor checks. It does not copy provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`.
+The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`. Omit `--activate` when you want to inspect the generated Hermes configuration before applying it.
 
 Open Hermes and say:
 
@@ -171,15 +171,17 @@ start Loopgraph
 
 Hermes will show the department catalog, recommend Product as the first example, ask compact questions about your stack and goals, explain the proposed loops, and materialize only the proposals you accept.
 
-Open the local company graph:
+Start the local operating plane and company graph:
 
 ```bash
-npm run loopgraph -- studio --project . --start
+npm run loopgraph -- start --project .
 ```
+
+One process now owns the worker lifecycle, controller scheduler, Hermes route synchronization, connector reconciliation, measurement scheduling, opportunity scans, installed-app update checks, aggregate health, and—when run from the repository clone—the Studio server. It uses an exclusive local lease, component-specific cadences, secret-redacted errors, atomic status snapshots, and graceful shutdown. The Brain page shows whether the supervisor is running and the last aggregate result. Run `npm run loopgraph -- start --project . --once` for a complete non-daemon health/work cycle. The advanced worker, controller, measurement, route, and Studio commands remain available for diagnosis.
 
 The printed URL opens the editable Hermes Brain topology. Local and hosted workspaces both save layout changes as backend graph transactions. Hosted receipts are tenant/project scoped and bound to the authenticated operator. Proposing a loop, valid workflow connection, or improve/split/merge/retire lifecycle change automatically opens a durable opportunity, versioned graph change set, and Hermes design task. The graph reloads those correlations from durable records, marks affected live loops with an amber pending-change ring, and gives operators the exact Hermes-question or accountable-review handoff in the loop inspector. The review surface can approve or reject the exact change set, but approval fails closed until the completed Hermes task, immutable design run, validated proposal identities, and proposal-content hash all agree. Application is a separate operator action: the server reloads the content-bound approval and Hermes artifacts, snapshots the current graph, rejects stale state, and commits or rolls back one atomic topology transaction. The ring is explicitly a proposal overlay: it never changes routing or presents a draft edge as live topology. If context is missing, Hermes asks only the blocking questions; nothing becomes runnable until design, accountable approval, readiness, and promotion checks pass.
 
-For event rehearsal, workers, outcome measurements, controllers, and hosted deployment, continue with the [Hermes Quickstart](docs/HERMES-QUICKSTART.md).
+For event rehearsal, advanced service operation, and hosted deployment, continue with the [Hermes Quickstart](docs/HERMES-QUICKSTART.md) and [local supervisor contract](docs/LOCAL-SUPERVISOR.md).
 
 ## Install a complete business capability
 
@@ -461,9 +463,11 @@ Use **Settings → Integrations** to review provider consent and scopes, inspect
 
 ```bash
 # Inspect the local company workspace and Hermes integration
+npm run loopgraph -- setup --project . --activate
+npm run loopgraph -- start --project .
+npm run loopgraph -- start --project . --once
 npm run loopgraph -- workspace inspect --project .
 npm run loopgraph -- hermes doctor --project .
-npm run loopgraph -- studio --project . --start
 
 # Validate and simulate a code-first loop
 npm run loopgraph -- validate examples/github-issue-triage
@@ -510,6 +514,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 ### Get started
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md)
+- [Local supervisor](docs/LOCAL-SUPERVISOR.md)
 - [Hermes examples](docs/HERMES-EXAMPLES.md)
 - [Company loop library](docs/COMPANY-LOOP-LIBRARY.md)
 - [Provider onboarding](docs/HERMES-PROVIDER-ONBOARDING.md)

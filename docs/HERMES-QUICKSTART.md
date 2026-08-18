@@ -29,12 +29,12 @@ Use `npm run loopgraph --` from this repository clone. Do not use `npx loopgraph
 
 `npm install` runs npm's full audit, including developer-only lint/build tooling. If you see dev-tooling findings there, do not connect live credentials until `npm run audit:prod` is clean; use the full audit output as a contributor backlog, not as the Hermes live-use gate.
 
-## 2. Run the guided Hermes setup
+## 2. Run the guided Loopgraph and Hermes setup
 
 From a Loopgraph clone:
 
 ```bash
-npm run loopgraph -- hermes setup --project . --activate
+npm run loopgraph -- setup --project . --activate
 ```
 
 The setup command does the safe local work in one step:
@@ -45,10 +45,12 @@ The setup command does the safe local work in one step:
 - writes the generated Hermes skills under `.loopgraph/hermes/skills/`;
 - registers the admin, webhook-router, and lifecycle-router MCP servers with Hermes;
 - installs the Loopgraph skill from the GitHub skill tap;
+- synchronizes the project-local, non-secret Hermes route manifest;
+- prepares the local Studio launch plan without copying preview loops;
 - runs the same protocol, MCP, workspace, and catalog checks as `hermes doctor`;
 - prints the exact file paths and first Hermes prompt.
 
-From an installed package, use `loopgraph hermes setup --project . --activate` instead.
+From an installed package, use `loopgraph setup --project . --activate` instead. Omit `--activate` to review the generated configuration before Loopgraph asks Hermes to apply it.
 
 If setup says Hermes is not on `PATH`, the local Loopgraph files were still generated. Install Hermes, confirm `hermes --version`, then rerun:
 
@@ -135,15 +137,23 @@ Hermes should:
 
 The browser can resume the same session at `/discovery`; it uses the same package runtime and schemas as Hermes.
 
-## 5. Open the local graph
+## 5. Start the local operating plane and graph
 
 From the clone:
 
 ```bash
-npm run loopgraph -- studio --project . --start
+npm run loopgraph -- start --project .
 ```
 
-Open the printed local URL and use the Hermes Brain view. A fresh local install stays empty until you accept real loops. If you choose Product first and accept a feedback loop plus a release-learning loop, the design graph should show:
+This starts the Studio UI plus one lease-owning local supervisor. The supervisor runs route synchronization, connector reconciliation, measurement scheduling, durable route jobs, opportunity detection, app update checks, and controller triggers at bounded component-specific cadences. It persists only redacted aggregate status under `.loopgraph/supervisor/status.json` and stops the Studio and supervisor cleanly together.
+
+Use a complete one-cycle diagnostic when you do not want a daemon:
+
+```bash
+npm run loopgraph -- start --project . --once
+```
+
+Open the printed local URL and use the Hermes Brain view. It shows the current supervisor state and latest aggregate health. A fresh local install stays empty until you accept real loops. If you choose Product first and accept a feedback loop plus a release-learning loop, the design graph should show:
 
 ```text
 Hermes Brain -> Product -> Feedback Clustering
@@ -152,9 +162,9 @@ Hermes Brain -> Product -> Release Learning
 
 Selecting a workflow node shows its goal, routing readiness, the concrete "connect next" checklist, generated fixtures, latest run status, and safe local validation/simulation controls.
 
-## 6. Plan Hermes webhook routes
+## 6. Inspect advanced route operations when needed
 
-After materializing loops:
+`loopgraph start` keeps the project-local route manifest synchronized. To inspect the exact plan manually after materializing loops:
 
 ```bash
 npm run loopgraph -- hermes webhooks plan --project .
@@ -162,7 +172,7 @@ npm run loopgraph -- hermes webhooks plan --project .
 
 This derives one Hermes route family per provider source pattern, not one public webhook per loop. It also includes the dedicated `loopgraph-lifecycle-events` route for signed notification-only callbacks from Loopgraph back to Hermes. For a Product flow, product analytics, support, CRM, roadmap, or release events become Hermes route families that point at the `loopgraph-event-router` skill.
 
-## 7. Sync and check the local route manifest
+## 7. Manually sync and check the local route manifest
 
 ```bash
 npm run loopgraph -- hermes webhooks sync --project .
@@ -171,7 +181,7 @@ npm run loopgraph -- hermes webhooks doctor --project .
 
 Sync writes `.loopgraph/hermes-routes.json` with non-secret route metadata only, including the lifecycle callback route. It preserves unrelated external route references in sanitized form and removes stale Loopgraph-managed entries.
 
-Doctor checks whether the manifest still matches the current routing catalog. Applying those routes to real provider subscriptions remains a Hermes-owned/configured step.
+Doctor checks whether the manifest still matches the current routing catalog. These commands are advanced recovery controls; the supervisor performs the same safe local synchronization. Applying routes to real provider subscriptions remains a Hermes-owned/configured step.
 
 ## 8. Rehearse an event before live webhooks
 
@@ -204,9 +214,9 @@ The fixture test:
 
 It does not send a real provider webhook, apply a live Hermes route, or store provider credentials.
 
-## 9. Run the durable local worker
+## 9. Run the durable local worker separately only for diagnosis
 
-Every accepted route—including shadow and recommendation routes—creates a durable route job. Process one batch:
+The top-level supervisor owns the normal worker lifecycle. Every accepted route—including shadow and recommendation routes—creates a durable route job. To process one batch independently during diagnosis:
 
 ```bash
 npm run loopgraph -- worker run --project .

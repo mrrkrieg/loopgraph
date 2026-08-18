@@ -2,7 +2,7 @@
   "name": "loopgraph",
   "version": "0.2.0",
   "private": false,
-  "description": "Code-first loop runtime: validate, simulate, trace, review, and case resolve from loopgraph.yaml specs.",
+  "description": "Governed company loops for Hermes Brain: discover, install, route, operate, measure, and improve recurring AI work.",
   "type": "module",
   "workspaces": [
     "packages/*"

@@ -13,6 +13,11 @@ import {
   getHostedOrganizationId,
   isHostedAuthRequired
 } from "@/lib/auth/hosted-config";
+import {
+  parseUserApiQuotaDecision,
+  quotaResponseHeaders,
+  resolveUserApiQuotaPolicy
+} from "@/lib/auth/user-api-quota";
 
 const PUBLIC_PATHS = [
   "/sign-in",
@@ -22,6 +27,7 @@ const PUBLIC_PATHS = [
 ] as const;
 
 export async function middleware(request: NextRequest) {
+  let quotaHeaders: Record<string, string> | undefined;
   const machineRoute = isMachineAuthenticatedRoute(request.nextUrl.pathname);
   if (
     isHostedAuthRequired() &&
@@ -120,6 +126,47 @@ export async function middleware(request: NextRequest) {
         { status: 403 }
       ));
     }
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      const quotaPolicy = resolveUserApiQuotaPolicy(
+        request.nextUrl.pathname,
+        request.method
+      );
+      if (quotaPolicy) {
+        const { data: quotaData, error: quotaError } = await supabase.rpc(
+          "consume_user_api_quota",
+          {
+            p_organization_id: membership.organization_id,
+            p_bucket: quotaPolicy.bucket
+          }
+        );
+        const decision = quotaError ? undefined : parseUserApiQuotaDecision(quotaData);
+        if (!decision) {
+          return secureResponse(NextResponse.json({
+            error: "Hosted API request guard is unavailable. Apply the current database migrations."
+          }, {
+            status: 503,
+            headers: { "cache-control": "no-store" }
+          }));
+        }
+        quotaHeaders = quotaResponseHeaders(decision);
+        if (!decision.allowed) {
+          if (decision.reason === "membership_required") {
+            return secureResponse(NextResponse.json({
+              error: "Organization membership required"
+            }, { status: 403, headers: quotaHeaders }));
+          }
+          if (decision.reason !== "rate_limited") {
+            return secureResponse(NextResponse.json({
+              error: "Hosted API request guard rejected the configured scope."
+            }, { status: 503, headers: quotaHeaders }));
+          }
+          return secureResponse(NextResponse.json({
+            error: "User API rate limit exceeded",
+            code: "rate_limited"
+          }, { status: 429, headers: quotaHeaders }));
+        }
+      }
+    }
   }
 
   if (authenticated && request.nextUrl.pathname === "/sign-in") {
@@ -129,6 +176,11 @@ export async function middleware(request: NextRequest) {
     return secureResponse(NextResponse.redirect(destination));
   }
 
+  if (quotaHeaders) {
+    for (const [name, value] of Object.entries(quotaHeaders)) {
+      response.headers.set(name, value);
+    }
+  }
   return secureResponse(response);
 }
 

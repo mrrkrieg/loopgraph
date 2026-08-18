@@ -128,6 +128,10 @@ The materialization boundary is described in the
 Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
 See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).
 
+Authenticated browser APIs consume database-owned, per-user/per-tenant quotas in stable read,
+write, compute, and admin buckets. Callers cannot choose their own limit or open a new quota by
+changing a resource ID. See [Hosted user API quotas](./USER-API-QUOTAS.md).
+
 Machine decisions also append to a tamper-evident security audit chain. Public health responses
 contain status only; detailed metrics and audit export remain separately authorized. See
 [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md).
