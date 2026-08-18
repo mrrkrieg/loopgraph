@@ -334,6 +334,9 @@ Hermes MCP and managed runners access the same private catalog with short-lived
 ambient OIDC workload identity and a durable, tenant-scoped `marketplace.consume`
 grant. A person can instead run `loopgraph auth login`, approve an eight-character
 code in the hosted browser, and receive a separate capability-scoped CLI session.
+Hosted admins can inspect and revoke those human sessions at
+`/settings/cli-sessions`; the inventory never returns credential digests, and every
+MFA-gated revocation is tenant-scoped and atomically audit-chained.
 Human access expires quickly, refresh rotates, membership is rechecked on every
 request, and local secrets are kept in a current-user-only `0600` file. Neither path
 receives a Supabase service key or provider token, treats the cache as authorization,

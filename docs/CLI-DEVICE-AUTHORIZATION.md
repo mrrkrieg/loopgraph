@@ -66,7 +66,14 @@ sequenceDiagram
   M-->>C: "Tenant-visible signed marketplace data"
 ```
 
-Apply `supabase/migrations/202608170003_cli_device_authorization.sql`. Configure:
+Apply these migrations in order:
+
+```text
+supabase/migrations/202608170003_cli_device_authorization.sql
+supabase/migrations/202608170004_cli_session_administration.sql
+```
+
+Configure:
 
 ```bash
 LOOPGRAPH_PUBLIC_URL=https://loopgraph.example
@@ -115,10 +122,17 @@ rewrites `X-Forwarded-For`.
 ## Revocation and deployment proof
 
 Removing organization membership invalidates the next refresh or request. `auth
-logout` revokes one session immediately. An enterprise admin session inventory and
-bulk kill switch remain a separate UI layer; until that is deployed, administrators
-can revoke rows through the service-owned operational procedure.
+logout` revokes one session immediately. Hosted admins and owners can open
+`/settings/cli-sessions` to inspect safe session metadata and revoke one device,
+every session owned by one user, or all human CLI sessions in the organization.
+The page and its API never select token digests. Revocation requires MFA step-up,
+rechecks the actor's active admin/owner membership inside the database, binds the
+update to the exact organization and project, and atomically appends a hash-chained
+security audit event. The audit record retains a reason digest rather than the
+operator's raw reason text. Workload identities and provider credentials are not
+affected by this human-session control.
 
 Before production, validate device-code issuance saturation, concurrent polling,
 refresh-token replay, cross-replica rotation, clock skew, membership removal,
-explicit revocation, and audit-retention export against the real staging database.
+single/user/organization revocation, MFA enforcement, and audit-retention export
+against the real staging database.
