@@ -69,6 +69,26 @@ The worker atomically claims work, verifies the immutable LoopSpec hash and rout
 
 See [Hermes examples](../../docs/HERMES-EXAMPLES.md) for the Marketing reference flow, strict Legal / Compliance sensitive-work example, and Custom field-ops example.
 
+### Private hosted apps from Hermes or CLI
+
+Managed Hermes and CLI processes can use private hosted LoopPacks with a
+short-lived workload identity—never a Supabase service key or provider token:
+
+```bash
+export LOOPGRAPH_MARKETPLACE_URL=https://loopgraph.example/
+export LOOPGRAPH_MARKETPLACE_AUDIENCE=https://loopgraph.example/marketplace
+export LOOPGRAPH_MARKETPLACE_ORGANIZATION_ID=YOUR_ORGANIZATION_UUID
+export LOOPGRAPH_MARKETPLACE_PROJECT_KEY=main
+export LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE=/absolute/path/to/projected.jwt
+
+npx loopgraph apps search "renewal risk" --department customer_success
+```
+
+The hosted admin must grant that workload `marketplace.consume`. Existing app
+detail, planning, mapping, and apply tools then fetch only the selected release,
+recheck tenant visibility, verify its signature and file digests, and use the
+normal write-blocked installer. See the [workload access guide](../../docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
+
 ### Runtime API
 
 ```typescript

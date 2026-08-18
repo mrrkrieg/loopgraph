@@ -13,6 +13,7 @@ import {
 import { loadLoopPackDirectory } from "loopgraph/runtime";
 import {
   hostedMarketplaceArtifactAttestation,
+  SupabaseMarketplaceMachineRegistryStore,
   SupabaseMarketplaceRegistryStore,
   SupabaseMarketplaceReleaseVerifier,
   SupabaseMarketplaceVerificationJobStore
@@ -299,6 +300,44 @@ describe("Supabase hosted marketplace registry", () => {
       p_offset: 0
     });
     expect(JSON.stringify(results)).not.toContain("artifact_object_key");
+  });
+
+  it("uses organization-scoped service RPCs for workload catalog reads", async () => {
+    const fixture = await marketplaceFixture();
+    const version = hostedVersion(fixture.version, "1.0.0", fixture.artifact.digest);
+    const appMetadata = { ...fixture.app } as Record<string, unknown>;
+    delete appMetadata.latestVersion;
+    delete appMetadata.versions;
+    const row = versionRow(appMetadata, version, "active");
+    const rpc = vi.fn(async (name: string) => ({
+      data: name.startsWith("search_")
+        ? [{ ...row, relevance_score: 100, matched_terms: ["id"] }]
+        : [row],
+      error: null
+    }));
+    const store = new SupabaseMarketplaceMachineRegistryStore(
+      { rpc } as unknown as SupabaseClient,
+      organizationId
+    );
+
+    await expect(store.searchVisibleApps({ query: fixture.app.id }))
+      .resolves.toMatchObject([{ app: { id: fixture.app.id }, score: 100 }]);
+    await expect(store.getVisibleApp(fixture.app.id, { includeDeprecated: false }))
+      .resolves.toMatchObject({ id: fixture.app.id, versions: [{ version: "1.0.0" }] });
+    expect(rpc).toHaveBeenNthCalledWith(
+      1,
+      "search_marketplace_apps_for_organization",
+      expect.objectContaining({ p_organization_id: organizationId })
+    );
+    expect(rpc).toHaveBeenNthCalledWith(
+      2,
+      "list_marketplace_versions_for_organization",
+      {
+        p_organization_id: organizationId,
+        p_app_id: fixture.app.id,
+        p_include_deprecated: false
+      }
+    );
   });
 
   it("claims and completes verification work only through fenced service RPCs", async () => {

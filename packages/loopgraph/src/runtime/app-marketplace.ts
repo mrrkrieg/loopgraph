@@ -36,8 +36,13 @@ export interface GitHubCatalogSynchronizer {
   synchronize(source: MarketplaceCatalogSource, destination: string): Promise<{ resolvedRef: string }>;
 }
 
+export interface HostedCatalogSynchronizer {
+  synchronize(source: MarketplaceCatalogSource, destination: string): Promise<{ resolvedRef: string }>;
+}
+
 export type LocalAppMarketplaceOptions = {
   githubSynchronizer?: GitHubCatalogSynchronizer;
+  hostedSynchronizer?: HostedCatalogSynchronizer;
   trustedGitHosts?: string[];
 };
 
@@ -108,6 +113,7 @@ export class LocalAppMarketplace {
       throw new Error("GitHub catalog sources must pin both a ref and expected digest");
     }
     if (source.type === "github") validateGitHubCatalogSource(source, this.options.trustedGitHosts);
+    if (source.type === "hosted") validateHostedCatalogSource(source);
     if (source.trustPolicy === "signed" && source.trustedPublisherKeys.length === 0) {
       throw new Error("Signed catalog sources must pin at least one trusted publisher public key");
     }
@@ -124,19 +130,66 @@ export class LocalAppMarketplace {
     return (parsed as { sources: unknown[] }).sources.map((source) => marketplaceCatalogSourceSchema.parse(source));
   }
 
+  async removeCatalogSource(sourceId: string): Promise<boolean> {
+    if (sourceId === "loopgraph-official") {
+      throw new Error("The bundled official marketplace source cannot be removed");
+    }
+    const sources = await this.listCatalogSources();
+    const source = sources.find((candidate) => candidate.id === sourceId);
+    if (!source) return false;
+    const current = await this.readIndex();
+    const apps = current.apps.flatMap((app) => {
+      const versions = app.versions.filter((version) =>
+        version.source.sourceId !== sourceId
+      );
+      if (versions.length === 0) return [];
+      const sorted = versions.sort(compareMarketplaceVersions);
+      return [marketplaceAppSchema.parse({
+        ...app,
+        latestVersion: sorted[0]!.version,
+        versions: sorted,
+        readmeUri: `${sorted[0]!.artifactUri}/README.md`
+      })];
+    });
+    if (source.type === "hosted") {
+      // Make a partial failure safe: once the bytes are gone, a stale index can
+      // no longer authorize or load the release and the hosted bridge must
+      // re-check RLS before it can be downloaded again.
+      await rm(hostedCatalogCacheRoot(this.stateRoot, source), {
+        recursive: true,
+        force: true
+      });
+    }
+    await this.writeIndex({
+      schemaVersion: MARKETPLACE_SCHEMA_VERSION,
+      apps,
+      refreshedAt: new Date().toISOString()
+    });
+    await atomicWriteJson(this.sourcesPath, {
+      schemaVersion: MARKETPLACE_SCHEMA_VERSION,
+      sources: sources.filter((candidate) => candidate.id !== sourceId)
+    });
+    for (const key of this.artifactLocations.keys()) {
+      if (key.startsWith(`${sourceId}:`)) this.artifactLocations.delete(key);
+    }
+    for (const key of this.artifactTrust.keys()) {
+      if (key.startsWith(`${sourceId}:`)) this.artifactTrust.delete(key);
+    }
+    return true;
+  }
+
   async refreshCatalogSource(sourceId: string): Promise<MarketplaceApp[]> {
     const sources = await this.listCatalogSources();
     const source = sources.find((candidate) => candidate.id === sourceId);
     if (!source) throw new Error(`Unknown marketplace source: ${sourceId}`);
     if (!source.enabled) throw new Error(`Marketplace source is disabled: ${sourceId}`);
-    if (source.type === "hosted") {
-      throw new Error("Hosted marketplace transport is not available in the local-first registry; use a synchronized filesystem cache");
-    }
     const synchronizedAt = new Date().toISOString();
 
     const prepared = source.type === "github"
       ? await this.prepareGitHubCatalogRoot(source)
-      : { root: resolveSourceRoot(source) };
+      : source.type === "hosted"
+        ? await this.prepareHostedCatalogRoot(source)
+        : { root: resolveSourceRoot(source) };
     let sourceRoot = prepared.root;
     let packDirectories: string[];
     let publishedCatalog: PublishedCatalog | undefined;
@@ -174,6 +227,13 @@ export class LocalAppMarketplace {
         if (snapshotDigest !== source.expectedDigest) {
           throw new Error(`GitHub catalog snapshot digest mismatch: expected ${source.expectedDigest}, received ${snapshotDigest}`);
         }
+      } catch (error) {
+        await cleanupPreparedCatalogRoot(prepared);
+        throw error;
+      }
+    }
+    if (prepared.finalRoot) {
+      try {
         sourceRoot = await promotePreparedCatalogRoot(prepared);
       } catch (error) {
         await cleanupPreparedCatalogRoot(prepared);
@@ -304,6 +364,33 @@ export class LocalAppMarketplace {
     }
   }
 
+  private async prepareHostedCatalogRoot(source: MarketplaceCatalogSource): Promise<PreparedCatalogRoot> {
+    validateHostedCatalogSource(source);
+    const finalRoot = hostedCatalogCacheRoot(this.stateRoot, source);
+    if (await pathExists(finalRoot)) return { root: finalRoot };
+    const synchronizer = this.options.hostedSynchronizer;
+    if (!synchronizer) {
+      throw new Error(
+        `Hosted marketplace artifact is not cached: ${source.id}. ` +
+        "Use an authenticated hosted marketplace transport to stage it first."
+      );
+    }
+    const stagingRoot = `${finalRoot}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+    await mkdir(path.dirname(finalRoot), { recursive: true });
+    try {
+      const result = await synchronizer.synchronize(source, stagingRoot);
+      if (result.resolvedRef !== source.pinnedRef) {
+        throw new Error(
+          `Hosted marketplace resolved ${result.resolvedRef}, expected ${source.pinnedRef}`
+        );
+      }
+      return { root: stagingRoot, stagingRoot, finalRoot };
+    } catch (error) {
+      await rm(stagingRoot, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
   async refreshAllCatalogSources(): Promise<MarketplaceApp[]> {
     const refreshKey = path.resolve(this.stateRoot);
     const active = activeMarketplaceRefreshes.get(refreshKey);
@@ -323,7 +410,20 @@ export class LocalAppMarketplace {
     await this.initialize();
     const sources = await this.listCatalogSources();
     for (const source of sources.filter((candidate) => candidate.enabled)) {
-      await this.refreshCatalogSource(source.id);
+      try {
+        await this.refreshCatalogSource(source.id);
+      } catch (error) {
+        if (
+          source.type === "hosted" &&
+          !this.options.hostedSynchronizer
+        ) {
+          // A hosted cache is never the authorization source. Let metadata
+          // reads continue; artifact use re-verifies and the authenticated
+          // server bridge repairs or evicts the exact release.
+          continue;
+        }
+        throw error;
+      }
     }
     return (await this.readIndex()).apps;
   }
@@ -383,10 +483,11 @@ export class LocalAppMarketplace {
     if (!trust) {
       const sources = await this.listCatalogSources();
       const sourceMatchesLocation = (candidate: MarketplaceCatalogSource) => {
-        if (candidate.type === "hosted") return false;
         const sourceRoot = candidate.type === "github"
           ? githubCatalogCacheRoot(this.stateRoot, candidate)
-          : resolveSourceRoot(candidate);
+          : candidate.type === "hosted"
+            ? hostedCatalogCacheRoot(this.stateRoot, candidate)
+            : resolveSourceRoot(candidate);
         return isWithin(sourceRoot, location!);
       };
       const source = sources.find((candidate) => candidate.id === appVersion.source.sourceId && sourceMatchesLocation(candidate)) ??
@@ -531,14 +632,75 @@ function validateGitHubCatalogSource(source: MarketplaceCatalogSource, trustedGi
   }
 }
 
+function validateHostedCatalogSource(source: MarketplaceCatalogSource): void {
+  if (source.type !== "hosted") {
+    throw new Error("Hosted synchronization requires a hosted catalog source");
+  }
+  if (
+    source.trustPolicy !== "signed" ||
+    !source.pinnedRef ||
+    !source.expectedDigest ||
+    source.trustedPublisherKeys.length === 0
+  ) {
+    throw new Error(
+      "Hosted catalog sources must pin a version, artifact digest, and publisher public key"
+    );
+  }
+  if (source.trustedPublisherKeys.some((key) => key.publisherId === "loopgraph")) {
+    throw new Error(
+      "Hosted catalogs cannot claim the reserved Loopgraph publisher namespace"
+    );
+  }
+  let uri: URL;
+  try {
+    uri = new URL(source.uri);
+  } catch {
+    throw new Error("Hosted catalog URI must be an absolute hosted:// marketplace URI");
+  }
+  if (
+    uri.protocol !== "hosted:" ||
+    uri.hostname !== "marketplace" ||
+    uri.username ||
+    uri.password ||
+    uri.port ||
+    uri.search ||
+    uri.hash ||
+    !/^\/[a-z0-9][a-z0-9._-]{1,159}\/[0-9A-Za-z.+-]{1,100}\/[a-f0-9]{64}$/.test(uri.pathname)
+  ) {
+    throw new Error("Hosted catalog URI must identify one exact marketplace app/version/digest");
+  }
+  const [, , version, digest] = uri.pathname.split("/");
+  if (version !== source.pinnedRef || `sha256:${digest}` !== source.expectedDigest) {
+    throw new Error(
+      "Hosted catalog URI version and digest must match its immutable source pins"
+    );
+  }
+}
+
 function validateCatalogArtifactOwnership(source: MarketplaceCatalogSource, artifact: LoopPackArtifact): void {
   const appId = artifact.manifest.metadata.id;
   const publisher = artifact.manifest.metadata.publisher;
-  if (source.type === "github" && (appId.startsWith("loopgraph.") || publisher.id === "loopgraph" || publisher.verified)) {
+  if ((source.type === "github" || source.type === "hosted") && (appId.startsWith("loopgraph.") || publisher.id === "loopgraph" || publisher.verified)) {
     throw new Error(`The Loopgraph app and verified publisher namespaces are reserved for the bundled official catalog (${appId})`);
   }
-  if (source.type === "github" && !appId.startsWith(`${publisher.id}.`)) {
-    throw new Error(`GitHub catalog app ${appId} must use its publisher namespace (${publisher.id}.)`);
+  if ((source.type === "github" || source.type === "hosted") && !appId.startsWith(`${publisher.id}.`)) {
+    throw new Error(`${source.type} catalog app ${appId} must use its publisher namespace (${publisher.id}.)`);
+  }
+  if (source.type === "hosted") {
+    validateHostedCatalogSource(source);
+    const uri = new URL(source.uri);
+    const [, uriAppId, uriVersion, uriDigest] = uri.pathname.split("/");
+    const signature = artifact.provenance.signature;
+    if (
+      uriAppId !== appId ||
+      uriVersion !== artifact.manifest.metadata.version ||
+      `sha256:${uriDigest}` !== artifact.digest ||
+      signature?.publisherId !== publisher.id
+    ) {
+      throw new Error(
+        `Hosted catalog identity does not match its signed artifact (${appId})`
+      );
+    }
   }
 }
 
@@ -546,6 +708,19 @@ function githubCatalogCacheRoot(stateRoot: string, source: MarketplaceCatalogSou
   const cacheKey = canonicalAppDigest({ uri: source.uri, pinnedRef: source.pinnedRef })
     .slice("sha256:".length, "sha256:".length + 24);
   return path.join(stateRoot, "catalog-cache", source.id, cacheKey);
+}
+
+export function hostedCatalogCacheRoot(
+  stateRoot: string,
+  source: MarketplaceCatalogSource
+): string {
+  validateHostedCatalogSource(source);
+  const cacheKey = canonicalAppDigest({
+    uri: source.uri,
+    pinnedRef: source.pinnedRef,
+    expectedDigest: source.expectedDigest
+  }).slice("sha256:".length, "sha256:".length + 24);
+  return path.join(stateRoot, "hosted-cache", source.id, cacheKey);
 }
 
 async function promotePreparedCatalogRoot(prepared: PreparedCatalogRoot): Promise<string> {

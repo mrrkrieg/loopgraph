@@ -402,6 +402,73 @@ export class SupabaseMarketplaceRegistryStore {
   }
 }
 
+/**
+ * Service-role adapter for an already authenticated marketplace workload.
+ * The organization is taken from the verified workload identity by the API;
+ * database RPCs repeat the visibility predicate and never return object keys.
+ */
+export class SupabaseMarketplaceMachineRegistryStore {
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly organizationId: string
+  ) {
+    assertOrganizationId(organizationId);
+  }
+
+  async searchVisibleApps(input: {
+    query?: string;
+    department?: string;
+    capability?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<HostedMarketplaceSearchResult[]> {
+    const { data, error } = await this.supabase.rpc(
+      "search_marketplace_apps_for_organization",
+      {
+        p_organization_id: this.organizationId,
+        p_query: boundedText(input.query, 160),
+        p_department: boundedText(input.department, 120),
+        p_capability: boundedText(input.capability, 240),
+        p_limit: boundedInteger(input.limit, 20, 1, 100),
+        p_offset: boundedInteger(input.offset, 0, 0, 10_000)
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to search the workload marketplace: ${error.message}`);
+    }
+    return z.array(searchRowSchema).parse(data ?? []).map((row) => {
+      const [app] = buildMarketplaceApps([row as unknown as VersionRow]);
+      if (!app) throw new Error("Workload marketplace search returned an empty app");
+      return {
+        app,
+        score: row.relevance_score,
+        matchedTerms: row.matched_terms
+      };
+    });
+  }
+
+  async getVisibleApp(
+    appId: string,
+    input: { includeDeprecated?: boolean } = {}
+  ): Promise<MarketplaceApp | undefined> {
+    const { data, error } = await this.supabase.rpc(
+      "list_marketplace_versions_for_organization",
+      {
+        p_organization_id: this.organizationId,
+        p_app_id: appId,
+        p_include_deprecated: input.includeDeprecated ?? true
+      }
+    );
+    if (error) {
+      throw new Error(`Failed to read the workload marketplace app: ${error.message}`);
+    }
+    return buildMarketplaceApps(
+      z.array(searchRowSchema.omit({ relevance_score: true, matched_terms: true }))
+        .parse(data ?? []) as unknown as VersionRow[]
+    )[0];
+  }
+}
+
 /** Service-role-only digest attestation after out-of-process signature checks. */
 export class SupabaseMarketplaceReleaseVerifier {
   constructor(private readonly supabase: SupabaseClient) {}

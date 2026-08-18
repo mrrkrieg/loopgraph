@@ -39,6 +39,16 @@ export const brokerCapabilitySchema = z.enum([
   "provider.disconnect"
 ]);
 
+/**
+ * Capabilities granted to non-human workloads. Provider operations remain
+ * constrained by brokerCapabilitySchema; platform services can add their own
+ * narrow capabilities without turning them into arbitrary provider access.
+ */
+export const workloadCapabilitySchema = z.union([
+  brokerCapabilitySchema,
+  z.enum(["marketplace.consume"])
+]);
+
 export const connectorOperationSchema = z.string()
   .min(3)
   .max(128)

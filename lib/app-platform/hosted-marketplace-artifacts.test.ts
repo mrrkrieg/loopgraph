@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { describe, expect, it, vi } from "vitest";
 import {
   HostedMarketplaceArtifactService,
+  HostedMarketplaceMachineArtifactService,
   HOSTED_MARKETPLACE_ARTIFACT_BUCKET,
   hostedMarketplaceArtifactObjectKey
 } from "./hosted-marketplace-artifacts";
@@ -111,8 +112,97 @@ describe("hosted marketplace artifact delivery", () => {
     })).rejects.toThrow("untrusted signed URL");
   });
 
+  it("downloads verified bytes for server staging only after RLS and key cross-checks", async () => {
+    const visible = {
+      app_id: identity.appId,
+      version: identity.version,
+      artifact_digest: identity.artifactDigest,
+      release_status: "active",
+      verified_at: "2026-08-16T12:00:00.000Z"
+    };
+    const userQuery = queryReturning(visible);
+    const releaseQuery = queryReturning({ ...visible, artifact_object_key: objectKey });
+    const signatureQuery = queryReturning({
+      publisher_id: "acme",
+      algorithm: "ed25519",
+      key_id: "acme.primary",
+      public_key: "public-key-material-that-is-long-enough"
+    });
+    const download = vi.fn().mockResolvedValue({
+      data: new Blob(["verified archive"], { type: "application/json" }),
+      error: null
+    });
+    const adminFrom = vi.fn((table: string) =>
+      table === "marketplace_release_signatures" ? signatureQuery : releaseQuery
+    );
+    const service = new HostedMarketplaceArtifactService(
+      { from: vi.fn(() => userQuery) } as unknown as SupabaseClient,
+      {
+        from: adminFrom,
+        storage: { from: vi.fn(() => ({ download })) }
+      } as unknown as SupabaseClient,
+      "https://example.supabase.co"
+    );
+
+    const staged = await service.downloadVerifiedArtifact({
+      appId: identity.appId,
+      version: identity.version,
+      artifactDigest: identity.artifactDigest
+    });
+
+    expect(new TextDecoder().decode(staged.bytes)).toBe("verified archive");
+    expect(staged.publisherKey).toEqual({
+      publisherId: "acme",
+      algorithm: "ed25519",
+      keyId: "acme.primary",
+      publicKey: "public-key-material-that-is-long-enough"
+    });
+    expect(userQuery.maybeSingle).toHaveBeenCalledTimes(1);
+    expect(download).toHaveBeenCalledWith(objectKey);
+  });
+
   it("derives an immutable digest-addressed object key", () => {
     expect(hostedMarketplaceArtifactObjectKey(identity)).toBe(objectKey);
+  });
+
+  it("downloads for a workload only through the organization-scoped delivery RPC", async () => {
+    const rpc = vi.fn().mockResolvedValue({
+      data: {
+        appId: identity.appId,
+        version: identity.version,
+        artifactDigest: identity.artifactDigest,
+        releaseStatus: "active",
+        verifiedAt: "2026-08-16T12:00:00.000Z",
+        artifactObjectKey: objectKey,
+        publisherId: "acme",
+        algorithm: "ed25519",
+        keyId: "acme.primary",
+        publicKey: "public-key-material-that-is-long-enough"
+      },
+      error: null
+    });
+    const download = vi.fn().mockResolvedValue({
+      data: new Blob(["machine archive"], { type: "application/json" }),
+      error: null
+    });
+    const service = new HostedMarketplaceMachineArtifactService({
+      rpc,
+      storage: { from: vi.fn(() => ({ download })) }
+    } as unknown as SupabaseClient);
+
+    const artifact = await service.downloadVerifiedArtifact(identity);
+
+    expect(rpc).toHaveBeenCalledWith(
+      "get_marketplace_delivery_for_organization",
+      {
+        p_organization_id: organizationId,
+        p_app_id: identity.appId,
+        p_version: identity.version,
+        p_artifact_digest: identity.artifactDigest
+      }
+    );
+    expect(download).toHaveBeenCalledWith(objectKey);
+    expect(new TextDecoder().decode(artifact.bytes)).toBe("machine archive");
   });
 });
 
