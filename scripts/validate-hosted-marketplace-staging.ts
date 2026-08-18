@@ -40,11 +40,19 @@ export type HostedMarketplaceStagingTokens = {
 };
 
 export type HostedMarketplaceStagingReceipt = {
-  schemaVersion: "hosted-marketplace-staging-validation/v1";
-  target: string;
+  schemaVersion: "hosted-marketplace-staging-validation/v2";
+  targetOrigin: string;
+  organizationId: string;
+  projectKey: string;
   checkedAt: string;
   durationMs: number;
   app: { id: string; version: string; artifactDigest: string };
+  auditEvidence: {
+    afterSequence: number;
+    throughSequence: number;
+    headHash: string;
+    requestId: string;
+  };
   checks: Array<{
     name: string;
     ok: true;
@@ -202,7 +210,7 @@ export async function validateHostedMarketplaceStaging(
     detail: "Reusing the same workload request identity is rejected by the durable guard."
   });
 
-  const auditStatus = await findAcceptedAuditEvidence({
+  const auditEvidence = await findAcceptedAuditEvidence({
     baseUrl,
     fetcher,
     token: tokens.observability,
@@ -216,19 +224,27 @@ export async function validateHostedMarketplaceStaging(
   checks.push({
     name: "independent_audit_evidence",
     ok: true,
-    status: auditStatus,
+    status: auditEvidence.status,
     detail: "Verified tenant audit chain contains the accepted marketplace.consume request."
   });
 
   return {
-    schemaVersion: "hosted-marketplace-staging-validation/v1",
-    target: baseUrl.host,
+    schemaVersion: "hosted-marketplace-staging-validation/v2",
+    targetOrigin: baseUrl.origin,
+    organizationId: config.organizationId,
+    projectKey: config.projectKey,
     checkedAt: now().toISOString(),
     durationMs: Date.now() - startedAt,
     app: {
       id: config.appId,
       version: config.version,
       artifactDigest: config.artifactDigest
+    },
+    auditEvidence: {
+      afterSequence: auditAfter,
+      throughSequence: auditEvidence.throughSequence,
+      headHash: auditEvidence.headHash,
+      requestId: replayId
     },
     checks
   };
@@ -266,9 +282,10 @@ function trustedStagingOrigin(value: string) {
     url.username ||
     url.password ||
     url.search ||
-    url.hash
+    url.hash ||
+    url.pathname !== "/"
   ) {
-    throw new Error("Hosted marketplace staging URL must use HTTPS without credentials, query, or fragment state");
+    throw new Error("Hosted marketplace staging URL must use HTTPS as one origin without credentials, path, query, or fragment state");
   }
   return url;
 }
@@ -336,10 +353,13 @@ async function findAcceptedAuditEvidence(input: {
   now: () => Date;
 }) {
   let after = input.after;
+  let through: number | undefined;
+  let checkpointHash: string | undefined;
   for (let page = 0; page < 50; page += 1) {
     const auditUrl = new URL("api/operations/audit-export", ensureTrailingSlash(input.baseUrl));
     auditUrl.searchParams.set("after", String(after));
     auditUrl.searchParams.set("limit", "500");
+    if (through !== undefined) auditUrl.searchParams.set("through", String(through));
     const response = await input.fetcher(auditUrl, {
       headers: machineHeaders({
         token: input.token,
@@ -360,13 +380,29 @@ async function findAcceptedAuditEvidence(input: {
     if (!isRecord(audit) || !isRecord(audit.integrity) || audit.integrity.valid !== true) {
       throw new Error("Marketplace staging audit export did not verify its hash chain");
     }
+    const pageThrough = Number(audit.throughSequence);
+    const pageHeadHash = audit.integrity.headHash;
+    if (
+      !Number.isSafeInteger(pageThrough) || pageThrough < 0 ||
+      typeof pageHeadHash !== "string" || !/^[a-f0-9]{64}$/.test(pageHeadHash) ||
+      (through !== undefined && pageThrough !== through) ||
+      (checkpointHash !== undefined && pageHeadHash !== checkpointHash)
+    ) {
+      throw new Error("Marketplace staging audit pagination changed its verified checkpoint");
+    }
+    through ??= pageThrough;
+    checkpointHash ??= pageHeadHash;
     const events = Array.isArray(audit.events) ? audit.events : [];
     if (events.some((event) =>
       isRecord(event) &&
       event.event_type === "machine.request.authorized" &&
       event.capability === "marketplace.consume" &&
       event.request_id === input.targetRequestId
-    )) return response.status;
+    )) return {
+      status: response.status,
+      throughSequence: through,
+      headHash: checkpointHash
+    };
     if (audit.hasMore !== true) break;
     const nextCursor = Number(audit.nextCursor);
     if (!Number.isSafeInteger(nextCursor) || nextCursor <= after) {

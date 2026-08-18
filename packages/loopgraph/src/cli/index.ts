@@ -75,6 +75,12 @@ import {
   callLoopgraphAppTool,
   type LoopgraphAppToolName
 } from "../runtime/app-tools";
+import {
+  CliDeviceAuthorizationClient,
+  LocalCliCredentialStore,
+  cliCredentialFileFromEnvironment,
+  profileFromTokens
+} from "../runtime/cli-device-auth";
 
 const HERO_TEMPLATES = [
   {
@@ -171,6 +177,118 @@ const graphPromotion = graph.command("promotion").description("Approve and apply
 const graphLifecycle = graph.command("lifecycle").description("Approve and apply loop pause or resume transactions");
 const graphRollback = graph.command("rollback").description("Approve and apply exact graph transaction rollback");
 const apps = program.command("apps").alias("app").description("Discover, build, publish, install, test, and operate Loopgraph Apps through the shared Hermes service");
+const auth = program.command("auth").description("Authorize this CLI against a hosted Loopgraph deployment");
+
+auth
+  .command("login")
+  .description("Sign in through the browser with a short-lived, read-only device session")
+  .option("--url <origin>", "Hosted Loopgraph origin", process.env.LOOPGRAPH_MARKETPLACE_URL)
+  .option("--audience <audience>", "Expected hosted marketplace audience", process.env.LOOPGRAPH_MARKETPLACE_AUDIENCE)
+  .option("--organization <id>", "Expected organization ID")
+  .option("--project <key>", "Expected project key")
+  .option("--credentials-file <path>", "Absolute local credential file path")
+  .option("--no-browser", "Print the verification URL without opening it")
+  .action(async (options: {
+    url?: string;
+    audience?: string;
+    organization?: string;
+    project?: string;
+    credentialsFile?: string;
+    browser: boolean;
+  }) => {
+    const baseUrl = options.url?.trim();
+    const audience = options.audience?.trim();
+    if (!baseUrl || !audience) {
+      throw new Error("auth login requires --url and --audience (or the matching LOOPGRAPH_MARKETPLACE_* variables)");
+    }
+    const credentialsFile = options.credentialsFile
+      ? path.resolve(options.credentialsFile)
+      : cliCredentialFileFromEnvironment();
+    const client = new CliDeviceAuthorizationClient(baseUrl);
+    const device = await client.requestDeviceCode();
+    console.log("Authorize Loopgraph CLI");
+    console.log(`Code: ${device.user_code}`);
+    console.log(`Open: ${device.verification_uri_complete}`);
+    console.log("Waiting for browser approval…");
+    if (options.browser) openAuthorizationUrl(device.verification_uri_complete);
+    const tokens = await client.waitForAuthorization(device);
+    if (options.organization && tokens.organization_id !== options.organization) {
+      await client.revoke(tokens.refresh_token);
+      throw new Error("Authorized organization does not match --organization");
+    }
+    if (options.project && tokens.project_key !== options.project) {
+      await client.revoke(tokens.refresh_token);
+      throw new Error("Authorized project does not match --project");
+    }
+    const profile = profileFromTokens({ baseUrl, audience, tokens });
+    try {
+      await new LocalCliCredentialStore(credentialsFile).saveProfile(profile);
+    } catch (error) {
+      try {
+        await client.revoke(tokens.refresh_token);
+      } catch {
+        // Preserve the local persistence error. The short-lived access token will
+        // expire, and the refresh token was never written to disk or printed.
+      }
+      throw error;
+    }
+    console.log("Loopgraph CLI authorized");
+    console.log(`Organization: ${profile.organizationId}`);
+    console.log(`Project: ${profile.projectKey}`);
+    console.log(`Scope: ${profile.scope.join(" ")}`);
+    console.log(`Credentials: ${credentialsFile} (0600)`);
+  });
+
+auth
+  .command("status")
+  .description("Show locally configured CLI sessions without printing credentials")
+  .option("--credentials-file <path>", "Absolute local credential file path")
+  .action(async (options: { credentialsFile?: string }) => {
+    const credentialsFile = options.credentialsFile
+      ? path.resolve(options.credentialsFile)
+      : cliCredentialFileFromEnvironment();
+    const profiles = await new LocalCliCredentialStore(credentialsFile).listProfiles();
+    console.log(JSON.stringify({
+      credentialsFile,
+      profiles: profiles.map((profile) => ({
+        id: profile.id,
+        baseUrl: profile.baseUrl,
+        audience: profile.audience,
+        organizationId: profile.organizationId,
+        projectKey: profile.projectKey,
+        scope: profile.scope,
+        accessExpiresAt: profile.accessExpiresAt,
+        refreshExpiresAt: profile.refreshExpiresAt,
+        updatedAt: profile.updatedAt
+      }))
+    }, null, 2));
+  });
+
+auth
+  .command("logout")
+  .description("Revoke and remove the active hosted CLI session")
+  .option("--credentials-file <path>", "Absolute local credential file path")
+  .action(async (options: { credentialsFile?: string }) => {
+    const credentialsFile = options.credentialsFile
+      ? path.resolve(options.credentialsFile)
+      : cliCredentialFileFromEnvironment();
+    const store = new LocalCliCredentialStore(credentialsFile);
+    const profile = await store.getActiveProfile();
+    if (!profile) {
+      console.log("No Loopgraph CLI session is configured.");
+      return;
+    }
+    let remotelyRevoked = true;
+    try {
+      await new CliDeviceAuthorizationClient(profile.baseUrl).revoke(profile.refreshToken);
+    } catch {
+      remotelyRevoked = false;
+    }
+    await store.removeProfile(profile.id);
+    console.log(remotelyRevoked
+      ? "Loopgraph CLI session revoked and removed."
+      : "Local CLI session removed. Remote revocation could not be confirmed; revoke it from the hosted admin UI.");
+  });
 
 apps
   .command("search")
@@ -2279,6 +2397,21 @@ function printStudioPlan(plan: LoopgraphStudioPlan): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function openAuthorizationUrl(url: string): void {
+  const command = process.platform === "darwin"
+    ? { file: "open", args: [url] }
+    : process.platform === "win32"
+      ? { file: "rundll32", args: ["url.dll,FileProtocolHandler", url] }
+      : { file: "xdg-open", args: [url] };
+  const child = spawn(command.file, command.args, {
+    detached: true,
+    stdio: "ignore",
+    shell: false
+  });
+  child.on("error", () => undefined);
+  child.unref();
 }
 
 async function startStudioServer(plan: LoopgraphStudioPlan): Promise<void> {

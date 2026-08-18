@@ -59,9 +59,16 @@ export default async function SettingsPage() {
         </SectionCard>
       </div>
       <SectionCard className="mt-5" title="Enterprise provider access" description="Manage consent, least-privilege scopes, credential rotation, health, and emergency disconnects through the Hermes Connector Broker.">
-        <Link href="/settings/integrations" className="inline-flex rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white">
-          Open provider integrations
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/settings/integrations" className="inline-flex rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white">
+            Open provider integrations
+          </Link>
+          {hosted ? (
+            <Link href="/settings/cli-sessions" className="inline-flex rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold">
+              Manage CLI sessions
+            </Link>
+          ) : null}
+        </div>
       </SectionCard>
       {hosted ? (
         <form action={signOutAction} className="mt-5">
