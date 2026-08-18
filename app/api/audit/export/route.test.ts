@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const requireHostedPermission = vi.hoisted(() => vi.fn());
 const exportSecurityAuditEvents = vi.hoisted(() => vi.fn());
-const verifySecurityAuditChain = vi.hoisted(() => vi.fn());
+const getVerifiedSecurityAuditCheckpoint = vi.hoisted(() => vi.fn());
 
 vi.mock("../../../../lib/auth/hosted-access", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../../lib/auth/hosted-access")>();
@@ -10,7 +10,7 @@ vi.mock("../../../../lib/auth/hosted-access", async (importOriginal) => {
 });
 vi.mock("../../../../lib/observability/operational-status", () => ({
   exportSecurityAuditEvents,
-  verifySecurityAuditChain
+  getVerifiedSecurityAuditCheckpoint
 }));
 
 import { GET } from "./route";
@@ -19,7 +19,7 @@ describe("security audit export API", () => {
   beforeEach(() => {
     requireHostedPermission.mockReset();
     exportSecurityAuditEvents.mockReset();
-    verifySecurityAuditChain.mockReset();
+    getVerifiedSecurityAuditCheckpoint.mockReset();
   });
 
   it("requires audit permission and returns a cursor plus chain verification", async () => {
@@ -36,9 +36,11 @@ describe("security audit export API", () => {
     exportSecurityAuditEvents.mockResolvedValue([
       { sequence_number: 11, event_type: "machine.request.authorized" }
     ]);
-    verifySecurityAuditChain.mockResolvedValue({
+    getVerifiedSecurityAuditCheckpoint.mockResolvedValue({
       valid: true,
-      eventsChecked: 11,
+      eventsChecked: 12,
+      headSequence: 12,
+      currentHeadSequence: 12,
       headHash: "a".repeat(64)
     });
 
@@ -49,8 +51,9 @@ describe("security audit export API", () => {
     expect(requireHostedPermission).toHaveBeenCalledWith("audit.read");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      schemaVersion: "loopgraph-security-audit-export/v1",
+      schemaVersion: "loopgraph-security-audit-export/v2",
       afterSequence: 10,
+      throughSequence: 12,
       nextCursor: 11,
       hasMore: true,
       integrity: { valid: true },
@@ -70,9 +73,11 @@ describe("security audit export API", () => {
       }
     });
     exportSecurityAuditEvents.mockResolvedValue([]);
-    verifySecurityAuditChain.mockResolvedValue({
+    getVerifiedSecurityAuditCheckpoint.mockResolvedValue({
       valid: false,
       eventsChecked: 4,
+      headSequence: 5,
+      currentHeadSequence: 5,
       firstBadSequence: 5,
       headHash: "b".repeat(64)
     });

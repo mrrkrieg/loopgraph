@@ -1,6 +1,16 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { marketplaceAppSchema } from "../core";
 import { HostedMarketplaceClient } from "./hosted-marketplace-client";
+import { LocalCliCredentialStore, profileFromTokens } from "./cli-device-auth";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+});
 
 const digest = `sha256:${"a".repeat(64)}`;
 const app = marketplaceAppSchema.parse({
@@ -142,5 +152,47 @@ describe("HostedMarketplaceClient", () => {
       }))
     });
     await expect(client.search()).rejects.toThrow("size limit");
+  });
+
+  it("discovers a browser-approved CLI profile while keeping ambient workload identity authoritative", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "loopgraph-hosted-client-"));
+    temporaryDirectories.push(directory);
+    const credentialsFile = path.join(directory, "credentials.json");
+    const accessToken = `lgcli_access_${"a".repeat(43)}`;
+    await new LocalCliCredentialStore(credentialsFile).saveProfile(profileFromTokens({
+      baseUrl: "https://loopgraph.example",
+      audience: "https://loopgraph.example/marketplace",
+      tokens: {
+        access_token: accessToken,
+        token_type: "Bearer",
+        expires_in: 900,
+        refresh_token: `lgcli_refresh_${"r".repeat(43)}`,
+        refresh_expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        scope: "marketplace.consume",
+        organization_id: "123e4567-e89b-12d3-a456-426614174000",
+        project_key: "main"
+      }
+    }));
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      schemaVersion: "hosted-marketplace-machine-search/v1",
+      query: {},
+      results: []
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const client = HostedMarketplaceClient.fromEnvironment({
+      NODE_ENV: "test",
+      LOOPGRAPH_CLI_CREDENTIALS_FILE: credentialsFile
+    } as NodeJS.ProcessEnv, { fetcher });
+    await expect(client?.search()).resolves.toEqual([]);
+    expect(new Headers(fetcher.mock.calls[0]![1].headers).get("authorization")).toBe(`Bearer ${accessToken}`);
+
+    const unsafeFile = path.join(directory, "unsafe.json");
+    await writeFile(unsafeFile, "not-json", { mode: 0o644 });
+    expect(() => HostedMarketplaceClient.fromEnvironment({
+      NODE_ENV: "test",
+      LOOPGRAPH_MARKETPLACE_URL: "https://loopgraph.example",
+      LOOPGRAPH_MARKETPLACE_AUDIENCE: "https://loopgraph.example/marketplace",
+      LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE: "/var/run/secrets/loopgraph/workload.jwt",
+      LOOPGRAPH_CLI_CREDENTIALS_FILE: unsafeFile
+    } as NodeJS.ProcessEnv)).not.toThrow();
   });
 });

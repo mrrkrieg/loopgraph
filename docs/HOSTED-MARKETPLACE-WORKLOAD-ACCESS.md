@@ -1,6 +1,6 @@
-# Hosted marketplace access for Hermes and CLI
+# Hosted marketplace workload access for Hermes and managed runners
 
-Hermes MCP and the Loopgraph CLI can discover and install private hosted apps
+Hermes MCP and managed Loopgraph CLI runners can discover and install private hosted apps
 without receiving a Supabase service key, user cookie, or reusable provider
 token. They use the same ambient, short-lived OIDC workload identity already
 supported by the Connector Broker.
@@ -107,6 +107,15 @@ audit; revocation does not silently erase company history.
 Run the real staging matrix before production: issuer key rotation, expired and
 replayed JWTs, disabled grants, cross-tenant claims, revoked shares, release
 revocation, cache corruption, multiple replicas, large bounded artifacts, and
-audit-retention export. Interactive human CLI login/device authorization is a
-separate UX layer; the implemented enterprise path is workload identity for
-Hermes and managed CLI runners.
+audit-retention export. Interactive terminals use the separate browser-approved
+device flow described in [Interactive CLI device authorization](./CLI-DEVICE-AUTHORIZATION.md).
+Human sessions do not become workload identities and cannot replace managed Hermes
+credentials.
+
+The executable first release of that matrix is `npm run validate:marketplace-staging`.
+It validates a private exact release with separate allowed, foreign-tenant,
+revoked-grant, and observability identities, then emits a secret-free JSON receipt.
+The protected staging workflow blocks production promotion unless all seven checks
+pass. Issuer key rotation, rate-limit saturation, backup/restore, external
+retention, and cross-replica human refresh-token rotation remain separate
+operational drills.

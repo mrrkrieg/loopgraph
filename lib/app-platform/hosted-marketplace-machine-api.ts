@@ -2,6 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { getHostedOrganizationId } from "@/lib/auth/hosted-config";
+import { authorizeCliSessionRequest } from "@/lib/auth/cli-session-api";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
 import { authorizeBearerApiRequest } from "@/lib/loopgraph-runtime/worker-api-auth";
 
@@ -10,14 +11,28 @@ const UUID_PATTERN =
 const PROJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export async function requireHostedMarketplaceMachineContext(request: Request) {
+  const rateLimit = positiveInteger(
+    process.env.LOOPGRAPH_MARKETPLACE_RATE_LIMIT_PER_MINUTE,
+    120
+  );
+  const cliSession = await authorizeCliSessionRequest(
+    request,
+    "marketplace.consume",
+    rateLimit
+  );
+  if (cliSession.handled) {
+    if ("response" in cliSession) return { response: cliSession.response } as const;
+    return {
+      organizationId: cliSession.organizationId,
+      projectKey: cliSession.projectKey,
+      adminClient: cliSession.adminClient
+    } as const;
+  }
   const denied = await authorizeBearerApiRequest(request, {
     environmentVariable: "LOOPGRAPH_MARKETPLACE_API_TOKEN",
     credentialEnvironmentVariable: "LOOPGRAPH_MARKETPLACE_CREDENTIAL_ID",
     capability: "marketplace.consume",
-    rateLimit: positiveInteger(
-      process.env.LOOPGRAPH_MARKETPLACE_RATE_LIMIT_PER_MINUTE,
-      120
-    )
+    rateLimit
   });
   if (denied) return { response: denied } as const;
 

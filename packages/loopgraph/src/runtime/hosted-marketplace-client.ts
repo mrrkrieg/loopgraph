@@ -10,8 +10,16 @@ import {
 import { redactSensitiveString } from "./secret-redaction";
 import {
   AmbientWorkloadTokenProvider,
+  hasAmbientWorkloadIdentity,
   type WorkloadTokenProvider
 } from "./workload-token-provider";
+import {
+  CliDeviceAuthorizationClient,
+  CliSessionTokenProvider,
+  LocalCliCredentialStore,
+  cliCredentialFileFromEnvironment,
+  readConfiguredCliProfile
+} from "./cli-device-auth";
 
 const MAX_CATALOG_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const MAX_REMOTE_MARKETPLACE_ARTIFACT_BYTES = 100 * 1024 * 1024;
@@ -72,22 +80,31 @@ export class HostedMarketplaceClient {
     env: NodeJS.ProcessEnv = process.env,
     dependencies: { fetcher?: typeof fetch; tokenProvider?: WorkloadTokenProvider } = {}
   ): HostedMarketplaceClient | undefined {
-    const baseUrl = env.LOOPGRAPH_MARKETPLACE_URL?.trim();
-    const audience = env.LOOPGRAPH_MARKETPLACE_AUDIENCE?.trim();
+    const ambientWorkloadIdentity = hasAmbientWorkloadIdentity(env);
+    const cliProfile = ambientWorkloadIdentity ? undefined : readConfiguredCliProfile(env);
+    const baseUrl = env.LOOPGRAPH_MARKETPLACE_URL?.trim() ?? cliProfile?.baseUrl;
+    const audience = env.LOOPGRAPH_MARKETPLACE_AUDIENCE?.trim() ?? cliProfile?.audience;
     if (!baseUrl && !audience) return undefined;
     if (!baseUrl || !audience) {
       throw new Error(
         "LOOPGRAPH_MARKETPLACE_URL and LOOPGRAPH_MARKETPLACE_AUDIENCE must be configured together"
       );
     }
+    const tokenProvider = dependencies.tokenProvider ?? (
+      cliProfile && !ambientWorkloadIdentity
+        ? new CliSessionTokenProvider({
+            profile: cliProfile,
+            store: new LocalCliCredentialStore(cliCredentialFileFromEnvironment(env)),
+            client: new CliDeviceAuthorizationClient(baseUrl, { fetcher: dependencies.fetcher })
+          })
+        : new AmbientWorkloadTokenProvider({ fetcher: dependencies.fetcher })
+    );
     return new HostedMarketplaceClient({
       baseUrl,
       audience,
-      tokenProvider: dependencies.tokenProvider ?? new AmbientWorkloadTokenProvider({
-        fetcher: dependencies.fetcher
-      }),
-      organizationId: env.LOOPGRAPH_MARKETPLACE_ORGANIZATION_ID?.trim(),
-      projectKey: env.LOOPGRAPH_MARKETPLACE_PROJECT_KEY?.trim(),
+      tokenProvider,
+      organizationId: env.LOOPGRAPH_MARKETPLACE_ORGANIZATION_ID?.trim() ?? cliProfile?.organizationId,
+      projectKey: env.LOOPGRAPH_MARKETPLACE_PROJECT_KEY?.trim() ?? cliProfile?.projectKey,
       fetcher: dependencies.fetcher
     });
   }

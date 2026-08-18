@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { authorizeObservabilityApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
-import { exportSecurityAuditEvents, verifySecurityAuditChain } from "../../../../lib/observability/operational-status";
+import {
+  exportSecurityAuditEvents,
+  getVerifiedSecurityAuditCheckpoint
+} from "../../../../lib/observability/operational-status";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,22 +17,44 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const afterSequence = boundedInteger(url.searchParams.get("after"), 0, 0, Number.MAX_SAFE_INTEGER);
     const limit = boundedInteger(url.searchParams.get("limit"), 100, 1, 500);
-    const [events, integrity] = await Promise.all([
-      exportSecurityAuditEvents({ organizationId, afterSequence, limit }),
-      verifySecurityAuditChain(organizationId)
-    ]);
+    const requestedThrough = optionalBoundedInteger(
+      url.searchParams.get("through"),
+      0,
+      Number.MAX_SAFE_INTEGER
+    );
+    const integrity = await getVerifiedSecurityAuditCheckpoint({
+      organizationId,
+      ...(requestedThrough === undefined ? {} : { throughSequence: requestedThrough })
+    });
+    if (!integrity.valid) {
+      return NextResponse.json({
+        error: "Security audit chain verification failed.",
+        integrity
+      }, { status: 409, headers: { "cache-control": "no-store" } });
+    }
+    if (afterSequence > integrity.headSequence) {
+      throw new InvalidAuditQueryError("after must not be greater than the verified audit checkpoint");
+    }
+    const events = await exportSecurityAuditEvents({
+      organizationId,
+      afterSequence,
+      throughSequence: integrity.headSequence,
+      limit
+    });
+    const nextCursor = events.at(-1)?.sequence_number ?? afterSequence;
     return NextResponse.json({
-      schemaVersion: "loopgraph-security-audit-export/v1",
+      schemaVersion: "loopgraph-security-audit-export/v2",
       organizationId,
       projectKey: process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default",
       exportedAt: new Date().toISOString(),
       afterSequence,
-      nextCursor: events.at(-1)?.sequence_number ?? afterSequence,
-      hasMore: events.length === limit,
+      throughSequence: integrity.headSequence,
+      nextCursor,
+      hasMore: nextCursor < integrity.headSequence,
       integrity,
       events
     }, {
-      status: integrity.valid ? 200 : 409,
+      status: 200,
       headers: { "cache-control": "no-store" }
     });
   } catch (error) {
@@ -38,6 +63,15 @@ export async function GET(request: Request) {
     }
     return NextResponse.json({ error: "Security audit export is unavailable." }, { status: 503, headers: { "cache-control": "no-store" } });
   }
+}
+
+function optionalBoundedInteger(
+  value: string | null,
+  minimum: number,
+  maximum: number
+) {
+  if (value === null || value === "") return undefined;
+  return boundedInteger(value, minimum, minimum, maximum);
 }
 
 function boundedInteger(value: string | null, fallback: number, minimum: number, maximum: number) {
