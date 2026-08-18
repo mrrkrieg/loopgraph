@@ -56,6 +56,8 @@ short-lived download API for authorized clients.
 | `POST /api/marketplace/artifacts/uploads` | `marketplace.publish` + MFA | Mint a non-upsert upload URL inside the caller's tenant namespace |
 | `POST /api/marketplace/releases` | `marketplace.publish` + MFA | Confirm the uploaded object and stage immutable signed release metadata |
 | `POST /api/marketplace/artifacts/downloads` | `workspace.read` | Mint a 60-second URL for one RLS-visible, verified digest |
+| `GET /api/marketplace/client/catalog` | workload identity + `marketplace.consume` | Search or resolve tenant-visible metadata for Hermes/CLI without artifact prefetch |
+| `POST /api/marketplace/client/artifacts` | workload identity + `marketplace.consume` | Stream one exact organization-visible verified archive to the workload client |
 | `POST /api/marketplace/verifier/worker` | `marketplace.verify` | Run bounded leased verification under a dedicated worker identity |
 | `GET\|POST /api/cron/marketplace-verifier` | `schedule.marketplace_verifier` | Lease and verify pending releases |
 
@@ -101,9 +103,13 @@ verification, and sends it through the existing detail, mapping, installation
 plan, conformance, and atomic-apply services. Cached hosted releases are
 re-authorized before use; releases no longer visible to the tenant are evicted.
 
-Direct CLI and Hermes MCP processes still need an authenticated tenant-session
-transport before they can discover or fetch hosted releases independently.
-They continue to support official, local, and signed GitHub catalogs, and they
-can use a hosted artifact already staged by the server bridge. Live staging
-must additionally validate cross-replica cache policy, revocation latency, and
-multi-user behavior.
+Direct CLI and Hermes MCP marketplace access now uses the existing ambient
+workload-token provider. The hosted API verifies short-lived OIDC claims,
+tenant/project scope, request replay metadata, rate limits, and the durable
+`marketplace.consume` grant. Metadata endpoints never return storage keys; the
+artifact endpoint proxies one exact release through the trusted API origin and
+the client re-verifies the archive and signature before atomic cache promotion.
+See [hosted marketplace workload access](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
+
+Live staging must still validate issuer rotation, cross-replica cache policy,
+revocation latency, multi-user behavior, and interactive human CLI login.

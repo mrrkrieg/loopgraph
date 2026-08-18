@@ -61,11 +61,15 @@ Official, project-local, and independently signed GitHub sources remain
 separate trust roots. Removing a hosted source does not remove those versions
 or any installed workspace state.
 
-## Current client boundary
+## Client boundaries
 
-The Next.js browser server bridge has the authenticated tenant session required
-for hosted discovery and staging. Direct CLI and Hermes MCP
-processes do not yet carry that session protocol, so they cannot independently
-download a private hosted release. They can still use official, local, GitHub,
-or already staged content. The remaining client work is a short-lived,
-workload-bound hosted marketplace session exchange—not static service keys.
+The Next.js browser bridge uses the operator's RLS-bound user session. Hermes
+MCP and managed CLI runners use a separate short-lived OIDC workload identity
+with an explicit durable `marketplace.consume` grant. Both paths recheck tenant
+visibility and exact release identity before service-side storage access, then
+feed the same verified local cache and governed installer.
+
+See [hosted marketplace access for Hermes and CLI](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
+Interactive human CLI login/device authorization remains a separate UX layer;
+the implemented direct client path is designed for Hermes and enterprise
+workload runners and does not persist or print a static marketplace token.

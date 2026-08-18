@@ -69,8 +69,8 @@ export async function callLoopgraphAppTool(
     });
   }
   const callOptions = CONNECTION_AWARE_TOOLS.has(name)
-    ? { ...options, connections: await trustedConnections() }
-    : options;
+    ? { ...options, connections: await trustedConnections(), hostedMarketplaceClient: null }
+    : { ...options, hostedMarketplaceClient: null };
   try {
     return await callRuntimeAppTool(name, effectiveInput, callOptions);
   } catch (error) {
@@ -95,7 +95,7 @@ async function combinedMarketplaceSearch(
   const local = await callRuntimeAppTool(
     "loopgraph_marketplace_search",
     input,
-    options
+    { ...options, hostedMarketplaceClient: null }
   ) as {
     schemaVersion: string;
     query?: string;

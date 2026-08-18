@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { brokerCapabilitySchema } from "loopgraph/core";
+import { workloadCapabilitySchema } from "loopgraph/core";
 import { deriveWorkloadCredentialId } from "loopgraph/runtime";
 import { HostedAccessError, requireHostedStepUp } from "@/lib/auth/hosted-access";
 import {
@@ -21,7 +21,7 @@ const createSchema = z.object({
   audience: z.string().trim().min(3).max(512),
   environment: z.enum(["development", "staging", "production"]),
   workloadType: z.string().trim().min(2).max(96).regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
-  capability: brokerCapabilitySchema,
+  capability: workloadCapabilitySchema,
   connectionId: safeId.optional(),
   expiresAt: z.string().datetime().optional(),
   confirmationKeyThumbprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),

@@ -22,6 +22,7 @@ export type MachineCapability =
   | "hermes.agent_heartbeat"
   | "hermes.execution_events"
   | "measurements.collect"
+  | "marketplace.consume"
   | "marketplace.verify"
   | "observability.read"
   | "provider.github_forward"
@@ -377,8 +378,10 @@ async function authorizeDurableWorkloadGrant(input: {
 }) {
   const supabase = createSupabaseAdminClient();
   if (!supabase) return unavailable("Durable workload grant storage is unavailable.");
-  const requestedCapability = input.request.headers.get("x-loopgraph-provider-capability") ?? input.broadCapability;
-  const connectionId = input.request.headers.get("x-loopgraph-connection-id");
+  const { capability: requestedCapability, connectionId } = resolveDurableWorkloadGrantScope(
+    input.request,
+    input.broadCapability
+  );
   const environment = input.identity.environment ?? process.env.LOOPGRAPH_DEPLOYMENT_ENVIRONMENT?.trim();
   const audience = input.identity.audience.find((value) => value === process.env.LOOPGRAPH_CONNECTOR_BROKER_AUDIENCE) ?? input.identity.audience[0];
   if (!environment || !["development", "staging", "production"].includes(environment) || !audience) {
@@ -419,6 +422,19 @@ async function authorizeDurableWorkloadGrant(input: {
   });
 }
 
+export function resolveDurableWorkloadGrantScope(
+  request: Request,
+  broadCapability: MachineCapability
+): { capability: string; connectionId: string | null } {
+  if (!broadCapability.startsWith("provider.")) {
+    return { capability: broadCapability, connectionId: null };
+  }
+  return {
+    capability: request.headers.get("x-loopgraph-provider-capability") ?? broadCapability,
+    connectionId: request.headers.get("x-loopgraph-connection-id")
+  };
+}
+
 function verifySenderBinding(request: Request, expected?: string): string | null | NextResponse {
   if (!expected) return null;
   if (process.env.LOOPGRAPH_TRUSTED_MTLS_PROXY !== "true") {
@@ -439,7 +455,7 @@ function verifySenderBinding(request: Request, expected?: string): string | null
 }
 
 function shouldRequireDurableWorkloadGrant(capability: MachineCapability) {
-  if (!capability.startsWith("provider.")) return false;
+  if (!capability.startsWith("provider.") && capability !== "marketplace.consume") return false;
   return process.env.NODE_ENV === "production" || process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS === "true";
 }
 
