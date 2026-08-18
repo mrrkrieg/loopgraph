@@ -56,7 +56,11 @@ describe("workload-authenticated audit retention drain", () => {
       pageSize: 2,
       minimumRetentionDays: 365,
       acknowledgementKeyId: "retention_key_1",
-      acknowledgementPublicKey: publicKey
+      acknowledgementPublicKey: publicKey,
+      releaseCheckpoints: [
+        { name: "staging", sequence: 2, hash: second.event_hash },
+        { name: "marketplace", sequence: 3, hash: third.event_hash }
+      ]
     }, {
       source: async () => "source.token.signature",
       destination: async () => "destination.token.signature"
@@ -71,7 +75,11 @@ describe("workload-authenticated audit retention drain", () => {
       throughSequence: 3,
       eventCount: 3,
       batchCount: 2,
-      headHash: third.event_hash
+      headHash: third.event_hash,
+      verifiedReleaseCheckpoints: [
+        { name: "staging", sequence: 2, hash: second.event_hash },
+        { name: "marketplace", sequence: 3, hash: third.event_hash }
+      ]
     });
     expect(receivedBatches[1]?.previousReceiptDigest).toBe(
       sha256Digest(canonicalJson(acknowledgements[0]))
@@ -97,7 +105,11 @@ describe("workload-authenticated audit retention drain", () => {
       pageSize: 100,
       minimumRetentionDays: 365,
       acknowledgementKeyId: "retention_key_1",
-      acknowledgementPublicKey: publicKey
+      acknowledgementPublicKey: publicKey,
+      releaseCheckpoints: [
+        { name: "staging", sequence: 1, hash: broken.event_hash },
+        { name: "marketplace", sequence: 1, hash: broken.event_hash }
+      ]
     }, {
       source: async () => "source.token.signature",
       destination: async () => "destination.token.signature"
@@ -135,7 +147,11 @@ describe("workload-authenticated audit retention drain", () => {
       pageSize: 1,
       minimumRetentionDays: 365,
       acknowledgementKeyId: "retention_key_1",
-      acknowledgementPublicKey: publicKey
+      acknowledgementPublicKey: publicKey,
+      releaseCheckpoints: [
+        { name: "staging", sequence: 1, hash: first.event_hash },
+        { name: "marketplace", sequence: 2, hash: second.event_hash }
+      ]
     }, {
       source: async () => "source.token.signature",
       destination: async () => "destination.token.signature"
@@ -143,5 +159,45 @@ describe("workload-authenticated audit retention drain", () => {
       fetcher: fetcher as typeof fetch,
       now: () => new Date("2026-08-17T00:01:00.000Z")
     })).rejects.toThrow(/verified checkpoint/i);
+  });
+
+  it("rejects a covered release sequence when its exact checkpoint hash differs", async () => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const first = event(1, "0".repeat(64), "1".repeat(64));
+    const second = event(2, first.event_hash, "2".repeat(64));
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const parsedUrl = new URL(url instanceof Request ? url.url : url.toString());
+      if (parsedUrl.origin === "https://loopgraph.example") {
+        return Response.json(page([first, second], 0, 2, false, second.event_hash));
+      }
+      const batch = retentionBatchSchema.parse(JSON.parse(String(init?.body)));
+      return Response.json(signedAcknowledgement({
+        batch,
+        payloadDigest: (init?.headers as Record<string, string>)["x-loopgraph-payload-digest"],
+        privateKey,
+        receiptSequence: 1
+      }));
+    });
+
+    await expect(drainAuditRetention({
+      sourceUrl: "https://loopgraph.example",
+      destinationUrl: "https://retention.example",
+      organizationId,
+      projectKey,
+      pageSize: 100,
+      minimumRetentionDays: 365,
+      acknowledgementKeyId: "retention_key_1",
+      acknowledgementPublicKey: publicKey,
+      releaseCheckpoints: [
+        { name: "staging", sequence: 1, hash: "f".repeat(64) },
+        { name: "marketplace", sequence: 2, hash: second.event_hash }
+      ]
+    }, {
+      source: async () => "source.token.signature",
+      destination: async () => "destination.token.signature"
+    }, {
+      fetcher: fetcher as typeof fetch,
+      now: () => new Date("2026-08-17T00:01:00.000Z")
+    })).rejects.toThrow(/checkpoint staging hash/i);
   });
 });

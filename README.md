@@ -330,12 +330,18 @@ writes still blocked. Cached hosted releases are re-authorized before use and
 evicted when they are revoked or no longer shared with the tenant. See
 [Hosted marketplace installation](docs/HOSTED-MARKETPLACE-INSTALL.md).
 
-Hermes MCP and managed CLI runners can access the same private catalog with
-short-lived ambient OIDC workload identity and a durable, tenant-scoped
-`marketplace.consume` grant. The client never receives a Supabase service key
-or provider token, never treats its cache as authorization, and re-verifies the
-exact signed archive before the normal governed install path. See
-[hosted marketplace access for Hermes and CLI](docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
+Hermes MCP and managed runners access the same private catalog with short-lived
+ambient OIDC workload identity and a durable, tenant-scoped `marketplace.consume`
+grant. A person can instead run `loopgraph auth login`, approve an eight-character
+code in the hosted browser, and receive a separate capability-scoped CLI session.
+Hosted admins can inspect and revoke those human sessions at
+`/settings/cli-sessions`; the inventory never returns credential digests, and every
+MFA-gated revocation is tenant-scoped and atomically audit-chained.
+Human access expires quickly, refresh rotates, membership is rechecked on every
+request, and local secrets are kept in a current-user-only `0600` file. Neither path
+receives a Supabase service key or provider token, treats the cache as authorization,
+or skips exact archive verification. See [workload access](docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md)
+and [interactive CLI authorization](docs/CLI-DEVICE-AUTHORIZATION.md).
 
 Production promotion can also require `npm run validate:marketplace-staging`.
 The protected gate uses separate projected allowed, foreign-tenant, revoked,
@@ -522,6 +528,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 - [Continuous loop controller](docs/CONTINUOUS-LOOP-CONTROLLER.md)
 - [Enterprise connector security](docs/ENTERPRISE-CONNECTOR-SECURITY.md)
 - [Production operations](docs/PRODUCTION-OPERATIONS.md)
+- [Production promotion evidence](docs/PRODUCTION-PROMOTION-EVIDENCE.md)
 - [Independent audit retention protocol](docs/AUDIT-RETENTION-PROTOCOL.md)
 
 For the implementation-to-test evidence map, see the [Hermes completion audit](docs/HERMES-COMPLETION-AUDIT.md).

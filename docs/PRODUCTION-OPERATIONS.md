@@ -7,15 +7,24 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `ops/slo.yaml` is the versioned SLO and alert contract. Route its metrics to an alerting system with paging ownership; the file is not an alert delivery system by itself.
 - `.github/workflows/staging-release.yml` builds once, deploys the prebuilt artifact to staging, validates it, and only promotes that verified deployment after protected-environment approval.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
-- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
+- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
 - `npm run validate:staging` now uses the projected observability workload identity too. Its receipt contains status and control summaries only; it no longer accepts a reusable observability token or copies audit/metrics response bodies into release evidence.
+- `npm run release:evidence:build` binds the current run's four receipts to one deployment, tenant/project, database identity, and exact marketplace artifact. `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any substituted, stale, or mixed receipt.
 
 ## Release evidence
 
-Keep the workflow run, staging validation JSON, exact deployment URL, migration commit, database backup checkpoint, alert configuration revision, and most recent restore rehearsal receipt together. Missing evidence blocks production promotion; it must not be replaced with a checkbox.
+The protected workflow stores the staging, marketplace, recovery, and audit-retention receipts as
+separate artifacts, compiles `loopgraph-production-promotion-evidence/v1`, and creates a GitHub OIDC
+provenance attestation for the exact manifest file. The production job downloads the same run's
+artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
+verifies the receiver acknowledgement against the production environment's independently configured
+Ed25519 public key before promoting the exact prebuilt deployment. Missing evidence blocks promotion; it
+must not be replaced with a checkbox or an environment variable claiming a check passed. See
+[Production promotion evidence](./PRODUCTION-PROMOTION-EVIDENCE.md) for the schemas and protected
+environment setup.
 
-The signed `audit-drain/v2` receipt is mandatory for every production promotion. Preserve it outside
+The `audit-drain/v3` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
 the application database through the protected runner's `LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE`; the
 sender atomically advances this predecessor only after verification. Production promotion depends
 on the protected `audit-retention-staging` job; an unavailable
@@ -50,6 +59,7 @@ LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes \
 LOOPGRAPH_REHEARSAL_TARGET_MARKER="$ONE_TIME_RESTORE_MARKER" \
 LOOPGRAPH_BACKUP_SOURCE_DB_URL_FILE="$SOURCE_DATABASE_URL_FILE" \
 LOOPGRAPH_REHEARSAL_RESTORE_DB_URL_FILE="$DISPOSABLE_RESTORE_DATABASE_URL_FILE" \
+LOOPGRAPH_EXPECTED_SOURCE_DB_IDENTITY_DIGEST="$REVIEWED_SOURCE_DATABASE_IDENTITY_DIGEST" \
 npm run rehearse:restore > restore-rehearsal.json
 ```
 
@@ -76,6 +86,11 @@ PostgreSQL major version. The `backup-restore-rehearsal/v2` receipt is emitted o
    count and order-independent SHA-256 multiset fingerprint;
 2. every restored tenant/project audit chain passes `verify_security_audit_chain`; and
 3. every evidence-ledger record family is enumerated in the receipt.
+
+The protected source identity digest is `sha256:` plus the SHA-256 of
+`lowercase-hostname:port/database`. The receipt preserves that digest, a distinct target identity
+digest, and each table's exact row-count/SHA-256 fingerprint; the promotion manifest binds all of
+them without exposing either credential-bearing database URL.
 
 The database dump contains marketplace metadata, signatures, and artifact identities, but external
 artifact bytes deliberately live outside PostgreSQL. Therefore the receipt marks those bytes as

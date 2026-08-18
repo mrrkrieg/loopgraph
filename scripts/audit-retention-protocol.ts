@@ -103,8 +103,7 @@ export const retentionAcknowledgementSchema = z.object({
   }).strict()
 }).strict();
 
-export const auditDrainReceiptSchema = z.object({
-  schemaVersion: z.literal("audit-drain/v2"),
+const auditDrainReceiptFields = {
   organizationId: z.string().uuid(),
   projectKey,
   sourceOrigin: z.string().url(),
@@ -118,13 +117,48 @@ export const auditDrainReceiptSchema = z.object({
   headHash: hashSchema,
   lastDestinationReceiptDigest: digestSchema.nullable(),
   lastDestinationAcknowledgement: retentionAcknowledgementSchema.nullable()
+};
+
+export const releaseAuditCheckpointSchema = z.object({
+  name: z.enum(["staging", "marketplace"]),
+  sequence: safeInteger,
+  hash: hashSchema
 }).strict();
+
+export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSchema)
+  .length(2)
+  .superRefine((checkpoints, context) => {
+    const names = checkpoints.map((checkpoint) => checkpoint.name);
+    if (new Set(names).size !== names.length || !names.includes("staging") || !names.includes("marketplace")) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Release audit checkpoints must contain staging and marketplace exactly once"
+      });
+    }
+  });
+
+export const auditDrainReceiptV2Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v2"),
+  ...auditDrainReceiptFields
+}).strict();
+
+export const auditDrainReceiptV3Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v3"),
+  ...auditDrainReceiptFields,
+  verifiedReleaseCheckpoints: releaseAuditCheckpointSetSchema
+}).strict();
+
+export const auditDrainReceiptSchema = z.discriminatedUnion("schemaVersion", [
+  auditDrainReceiptV2Schema,
+  auditDrainReceiptV3Schema
+]);
 
 export type AuditEvent = z.infer<typeof auditEventSchema>;
 export type AuditExportPage = z.infer<typeof auditExportPageSchema>;
 export type RetentionBatch = z.infer<typeof retentionBatchSchema>;
 export type RetentionAcknowledgement = z.infer<typeof retentionAcknowledgementSchema>;
 export type AuditDrainReceipt = z.infer<typeof auditDrainReceiptSchema>;
+export type ReleaseAuditCheckpoint = z.infer<typeof releaseAuditCheckpointSchema>;
 
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortKeys(value));

@@ -86,6 +86,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - A tenant-scoped hosted marketplace registry stores publisher/app ownership, immutable signed versions, file digests, dependencies, connector requirements, presets, evaluation records, release signatures, and explicit private-catalog grants behind RLS. Its private delivery layer adds department/capability search, MFA-gated digest-addressed uploads, a private 100 MiB object bucket, leased service-role verification, safe rejection codes, crash reconciliation, and 60-second exact-release downloads. Raw signatures and standalone storage-key fields never cross the service boundary; the signed storage capability may contain its scoped path and expires after 60 seconds.
 - In hosted mode, the browser server bridge merges RLS-visible metadata with official, local, and signed GitHub results without eagerly downloading artifacts. Opening, mapping, planning, or applying a hosted app stages only the selected exact version into a content-addressed cache after a second archive/file/signature verification, then invokes the existing governed App Platform service. Cached hosted releases are re-authorized before use, revoked/unshared identities are evicted, corrupt entries are rebuilt, immutable cross-source conflicts fail closed, and installation still cannot enable provider writes.
 - Hermes MCP and managed CLI runners can use the hosted marketplace through short-lived ambient OIDC workload identity. The API requires tenant/project claims, a durable `marketplace.consume` grant, fresh replay metadata, rate limits, and organization visibility; it proxies one exact private archive without exposing service credentials or reusable object keys. The package re-verifies and atomically stages the release before invoking the existing app tools.
+- Interactive terminals can use browser-approved device authorization without receiving a workload identity or Supabase cookie. Device/user codes and access/refresh credentials are stored only as hashes server-side; access lasts 15 minutes, refresh rotates, membership is checked on every request, the only grant is `marketplace.consume`, and the local credential profile is atomic, current-user-only, and never printed by status output.
+- Hosted admins and owners have a paged, token-free human CLI session inventory. MFA-gated emergency controls revoke one device, one user's sessions, or every organization session in the exact tenant/project scope, while the revocation and immutable reason-digest audit event commit atomically.
+- Production promotion now compiles staging readiness, hosted-marketplace isolation, snapshot-consistent recovery, and independently acknowledged audit-retention receipts into one content-bound manifest. The workflow attests that exact manifest with GitHub OIDC, reconstructs it in the protected production job, verifies the upstream digest and provenance, and only then promotes the same prebuilt deployment. Receipt freshness is rechecked against the actual promotion time; deployment origin, tenant/project, database identity, marketplace artifact, exact audit sequence/hash checkpoints, acknowledgement digest, and restored-table fingerprints all fail closed.
 
 ### Verification
 
@@ -165,10 +168,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, and complete clean-install plus hosted multi-user release audits.
-6. Add interactive human CLI/device authorization on top of the implemented workload-identity
-   path; validate issuer rotation, rate-limit saturation, cross-replica cache behavior, and release
-   revocation in staging. Durable grant revocation, cross-tenant denial, replay rejection, exact
-   signed staging, and audit presence are now part of the executable marketplace gate.
+6. Validate issuer rotation, device-code and request rate-limit saturation, refresh-token replay,
+   cross-replica session/cache behavior, membership removal, and release revocation in staging.
+   Durable workload grant revocation, cross-tenant denial, replay rejection, exact signed staging,
+   and audit presence are already part of the executable marketplace gate.
 
 ## Key documentation
 
@@ -195,3 +198,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hosted marketplace delivery](./HOSTED-MARKETPLACE-DELIVERY.md)
 - [Hosted marketplace installation](./HOSTED-MARKETPLACE-INSTALL.md)
 - [Hosted marketplace access for Hermes and CLI](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md)
+- [Interactive CLI device authorization](./CLI-DEVICE-AUTHORIZATION.md)

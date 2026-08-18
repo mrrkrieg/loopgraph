@@ -86,3 +86,10 @@ Accepted and denied hosted machine decisions are appended to a tenant/project ha
 health checks expose status only, while detailed metrics and audit exports require separate
 authorization. See
 [Operational audit and observability](docs/OPERATIONAL-AUDIT-OBSERVABILITY.md).
+
+Production promotion is also fail-closed across staging readiness, marketplace isolation, recovery,
+and independent audit retention. Their secret-free receipts are content-bound, freshness-checked,
+and attested before the exact prebuilt deployment can be promoted. Promotion rechecks every source
+timestamp, exact retained audit checkpoint hash, and signed acknowledgement digest instead of
+trusting coverage or presence alone. See
+[Production promotion evidence](docs/PRODUCTION-PROMOTION-EVIDENCE.md).

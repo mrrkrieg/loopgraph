@@ -1,5 +1,6 @@
 import { randomUUID, type KeyObject } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
 import {
   auditDrainReceiptSchema,
   auditExportPageSchema,
@@ -8,11 +9,13 @@ import {
   parsePreviousDrainReceipt,
   readBoundedIntegrityFile,
   readRetentionPublicKey,
+  releaseAuditCheckpointSetSchema,
   sha256Digest,
   validateAuditPage,
   verifyRetentionAcknowledgement,
   writeAuditDrainReceiptState,
   type AuditDrainReceipt,
+  type ReleaseAuditCheckpoint,
   type RetentionAcknowledgement
 } from "./audit-retention-protocol";
 import { readBoundedResponseJson } from "./bounded-response";
@@ -30,6 +33,7 @@ export type AuditRetentionConfig = {
   minimumRetentionDays: number;
   acknowledgementKeyId: string;
   acknowledgementPublicKey: KeyObject;
+  releaseCheckpoints: ReleaseAuditCheckpoint[];
   previousReceipt?: AuditDrainReceipt;
 };
 
@@ -66,6 +70,7 @@ export async function drainAuditRetention(
   ) {
     throw new Error("Minimum audit retention days must be an integer from 1 to 36500");
   }
+  const releaseCheckpoints = releaseAuditCheckpointSetSchema.parse(config.releaseCheckpoints);
 
   const startedAt = now();
   const previousReceipt = config.previousReceipt;
@@ -79,6 +84,20 @@ export async function drainAuditRetention(
     previousReceipt?.lastDestinationAcknowledgement ?? null;
   let eventCount = 0;
   let batchCount = 0;
+  const verifiedReleaseCheckpoints = new Map<string, ReleaseAuditCheckpoint>();
+  for (const checkpoint of releaseCheckpoints) {
+    if (checkpoint.sequence < fromSequence) {
+      throw new Error(
+        `Release audit checkpoint ${checkpoint.name} precedes the retained audit state and cannot be independently verified`
+      );
+    }
+    if (checkpoint.sequence === fromSequence) {
+      if (checkpoint.hash !== previousEventHash) {
+        throw new Error(`Release audit checkpoint ${checkpoint.name} does not match the retained audit head`);
+      }
+      verifiedReleaseCheckpoints.set(checkpoint.name, checkpoint);
+    }
+  }
 
   for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber += 1) {
     const pageUrl = new URL("api/operations/audit-export", ensureTrailingSlash(source));
@@ -119,6 +138,20 @@ export async function drainAuditRetention(
     const page = validated.page;
     throughSequence ??= page.throughSequence;
     checkpointHeadHash ??= page.integrity.headHash;
+    for (const checkpoint of releaseCheckpoints) {
+      if (checkpoint.sequence > throughSequence) {
+        throw new Error(`Release audit checkpoint ${checkpoint.name} is beyond the pinned export head`);
+      }
+    }
+    for (const event of page.events) {
+      for (const checkpoint of releaseCheckpoints) {
+        if (event.sequence_number !== checkpoint.sequence) continue;
+        if (event.event_hash !== checkpoint.hash) {
+          throw new Error(`Release audit checkpoint ${checkpoint.name} hash does not match the verified event chain`);
+        }
+        verifiedReleaseCheckpoints.set(checkpoint.name, checkpoint);
+      }
+    }
 
     if (page.events.length > 0) {
       const batch = createRetentionBatch({
@@ -184,9 +217,12 @@ export async function drainAuditRetention(
 
     previousEventHash = validated.lastEventHash;
     if (!page.hasMore) {
+      if (verifiedReleaseCheckpoints.size !== releaseCheckpoints.length) {
+        throw new Error("Audit retention did not verify every required release checkpoint");
+      }
       const completedAt = now();
       return auditDrainReceiptSchema.parse({
-        schemaVersion: "audit-drain/v2",
+        schemaVersion: "audit-drain/v3",
         organizationId: config.organizationId,
         projectKey: config.projectKey,
         sourceOrigin: source.origin,
@@ -199,7 +235,8 @@ export async function drainAuditRetention(
         batchCount,
         headHash: checkpointHeadHash,
         lastDestinationReceiptDigest: previousReceiptDigest,
-        lastDestinationAcknowledgement: lastAcknowledgement
+        lastDestinationAcknowledgement: lastAcknowledgement,
+        verifiedReleaseCheckpoints: releaseCheckpoints
       });
     }
     if (page.nextCursor <= afterSequence) {
@@ -342,6 +379,13 @@ async function main() {
       "Use LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE instead of also setting LOOPGRAPH_AUDIT_PREVIOUS_RECEIPT_FILE"
     );
   }
+  const releaseCheckpoints = await readReleaseCheckpoints({
+    stagingFile: required("LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE"),
+    marketplaceFile: required("LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE"),
+    sourceOrigin: source.origin,
+    organizationId,
+    projectKey
+  });
   const receipt = await drainAuditRetention({
     sourceUrl,
     destinationUrl,
@@ -351,6 +395,7 @@ async function main() {
     minimumRetentionDays,
     acknowledgementKeyId,
     acknowledgementPublicKey,
+    releaseCheckpoints,
     previousReceipt: await optionalPreviousReceipt({
       file: stateFile ?? legacyPreviousReceiptFile,
       allowMissing: Boolean(stateFile),
@@ -376,6 +421,68 @@ async function main() {
     await writeAuditDrainReceiptState(stateFile, receipt);
   }
   process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+}
+
+const stagingCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("staging-validation/v3"),
+  targetOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditCheckpoint: z.object({
+    headSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).strict()
+}).passthrough();
+
+const marketplaceCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-marketplace-staging-validation/v2"),
+  targetOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
+async function readReleaseCheckpoints(input: {
+  stagingFile: string;
+  marketplaceFile: string;
+  sourceOrigin: string;
+  organizationId: string;
+  projectKey: string;
+}) {
+  const staging = stagingCheckpointReceiptSchema.parse(JSON.parse(await readBoundedIntegrityFile(
+    input.stagingFile,
+    "LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE",
+    1024 * 1024
+  )));
+  const marketplace = marketplaceCheckpointReceiptSchema.parse(JSON.parse(await readBoundedIntegrityFile(
+    input.marketplaceFile,
+    "LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE",
+    1024 * 1024
+  )));
+  for (const receipt of [staging, marketplace]) {
+    if (
+      trustedEndpoint(receipt.targetOrigin, "Release checkpoint origin", true).origin !== input.sourceOrigin ||
+      receipt.organizationId !== input.organizationId ||
+      receipt.projectKey !== input.projectKey
+    ) {
+      throw new Error("Release audit checkpoint receipt belongs to a different source or tenant scope");
+    }
+  }
+  return releaseAuditCheckpointSetSchema.parse([
+    {
+      name: "staging",
+      sequence: staging.auditCheckpoint.headSequence,
+      hash: staging.auditCheckpoint.headHash
+    },
+    {
+      name: "marketplace",
+      sequence: marketplace.auditEvidence.throughSequence,
+      hash: marketplace.auditEvidence.headHash
+    }
+  ]);
 }
 
 function isFileNotFound(error: unknown): error is NodeJS.ErrnoException {

@@ -27,6 +27,10 @@ export const RECOVERY_TABLES = [
   "security_audit_events",
   "machine_request_receipts",
   "machine_rate_limit_windows",
+  "cli_device_authorizations",
+  "cli_device_issuance_rate_windows",
+  "cli_device_decision_rate_windows",
+  "cli_access_sessions",
   "workload_principals",
   "workload_capability_grants",
   "workload_identity_audit_events",
@@ -170,7 +174,12 @@ export function compareRecoveryFingerprints(
     ) {
       throw new Error(`Recovery fingerprint mismatch for ${table}`);
     }
-    return { table, rowCount: targetValue.rowCount, matched: true as const };
+    return {
+      table,
+      rowCount: targetValue.rowCount,
+      sha256: targetValue.sha256,
+      matched: true as const
+    };
   });
 }
 
