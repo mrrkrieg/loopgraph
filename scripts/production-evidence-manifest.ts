@@ -17,7 +17,7 @@ const projectKeySchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
 const originSchema = z.string().url();
 
 const stagingReceiptSchema = z.object({
-  schemaVersion: z.literal("staging-validation/v3"),
+  schemaVersion: z.literal("staging-validation/v4"),
   targetOrigin: originSchema,
   organizationId: z.string().uuid(),
   projectKey: projectKeySchema,
@@ -27,11 +27,26 @@ const stagingReceiptSchema = z.object({
     headHash: hashSchema
   }).strict(),
   results: z.array(z.object({
-    name: z.enum(["readiness", "operational_metrics", "audit_integrity"]),
-    status: z.number().int().min(200).max(299),
+    name: z.enum([
+      "readiness",
+      "operational_metrics",
+      "audit_integrity",
+      "unauthenticated_user_denial",
+      "cross_tenant_user_denial",
+      "suspended_user_denial",
+      "user_api_quota_saturation"
+    ]),
+    status: z.number().int().min(100).max(599),
     ok: z.literal(true),
     detail: z.string().min(1).max(1024)
-  }).strict()).length(3)
+  }).strict()).length(7),
+  quotaEvidence: z.object({
+    bucket: z.literal("admin"),
+    limit: z.number().int().min(1).max(10),
+    allowedRequests: z.number().int().min(1).max(10),
+    deniedStatus: z.literal(429),
+    retryAfterSeconds: z.number().int().min(1).max(30)
+  }).strict()
 }).strict();
 
 const marketplaceReceiptSchema = z.object({
@@ -214,9 +229,29 @@ export function buildProductionEvidenceManifest(
 
   requireExactNames(
     staging.results.map((result) => result.name),
-    ["readiness", "operational_metrics", "audit_integrity"],
+    [
+      "readiness",
+      "operational_metrics",
+      "audit_integrity",
+      "unauthenticated_user_denial",
+      "cross_tenant_user_denial",
+      "suspended_user_denial",
+      "user_api_quota_saturation"
+    ],
     "Staging validation"
   );
+  requireExactStatuses(staging.results, {
+    readiness: 200,
+    operational_metrics: 200,
+    audit_integrity: 200,
+    unauthenticated_user_denial: 401,
+    cross_tenant_user_denial: 403,
+    suspended_user_denial: 403,
+    user_api_quota_saturation: 429
+  });
+  if (staging.quotaEvidence.allowedRequests !== staging.quotaEvidence.limit) {
+    throw new Error("Staging quota evidence did not consume one exact configured window");
+  }
   requireExactNames(
     marketplace.checks.map((check) => check.name),
     [
@@ -308,7 +343,9 @@ export function buildProductionEvidenceManifest(
     staging: descriptor(staging, staging.checkedAt, {
       auditHeadSequence: staging.auditCheckpoint.headSequence,
       auditHeadHash: staging.auditCheckpoint.headHash,
-      checks: staging.results.length
+      checks: staging.results.length,
+      quotaBucket: staging.quotaEvidence.bucket,
+      quotaLimit: staging.quotaEvidence.limit
     }),
     marketplace: descriptor(marketplace, marketplace.checkedAt, {
       checks: marketplace.checks.length,
@@ -444,6 +481,15 @@ function requireExactNames(actual: string[], expected: string[], label: string) 
     new Set(actual).size !== actual.length ||
     expected.some((name) => !actual.includes(name))
   ) throw new Error(`${label} omitted or duplicated a required control`);
+}
+
+function requireExactStatuses(
+  results: Array<{ name: string; status: number }>,
+  expected: Record<string, number>
+) {
+  if (results.some((result) => expected[result.name] !== result.status)) {
+    throw new Error("Staging validation returned an unexpected control status");
+  }
 }
 
 async function readJsonReceipt(name: string) {
