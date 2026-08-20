@@ -54,6 +54,8 @@ Installation is content-bound by an `AppInstallPlan` digest and committed atomic
 
 Marketplace maturity is derived from recorded evidence, not publisher claims. Every marketplace-ready app must cover the happy path, missing context, exclusions, duplicates, ambiguity, low confidence, unavailable connectors, missing fields, approval gates, customer-facing actions, missing outcomes, retries/idempotency, and upgrade/rollback.
 
+The App detail contract is compiled from the selected immutable artifact rather than maintained as separate marketing content. It exposes the accountable audience, problem statement, Hermes summary, loops, expected outcome artifacts, setup questions, permission boundaries, compatible presets, typed graph, explicit limitations, maturity, version history, and optional packaged changelog. A synthetic preview is available only when evaluation suites exist, and a sample-data preview only when fixtures exist. Historical read-only replay additionally requires an installed App and a passing connection-readiness check; availability never implies provider-write authority or production value proof.
+
 Synthetic conformance evaluates the declared fixture through the compiled routing contract and policy surface; referencing an existing fixture or loop ID alone is not a passing test. Historical replay accepts only a bounded normalized dataset:
 
 - no more than 500 events;

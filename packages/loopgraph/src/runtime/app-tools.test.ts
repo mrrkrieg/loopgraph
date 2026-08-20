@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -81,6 +81,7 @@ describe("shared Loopgraph App tools", () => {
     const preview = await callLoopgraphAppTool("loopgraph_app_preview", { projectRoot, packRoot: initialized.packRoot }) as { status: string; providerWrites: number; scenarios: unknown[] };
     expect(preview).toMatchObject({ status: "passed", providerWrites: 0 });
     expect(preview.scenarios).toHaveLength(13);
+    await writeFile(path.join(initialized.packRoot, "CHANGELOG.md"), `# Changelog\n\n${"safe release note\n".repeat(5_000)}`);
     const validation = await callLoopgraphAppTool("loopgraph_app_validate", { projectRoot, packRoot: initialized.packRoot }) as { ok: boolean };
     expect(validation.ok).toBe(true);
     const key = await callLoopgraphAppTool("loopgraph_app_publisher_key_generate", {
@@ -98,6 +99,12 @@ describe("shared Loopgraph App tools", () => {
     }) as { sourceId: string };
     const sources = await callLoopgraphAppTool("loopgraph_marketplace_sources_get", { projectRoot }) as { sources: Array<{ id: string }> };
     expect(sources.sources.map((source) => source.id)).toContain(published.sourceId);
+    const detail = await callLoopgraphAppTool("loopgraph_app_get", {
+      projectRoot,
+      appId: "acme.product.product-learning"
+    }) as { changelog?: string };
+    expect(Buffer.byteLength(detail.changelog ?? "", "utf8")).toBeLessThan(66 * 1024);
+    expect(detail.changelog).toMatch(/Changelog truncated to 64 KiB/);
   });
 
   it("discovers official apps and returns an immutable app detail contract", async () => {
@@ -118,9 +125,20 @@ describe("shared Loopgraph App tools", () => {
       selectedVersion: { version: string; digest: string };
       provenance: { verified: boolean };
       manifest: { metadata: { id: string } };
+      audience: { department: string; ownerRole: string; reviewRoles: string[] };
+      problemSolved: string;
       loops: unknown[];
       skills: unknown[];
       setupQuestions: unknown[];
+      sampleOutputs: Array<{ loopId: string; loopName: string; metric?: string }>;
+      limitations: string[];
+      previewAvailability: {
+        synthetic: boolean;
+        sampleDataset: boolean;
+        historicalReadOnlyRequiresInstallation: boolean;
+      };
+      versionHistory: Array<{ version: string; digest: string; maturity: string; sourceId: string }>;
+      changelog?: string;
       evaluationSummary: { scenarios: number };
       graphPreview: { nodes: Array<{ type: string }> };
     };
@@ -128,9 +146,25 @@ describe("shared Loopgraph App tools", () => {
     expect(detail.selectedVersion.version).toBe("1.0.0");
     expect(detail.selectedVersion.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(detail.provenance.verified).toBe(true);
+    expect(detail.audience).toMatchObject({ department: "sales", ownerRole: "sales_operations" });
+    expect(detail.audience.reviewRoles).toContain("sales_manager");
+    expect(detail.problemSolved).toMatch(/inbound lead/i);
     expect(detail.loops).toHaveLength(6);
     expect(detail.skills).toHaveLength(4);
     expect(detail.setupQuestions).toHaveLength(10);
+    expect(detail.sampleOutputs.length).toBeGreaterThanOrEqual(6);
+    expect(detail.sampleOutputs.some((output) => output.loopId.includes("lead-qualification") && output.metric)).toBe(true);
+    expect(detail.limitations).toHaveLength(4);
+    expect(detail.limitations.join(" ")).toMatch(/do not prove production business value/i);
+    expect(detail.previewAvailability).toEqual({
+      synthetic: true,
+      sampleDataset: true,
+      historicalReadOnlyRequiresInstallation: true
+    });
+    expect(detail.versionHistory).toHaveLength(1);
+    expect(detail.versionHistory[0]).toMatchObject({ version: "1.0.0", maturity: "tested", sourceId: "loopgraph-official" });
+    expect(detail.versionHistory[0]?.digest).toBe(detail.selectedVersion.digest);
+    expect(detail.changelog).toMatch(/Initial six-loop Sales application/);
     expect(detail.evaluationSummary.scenarios).toBe(14);
     expect(detail.graphPreview.nodes.some((node) => node.type === "app")).toBe(true);
   });

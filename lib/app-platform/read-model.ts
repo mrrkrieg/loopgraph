@@ -133,6 +133,12 @@ export type MarketplaceAppDetail = {
     trustPolicy: "official_only" | "signed" | "explicit_local";
   };
   graphPreview: AppGraphPreview;
+  audience: {
+    department: MarketplaceApp["department"];
+    ownerRole: string;
+    reviewRoles: string[];
+  };
+  problemSolved: string;
   loops: Array<{
     id: string;
     name: string;
@@ -143,6 +149,30 @@ export type MarketplaceAppDetail = {
   }>;
   skills: AppSkillDefinition[];
   setupQuestions: AppSetupDefinition["questions"];
+  sampleOutputs: Array<{
+    id: string;
+    loopId: string;
+    loopName: string;
+    metric?: string;
+    description?: string;
+    direction?: string;
+  }>;
+  limitations: string[];
+  previewAvailability: {
+    synthetic: boolean;
+    sampleDataset: boolean;
+    historicalReadOnlyRequiresInstallation: true;
+  };
+  versionHistory: Array<{
+    version: string;
+    digest: string;
+    publishedAt: string;
+    maturity: MarketplaceAppVersion["maturity"];
+    deprecated: boolean;
+    deprecationMessage?: string;
+    sourceId: string;
+  }>;
+  changelog?: string;
   evaluationSummary: {
     suites: number;
     scenarios: number;
@@ -174,7 +204,11 @@ export type InstalledAppDiff = {
   updateAvailable?: { version: string; artifactDigest: string };
 };
 
-export type MarketplaceAppDetailView = MarketplaceAppDetail & {
+export type MarketplaceAppDetailView = Omit<MarketplaceAppDetail, "previewAvailability"> & {
+  previewAvailability: MarketplaceAppDetail["previewAvailability"] & {
+    historicalReadOnly: boolean;
+    historicalReason: string;
+  };
   installation?: WorkspaceAppInstallation;
   readiness?: AppReadiness;
 };
@@ -250,12 +284,23 @@ export async function getMarketplaceAppDetailView(
     getInstalledAppsViewData(projectRoot)
   ]);
   const installation = installed.installations.find((candidate) => candidate.appId === detail.app.id);
+  const readiness = installation
+    ? installed.readiness.find((candidate) => candidate.installationId === installation.id)
+    : undefined;
+  const connected = readiness?.checks.some((check) => check.category === "connection" && check.status === "pass") ?? false;
   return {
     ...detail,
+    previewAvailability: {
+      ...detail.previewAvailability,
+      historicalReadOnly: Boolean(installation && connected),
+      historicalReason: !installation
+        ? "Install the App before selecting a bounded historical dataset."
+        : connected
+          ? "Available with an explicitly approved date range and read-only event limit; provider writes remain blocked."
+          : "Connect the required read capabilities before selecting historical evidence."
+    },
     installation,
-    readiness: installation
-      ? installed.readiness.find((candidate) => candidate.installationId === installation.id)
-      : undefined
+    readiness
   };
 }
 

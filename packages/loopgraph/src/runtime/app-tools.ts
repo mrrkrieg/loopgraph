@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
@@ -60,6 +60,8 @@ const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_install_apply",
   "loopgraph_app_field_mappings_get"
 ]);
+
+const MAX_MARKETPLACE_CHANGELOG_BYTES = 64 * 1024;
 
 export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_company_blueprints_search",
@@ -646,6 +648,15 @@ export async function callLoopgraphAppTool(
         appEvalSuiteSchema.parse(await readPackDocument(loaded.root, entry))
       ))
     ]);
+    const loops = compiled.loopSpecs.map((spec) => ({
+      id: spec.metadata.id,
+      name: spec.metadata.name,
+      description: spec.metadata.description,
+      owner: spec.metadata.owner?.role,
+      trigger: `${spec.trigger.source}:${spec.trigger.event}`,
+      outcomes: Array.isArray(spec.studioExtension?.outcomes) ? spec.studioExtension.outcomes : []
+    }));
+    const approvalGatedPermissions = loaded.manifest.permissions.filter((permission) => permission.defaultPolicy !== "allowed");
     return {
       schemaVersion: "loopgraph-app-detail/v1alpha1",
       app,
@@ -653,16 +664,46 @@ export async function callLoopgraphAppTool(
       manifest: loaded.manifest,
       provenance,
       graphPreview: compiled.graph,
-      loops: compiled.loopSpecs.map((spec) => ({
-        id: spec.metadata.id,
-        name: spec.metadata.name,
-        description: spec.metadata.description,
-        owner: spec.metadata.owner?.role,
-        trigger: `${spec.trigger.source}:${spec.trigger.event}`,
-        outcomes: Array.isArray(spec.studioExtension?.outcomes) ? spec.studioExtension.outcomes : []
-      })),
+      audience: {
+        department: loaded.manifest.metadata.department,
+        ownerRole: loaded.manifest.ownership.defaultOwnerRole,
+        reviewRoles: loaded.manifest.ownership.reviewRoles
+      },
+      problemSolved: loaded.manifest.metadata.description,
+      loops,
       skills: compiled.skills,
       setupQuestions: setup.flatMap((definition) => definition.questions),
+      sampleOutputs: loops.flatMap((loop) => loop.outcomes.map((outcome, index) => ({
+        id: `${loop.id}.outcome.${index + 1}`,
+        loopId: loop.id,
+        loopName: loop.name,
+        metric: outcome.metric,
+        description: outcome.description,
+        direction: outcome.direction
+      }))),
+      limitations: [
+        "Synthetic and sample previews demonstrate declared behavior; they do not prove production business value.",
+        "Historical preview requires an installed App, healthy read connections, an explicitly bounded dataset, and no provider writes.",
+        approvalGatedPermissions.length > 0
+          ? `${approvalGatedPermissions.length} permission${approvalGatedPermissions.length === 1 ? " is" : "s are"} forbidden or approval-gated by default; installation never grants provider execution.`
+          : "Installation never grants provider execution; any future provider write requires separate promotion and policy approval.",
+        `The declared connector support is limited to ${loaded.manifest.presets.length} reviewed stack preset${loaded.manifest.presets.length === 1 ? "" : "s"}; other stacks require an explicit connector recipe and field review.`
+      ],
+      previewAvailability: {
+        synthetic: loaded.manifest.entrypoints.evals.length > 0,
+        sampleDataset: loaded.manifest.entrypoints.fixtures.length > 0,
+        historicalReadOnlyRequiresInstallation: true
+      },
+      versionHistory: app.versions.map((candidate) => ({
+        version: candidate.version,
+        digest: candidate.digest,
+        publishedAt: candidate.publishedAt,
+        maturity: candidate.maturity,
+        deprecated: candidate.deprecated,
+        deprecationMessage: candidate.deprecationMessage,
+        sourceId: candidate.source.sourceId
+      })),
+      changelog: await readOptionalBoundedText(path.join(loaded.root, "CHANGELOG.md")),
       evaluationSummary: {
         suites: evaluations.length,
         scenarios: evaluations.reduce((count, suite) => count + suite.scenarios.length, 0),
@@ -1076,6 +1117,24 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_test") return service.test(parsed.installationId, parsed.actor, options.now);
   if (name === "loopgraph_app_pause") return service.pause(parsed.installationId, parsed.actor);
   return service.resume(parsed.installationId, parsed.actor);
+}
+
+async function readOptionalBoundedText(filePath: string): Promise<string | undefined> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(filePath, "r");
+    const buffer = Buffer.alloc(MAX_MARKETPLACE_CHANGELOG_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, 0);
+    const text = buffer.subarray(0, Math.min(bytesRead, MAX_MARKETPLACE_CHANGELOG_BYTES)).toString("utf8");
+    return bytesRead > MAX_MARKETPLACE_CHANGELOG_BYTES
+      ? `${text}\n\n[Changelog truncated to 64 KiB for safe Marketplace display.]`
+      : text;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  } finally {
+    await handle?.close();
+  }
 }
 
 function remoteHostedArtifactRequest(

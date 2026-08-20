@@ -35,12 +35,27 @@ export default async function MarketplaceAppPage({ params }: { params: Promise<{
           <section className="rounded-xl border border-ink bg-ink p-6 text-white">
             <div className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-300">What Hermes will do</div>
             <p className="mt-3 max-w-3xl text-lg leading-8 text-white/85">{data.app.summary}</p>
-            <div className="mt-6 grid gap-3 sm:grid-cols-3">
+            <div className="mt-6 grid gap-3 sm:grid-cols-4">
               <HeroFact label="Loops" value={String(data.loops.length)} />
               <HeroFact label="Hermes skills" value={String(data.skills.length)} />
               <HeroFact label="Safety scenarios" value={String(data.evaluationSummary.scenarios)} />
+              <HeroFact label="Maturity" value={maturityLabel(data.selectedVersion.maturity)} />
             </div>
           </section>
+
+          <SectionCard title="Who it is for and the problem it solves" description="The App is an opinionated operating contract for a recurring business result, not a generic prompt bundle.">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border border-line bg-paper/40 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">Accountable team</div>
+                <div className="mt-2 text-lg font-semibold capitalize">{data.audience.department.replace(/_/g, " ")}</div>
+                <p className="mt-2 text-sm leading-6 text-ink/60">Owned by {data.audience.ownerRole.replace(/_/g, " ")}. Reviews: {data.audience.reviewRoles.map((role) => role.replace(/_/g, " ")).join(", ") || "configured during install"}.</p>
+              </div>
+              <div className="rounded-lg border border-line bg-paper/40 p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/45">Business problem</div>
+                <p className="mt-2 text-sm leading-6 text-ink/70">{data.problemSolved}</p>
+              </div>
+            </div>
+          </SectionCard>
 
           <SectionCard title="Included operating loops" description="Hermes routes one business problem into the clearest eligible loop, while related loops receive evidence only when the topology permits it.">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -54,6 +69,21 @@ export default async function MarketplaceAppPage({ params }: { params: Promise<{
               ))}
             </div>
           </SectionCard>
+
+          {data.sampleOutputs.length > 0 ? (
+            <SectionCard title="Sample outputs and outcome evidence" description="These are the declared artifacts and metrics the loops should produce. They are expectations for rehearsal and measurement, not claims of production value.">
+              <div className="grid gap-3 sm:grid-cols-2">
+                {data.sampleOutputs.map((output) => (
+                  <div className="rounded-lg border border-line bg-paper/40 p-4" key={output.id}>
+                    <div className="text-xs font-semibold uppercase tracking-[0.1em] text-signal">{output.loopName}</div>
+                    <h3 className="mt-2 font-semibold">{output.metric?.replace(/_/g, " ") ?? output.description ?? "Measured loop outcome"}</h3>
+                    {output.description ? <p className="mt-2 text-sm leading-6 text-ink/60">{output.description}</p> : null}
+                    {output.direction ? <div className="mt-3 text-xs text-ink/45">Desired direction · {output.direction}</div> : null}
+                  </div>
+                ))}
+              </div>
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Company graph preview" description="The signed pack defines the company objects, permitted supporting routes, and learning returns. Hermes remains the event router and may fan out only across declared supporting edges.">
             <GraphPreview edges={data.graphPreview.edges} nodes={data.graphPreview.nodes} />
@@ -88,12 +118,38 @@ export default async function MarketplaceAppPage({ params }: { params: Promise<{
               </table>
             </div>
           </SectionCard>
+
+          <SectionCard title="Preview, proof, and limitations" description="A preview can show declared behavior. Only observed outcomes from a connected installation can establish ongoing value.">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <AvailabilityCard available={data.previewAvailability.synthetic} label="Synthetic preview" detail="Run every deterministic routing and safety scenario with writes blocked." />
+              <AvailabilityCard available={data.previewAvailability.sampleDataset} label="Sample dataset" detail="Use the declared redacted fixtures to inspect expected versus actual decisions." />
+              <AvailabilityCard available={data.previewAvailability.historicalReadOnly} label="Historical replay" detail={data.previewAvailability.historicalReason} />
+            </div>
+            <ul className="mt-5 space-y-2 text-sm leading-6 text-ink/60">
+              {data.limitations.map((limitation) => <li className="flex gap-2" key={limitation}><span aria-hidden="true" className="text-signal">•</span><span>{limitation}</span></li>)}
+            </ul>
+          </SectionCard>
+
+          <SectionCard title="Version history" description="Every version is immutable and identified by its exact digest and source. Deprecated versions remain visible as history but are not selected for new installs.">
+            <div className="divide-y divide-line">
+              {data.versionHistory.map((version) => (
+                <div className="grid gap-2 py-4 sm:grid-cols-[7rem_minmax(0,1fr)_10rem] sm:items-center" key={`${version.version}:${version.digest}:${version.sourceId}`}>
+                  <div><div className="font-semibold">v{version.version}</div><div className="text-xs text-ink/45">{maturityLabel(version.maturity)}</div></div>
+                  <div className="font-mono text-xs text-ink/55">{version.digest.slice(0, 24)}…<div className="mt-1 font-sans">Source · {version.sourceId}</div></div>
+                  <div className="text-xs text-ink/45 sm:text-right">{new Date(version.publishedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}{version.deprecated ? <div className="mt-1 font-semibold text-signal">Deprecated</div> : null}</div>
+                  {version.deprecationMessage ? <p className="text-sm text-ink/60 sm:col-span-3">{version.deprecationMessage}</p> : null}
+                </div>
+              ))}
+            </div>
+            {data.changelog ? <pre className="mt-5 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-paper/50 p-4 font-sans text-sm leading-6 text-ink/65">{data.changelog}</pre> : null}
+          </SectionCard>
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
           <section className="rounded-xl border border-line bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Version</span><span className="font-mono text-xs">v{data.selectedVersion.version}</span></div>
             <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Publisher</span><span className="text-sm font-semibold">{data.app.publisher.name}{data.app.publisher.verified ? " ✓" : ""}</span></div>
+            <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Maturity</span><span className="text-sm font-semibold">{maturityLabel(data.selectedVersion.maturity)}</span></div>
             <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Source</span><span className="truncate font-mono text-xs">{data.provenance.sourceId}</span></div>
             {data.provenance.sourceRef ? <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Commit</span><span className="font-mono text-xs">{data.provenance.sourceRef.slice(0, 12)}</span></div> : null}
             <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Artifact</span><span className="font-mono text-xs">{data.provenance.verified ? "verified" : "unverified"}</span></div>
@@ -123,6 +179,14 @@ export default async function MarketplaceAppPage({ params }: { params: Promise<{
 
 function HeroFact({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border border-white/15 bg-white/5 p-4"><div className="text-2xl font-semibold">{value}</div><div className="mt-1 text-xs uppercase tracking-[0.12em] text-white/50">{label}</div></div>;
+}
+
+function AvailabilityCard({ available, label, detail }: { available: boolean; label: string; detail: string }) {
+  return <div className="rounded-lg border border-line bg-paper/40 p-4"><div className="flex items-center justify-between gap-3"><span className="font-semibold">{label}</span><span className={`rounded-full px-2 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.08em] ${available ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>{available ? "Available" : "Not ready"}</span></div><p className="mt-2 text-xs leading-5 text-ink/55">{detail}</p></div>;
+}
+
+function maturityLabel(value: string): string {
+  return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
 
 function GraphPreview({
