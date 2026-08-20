@@ -21,6 +21,7 @@ export const FIELD_MAPPING_PLAN_SCHEMA_VERSION = "loopgraph-field-mapping-plan/v
 export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1alpha1" as const;
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
+export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -38,6 +39,7 @@ export const APP_PLATFORM_INVARIANTS = [
   "Provider schema samples are connection-bound, short-lived, redacted-only, and never trusted as field mappings without confirmation.",
   "Workspace customization is stored as an overlay and never mutates the pinned artifact.",
   "Quality and maturity labels are derived from recorded evidence.",
+  "App mode activation requires a content-bound, unexpired, single-use human approval receipt.",
   "Low-level implementation details are hidden behind an explicit Advanced surface."
 ] as const;
 
@@ -1095,6 +1097,51 @@ export const appLifecycleReceiptSchema = z.object({
   createdAt: isoDateTimeSchema
 }).strict();
 
+const appActivatableModeSchema = z.enum(["shadow", "recommend", "execute_with_approval"]);
+
+export const appActivationApprovalReceiptSchema = z.object({
+  schemaVersion: z.literal(APP_ACTIVATION_APPROVAL_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  fromState: appInstallationStateSchema,
+  requestedMode: appActivatableModeSchema,
+  approvedBy: z.string().min(1).max(300),
+  reason: z.string().min(1).max(2000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  approvedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  approvalDigest: artifactDigestSchema,
+  consumedAt: isoDateTimeSchema.optional(),
+  consumedBy: z.string().min(1).max(300).optional()
+}).strict().superRefine((receipt, ctx) => {
+  if (Date.parse(receipt.expiresAt) <= Date.parse(receipt.approvedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Activation approval expiry must follow approval" });
+  }
+  if (receipt.approvalDigest !== canonicalAppDigest({
+    schemaVersion: receipt.schemaVersion,
+    id: receipt.id,
+    workspaceId: receipt.workspaceId,
+    installationId: receipt.installationId,
+    appId: receipt.appId,
+    artifactDigest: receipt.artifactDigest,
+    fromState: receipt.fromState,
+    requestedMode: receipt.requestedMode,
+    approvedBy: receipt.approvedBy,
+    reason: receipt.reason,
+    evidenceRefs: receipt.evidenceRefs,
+    approvedAt: receipt.approvedAt,
+    expiresAt: receipt.expiresAt
+  })) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approvalDigest"], message: "Activation approval digest does not match the approved content" });
+  }
+  if (Boolean(receipt.consumedAt) !== Boolean(receipt.consumedBy)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["consumedAt"], message: "Consumed activation approvals require both timestamp and actor" });
+  }
+});
+
 export type LoopPackManifest = z.infer<typeof loopPackManifestSchema>;
 export type LoopPackArtifact = z.infer<typeof loopPackArtifactSchema>;
 export type LoopPackSignature = z.infer<typeof loopPackSignatureSchema>;
@@ -1126,6 +1173,7 @@ export type AppOnboardingStage = z.infer<typeof appOnboardingStageSchema>;
 export type AppOnboardingJourney = z.infer<typeof appOnboardingJourneySchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
+export type AppActivationApprovalReceipt = z.infer<typeof appActivationApprovalReceiptSchema>;
 export type AppInstallationState = z.infer<typeof appInstallationStateSchema>;
 export type AppRolloutMode = z.infer<typeof appRolloutModeSchema>;
 
@@ -1158,7 +1206,8 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
     AppOnboardingJourney: zodToJsonSchema(appOnboardingJourneySchema, "AppOnboardingJourney") as Record<string, unknown>,
     AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>,
-    AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>
+    AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>,
+    AppActivationApprovalReceipt: zodToJsonSchema(appActivationApprovalReceiptSchema, "AppActivationApprovalReceipt") as Record<string, unknown>
   };
 }
 

@@ -36,6 +36,8 @@ The journey is derived, not separately mutable. After any connection, answer, fi
 
 Installation and shadow activation are deliberately separate approvals. Installation writes generated LoopSpecs and graph assets but cannot enable provider writes. Synthetic conformance runs with writes blocked. Shadow mode records real routing decisions while continuing to block provider writes.
 
+Activation is a two-step runtime protocol, not a prompt convention. After the accountable operator accepts an exact transition, `loopgraph_app_activation_approve` records a short-lived receipt bound to the workspace, installation, pinned artifact digest, current state, requested mode, approver, reason, and evidence. `loopgraph_app_activate` must consume that exact receipt. A receipt is rejected when it is missing, expired, already consumed, or no longer matches the artifact, state, installation, or requested mode.
+
 ## CLI
 
 ```bash

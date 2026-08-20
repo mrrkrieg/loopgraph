@@ -2,8 +2,10 @@ import { cp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
+  APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
+  appActivationApprovalReceiptSchema,
   appIdSchema,
   appEvalJudgmentSchema,
   appEvalRunSchema,
@@ -17,6 +19,7 @@ import {
   canonicalAppDigest,
   contentHash,
   type AppConfigField,
+  type AppActivationApprovalReceipt,
   type AppEvalRun,
   type AppEvalJudgment,
   type AppHistoricalReplayRequest,
@@ -87,6 +90,16 @@ export type ConfigureAppInstallationInput = {
   values: Record<string, unknown>;
   expectedConfigurationDigest: string;
   actor: string;
+  now?: Date;
+};
+
+export type ApproveAppActivationInput = {
+  installationId: string;
+  mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  approvedBy: string;
+  reason: string;
+  evidenceRefs?: string[];
+  expiresInSeconds?: number;
   now?: Date;
 };
 
@@ -1040,15 +1053,90 @@ export class AppInstallationService {
     };
   }
 
-  async activate(installationId: string, mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval" | "live">, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, mode, actor, (installation, registry) => {
+  async approveActivation(input: ApproveAppActivationInput): Promise<AppActivationApprovalReceipt> {
+    const now = input.now ?? new Date();
+    const expiresInSeconds = input.expiresInSeconds ?? 900;
+    if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 3600) {
+      throw new Error("Activation approval expiry must be between 60 and 3600 seconds");
+    }
+    return this.installationStore.withExclusiveUpdate(async (registry) => {
+      const installation = requireInstallation(registry, input.installationId);
+      assertLifecycleTransition(installation.state, input.mode, input.mode);
+      const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installation.id && run.status === "passed");
+      if (!latestPassed) throw new Error("App must pass conformance before activation");
+      if (input.mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
+        throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
+      }
+      const approvedAt = now.toISOString();
+      const expiresAt = new Date(now.getTime() + expiresInSeconds * 1000).toISOString();
+      const approvalContent = {
+        workspaceId: registry.workspaceId,
+        installationId: installation.id,
+        appId: installation.appId,
+        artifactDigest: installation.artifactDigest,
+        fromState: installation.state,
+        requestedMode: input.mode,
+        approvedBy: input.approvedBy,
+        reason: input.reason,
+        evidenceRefs: input.evidenceRefs ?? [],
+        approvedAt,
+        expiresAt
+      } as const;
+      const immutable = {
+        schemaVersion: APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
+        id: `activation-approval.${contentHash(approvalContent)}`,
+        ...approvalContent
+      } as const;
+      const receipt = appActivationApprovalReceiptSchema.parse({
+        ...immutable,
+        approvalDigest: canonicalAppDigest(immutable)
+      });
+      const nextRegistry: AppInstallationRegistry = {
+        ...registry,
+        revision: registry.revision + 1,
+        activationApprovals: [...registry.activationApprovals, receipt],
+        updatedAt: approvedAt
+      };
+      return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: receipt };
+    });
+  }
+
+  async activate(
+    installationId: string,
+    mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">,
+    approvalReceiptId: string,
+    actor: string,
+    now = new Date()
+  ): Promise<WorkspaceAppInstallation> {
+    return this.installationStore.withExclusiveUpdate(async (registry) => {
+      const installation = requireInstallation(registry, installationId);
+      const approval = registry.activationApprovals.find((candidate) => candidate.id === approvalReceiptId);
+      if (!approval) throw new Error(`App activation approval receipt not found: ${approvalReceiptId}`);
+      if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
+      if (Date.parse(approval.expiresAt) <= now.getTime()) throw new Error("App activation approval receipt has expired");
+      if (approval.workspaceId !== registry.workspaceId || approval.installationId !== installation.id || approval.appId !== installation.appId) {
+        throw new Error("App activation approval receipt belongs to another workspace, installation, or app");
+      }
+      if (approval.artifactDigest !== installation.artifactDigest || approval.fromState !== installation.state || approval.requestedMode !== mode) {
+        throw new Error("App activation approval receipt does not match the current artifact, state, and requested mode");
+      }
       const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installationId && run.status === "passed");
       if (!latestPassed) throw new Error("App must pass conformance before activation");
       if (mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
         throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
       }
-      if (mode === "live") throw new Error("Live activation requires a separate production promotion receipt and is not granted by installation");
-      return mode;
+      assertLifecycleTransition(installation.state, mode, mode);
+      const timestamp = now.toISOString();
+      const updated: WorkspaceAppInstallation = { ...installation, state: mode, mode, updatedAt: timestamp, failureReason: undefined };
+      const consumedApproval = appActivationApprovalReceiptSchema.parse({ ...approval, consumedAt: timestamp, consumedBy: actor });
+      const nextRegistry: AppInstallationRegistry = {
+        ...registry,
+        revision: registry.revision + 1,
+        installations: replaceInstallation(registry.installations, updated),
+        activationApprovals: registry.activationApprovals.map((candidate) => candidate.id === approval.id ? consumedApproval : candidate),
+        updatedAt: timestamp
+      };
+      return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: updated };
     });
   }
 

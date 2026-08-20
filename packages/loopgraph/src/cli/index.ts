@@ -681,16 +681,43 @@ for (const action of ["test", "pause", "resume"] as const) {
 }
 
 apps
-  .command("activate")
-  .description("Promote a tested app to shadow, recommend, or execute-with-approval")
+  .command("activation-approve")
+  .description("Approve one exact, short-lived non-live App mode transition")
   .argument("<installation-id>", "Installed app ID")
   .requiredOption("--mode <mode>", "shadow, recommend, or execute_with_approval")
+  .requiredOption("--approved-by <id>", "Accountable human approver identity")
+  .requiredOption("--reason <text>", "Why this exact transition is approved")
+  .option("--evidence <refs...>", "Evidence references reviewed by the approver", [])
+  .option("--expires-in <seconds>", "Receipt lifetime from 60 to 3600 seconds", "900")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { mode: string; approvedBy: string; reason: string; evidence: string[]; expiresIn: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_activation_approve", {
+      projectRoot: options.project,
+      installationId,
+      mode: options.mode,
+      approvedBy: options.approvedBy,
+      reason: options.reason,
+      evidenceRefs: options.evidence,
+      expiresInSeconds: Number.parseInt(options.expiresIn, 10),
+      workspaceId: options.workspace,
+      companyId: options.company
+    });
+  });
+
+apps
+  .command("activate")
+  .description("Consume an exact approval receipt to promote a tested app")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--mode <mode>", "shadow, recommend, or execute_with_approval")
+  .requiredOption("--approval-receipt <id>", "Unexpired receipt returned by apps activation-approve")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--workspace <id>", "Workspace ID")
   .option("--company <id>", "Company ID")
   .option("--actor <id>", "Accountable actor identity", "cli")
-  .action(async (installationId: string, options: { mode: string; project: string; workspace?: string; company?: string; actor: string }) => {
-    await printAppTool("loopgraph_app_activate", { projectRoot: options.project, installationId, mode: options.mode, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
+  .action(async (installationId: string, options: { mode: string; approvalReceipt: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_activate", { projectRoot: options.project, installationId, mode: options.mode, approvalReceiptId: options.approvalReceipt, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
   });
 
 apps

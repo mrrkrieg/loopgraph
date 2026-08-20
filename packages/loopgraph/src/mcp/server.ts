@@ -172,6 +172,7 @@ import {
 } from "../runtime/loop-tools";
 import { listLoopgraphLoops } from "../runtime/loop-materialization";
 import {
+  appActivationApproveInputSchema,
   appActivateInputSchema,
   companyBlueprintGetInputSchema,
   companyBlueprintsSearchInputSchema,
@@ -458,6 +459,7 @@ const toolInputSchemas = {
   loopgraph_app_rollback: appRollbackInputSchema,
   loopgraph_app_detach: appDetachInputSchema,
   loopgraph_app_uninstall: appUninstallInputSchema,
+  loopgraph_app_activation_approve: appActivationApproveInputSchema,
   loopgraph_app_activate: appActivateInputSchema,
   loopgraph_app_pause: appPauseInputSchema,
   loopgraph_app_resume: appResumeInputSchema,

@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   APP_INSTALL_SCHEMA_VERSION,
+  appActivationApprovalReceiptSchema,
   appAssetOwnershipSchema,
   appEvalRunSchema,
   appLifecycleReceiptSchema,
@@ -19,6 +20,7 @@ const appInstallationRegistrySchema = z.object({
   assets: z.array(appAssetOwnershipSchema),
   evaluations: z.array(appEvalRunSchema),
   lifecycleReceipts: z.array(appLifecycleReceiptSchema).default([]),
+  activationApprovals: z.array(appActivationApprovalReceiptSchema).default([]),
   updatedAt: z.string().datetime()
 }).strict();
 
@@ -60,6 +62,7 @@ export class FileAppInstallationStore {
         assets: [],
         evaluations: [],
         lifecycleReceipts: [],
+        activationApprovals: [],
         updatedAt: new Date(0).toISOString()
       };
     }

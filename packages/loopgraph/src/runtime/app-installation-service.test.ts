@@ -146,7 +146,21 @@ describe("atomic app installation lifecycle", () => {
     expect(evaluation.writeBlocked).toBe(true);
     expect(evaluation.scenarios.length).toBeGreaterThanOrEqual(12);
 
-    const activated = await service.activate(applied.installation.id, "shadow", "admin-1");
+    const activationApproval = await service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "Conformance passed and shadow mode keeps provider writes blocked.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:07:00.000Z")
+    });
+    const activated = await service.activate(
+      applied.installation.id,
+      "shadow",
+      activationApproval.id,
+      "admin-1",
+      new Date("2026-08-08T12:08:00.000Z")
+    );
     expect(activated.state).toBe("shadow");
     expect(activated.mode).toBe("shadow");
     const readiness = await service.readiness(applied.installation.id);
@@ -154,6 +168,13 @@ describe("atomic app installation lifecycle", () => {
     expect(readiness.score).toBe(100);
 
     const registry = await new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(registry.activationApprovals).toContainEqual(expect.objectContaining({
+      id: activationApproval.id,
+      artifactDigest: applied.installation.artifactDigest,
+      fromState: "simulation_passed",
+      requestedMode: "shadow",
+      consumedBy: "admin-1"
+    }));
     expect(registry.installations).toHaveLength(1);
     expect(registry.installations[0].ownedAssets.every((asset) => asset.refCount === 1)).toBe(true);
     expect(registry.assets).toContainEqual(expect.objectContaining({
@@ -167,6 +188,68 @@ describe("atomic app installation lifecycle", () => {
       installationId: applied.installation.id
     }) as { installations: Array<{ workspaceId: string }> };
     expect(browserStyleStatus.installations[0].workspaceId).toBe("acme");
+  });
+
+  it("rejects missing, mismatched, expired, and replayed App activation approvals", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+    expect(evaluation.status).toBe("passed");
+
+    await expect(input.service.activate(
+      applied.installation.id,
+      "shadow",
+      "activation-approval.missing",
+      "admin-1",
+      new Date("2026-08-08T12:03:00.000Z")
+    )).rejects.toThrow("not found");
+
+    const approval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "Approve only the tested shadow transition.",
+      evidenceRefs: [evaluation.id],
+      expiresInSeconds: 60,
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    await expect(input.service.activate(
+      applied.installation.id,
+      "recommend",
+      approval.id,
+      "admin-1",
+      new Date("2026-08-08T12:03:30.000Z")
+    )).rejects.toThrow("does not match");
+    await expect(input.service.activate(
+      applied.installation.id,
+      "shadow",
+      approval.id,
+      "admin-1",
+      new Date("2026-08-08T12:04:00.000Z")
+    )).rejects.toThrow("expired");
+
+    const freshApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "Approve the exact tested shadow transition.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      freshApproval.id,
+      "admin-1",
+      new Date("2026-08-08T12:06:00.000Z")
+    );
+    await expect(input.service.activate(
+      applied.installation.id,
+      "shadow",
+      freshApproval.id,
+      "admin-1",
+      new Date("2026-08-08T12:06:30.000Z")
+    )).rejects.toThrow("already been consumed");
   });
 
   it("returns an explainable read-only plan when connections, mappings, and answers are missing", async () => {

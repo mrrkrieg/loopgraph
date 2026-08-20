@@ -89,6 +89,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_rollback",
   "loopgraph_app_detach",
   "loopgraph_app_uninstall",
+  "loopgraph_app_activation_approve",
   "loopgraph_app_activate",
   "loopgraph_app_pause",
   "loopgraph_app_resume",
@@ -297,7 +298,18 @@ export const appUninstallInputSchema = appInstallationActionInputSchema.extend({
 }).strict();
 export const appPauseInputSchema = appInstallationActionInputSchema;
 export const appResumeInputSchema = appInstallationActionInputSchema;
+export const appActivationApproveInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  installationId: z.string().min(1),
+  mode: z.enum(["shadow", "recommend", "execute_with_approval"]),
+  approvedBy: z.string().min(1).max(300),
+  reason: z.string().min(1).max(2000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  expiresInSeconds: z.number().int().min(60).max(3600).default(900)
+}).strict();
 export const appActivateInputSchema = appInstallationActionInputSchema.extend({
+  approvalReceiptId: z.string().min(1),
   mode: appRolloutModeSchema.refine((mode) => mode === "shadow" || mode === "recommend" || mode === "execute_with_approval", {
     message: "MCP activation supports shadow, recommend, or execute_with_approval; live requires a separate promotion receipt"
   })
@@ -369,7 +381,8 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_rollback", description: "Restore the exact prior installed revision and return to write-blocked conformance.", readOnly: false, idempotent: false, destructive: true },
   { name: "loopgraph_app_detach", description: "Pin a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app.", readOnly: false, idempotent: false, destructive: true },
   { name: "loopgraph_app_uninstall", description: "Remove only installation-owned runtime assets while retaining shared company resources and evidence.", readOnly: false, idempotent: false, destructive: true },
-  { name: "loopgraph_app_activate", description: "Promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_activation_approve", description: "Record an accountable, short-lived, content-bound approval for one exact non-live App mode transition.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_activate", description: "Consume a matching one-time approval receipt to promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_pause", description: "Pause an installed app without deleting shared connectors, mappings, context, entities, or evidence.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_resume", description: "Resume a paused app at its last safe non-live rollout mode.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_publisher_key_generate", description: "Generate a project-confined Ed25519 publisher key; return only the public trust material and keep the private key mode-0600.", readOnly: false, idempotent: false, destructive: false },
@@ -803,6 +816,7 @@ export async function callLoopgraphAppTool(
         installation,
         readiness: await service.readiness(installation.id, options.now),
         evaluations: registry.evaluations,
+        activationApprovals: registry.activationApprovals,
         now: options.now
       });
     }
@@ -1009,9 +1023,38 @@ export async function callLoopgraphAppTool(
       now: options.now
     });
   }
+  if (name === "loopgraph_app_activation_approve") {
+    const approval = appActivationApproveInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const receipt = await service.approveActivation({
+      installationId: approval.installationId,
+      mode: approval.mode,
+      approvedBy: approval.approvedBy,
+      reason: approval.reason,
+      evidenceRefs: approval.evidenceRefs,
+      expiresInSeconds: approval.expiresInSeconds,
+      now: options.now
+    });
+    return {
+      receipt,
+      nextAction: {
+        toolName: "loopgraph_app_activate",
+        input: {
+          installationId: approval.installationId,
+          mode: approval.mode,
+          approvalReceiptId: receipt.id
+        }
+      }
+    };
+  }
   if (name === "loopgraph_app_activate") {
     const activation = appActivateInputSchema.parse({ ...raw, projectRoot, ...identity });
-    return service.activate(activation.installationId, activation.mode as "shadow" | "recommend" | "execute_with_approval", activation.actor);
+    return service.activate(
+      activation.installationId,
+      activation.mode as "shadow" | "recommend" | "execute_with_approval",
+      activation.approvalReceiptId,
+      activation.actor,
+      options.now
+    );
   }
   const parsed = appInstallationActionInputSchema.parse({ ...raw, projectRoot, ...identity });
   if (name === "loopgraph_app_test") return service.test(parsed.installationId, parsed.actor, options.now);

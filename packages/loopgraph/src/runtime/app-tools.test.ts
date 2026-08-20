@@ -43,6 +43,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_rollback",
       "loopgraph_app_detach",
       "loopgraph_app_uninstall",
+      "loopgraph_app_activation_approve",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
       "loopgraph_app_resume",
@@ -456,15 +457,41 @@ describe("shared Loopgraph App tools", () => {
     expect(activate).toMatchObject({
       stage: "activate_shadow",
       nextAction: {
-        toolName: "loopgraph_app_activate",
+        toolName: "loopgraph_app_activation_approve",
         requiresHumanConfirmation: true,
         input: { installationId: applied.installation.id, mode: "shadow" }
+      }
+    });
+    const approval = await callLoopgraphAppTool("loopgraph_app_activation_approve", {
+      projectRoot,
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "sales-operations",
+      reason: "The write-blocked rehearsal passed and shadow routing is approved.",
+      evidenceRefs: ["operator-review:shadow"]
+    }) as { receipt: { id: string }; nextAction: { toolName: string; input: { approvalReceiptId: string } } };
+    expect(approval.nextAction).toMatchObject({
+      toolName: "loopgraph_app_activate",
+      input: { approvalReceiptId: approval.receipt.id }
+    });
+    const approvedJourney = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      installationId: applied.installation.id
+    }) as AppOnboardingJourney;
+    expect(approvedJourney).toMatchObject({
+      stage: "activate_shadow",
+      nextAction: {
+        toolName: "loopgraph_app_activate",
+        requiresHumanConfirmation: false,
+        input: { installationId: applied.installation.id, mode: "shadow", approvalReceiptId: approval.receipt.id }
       }
     });
     await callLoopgraphAppTool("loopgraph_app_activate", {
       projectRoot,
       installationId: applied.installation.id,
       mode: "shadow",
+      approvalReceiptId: approval.receipt.id,
       actor: "sales-operations"
     });
     const operating = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {

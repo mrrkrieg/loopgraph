@@ -1,6 +1,7 @@
 import {
   APP_ONBOARDING_SCHEMA_VERSION,
   appOnboardingJourneySchema,
+  type AppActivationApprovalReceipt,
   type AppEvalRun,
   type AppFieldMappingPlan,
   type AppInstallPlan,
@@ -25,6 +26,7 @@ type JourneyInput = {
   installation?: WorkspaceAppInstallation;
   readiness?: AppReadiness;
   evaluations?: AppEvalRun[];
+  activationApprovals?: AppActivationApprovalReceipt[];
   now?: Date;
 };
 
@@ -43,6 +45,7 @@ const STEP_LABELS: Array<{ id: StepId; label: string }> = [
 ];
 
 export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJourney {
+  const now = input.now ?? new Date();
   const evaluations = input.evaluations?.filter((run) =>
     !input.installation || run.installationId === input.installation.id
   ) ?? [];
@@ -58,6 +61,15 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     : latestReplay
       ? "failed" as const
       : "not_run" as const;
+  const pendingShadowApproval = input.installation
+    ? [...(input.activationApprovals ?? [])].reverse().find((approval) =>
+        approval.installationId === input.installation!.id &&
+        approval.artifactDigest === input.installation!.artifactDigest &&
+        approval.fromState === input.installation!.state &&
+        approval.requestedMode === "shadow" &&
+        !approval.consumedAt &&
+        Date.parse(approval.expiresAt) > now.getTime())
+    : undefined;
 
   const missingConfiguration = input.plan?.missingConfigurationKeys.filter((key) =>
     !key.startsWith("mapping:") && !key.startsWith("mapping_confirmation:")
@@ -128,7 +140,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     connectionGaps: connectionGaps.length,
     configurationGaps: missingConfiguration.length,
     mappingGaps: mappingGaps.length,
-    permissionGaps: permissionGaps.length
+    permissionGaps: permissionGaps.length,
+    activationApprovalReceiptId: pendingShadowApproval?.id
   });
   if (decision.stage === "resolve_test_failures") {
     blockers.push({
@@ -187,7 +200,7 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
         !input.installation || ["simulation", "shadow", "recommend"].includes(input.installation.mode)
     },
     nextAction: decision.nextAction,
-    generatedAt: (input.now ?? new Date()).toISOString()
+    generatedAt: now.toISOString()
   });
 }
 
@@ -200,6 +213,7 @@ function decideStage(input: {
   configurationGaps: number;
   mappingGaps: number;
   permissionGaps: number;
+  activationApprovalReceiptId?: string;
 }): {
   stage: AppOnboardingJourney["stage"];
   currentStep: StepId;
@@ -231,7 +245,9 @@ function decideStage(input: {
       return toolDecision("run_conformance", "test", "Run deterministic conformance with every provider write blocked.", "loopgraph_app_test", installationId!, false);
     }
     if (input.installation.state === "simulation_passed") {
-      return toolDecision("activate_shadow", "shadow", "Rehearsal passed. An accountable operator can now activate shadow routing with provider writes still blocked.", "loopgraph_app_activate", installationId!, true, { mode: "shadow" });
+      return input.activationApprovalReceiptId
+        ? toolDecision("activate_shadow", "shadow", "Shadow activation has an exact, unexpired approval receipt and is ready to be applied with provider writes still blocked.", "loopgraph_app_activate", installationId!, false, { mode: "shadow", approvalReceiptId: input.activationApprovalReceiptId })
+        : toolDecision("activate_shadow", "shadow", "Rehearsal passed. An accountable operator must approve the exact shadow transition before Hermes can activate it.", "loopgraph_app_activation_approve", installationId!, true, { mode: "shadow" });
     }
     if (["shadow", "recommend", "execute_with_approval", "live"].includes(input.installation.state)) {
       return {
