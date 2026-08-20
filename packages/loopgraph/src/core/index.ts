@@ -41,3 +41,4 @@ export * from "./entity-resolution";
 export * from "./graph-authoring";
 export * from "./app-platform";
 export * from "./app-pack-content";
+export * from "./department-pack";

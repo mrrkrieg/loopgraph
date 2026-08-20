@@ -16,6 +16,8 @@ afterEach(async () => {
 describe("shared Loopgraph App tools", () => {
   it("exposes the required marketplace and lifecycle surface", () => {
     expect(LOOPGRAPH_APP_TOOL_NAMES).toEqual([
+      "loopgraph_department_packs_search",
+      "loopgraph_department_pack_get",
       "loopgraph_marketplace_search",
       "loopgraph_app_get",
       "loopgraph_app_onboarding_get",
@@ -120,6 +122,40 @@ describe("shared Loopgraph App tools", () => {
     expect(detail.setupQuestions).toHaveLength(10);
     expect(detail.evaluationSummary.scenarios).toBe(14);
     expect(detail.graphPreview.nodes.some((node) => node.type === "app")).toBe(true);
+  });
+
+  it("returns curated Department Packs without installing or activating Apps", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-department-pack-tools-"));
+    temporaryDirectories.push(projectRoot);
+
+    const search = await callLoopgraphAppTool("loopgraph_department_packs_search", {
+      projectRoot,
+      query: "pipeline leads"
+    }) as { results: Array<{ pack: { id: string } }> };
+    expect(search.results[0]?.pack.id).toBe("loopgraph.department.sales");
+
+    const detail = await callLoopgraphAppTool("loopgraph_department_pack_get", {
+      projectRoot,
+      packId: "loopgraph.department.sales"
+    }) as {
+      applications: Array<{ app: { id: string }; installation?: unknown }>;
+      progress: { installed: number; total: number; complete: boolean };
+      nextAction: { action: string; tool: string; appId: string };
+    };
+    expect(detail.applications.map((entry) => entry.app.id)).toEqual([
+      "loopgraph.sales.qualify-route-inbound-leads",
+      "loopgraph.sales.find-recover-cold-deals"
+    ]);
+    expect(detail.applications.every((entry) => !entry.installation)).toBe(true);
+    expect(detail.progress).toEqual({ installed: 0, total: 2, complete: false });
+    expect(detail.nextAction).toMatchObject({
+      action: "onboard_app",
+      tool: "loopgraph_app_onboarding_get",
+      appId: "loopgraph.sales.qualify-route-inbound-leads"
+    });
+
+    const status = await callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as { installations: unknown[] };
+    expect(status.installations).toEqual([]);
   });
 
   it("keeps a clean local workspace empty until an exact plan is installed", async () => {

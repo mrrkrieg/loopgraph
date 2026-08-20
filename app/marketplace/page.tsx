@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { MarketplaceAppCard } from "@/components/apps/marketplace-app-card";
+import { DepartmentPackCard } from "@/components/apps/department-pack-card";
 import { PageHeader } from "@/components/page-header";
 import { getMarketplaceViewData } from "@/lib/app-platform/read-model";
 
@@ -53,13 +54,28 @@ export default async function MarketplacePage({ searchParams }: MarketplacePageP
 
       <div className="mt-6 flex flex-wrap items-center gap-2" aria-label="Department filters">
         <DepartmentLink active={!department} href={query ? `/marketplace?q=${encodeURIComponent(query)}` : "/marketplace"} label="All departments" />
-        {['sales', 'product', 'customer_success', 'marketing', 'engineering'].map((item) => {
+        {['product', 'sales', 'marketing', 'customer_success', 'engineering', 'ops_finance', 'hr_talent', 'legal_compliance', 'management'].map((item) => {
           const search = new URLSearchParams();
           if (query) search.set("q", query);
           search.set("department", item);
           return <DepartmentLink active={department === item} href={`/marketplace?${search.toString()}`} key={item} label={item.replace(/_/g, " ")} />;
         })}
       </div>
+
+      {data.departmentPacks.length > 0 ? (
+        <section className="mt-8">
+          <div className="flex items-baseline justify-between gap-4">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.16em] text-signal">Start with a complete department</div>
+              <h2 className="mt-1 text-xl font-semibold">Prebuilt Hermes topologies</h2>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-ink/55">Choose a Pack to see the ordered Apps, shared company context, and permitted evidence handoffs. Nothing is bulk-installed; Hermes onboards every App through its own governed journey.</p>
+            </div>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {data.departmentPacks.map((entry) => <DepartmentPackCard entry={entry} key={entry.pack.id} />)}
+          </div>
+        </section>
+      ) : null}
 
       <div className="mt-7 flex items-baseline justify-between gap-4">
         <div>

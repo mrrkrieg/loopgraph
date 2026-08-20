@@ -433,6 +433,38 @@ auth
   });
 
 apps
+  .command("departments")
+  .description("Search curated Department Pack topologies for Hermes by business outcome or department")
+  .argument("[query]", "Business outcome or Department Pack terms")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--department <department>", "Filter by official department")
+  .option("--limit <count>", "Maximum results", "20")
+  .action(async (query: string | undefined, options: { project: string; department?: string; limit: string }) => {
+    await printAppTool("loopgraph_department_packs_search", {
+      projectRoot: options.project,
+      query,
+      department: options.department,
+      limit: parsePositiveInteger(options.limit, "Department Pack result limit")
+    });
+  });
+
+apps
+  .command("department")
+  .description("Inspect one Department Pack, its Apps, topology, progress, and exact next onboarding action")
+  .argument("<pack-id>", "Department Pack ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .action(async (packId: string, options: { project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_department_pack_get", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      packId
+    });
+  });
+
+apps
   .command("search")
   .description("Search the local-first app marketplace by outcome, department, or capability")
   .argument("[query]", "Business outcome or app terms")

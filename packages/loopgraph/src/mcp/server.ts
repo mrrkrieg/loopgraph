@@ -173,6 +173,8 @@ import {
 import { listLoopgraphLoops } from "../runtime/loop-materialization";
 import {
   appActivateInputSchema,
+  departmentPackGetInputSchema,
+  departmentPacksSearchInputSchema,
   appGetInputSchema,
   appOnboardingGetInputSchema,
   appHistoricalReplayInputSchema,
@@ -427,6 +429,8 @@ const toolInputSchemas = {
   loopgraph_hermes_agent_heartbeat: hermesAgentHeartbeatInputSchema,
   loopgraph_hermes_execution_event_ingest: hermesExecutionEventIngestInputSchema,
   loopgraph_agent_operations_get: agentOperationsGetInputSchema,
+  loopgraph_department_packs_search: departmentPacksSearchInputSchema,
+  loopgraph_department_pack_get: departmentPackGetInputSchema,
   loopgraph_marketplace_search: marketplaceSearchInputSchema,
   loopgraph_app_get: appGetInputSchema,
   loopgraph_app_onboarding_get: appOnboardingGetInputSchema,

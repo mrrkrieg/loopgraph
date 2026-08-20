@@ -14,6 +14,7 @@ import {
   appUpdatePlanSchema,
   artifactDigestSchema,
   appSetupDefinitionSchema,
+  DepartmentTypeSchema,
   marketplaceCatalogSourceSchema,
   marketplaceAppSchema,
   providerSchemaFieldSchema,
@@ -43,6 +44,10 @@ import { PROVIDER_ONBOARDING_CATALOG } from "./provider-onboarding";
 import { HostedMarketplaceClient } from "./hosted-marketplace-client";
 import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
 import { deriveAppOnboardingJourney } from "./app-onboarding-journey";
+import {
+  getOfficialDepartmentPack,
+  searchOfficialDepartmentPacks
+} from "./department-pack-catalog";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
@@ -53,6 +58,8 @@ const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
 ]);
 
 export const LOOPGRAPH_APP_TOOL_NAMES = [
+  "loopgraph_department_packs_search",
+  "loopgraph_department_pack_get",
   "loopgraph_marketplace_search",
   "loopgraph_app_get",
   "loopgraph_app_onboarding_get",
@@ -111,6 +118,18 @@ const APP_PUBLISHER_TOOL_NAMES = new Set<LoopgraphAppToolName>([
 export type LoopgraphAppToolName = (typeof LOOPGRAPH_APP_TOOL_NAMES)[number];
 
 const projectSchema = z.object({ projectRoot: z.string().optional() }).strict();
+
+export const departmentPacksSearchInputSchema = projectSchema.extend({
+  query: z.string().max(500).optional(),
+  department: DepartmentTypeSchema.exclude(["custom"]).optional(),
+  limit: z.number().int().min(1).max(50).default(20)
+}).strict();
+
+export const departmentPackGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  packId: z.string().min(1)
+}).strict();
 
 export const marketplaceSearchInputSchema = projectSchema.extend({
   query: z.string().max(500).optional(),
@@ -306,6 +325,8 @@ export const marketplaceSourceAddInputSchema = projectSchema.extend({ source: ma
 export const marketplaceSourceRefreshInputSchema = projectSchema.extend({ sourceId: z.string().min(3).max(160) }).strict();
 
 export const loopgraphAppToolDefinitions = [
+  { name: "loopgraph_department_packs_search", description: "Search curated, read-only Department Pack topologies that group official Apps, shared context, and permitted cross-App handoffs for Hermes.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_department_pack_get", description: "Inspect one curated Department Pack, current per-App readiness, declared topology, and the exact next App onboarding action without bulk-installing or activating anything.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_marketplace_search", description: "Search available Loopgraph Apps by business outcome, department, capability, or maturity.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_get", description: "Inspect one app, immutable versions, modules, presets, permissions, capabilities, provenance, and graph intent.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_onboarding_get", description: "Return one state-derived, resumable App journey with only the unresolved questions, blockers, evidence, and exact safe next action for Hermes, CLI, or browser.", readOnly: true, idempotent: true, destructive: false },
@@ -375,6 +396,80 @@ export async function callLoopgraphAppTool(
     : options.hostedMarketplaceClient === null
       ? undefined
       : options.hostedMarketplaceClient ?? HostedMarketplaceClient.fromEnvironment();
+
+  if (name === "loopgraph_department_packs_search") {
+    const parsed = departmentPacksSearchInputSchema.parse({ ...raw, projectRoot });
+    const results = searchOfficialDepartmentPacks(parsed);
+    return {
+      schemaVersion: "loopgraph-department-pack-search/v1alpha1",
+      query: parsed.query,
+      department: parsed.department,
+      count: results.length,
+      results
+    };
+  }
+
+  if (name === "loopgraph_department_pack_get") {
+    const parsed = departmentPackGetInputSchema.parse({ ...raw, projectRoot });
+    const pack = getOfficialDepartmentPack(parsed.packId);
+    if (!pack) throw new Error(`Department Pack not found: ${parsed.packId}`);
+    const identity = await resolveIdentity(projectRoot, parsed.workspaceId, parsed.companyId);
+    const installationStore = new FileAppInstallationStore(
+      path.join(projectRoot, ".loopgraph", "apps"),
+      identity.workspaceId
+    );
+    const registry = await installationStore.read();
+    const service = new AppInstallationService(
+      marketplace,
+      projectRoot,
+      identity.workspaceId,
+      identity.companyId
+    );
+    const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
+    const applications = await Promise.all(orderedDefinitions.map(async (definition) => {
+      const app = await marketplace.getApp(definition.appId);
+      if (!app) throw new Error(`Official Department Pack App not found: ${definition.appId}`);
+      const installation = registry.installations.find((candidate) => candidate.appId === definition.appId);
+      return {
+        definition,
+        app,
+        installation,
+        readiness: installation ? await service.readiness(installation.id, options.now) : undefined
+      };
+    }));
+    const installedAppIds = new Set(applications.filter((entry) => entry.installation).map((entry) => entry.app.id));
+    const next = applications.find((entry) =>
+      !entry.installation && entry.definition.dependsOn.every((dependency) => installedAppIds.has(dependency))
+    );
+    return {
+      schemaVersion: "loopgraph-department-pack-detail/v1alpha1",
+      pack,
+      applications,
+      progress: {
+        installed: installedAppIds.size,
+        total: applications.length,
+        complete: installedAppIds.size === applications.length
+      },
+      nextAction: next
+        ? {
+            action: "onboard_app",
+            tool: "loopgraph_app_onboarding_get",
+            input: { appId: next.app.id, versionRange: "latest" },
+            appId: next.app.id,
+            reason: installedAppIds.size === 0
+              ? next.app.id === pack.defaultAppId
+                ? `Start with the Department Pack default App: ${next.app.name}.`
+                : `Start with the required foundation App ${next.app.name} before onboarding the default App.`
+              : `Continue with the next dependency-safe App: ${next.app.name}.`
+          }
+        : {
+            action: "operate",
+            tool: null,
+            input: null,
+            reason: "Every App in this Department Pack is installed. Continue each App's governed onboarding journey and operate only at its approved rollout mode."
+          }
+    };
+  }
 
   if (name === "loopgraph_marketplace_search") {
     const parsed = marketplaceSearchInputSchema.parse({ ...raw, projectRoot });

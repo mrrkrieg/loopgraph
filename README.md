@@ -189,6 +189,21 @@ Loopgraph Apps package one or more cooperating loops, Hermes skills, connector r
 
 Opinionated apps also declare a typed evidence topology in the signed pack: shared company objects, evidence inputs, produced evidence, learning returns, and the exact supporting-loop edges Hermes may use. A loop allowing multiple routes is not enough on its own—Hermes must select exactly one primary route, every supporting route must be eligible, and the primary loop must explicitly permit that supporting loop. The Marketplace preview and installed company graph are compiled from this same contract.
 
+### Start with a complete department
+
+Department Packs group the official Apps that commonly work together for Product, Sales, Marketing, Customer Success, Engineering, Operations & Finance, HR & Talent, Legal & Compliance, and Management. Each Pack declares an install order, shared company-context keys, shared logical capabilities, dependencies, and the only cross-App handoffs or evidence returns Hermes may consider.
+
+A Pack is intentionally not a bulk installer. Selecting one changes nothing. Hermes inspects the Pack, follows the prerequisite chain for its default App, and brings every App through the same governed onboarding journey and separate approval boundaries. This gives a company an opinionated topology without turning a template into authority.
+
+```bash
+# Explore the default topologies without changing the workspace
+npm run loopgraph -- apps departments
+npm run loopgraph -- apps departments "renewal risk"
+npm run loopgraph -- apps department loopgraph.department.customer-success
+```
+
+The Marketplace exposes the same service visually. See [Department Packs](docs/DEPARTMENT-PACKS.md) for the contract, current catalog, and extension rules.
+
 | Official app | Department | Business result |
 |---|---|---|
 | [Turn Customer Feedback Into Validated Product Problems](packs/official/product/turn-feedback-into-product-problems) | Product | Join feedback, usage, issue, and release evidence into validated problems and measurable release learning |

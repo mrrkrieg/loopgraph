@@ -12,6 +12,7 @@ import type {
   AppUpdatePlan,
   AppSetupDefinition,
   AppSkillDefinition,
+  DepartmentPack,
   LoopPackManifest,
   MarketplaceApp,
   MarketplaceAppVersion,
@@ -33,7 +34,33 @@ export type MarketplaceViewData = {
   department?: string;
   capability?: string;
   results: MarketplaceSearchEntry[];
+  departmentPacks: DepartmentPackSearchEntry[];
   installedCount: number;
+};
+
+export type DepartmentPackSearchEntry = {
+  pack: DepartmentPack;
+  score: number;
+  matchedTerms: string[];
+};
+
+export type DepartmentPackDetailView = {
+  schemaVersion: "loopgraph-department-pack-detail/v1alpha1";
+  pack: DepartmentPack;
+  applications: Array<{
+    definition: DepartmentPack["apps"][number];
+    app: MarketplaceApp;
+    installation?: WorkspaceAppInstallation;
+    readiness?: AppReadiness;
+  }>;
+  progress: { installed: number; total: number; complete: boolean };
+  nextAction: {
+    action: "onboard_app" | "operate";
+    tool: "loopgraph_app_onboarding_get" | null;
+    input: { appId: string; versionRange: string } | null;
+    appId?: string;
+    reason: string;
+  };
 };
 
 export type AppGraphPreview = {
@@ -126,7 +153,7 @@ export async function getMarketplaceViewData(input: {
   capability?: string;
 } = {}): Promise<MarketplaceViewData> {
   const projectRoot = getActiveLoopgraphProjectRoot();
-  const [search, installed] = await Promise.all([
+  const [search, departmentPacks, installed] = await Promise.all([
     callLoopgraphAppTool("loopgraph_marketplace_search", {
       projectRoot,
       query: input.query,
@@ -134,6 +161,12 @@ export async function getMarketplaceViewData(input: {
       capability: input.capability,
       limit: 50
     }) as Promise<{ results: Array<Omit<MarketplaceSearchEntry, "installation" | "readiness">> }>,
+    callLoopgraphAppTool("loopgraph_department_packs_search", {
+      projectRoot,
+      query: input.query,
+      department: input.department,
+      limit: 20
+    }) as Promise<{ results: DepartmentPackSearchEntry[] }>,
     getInstalledAppsViewData(projectRoot)
   ]);
   const installationByApp = new Map(installed.installations.map((installation) => [installation.appId, installation]));
@@ -141,6 +174,7 @@ export async function getMarketplaceViewData(input: {
   return {
     ...input,
     installedCount: installed.installations.length,
+    departmentPacks: departmentPacks.results,
     results: search.results.map((result) => {
       const installation = installationByApp.get(result.app.id);
       return {
@@ -150,6 +184,14 @@ export async function getMarketplaceViewData(input: {
       };
     })
   };
+}
+
+export async function getDepartmentPackViewData(packId: string): Promise<DepartmentPackDetailView> {
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  return callLoopgraphAppTool("loopgraph_department_pack_get", {
+    projectRoot,
+    packId
+  }) as Promise<DepartmentPackDetailView>;
 }
 
 export async function getMarketplaceAppDetailView(

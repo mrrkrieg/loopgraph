@@ -34,6 +34,13 @@ Moving a node is a layout-only transaction. Adding or connecting semantic nodes 
 
 When the user wants a complete business capability, search the Marketplace by outcome and inspect the selected App. Then call `loopgraph_app_onboarding_get` as the source of truth for the rest of the journey.
 
+When the user wants to start an entire department, asks what a company function can run, or needs several Apps to share context, call `loopgraph_department_packs_search` first. Inspect the selected Pack with `loopgraph_department_pack_get`, explain its ordered Apps, shared context, shared capabilities, and permitted evidence handoffs, then use only the returned exact next App action.
+
+- A Department Pack is a declarative topology, not a bulk installer. Never install or activate every App automatically.
+- Re-read `loopgraph_department_pack_get` after each App installation to derive the next dependency-safe App.
+- Every App still requires its own preset, connections, field mappings, company answers, exact install approval, conformance, and separate shadow approval.
+- Treat cross-App edges as permission to consider a handoff. They never authorize provider writes or override the receiving App's eligibility rules.
+
 - Present its declared stack presets when the stage is `choose_preset`.
 - Ask only the returned `questions`; do not repeat answers or invent missing company context.
 - Resolve only the returned connector, mapping, and permission blockers.
