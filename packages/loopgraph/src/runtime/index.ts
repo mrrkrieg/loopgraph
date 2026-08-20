@@ -113,6 +113,7 @@ export * from "./app-connector-service";
 export * from "./app-installation-store";
 export * from "./app-installation-service";
 export * from "./app-quality-engine";
+export * from "./app-onboarding-journey";
 export * from "./app-publisher-catalog";
 export * from "./app-publisher";
 export * from "./app-tools";

@@ -29,3 +29,15 @@ For every event determine: what happened; canonical company object; new problem 
 ## Graph changes
 
 Moving a node is a layout-only transaction. Adding or connecting semantic nodes creates a proposed change set. Never bypass design validation, approval, readiness checks, or promotion gates.
+
+## Installable company Apps
+
+When the user wants a complete business capability, search the Marketplace by outcome and inspect the selected App. Then call `loopgraph_app_onboarding_get` as the source of truth for the rest of the journey.
+
+- Present its declared stack presets when the stage is `choose_preset`.
+- Ask only the returned `questions`; do not repeat answers or invent missing company context.
+- Resolve only the returned connector, mapping, and permission blockers.
+- After every connection, answer, mapping, install, test, or lifecycle change, call `loopgraph_app_onboarding_get` again instead of guessing the next step.
+- Use only the exact `nextAction.toolName` and content-bound plan returned by the journey.
+- Stop whenever `requiresHumanConfirmation` is true. Installation and shadow activation are separate approval boundaries.
+- Conformance and historical replay remain write-blocked. A passing test never authorizes live provider work.

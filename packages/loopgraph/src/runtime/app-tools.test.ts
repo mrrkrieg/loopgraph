@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { connectorInstallationViewSchema } from "../core";
+import { connectorInstallationViewSchema, type AppOnboardingJourney } from "../core";
 import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
 import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
@@ -18,6 +18,7 @@ describe("shared Loopgraph App tools", () => {
     expect(LOOPGRAPH_APP_TOOL_NAMES).toEqual([
       "loopgraph_marketplace_search",
       "loopgraph_app_get",
+      "loopgraph_app_onboarding_get",
       "loopgraph_app_install_plan",
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
@@ -271,4 +272,143 @@ describe("shared Loopgraph App tools", () => {
     expect(installPlan.fieldMappingIds).toHaveLength(7);
     expect(installPlan.missingConfigurationKeys.filter((key) => key.startsWith("mapping"))).toEqual([]);
   });
+
+  it("drives one resumable journey from stack selection through shadow operation", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-onboarding-"));
+    temporaryDirectories.push(projectRoot);
+    const appId = "loopgraph.sales.qualify-route-inbound-leads";
+
+    const choose = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
+    }) as AppOnboardingJourney;
+    expect(choose).toMatchObject({
+      stage: "choose_preset",
+      nextAction: { kind: "choose_preset", requiresHumanConfirmation: true },
+      evidence: { providerWritesBlocked: true }
+    });
+    expect(choose.app.presets.map((preset) => preset.id)).toEqual([
+      "hubspot-gmail-slack",
+      "salesforce-outlook-teams"
+    ]);
+
+    const disconnected = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      presetId: "hubspot-gmail-slack"
+    }) as AppOnboardingJourney;
+    expect(disconnected.stage).toBe("connect_systems");
+    expect(disconnected.questions.length).toBeGreaterThan(0);
+    expect(disconnected.blockers.some((blocker) => blocker.kind === "connection")).toBe(true);
+
+    await callLoopgraphConnectionTool("loopgraph_connections_register", {
+      projectRoot,
+      id: "hubspot-production",
+      manifestId: "hubspot",
+      capabilityKeys: ["crm.read"],
+      grantedScopes: ["crm.objects.contacts.read", "crm.objects.companies.read"],
+      status: "connected",
+      environment: "live",
+      readPolicy: "read_only",
+      writePolicy: "approved_only"
+    });
+    const configuration = {
+      icpDefinition: { industries: ["software"], minimumEmployees: 50 },
+      exclusions: ["existing_customer", "employee"],
+      territories: { north_america: "sales-na" },
+      qualificationThreshold: { qualified: 80, review: 60 },
+      lifecycleStages: { new: "lead", qualified: "mql", accepted: "sal", disqualified: "other" }
+    };
+    const needsMappings = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration
+    }) as AppOnboardingJourney;
+    expect(needsMappings.stage).toBe("confirm_mappings");
+    expect(needsMappings.mappingPlan?.requirements.length).toBeGreaterThan(0);
+    for (const requirement of needsMappings.mappingPlan!.requirements) {
+      await callLoopgraphAppTool("loopgraph_app_field_mapping_confirm", {
+        projectRoot,
+        connectionId: requirement.connectionId,
+        objectType: requirement.objectType,
+        mappings: requirement.suggestions.filter((suggestion) => suggestion.providerField).map((suggestion) => ({
+          logicalField: suggestion.logicalField,
+          providerField: suggestion.providerField,
+          direction: "read",
+          confidence: suggestion.confidence
+        })),
+        actor: "sales-operations"
+      });
+    }
+
+    const review = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration
+    }) as AppOnboardingJourney;
+    expect(review).toMatchObject({
+      stage: "review_install",
+      blockers: [],
+      nextAction: {
+        kind: "call_tool",
+        toolName: "loopgraph_app_install_apply",
+        requiresHumanConfirmation: true
+      }
+    });
+    expect(review.plan).toBeDefined();
+    const applied = await callLoopgraphAppTool("loopgraph_app_install_apply", {
+      projectRoot,
+      plan: review.plan,
+      actor: "sales-operations"
+    }) as { installation: { id: string } };
+
+    const rehearse = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      installationId: applied.installation.id
+    }) as AppOnboardingJourney;
+    expect(rehearse).toMatchObject({
+      stage: "run_conformance",
+      nextAction: { toolName: "loopgraph_app_test", requiresHumanConfirmation: false }
+    });
+    const conformance = await callLoopgraphAppTool("loopgraph_app_test", {
+      projectRoot,
+      installationId: applied.installation.id,
+      actor: "hermes"
+    }) as { status: string; writeBlocked: boolean };
+    expect(conformance).toMatchObject({ status: "passed", writeBlocked: true });
+
+    const activate = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      installationId: applied.installation.id
+    }) as AppOnboardingJourney;
+    expect(activate).toMatchObject({
+      stage: "activate_shadow",
+      nextAction: {
+        toolName: "loopgraph_app_activate",
+        requiresHumanConfirmation: true,
+        input: { installationId: applied.installation.id, mode: "shadow" }
+      }
+    });
+    await callLoopgraphAppTool("loopgraph_app_activate", {
+      projectRoot,
+      installationId: applied.installation.id,
+      mode: "shadow",
+      actor: "sales-operations"
+    });
+    const operating = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      installationId: applied.installation.id
+    }) as AppOnboardingJourney;
+    expect(operating).toMatchObject({
+      stage: "operate",
+      progress: { completed: 7, total: 8 },
+      nextAction: { kind: "monitor", requiresHumanConfirmation: false },
+      evidence: { syntheticStatus: "passed", providerWritesBlocked: true }
+    });
+  }, 15_000);
 });

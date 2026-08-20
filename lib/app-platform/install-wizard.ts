@@ -1,13 +1,28 @@
-import type { AppInstallPlan, AppSetupDefinition, LoopPackManifest } from "loopgraph/core";
+import type { AppFieldMappingPlan, AppInstallPlan, AppOnboardingJourney, AppSetupDefinition, LoopPackManifest } from "loopgraph/core";
 
 export type InstallWizardQuestion = AppSetupDefinition["questions"][number];
 
 export type InstallWizardState = {
   stage: "configure" | "review";
   plan: AppInstallPlan;
+  mappingPlan: AppFieldMappingPlan;
+  journey: AppOnboardingProgressView;
+  unresolvedQuestionKeys: string[];
   error?: string;
   notice?: string;
 };
+
+export type AppOnboardingProgressView = Pick<AppOnboardingJourney, "stage" | "headline" | "progress" | "steps" | "nextAction">;
+
+export function appOnboardingProgressForView(journey: AppOnboardingJourney): AppOnboardingProgressView {
+  return {
+    stage: journey.stage,
+    headline: journey.headline,
+    progress: journey.progress,
+    steps: journey.steps,
+    nextAction: journey.nextAction
+  };
+}
 
 export type InstallWizardApp = {
   id: string;

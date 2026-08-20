@@ -19,6 +19,7 @@ import {
 import { SupabaseMarketplaceRegistryStore } from "@/lib/db/adapters/supabase-marketplace-registry-store";
 
 const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
   "loopgraph_connector_schema_record",
   "loopgraph_app_field_mappings_get",
@@ -28,6 +29,7 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
+  "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_field_mappings_get"
@@ -179,7 +181,7 @@ function isMissingMarketplaceArtifact(error: unknown) {
 }
 
 function hostedReadMayUseDeprecated(name: LoopgraphAppToolName) {
-  return name === "loopgraph_app_get" || name === "loopgraph_app_field_mappings_get";
+  return name === "loopgraph_app_get" || name === "loopgraph_app_onboarding_get" || name === "loopgraph_app_field_mappings_get";
 }
 
 function withoutCachedHostedVersions(entry: {

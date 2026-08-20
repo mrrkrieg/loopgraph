@@ -461,6 +461,36 @@ apps
   });
 
 apps
+  .command("onboard")
+  .description("Return the one resumable install journey, unresolved questions, blockers, and exact safe next action")
+  .argument("<app-id>", "Marketplace app ID")
+  .option("--preset <preset>", "Provider preset ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--version <range>", "Semantic version or range", "latest")
+  .option("--config <path>", "JSON object with confirmed installation answers")
+  .option("--mapping <ids...>", "Confirmed field mapping IDs")
+  .option("--module <ids...>", "Selected optional module IDs")
+  .option("--installation <id>", "Resume one installed app journey")
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .option("--actor <id>", "Accountable planner identity", "cli")
+  .action(async (appId: string, options: { project: string; preset?: string; version: string; config?: string; mapping?: string[]; module?: string[]; installation?: string; workspace?: string; company?: string; actor: string }) => {
+    await printAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      versionRange: options.version,
+      presetId: options.preset,
+      selectedModules: options.module,
+      configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : {},
+      fieldMappingIds: options.mapping,
+      installationId: options.installation,
+      actor: options.actor
+    });
+  });
+
+apps
   .command("plan")
   .description("Create a read-only exact install plan; missing connections, mappings, and answers are returned as blockers")
   .argument("<app-id>", "Marketplace app ID")

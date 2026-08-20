@@ -20,6 +20,7 @@ export const PROVIDER_SCHEMA_SNAPSHOT_VERSION = "loopgraph-provider-schema/v1alp
 export const FIELD_MAPPING_PLAN_SCHEMA_VERSION = "loopgraph-field-mapping-plan/v1alpha1" as const;
 export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1alpha1" as const;
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
+export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -935,6 +936,98 @@ export const appReadinessSchema = z.object({
   evidenceDerived: z.literal(true)
 }).strict();
 
+export const appOnboardingStageSchema = z.enum([
+  "choose_preset",
+  "answer_questions",
+  "connect_systems",
+  "confirm_mappings",
+  "review_install",
+  "run_conformance",
+  "resolve_test_failures",
+  "activate_shadow",
+  "operate",
+  "resume",
+  "unavailable"
+]);
+
+export const appOnboardingJourneySchema = z.object({
+  schemaVersion: z.literal(APP_ONBOARDING_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  app: z.object({
+    id: appIdSchema,
+    name: z.string().min(1).max(160),
+    version: appVersionSchema,
+    department: DepartmentTypeSchema,
+    presets: z.array(z.object({
+      id: appIdSchema,
+      name: z.string().min(1).max(160),
+      description: z.string().min(1).max(1000)
+    }).strict()).min(1),
+    presetId: appIdSchema.optional()
+  }).strict(),
+  installationId: appIdSchema.optional(),
+  stage: appOnboardingStageSchema,
+  headline: z.string().min(1).max(500),
+  progress: z.object({
+    completed: z.number().int().nonnegative(),
+    total: z.number().int().positive()
+  }).strict().superRefine((progress, ctx) => {
+    if (progress.completed > progress.total) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["completed"], message: "Completed onboarding steps cannot exceed total steps" });
+    }
+  }),
+  steps: z.array(z.object({
+    id: z.enum(["select", "connect", "configure", "map", "review", "test", "shadow", "operate"]),
+    label: z.string().min(1).max(120),
+    status: z.enum(["complete", "current", "pending", "blocked", "optional"]),
+    summary: z.string().min(1).max(500)
+  }).strict()).length(8),
+  questions: z.array(z.object({
+    key: z.string().min(1).max(160),
+    prompt: z.string().min(1).max(500),
+    why: z.string().min(1).max(1000),
+    valueType: z.enum(["string", "number", "boolean", "string_list", "object"]),
+    requirement: z.enum(["required", "optional"]),
+    confirmationRequired: z.boolean(),
+    currentValue: jsonValueSchema.optional()
+  }).strict()).max(20).default([]),
+  blockers: z.array(z.object({
+    kind: z.enum(["configuration", "connection", "mapping", "permission", "test", "lifecycle"]),
+    id: z.string().min(1).max(300),
+    summary: z.string().min(1).max(1000),
+    remediation: z.string().min(1).max(1000)
+  }).strict()).default([]),
+  plan: appInstallPlanSchema.optional(),
+  mappingPlan: appFieldMappingPlanSchema.optional(),
+  installation: workspaceAppInstallationSchema.optional(),
+  readiness: appReadinessSchema.optional(),
+  evidence: z.object({
+    syntheticStatus: z.enum(["not_run", "passed", "failed"]),
+    historicalReplayStatus: z.enum(["not_run", "passed", "failed"]),
+    providerWritesBlocked: z.boolean()
+  }).strict(),
+  nextAction: z.object({
+    kind: z.enum(["choose_preset", "answer_questions", "connect_providers", "confirm_mappings", "review_plan", "call_tool", "inspect_failures", "monitor", "none"]),
+    summary: z.string().min(1).max(1000),
+    toolName: z.string().min(1).max(160).optional(),
+    requiresHumanConfirmation: z.boolean(),
+    input: z.record(jsonValueSchema).optional()
+  }).strict().superRefine((action, ctx) => {
+    if (action.kind === "call_tool" && !action.toolName) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["toolName"], message: "Tool actions require an exact tool name" });
+    }
+  }),
+  generatedAt: isoDateTimeSchema
+}).strict().superRefine((journey, ctx) => {
+  const currentSteps = journey.steps.filter((step) => step.status === "current");
+  if (currentSteps.length !== 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["steps"], message: "An onboarding journey must have exactly one current step" });
+  }
+  if (journey.installation && journey.installation.id !== journey.installationId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["installationId"], message: "Installation identity does not match the onboarding journey" });
+  }
+});
+
 export const appUpdatePlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1029,6 +1122,8 @@ export type AppHistoricalReplayRequest = z.infer<typeof appHistoricalReplayReque
 export type AppEvalJudgment = z.infer<typeof appEvalJudgmentSchema>;
 export type AppPromotionRecommendation = z.infer<typeof appPromotionRecommendationSchema>;
 export type AppReadiness = z.infer<typeof appReadinessSchema>;
+export type AppOnboardingStage = z.infer<typeof appOnboardingStageSchema>;
+export type AppOnboardingJourney = z.infer<typeof appOnboardingJourneySchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
 export type AppInstallationState = z.infer<typeof appInstallationStateSchema>;
@@ -1061,6 +1156,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppEvalJudgment: zodToJsonSchema(appEvalJudgmentSchema, "AppEvalJudgment") as Record<string, unknown>,
     AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
+    AppOnboardingJourney: zodToJsonSchema(appOnboardingJourneySchema, "AppOnboardingJourney") as Record<string, unknown>,
     AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>,
     AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>
   };

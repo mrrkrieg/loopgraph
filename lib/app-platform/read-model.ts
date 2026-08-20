@@ -4,6 +4,7 @@ import type {
   AppEvalRun,
   AppFieldMappingPlan,
   AppInstallPlan,
+  AppOnboardingJourney,
   AppInstallationLock,
   AppLifecycleReceipt,
   AppPromotionRecommendation,
@@ -180,25 +181,22 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
   detail: MarketplaceAppDetail;
   plan: AppInstallPlan;
   mappingPlan: AppFieldMappingPlan;
+  journey: AppOnboardingJourney;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
-  const [detail, plan, mappingPlan] = await Promise.all([
+  const [detail, journey] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", { projectRoot, appId }) as Promise<MarketplaceAppDetail>,
-    callLoopgraphAppTool("loopgraph_app_install_plan", {
+    callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
       versionRange: "latest",
       presetId,
       configuration: {},
       actor: "loopgraph-browser"
-    }) as Promise<AppInstallPlan>,
-    callLoopgraphAppTool("loopgraph_app_field_mappings_get", {
-      projectRoot,
-      appId,
-      presetId
-    }) as Promise<AppFieldMappingPlan>
+    }) as Promise<AppOnboardingJourney>
   ]);
-  return { detail, plan, mappingPlan };
+  if (!journey.plan || !journey.mappingPlan) throw new Error("App onboarding journey did not return its exact plan and mapping requirements");
+  return { detail, plan: journey.plan, mappingPlan: journey.mappingPlan, journey };
 }
 
 export async function getInstalledAppViewData(installationId: string): Promise<{
@@ -211,6 +209,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   updatePlan?: AppUpdatePlan;
   lifecycleReceipts: AppLifecycleReceipt[];
   installedLoops: Array<{ id: string; name: string; path: string }>;
+  onboardingJourney: AppOnboardingJourney;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const installed = await callLoopgraphAppTool("loopgraph_app_install_status", {
@@ -220,7 +219,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   const installation = installed.installations[0];
   const readiness = installed.readiness[0];
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
-  const [detail, promotionRecommendation, diff] = await Promise.all([
+  const [detail, promotionRecommendation, diff, onboardingJourney] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", {
       projectRoot,
       appId: installation.appId,
@@ -233,7 +232,12 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     callLoopgraphAppTool("loopgraph_app_diff", {
       projectRoot,
       installationId
-    }) as Promise<InstalledAppDiff>
+    }) as Promise<InstalledAppDiff>,
+    callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId: installation.appId,
+      installationId
+    }) as Promise<AppOnboardingJourney>
   ]);
   const updatePlan = diff.updateAvailable
     ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
@@ -252,6 +256,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     diff,
     updatePlan,
     lifecycleReceipts: installed.lifecycleReceipts.filter((receipt) => receipt.installationId === installationId),
-    installedLoops: installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? []
+    installedLoops: installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? [],
+    onboardingJourney
   };
 }

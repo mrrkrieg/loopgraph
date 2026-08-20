@@ -17,6 +17,7 @@ import {
   marketplaceCatalogSourceSchema,
   marketplaceAppSchema,
   providerSchemaFieldSchema,
+  type AppFieldMappingPlan,
   type ConnectionInstance,
   type MarketplaceApp
 } from "../core";
@@ -41,9 +42,11 @@ import { inspectLoopgraphWorkspace } from "./workspace";
 import { PROVIDER_ONBOARDING_CATALOG } from "./provider-onboarding";
 import { HostedMarketplaceClient } from "./hosted-marketplace-client";
 import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
+import { deriveAppOnboardingJourney } from "./app-onboarding-journey";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
+  "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_field_mappings_get"
@@ -52,6 +55,7 @@ const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
 export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_marketplace_search",
   "loopgraph_app_get",
+  "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
@@ -120,6 +124,19 @@ export const marketplaceSearchInputSchema = projectSchema.extend({
 export const appGetInputSchema = projectSchema.extend({
   appId: z.string().min(1),
   version: z.string().min(1).optional()
+}).strict();
+
+export const appOnboardingGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  appId: z.string().min(1),
+  versionRange: z.string().min(1).default("latest"),
+  presetId: z.string().min(1).optional(),
+  selectedModules: z.array(z.string().min(1)).optional(),
+  configuration: z.record(z.unknown()).default({}),
+  fieldMappingIds: z.array(z.string().min(1)).optional(),
+  installationId: z.string().min(1).optional(),
+  actor: z.string().min(1).default("hermes")
 }).strict();
 
 export const appInstallPlanInputSchema = projectSchema.extend({
@@ -291,6 +308,7 @@ export const marketplaceSourceRefreshInputSchema = projectSchema.extend({ source
 export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_marketplace_search", description: "Search available Loopgraph Apps by business outcome, department, capability, or maturity.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_get", description: "Inspect one app, immutable versions, modules, presets, permissions, capabilities, provenance, and graph intent.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_onboarding_get", description: "Return one state-derived, resumable App journey with only the unresolved questions, blockers, evidence, and exact safe next action for Hermes, CLI, or browser.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
@@ -574,6 +592,81 @@ export async function callLoopgraphAppTool(
     return { schemaVersion: "loopgraph-field-mapping-confirmation/v1alpha1", connectionId: parsed.connectionId, objectType: parsed.objectType, mappings };
   }
   const service = new AppInstallationService(marketplace, projectRoot, identity.workspaceId, identity.companyId);
+  if (name === "loopgraph_app_onboarding_get") {
+    const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const installationStore = new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), parsed.workspaceId!);
+    const registry = await installationStore.read();
+    const installation = parsed.installationId
+      ? registry.installations.find((candidate) => candidate.id === parsed.installationId)
+      : registry.installations.find((candidate) => candidate.appId === parsed.appId);
+    if (parsed.installationId && !installation) throw new Error(`App installation not found: ${parsed.installationId}`);
+    if (installation && installation.appId !== parsed.appId) {
+      throw new Error(`Installation ${installation.id} does not belong to ${parsed.appId}`);
+    }
+    const version = await marketplace.resolveAppVersion(
+      parsed.appId,
+      installation?.version ?? parsed.versionRange
+    );
+    const loaded = await marketplace.getAppArtifact(parsed.appId, version.version, version.digest);
+    const app = await marketplace.getApp(parsed.appId);
+    if (!app) throw new Error(`Marketplace app not found: ${parsed.appId}`);
+    const setup = await Promise.all(loaded.manifest.entrypoints.setup.map(async (entry) =>
+      appSetupDefinitionSchema.parse(await readPackDocument(loaded.root, entry))
+    ));
+    if (installation) {
+      return deriveAppOnboardingJourney({
+        workspaceId: parsed.workspaceId!,
+        app,
+        selectedVersion: version,
+        manifest: loaded.manifest,
+        setupQuestions: setup.flatMap((definition) => definition.questions),
+        presetId: installation.presetId,
+        installation,
+        readiness: await service.readiness(installation.id, options.now),
+        evaluations: registry.evaluations,
+        now: options.now
+      });
+    }
+    const plan = parsed.presetId
+      ? await service.plan({
+          projectRoot,
+          workspaceId: parsed.workspaceId!,
+          companyId: parsed.companyId!,
+          appId: parsed.appId,
+          versionRange: parsed.versionRange,
+          presetId: parsed.presetId,
+          selectedModules: parsed.selectedModules,
+          connections: await appConnections(projectRoot, options.connections),
+          installValues: parsed.configuration,
+          fieldMappingIds: parsed.fieldMappingIds,
+          actor: parsed.actor,
+          now: options.now
+        })
+      : undefined;
+    const mappingPlan = parsed.presetId
+      ? await buildAppFieldMappingPlan({
+          marketplace,
+          projectRoot,
+          workspaceId: parsed.workspaceId!,
+          appId: parsed.appId,
+          version: version.version,
+          presetId: parsed.presetId,
+          connections: await appConnections(projectRoot, options.connections),
+          now: options.now
+        })
+      : undefined;
+    return deriveAppOnboardingJourney({
+      workspaceId: parsed.workspaceId!,
+      app,
+      selectedVersion: version,
+      manifest: loaded.manifest,
+      setupQuestions: setup.flatMap((definition) => definition.questions),
+      presetId: parsed.presetId,
+      plan,
+      mappingPlan,
+      now: options.now
+    });
+  }
   if (name === "loopgraph_app_install_plan") {
     const parsed = appInstallPlanInputSchema.parse({ ...raw, projectRoot, ...identity });
     return service.plan({
@@ -737,12 +830,14 @@ export async function callLoopgraphAppTool(
       now: options.now
     });
   }
+  if (name === "loopgraph_app_activate") {
+    const activation = appActivateInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.activate(activation.installationId, activation.mode as "shadow" | "recommend" | "execute_with_approval", activation.actor);
+  }
   const parsed = appInstallationActionInputSchema.parse({ ...raw, projectRoot, ...identity });
   if (name === "loopgraph_app_test") return service.test(parsed.installationId, parsed.actor, options.now);
   if (name === "loopgraph_app_pause") return service.pause(parsed.installationId, parsed.actor);
-  if (name === "loopgraph_app_resume") return service.resume(parsed.installationId, parsed.actor);
-  const activation = appActivateInputSchema.parse({ ...raw, projectRoot, ...identity });
-  return service.activate(activation.installationId, activation.mode as "shadow" | "recommend" | "execute_with_approval", activation.actor);
+  return service.resume(parsed.installationId, parsed.actor);
 }
 
 function remoteHostedArtifactRequest(
@@ -774,7 +869,7 @@ function remoteHostedArtifactRequest(
 }
 
 function remoteHostedReadMayUseDeprecated(name: LoopgraphAppToolName) {
-  return name === "loopgraph_app_get" || name === "loopgraph_app_field_mappings_get";
+  return name === "loopgraph_app_get" || name === "loopgraph_app_onboarding_get" || name === "loopgraph_app_field_mappings_get";
 }
 
 function withoutCachedHostedVersions(entry: {
@@ -904,7 +999,7 @@ async function buildAppFieldMappingPlan(input: {
   presetId: string;
   connections: ConnectionInstance[];
   now?: Date;
-}): Promise<unknown> {
+}): Promise<AppFieldMappingPlan> {
   const version = input.version
     ? await input.marketplace.resolveAppVersion(input.appId, input.version)
     : await input.marketplace.resolveAppVersion(input.appId, "latest");

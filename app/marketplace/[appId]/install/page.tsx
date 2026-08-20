@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { InstallWizard } from "@/components/apps/install-wizard";
 import { PageHeader } from "@/components/page-header";
 import { getAppInstallPlanViewData } from "@/lib/app-platform/read-model";
+import { appOnboardingProgressForView } from "@/lib/app-platform/install-wizard";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,8 @@ export default async function AppInstallPlanPage({
           questions: data.detail.setupQuestions
         }}
         initialPlan={data.plan}
+        initialJourney={appOnboardingProgressForView(data.journey)}
+        initialQuestionKeys={data.journey.questions.map((question) => question.key)}
         mappingPlan={data.mappingPlan}
       />
     </>

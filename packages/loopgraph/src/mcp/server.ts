@@ -174,6 +174,7 @@ import { listLoopgraphLoops } from "../runtime/loop-materialization";
 import {
   appActivateInputSchema,
   appGetInputSchema,
+  appOnboardingGetInputSchema,
   appHistoricalReplayInputSchema,
   appEvaluationLabelInputSchema,
   appConfigureInputSchema,
@@ -428,6 +429,7 @@ const toolInputSchemas = {
   loopgraph_agent_operations_get: agentOperationsGetInputSchema,
   loopgraph_marketplace_search: marketplaceSearchInputSchema,
   loopgraph_app_get: appGetInputSchema,
+  loopgraph_app_onboarding_get: appOnboardingGetInputSchema,
   loopgraph_app_install_plan: appInstallPlanInputSchema,
   loopgraph_app_install_apply: appInstallApplyInputSchema,
   loopgraph_app_install_status: appInstallStatusInputSchema,

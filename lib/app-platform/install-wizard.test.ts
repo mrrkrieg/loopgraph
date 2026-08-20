@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { configurationFromInstallForm, installPlanBlockersForView } from "./install-wizard";
+import { appOnboardingProgressForView, configurationFromInstallForm, installPlanBlockersForView } from "./install-wizard";
 
 describe("guided app installation", () => {
   it("parses typed setup answers without requiring YAML or JSON for ordinary fields", () => {
@@ -39,6 +39,29 @@ describe("guided app installation", () => {
       "Connect crm.lead.read (missing).",
       "Review permission crm.lead.update."
     ]);
+  });
+
+  it("projects only progress fields across the client boundary", () => {
+    const progress = appOnboardingProgressForView({
+      stage: "connect_systems",
+      headline: "Connect the required CRM.",
+      progress: { completed: 1, total: 8 },
+      steps: [{ id: "connect", label: "Connect systems", status: "current", summary: "Connect CRM." }],
+      nextAction: { kind: "connect_providers", summary: "Connect CRM.", requiresHumanConfirmation: true },
+      plan: { planDigest: "should-not-cross-the-boundary" },
+      mappingPlan: { requirements: ["large-provider-contract"] },
+      questions: [{ key: "privateCompanyContext" }]
+    } as never);
+
+    expect(progress).toEqual({
+      stage: "connect_systems",
+      headline: "Connect the required CRM.",
+      progress: { completed: 1, total: 8 },
+      steps: [{ id: "connect", label: "Connect systems", status: "current", summary: "Connect CRM." }],
+      nextAction: { kind: "connect_providers", summary: "Connect CRM.", requiresHumanConfirmation: true }
+    });
+    expect(JSON.stringify(progress)).not.toContain("should-not-cross-the-boundary");
+    expect(JSON.stringify(progress)).not.toContain("privateCompanyContext");
   });
 });
 

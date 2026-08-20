@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppStatusPill } from "@/components/apps/app-status-pill";
+import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
+import { appOnboardingProgressForView } from "@/lib/app-platform/install-wizard";
 import {
   activateInstalledAppAction,
   applyInstalledAppUpdateAction,
@@ -41,6 +43,10 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
         description={data.detail.app.summary}
         action={<AppStatusPill state={data.installation.state} readiness={data.readiness.state} />}
       />
+
+      <div className="mb-6">
+        <AppOnboardingProgress compact journey={appOnboardingProgressForView(data.onboardingJourney)} />
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <ScoreCard label="Readiness" value={`${data.readiness.score}%`} detail={data.readiness.state.replace(/_/g, " ")} />

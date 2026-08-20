@@ -7,6 +7,7 @@ import {
   displayConfigurationValue,
   installPlanBlockersForView,
   type InstallWizardApp,
+  type AppOnboardingProgressView,
   type InstallWizardQuestion,
   type InstallWizardState
 } from "@/lib/app-platform/install-wizard";
@@ -15,15 +16,19 @@ import {
   confirmAppFieldMappingsAction,
   planMarketplaceAppInstallAction
 } from "@/app/marketplace/[appId]/install/actions";
+import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
 
-export function InstallWizard({ app, initialPlan, mappingPlan }: { app: InstallWizardApp; initialPlan: AppInstallPlan; mappingPlan: AppFieldMappingPlan }) {
-  const initialState: InstallWizardState = { stage: "configure", plan: initialPlan };
+export function InstallWizard({ app, initialPlan, initialJourney, initialQuestionKeys, mappingPlan }: { app: InstallWizardApp; initialPlan: AppInstallPlan; initialJourney: AppOnboardingProgressView; initialQuestionKeys: string[]; mappingPlan: AppFieldMappingPlan }) {
+  const initialState: InstallWizardState = { stage: "configure", plan: initialPlan, mappingPlan, journey: initialJourney, unresolvedQuestionKeys: initialQuestionKeys };
   const [state, planAction, isPlanning] = useActionState(planMarketplaceAppInstallAction, initialState);
   const blockers = installPlanBlockersForView(state.plan);
   const ready = blockers.length === 0;
+  const activeMappingPlan = state.mappingPlan;
+  const unresolvedQuestions = app.questions.filter((question) => state.unresolvedQuestionKeys.includes(question.key));
 
   return (
     <div className="space-y-6">
+      <AppOnboardingProgress journey={state.journey} />
       <section className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -54,11 +59,13 @@ export function InstallWizard({ app, initialPlan, mappingPlan }: { app: InstallW
           <fieldset className="mt-7 border-t border-line pt-6">
             <legend className="text-sm font-semibold">Step 2 · company-specific answers</legend>
             <p className="mt-2 text-sm leading-6 text-ink/55">Preset and approved company-context values are filled in first. Confirm or change only what is specific to this installation.</p>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
-              {app.questions.map((question) => (
-                <QuestionField key={question.key} plan={state.plan} question={question} />
-              ))}
-            </div>
+            {unresolvedQuestions.length > 0 ? (
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                {unresolvedQuestions.map((question) => (
+                  <QuestionField key={question.key} plan={state.plan} question={question} />
+                ))}
+              </div>
+            ) : <div className="mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-900">No company-specific questions are unresolved.</div>}
           </fieldset>
 
           {state.error ? <div className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{state.error}</div> : null}
@@ -72,11 +79,11 @@ export function InstallWizard({ app, initialPlan, mappingPlan }: { app: InstallW
         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-signal">Step 3 · field mappings</div>
         <h2 className="mt-2 text-xl font-semibold">Confirm how provider fields map to company objects</h2>
         <p className="mt-2 text-sm leading-6 text-ink/55">Hermes can suggest mappings from a connection-bound schema snapshot. Nothing becomes trusted until you confirm it, and confirmed mappings can be reused by later apps.</p>
-        {mappingPlan.requirements.length === 0 ? (
+        {activeMappingPlan.requirements.length === 0 ? (
           <div className="mt-4 rounded-md bg-paper px-4 py-3 text-sm text-ink/60">This app does not require provider field mappings.</div>
         ) : (
           <div className="mt-5 space-y-5">
-            {mappingPlan.requirements.map((requirement) => (
+            {activeMappingPlan.requirements.map((requirement) => (
               <FieldMappingRequirement appId={app.id} key={`${requirement.recipeId}:${requirement.objectType}`} presetId={app.preset.id} requirement={requirement} />
             ))}
           </div>

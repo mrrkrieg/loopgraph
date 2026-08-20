@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-08-17
+Last updated: 2026-08-19
 
 ## One-line summary
 
@@ -83,6 +83,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 - Official and private LoopPacks are strict, immutable, content-digested data artifacts that compile into existing governed runtime primitives.
 - The browser, Hermes MCP tools, and CLI share marketplace search, exact install planning, connection and mapping readiness, atomic install, conformance, replay, promotion recommendation, pause/resume, update, rollback, detach, and uninstall services.
+- A versioned, read-only App onboarding journey now derives the same eight-step progress for Hermes, CLI, and browser from durable connector, mapping, configuration, install, test, and lifecycle state. It returns only unresolved questions and blockers plus one exact safe next action, and stops separately for installation and shadow-activation approval.
 - Signed GitHub catalog taps synchronize only from an allowlisted HTTPS Git host and require an exact commit, canonical catalog snapshot digest, and pinned Ed25519 publisher keys. Remote content is validated in staging before atomic cache promotion and never installs or activates an app by itself.
 - Every indexed App version records its exact catalog source, transport, URI/ref, snapshot digest, trust policy, and synchronization time. Catalog refresh removes only versions owned by that source, preserves mirrors from other sources, and rejects one semantic version resolving to different immutable digests.
 - A tenant-scoped hosted marketplace registry stores publisher/app ownership, immutable signed versions, file digests, dependencies, connector requirements, presets, evaluation records, release signatures, and explicit private-catalog grants behind RLS. Its private delivery layer adds department/capability search, MFA-gated digest-addressed uploads, a private 100 MiB object bucket, leased service-role verification, safe rejection codes, crash reconciliation, and 60-second exact-release downloads. Raw signatures and standalone storage-key fields never cross the service boundary; the signed storage capability may contain its scoped path and expires after 60 seconds.
@@ -204,5 +205,6 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hosted marketplace registry](./HOSTED-MARKETPLACE-REGISTRY.md)
 - [Hosted marketplace delivery](./HOSTED-MARKETPLACE-DELIVERY.md)
 - [Hosted marketplace installation](./HOSTED-MARKETPLACE-INSTALL.md)
+- [Hermes-guided App onboarding journey](./APP-ONBOARDING-JOURNEY.md)
 - [Hosted marketplace access for Hermes and CLI](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md)
 - [Interactive CLI device authorization](./CLI-DEVICE-AUTHORIZATION.md)

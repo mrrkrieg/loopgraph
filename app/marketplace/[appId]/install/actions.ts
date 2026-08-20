@@ -2,12 +2,13 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import type { AppInstallPlan } from "loopgraph/core";
+import type { AppInstallPlan, AppOnboardingJourney } from "loopgraph/core";
 import { requireHostedPermission } from "@/lib/auth/hosted-access";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import {
   configurationFromInstallForm,
+  appOnboardingProgressForView,
   type InstallWizardState
 } from "@/lib/app-platform/install-wizard";
 import type { MarketplaceAppDetail } from "@/lib/app-platform/read-model";
@@ -27,7 +28,7 @@ export async function planMarketplaceAppInstallAction(
     }) as MarketplaceAppDetail;
     const selectedModules = formData.getAll("selectedModule").filter((value): value is string => typeof value === "string");
     const configuration = configurationFromInstallForm(formData, detail.setupQuestions);
-    const plan = await callLoopgraphAppTool("loopgraph_app_install_plan", {
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
       versionRange: detail.selectedVersion.version,
@@ -36,10 +37,15 @@ export async function planMarketplaceAppInstallAction(
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
       actor: "loopgraph-browser"
-    }) as AppInstallPlan;
+    }) as AppOnboardingJourney;
+    if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");
+    const plan = journey.plan;
     return {
       stage: "review",
       plan,
+      mappingPlan: journey.mappingPlan ?? previousState.mappingPlan,
+      journey: appOnboardingProgressForView(journey),
+      unresolvedQuestionKeys: journey.questions.map((question) => question.key),
       notice: plan.missingConfigurationKeys.length === 0
         ? "Configuration was validated. Review the exact graph and permission transaction below."
         : "Your answers were saved into a new read-only plan. Complete the remaining items before installation."

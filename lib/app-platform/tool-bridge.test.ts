@@ -153,6 +153,36 @@ describe("hosted app tool bridge", () => {
     expect(mocks.runtimeTool).toHaveBeenCalledTimes(2);
   });
 
+  it("stages hosted onboarding and projects only secret-free Connector Broker authority", async () => {
+    mocks.runtimeTool
+      .mockRejectedValueOnce(new Error("Marketplace app not found: acme.product.hosted"))
+      .mockResolvedValueOnce({ schemaVersion: "loopgraph-app-onboarding/v1alpha1" });
+    mocks.ensureArtifact.mockResolvedValue({});
+    mocks.listInstallations.mockResolvedValue([{ id: "provider-hubspot", providerId: "hubspot" }]);
+
+    await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: "/tmp/loopgraph-company",
+      appId: "acme.product.hosted",
+      versionRange: "^2.0.0",
+      presetId: "default"
+    });
+
+    expect(mocks.ensureArtifact).toHaveBeenCalledWith(expect.objectContaining({
+      appId: "acme.product.hosted",
+      versionRange: "^2.0.0",
+      includeDeprecated: true
+    }));
+    expect(mocks.getDatabase).toHaveBeenCalledWith("integrations.read");
+    expect(mocks.runtimeTool).toHaveBeenLastCalledWith(
+      "loopgraph_app_onboarding_get",
+      expect.objectContaining({ appId: "acme.product.hosted" }),
+      expect.objectContaining({
+        connections: [{ id: "provider-hubspot", providerId: "hubspot" }],
+        hostedMarketplaceClient: null
+      })
+    );
+  });
+
   it("rechecks tenant visibility before using a cached hosted release", async () => {
     mocks.hasCachedArtifact.mockResolvedValue(true);
     mocks.ensureArtifact.mockResolvedValue({});
