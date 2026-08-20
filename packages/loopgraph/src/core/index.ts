@@ -42,3 +42,4 @@ export * from "./graph-authoring";
 export * from "./app-platform";
 export * from "./app-pack-content";
 export * from "./department-pack";
+export * from "./company-blueprint";

@@ -48,6 +48,10 @@ import {
   getOfficialDepartmentPack,
   searchOfficialDepartmentPacks
 } from "./department-pack-catalog";
+import {
+  getOfficialCompanyBlueprint,
+  searchOfficialCompanyBlueprints
+} from "./company-blueprint-catalog";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
@@ -58,6 +62,8 @@ const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
 ]);
 
 export const LOOPGRAPH_APP_TOOL_NAMES = [
+  "loopgraph_company_blueprints_search",
+  "loopgraph_company_blueprint_get",
   "loopgraph_department_packs_search",
   "loopgraph_department_pack_get",
   "loopgraph_marketplace_search",
@@ -118,6 +124,17 @@ const APP_PUBLISHER_TOOL_NAMES = new Set<LoopgraphAppToolName>([
 export type LoopgraphAppToolName = (typeof LOOPGRAPH_APP_TOOL_NAMES)[number];
 
 const projectSchema = z.object({ projectRoot: z.string().optional() }).strict();
+
+export const companyBlueprintsSearchInputSchema = projectSchema.extend({
+  query: z.string().max(500).optional(),
+  limit: z.number().int().min(1).max(20).default(20)
+}).strict();
+
+export const companyBlueprintGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  blueprintId: z.string().min(1)
+}).strict();
 
 export const departmentPacksSearchInputSchema = projectSchema.extend({
   query: z.string().max(500).optional(),
@@ -325,6 +342,8 @@ export const marketplaceSourceAddInputSchema = projectSchema.extend({ source: ma
 export const marketplaceSourceRefreshInputSchema = projectSchema.extend({ sourceId: z.string().min(3).max(160) }).strict();
 
 export const loopgraphAppToolDefinitions = [
+  { name: "loopgraph_company_blueprints_search", description: "Search read-only company-wide Hermes Brain blueprints that compose Department Packs, canonical company objects, and cross-department evidence contracts.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_company_blueprint_get", description: "Inspect one company-wide Blueprint, Department Pack progress, canonical object contracts, cross-department topology, and the exact dependency-safe next Pack without installing anything.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_department_packs_search", description: "Search curated, read-only Department Pack topologies that group official Apps, shared context, and permitted cross-App handoffs for Hermes.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_department_pack_get", description: "Inspect one curated Department Pack, current per-App readiness, declared topology, and the exact next App onboarding action without bulk-installing or activating anything.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_marketplace_search", description: "Search available Loopgraph Apps by business outcome, department, capability, or maturity.", readOnly: true, idempotent: true, destructive: false },
@@ -396,6 +415,71 @@ export async function callLoopgraphAppTool(
     : options.hostedMarketplaceClient === null
       ? undefined
       : options.hostedMarketplaceClient ?? HostedMarketplaceClient.fromEnvironment();
+
+  if (name === "loopgraph_company_blueprints_search") {
+    const parsed = companyBlueprintsSearchInputSchema.parse({ ...raw, projectRoot });
+    const results = searchOfficialCompanyBlueprints(parsed);
+    return {
+      schemaVersion: "loopgraph-company-blueprint-search/v1alpha1",
+      query: parsed.query,
+      count: results.length,
+      results
+    };
+  }
+
+  if (name === "loopgraph_company_blueprint_get") {
+    const parsed = companyBlueprintGetInputSchema.parse({ ...raw, projectRoot });
+    const blueprint = getOfficialCompanyBlueprint(parsed.blueprintId);
+    if (!blueprint) throw new Error(`Company Blueprint not found: ${parsed.blueprintId}`);
+    const identity = await resolveIdentity(projectRoot, parsed.workspaceId, parsed.companyId);
+    const registry = await new FileAppInstallationStore(
+      path.join(projectRoot, ".loopgraph", "apps"),
+      identity.workspaceId
+    ).read();
+    const orderedDefinitions = [...blueprint.packs].sort((left, right) => left.installOrder - right.installOrder);
+    const departmentPacks = orderedDefinitions.map((definition) => {
+      const pack = getOfficialDepartmentPack(definition.packId);
+      if (!pack) throw new Error(`Official Company Blueprint Department Pack not found: ${definition.packId}`);
+      const installed = pack.apps.filter((app) => registry.installations.some((installation) => installation.appId === app.appId)).length;
+      return {
+        definition,
+        pack,
+        progress: { installed, total: pack.apps.length, complete: installed === pack.apps.length }
+      };
+    });
+    const completedPackIds = new Set(departmentPacks.filter((entry) => entry.progress.complete).map((entry) => entry.pack.id));
+    const next = departmentPacks.find((entry) =>
+      !entry.progress.complete && entry.definition.dependsOn.every((dependency) => completedPackIds.has(dependency))
+    );
+    return {
+      schemaVersion: "loopgraph-company-blueprint-detail/v1alpha1",
+      blueprint,
+      departmentPacks,
+      progress: {
+        completedPacks: completedPackIds.size,
+        totalPacks: departmentPacks.length,
+        installedApps: registry.installations.filter((installation) => departmentPacks.some((entry) => entry.pack.apps.some((app) => app.appId === installation.appId))).length,
+        totalApps: departmentPacks.reduce((count, entry) => count + entry.pack.apps.length, 0),
+        complete: completedPackIds.size === departmentPacks.length
+      },
+      nextAction: next
+        ? {
+            action: "open_department_pack",
+            tool: "loopgraph_department_pack_get",
+            input: { packId: next.pack.id },
+            packId: next.pack.id,
+            reason: completedPackIds.size === 0 && next.pack.id === blueprint.defaultPackId
+              ? `Start with the Company Blueprint default Department Pack: ${next.pack.name}.`
+              : `Continue with the next dependency-safe Department Pack: ${next.pack.name}.`
+          }
+        : {
+            action: "operate_company",
+            tool: null,
+            input: null,
+            reason: "Every Department Pack is complete. Operate each App only at its independently approved rollout mode and use the declared object and evidence contracts for cross-department routing."
+          }
+    };
+  }
 
   if (name === "loopgraph_department_packs_search") {
     const parsed = departmentPacksSearchInputSchema.parse({ ...raw, projectRoot });

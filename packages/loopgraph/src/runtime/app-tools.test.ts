@@ -16,6 +16,8 @@ afterEach(async () => {
 describe("shared Loopgraph App tools", () => {
   it("exposes the required marketplace and lifecycle surface", () => {
     expect(LOOPGRAPH_APP_TOOL_NAMES).toEqual([
+      "loopgraph_company_blueprints_search",
+      "loopgraph_company_blueprint_get",
       "loopgraph_department_packs_search",
       "loopgraph_department_pack_get",
       "loopgraph_marketplace_search",
@@ -154,6 +156,36 @@ describe("shared Loopgraph App tools", () => {
       appId: "loopgraph.sales.qualify-route-inbound-leads"
     });
 
+    const status = await callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as { installations: unknown[] };
+    expect(status.installations).toEqual([]);
+  });
+
+  it("returns a company-wide Hermes Blueprint without seeding the workspace", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-company-blueprint-tools-"));
+    temporaryDirectories.push(projectRoot);
+
+    const search = await callLoopgraphAppTool("loopgraph_company_blueprints_search", {
+      projectRoot,
+      query: "saas recurring revenue"
+    }) as { results: Array<{ blueprint: { id: string } }> };
+    expect(search.results[0]?.blueprint.id).toBe("loopgraph.company.saas-operating-system");
+
+    const detail = await callLoopgraphAppTool("loopgraph_company_blueprint_get", {
+      projectRoot,
+      blueprintId: "loopgraph.company.saas-operating-system"
+    }) as {
+      departmentPacks: Array<{ pack: { id: string }; progress: { complete: boolean } }>;
+      progress: { completedPacks: number; totalPacks: number; installedApps: number; totalApps: number; complete: boolean };
+      nextAction: { action: string; tool: string; packId: string };
+    };
+    expect(detail.departmentPacks).toHaveLength(9);
+    expect(detail.departmentPacks.every((entry) => !entry.progress.complete)).toBe(true);
+    expect(detail.progress).toEqual({ completedPacks: 0, totalPacks: 9, installedApps: 0, totalApps: 13, complete: false });
+    expect(detail.nextAction).toMatchObject({
+      action: "open_department_pack",
+      tool: "loopgraph_department_pack_get",
+      packId: "loopgraph.department.product"
+    });
     const status = await callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as { installations: unknown[] };
     expect(status.installations).toEqual([]);
   });

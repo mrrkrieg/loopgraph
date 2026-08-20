@@ -12,6 +12,7 @@ import type {
   AppUpdatePlan,
   AppSetupDefinition,
   AppSkillDefinition,
+  CompanyBlueprint,
   DepartmentPack,
   LoopPackManifest,
   MarketplaceApp,
@@ -35,7 +36,38 @@ export type MarketplaceViewData = {
   capability?: string;
   results: MarketplaceSearchEntry[];
   departmentPacks: DepartmentPackSearchEntry[];
+  companyBlueprints: CompanyBlueprintSearchEntry[];
   installedCount: number;
+};
+
+export type CompanyBlueprintSearchEntry = {
+  blueprint: CompanyBlueprint;
+  score: number;
+  matchedTerms: string[];
+};
+
+export type CompanyBlueprintDetailView = {
+  schemaVersion: "loopgraph-company-blueprint-detail/v1alpha1";
+  blueprint: CompanyBlueprint;
+  departmentPacks: Array<{
+    definition: CompanyBlueprint["packs"][number];
+    pack: DepartmentPack;
+    progress: { installed: number; total: number; complete: boolean };
+  }>;
+  progress: {
+    completedPacks: number;
+    totalPacks: number;
+    installedApps: number;
+    totalApps: number;
+    complete: boolean;
+  };
+  nextAction: {
+    action: "open_department_pack" | "operate_company";
+    tool: "loopgraph_department_pack_get" | null;
+    input: { packId: string } | null;
+    packId?: string;
+    reason: string;
+  };
 };
 
 export type DepartmentPackSearchEntry = {
@@ -153,7 +185,7 @@ export async function getMarketplaceViewData(input: {
   capability?: string;
 } = {}): Promise<MarketplaceViewData> {
   const projectRoot = getActiveLoopgraphProjectRoot();
-  const [search, departmentPacks, installed] = await Promise.all([
+  const [search, companyBlueprints, departmentPacks, installed] = await Promise.all([
     callLoopgraphAppTool("loopgraph_marketplace_search", {
       projectRoot,
       query: input.query,
@@ -161,6 +193,11 @@ export async function getMarketplaceViewData(input: {
       capability: input.capability,
       limit: 50
     }) as Promise<{ results: Array<Omit<MarketplaceSearchEntry, "installation" | "readiness">> }>,
+    callLoopgraphAppTool("loopgraph_company_blueprints_search", {
+      projectRoot,
+      query: input.query,
+      limit: 20
+    }) as Promise<{ results: CompanyBlueprintSearchEntry[] }>,
     callLoopgraphAppTool("loopgraph_department_packs_search", {
       projectRoot,
       query: input.query,
@@ -174,6 +211,7 @@ export async function getMarketplaceViewData(input: {
   return {
     ...input,
     installedCount: installed.installations.length,
+    companyBlueprints: companyBlueprints.results,
     departmentPacks: departmentPacks.results,
     results: search.results.map((result) => {
       const installation = installationByApp.get(result.app.id);
@@ -184,6 +222,14 @@ export async function getMarketplaceViewData(input: {
       };
     })
   };
+}
+
+export async function getCompanyBlueprintViewData(blueprintId: string): Promise<CompanyBlueprintDetailView> {
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  return callLoopgraphAppTool("loopgraph_company_blueprint_get", {
+    projectRoot,
+    blueprintId
+  }) as Promise<CompanyBlueprintDetailView>;
 }
 
 export async function getDepartmentPackViewData(packId: string): Promise<DepartmentPackDetailView> {

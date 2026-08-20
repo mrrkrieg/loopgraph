@@ -34,6 +34,12 @@ Moving a node is a layout-only transaction. Adding or connecting semantic nodes 
 
 When the user wants a complete business capability, search the Marketplace by outcome and inspect the selected App. Then call `loopgraph_app_onboarding_get` as the source of truth for the rest of the journey.
 
+When the user wants a company-wide operating system, asks how departments should share context, or wants one Hermes Brain across the company, call `loopgraph_company_blueprints_search` and inspect the selected result with `loopgraph_company_blueprint_get`. Explain its canonical company objects and cross-department evidence conditions, then open only the returned dependency-safe Department Pack.
+
+- A Company Blueprint composes read-only Department Pack contracts. It never installs Packs or Apps and never grants routing or provider-write authority.
+- Re-read `loopgraph_company_blueprint_get` after a Department Pack changes; do not infer company progress from conversation memory.
+- Cross-department edges require canonical entity resolution, required evidence, an eligible receiving App, and its independent approval policy.
+
 When the user wants to start an entire department, asks what a company function can run, or needs several Apps to share context, call `loopgraph_department_packs_search` first. Inspect the selected Pack with `loopgraph_department_pack_get`, explain its ordered Apps, shared context, shared capabilities, and permitted evidence handoffs, then use only the returned exact next App action.
 
 - A Department Pack is a declarative topology, not a bulk installer. Never install or activate every App automatically.

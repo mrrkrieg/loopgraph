@@ -363,7 +363,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(131);
+    expect(listLoopgraphMcpTools()).toHaveLength(133);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
@@ -586,6 +586,8 @@ describe("Loopgraph MCP server", () => {
   it("exposes app discovery and lifecycle only through the governed admin surface", async () => {
     const { projectRoot } = await createRoutingProject();
     const appToolNames = [
+      "loopgraph_company_blueprints_search",
+      "loopgraph_company_blueprint_get",
       "loopgraph_department_packs_search",
       "loopgraph_department_pack_get",
       "loopgraph_marketplace_search",

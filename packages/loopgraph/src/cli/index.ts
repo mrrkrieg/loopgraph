@@ -433,6 +433,36 @@ auth
   });
 
 apps
+  .command("company-blueprints")
+  .description("Search company-wide Hermes Brain blueprints by operating model or outcome")
+  .argument("[query]", "Company profile, object, or cross-department outcome")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--limit <count>", "Maximum results", "20")
+  .action(async (query: string | undefined, options: { project: string; limit: string }) => {
+    await printAppTool("loopgraph_company_blueprints_search", {
+      projectRoot: options.project,
+      query,
+      limit: parsePositiveInteger(options.limit, "Company Blueprint result limit")
+    });
+  });
+
+apps
+  .command("company-blueprint")
+  .description("Inspect one company-wide Hermes Blueprint, canonical objects, cross-department topology, progress, and exact next Pack")
+  .argument("<blueprint-id>", "Company Blueprint ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .action(async (blueprintId: string, options: { project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_company_blueprint_get", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      blueprintId
+    });
+  });
+
+apps
   .command("departments")
   .description("Search curated Department Pack topologies for Hermes by business outcome or department")
   .argument("[query]", "Business outcome or Department Pack terms")

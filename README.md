@@ -191,6 +191,15 @@ Opinionated apps also declare a typed evidence topology in the signed pack: shar
 
 ### Start with a complete department
 
+For a company-wide starting point, the official **SaaS Company Operating System** Blueprint composes all nine Department Packs under Hermes Brain. It defines canonical Account, Campaign, Product Problem, Incident, Contract, Forecast, and Decision objects plus the precise evidence conditions for cross-department handoffs. The Blueprint is visual and inspectable in Marketplace, but remains read-only: it opens the next safe Department Pack rather than installing the company automatically.
+
+```bash
+npm run loopgraph -- apps company-blueprints "saas recurring revenue"
+npm run loopgraph -- apps company-blueprint loopgraph.company.saas-operating-system
+```
+
+See [Company Blueprints](docs/COMPANY-BLUEPRINTS.md) for the shared-object and cross-department routing contract.
+
 Department Packs group the official Apps that commonly work together for Product, Sales, Marketing, Customer Success, Engineering, Operations & Finance, HR & Talent, Legal & Compliance, and Management. Each Pack declares an install order, shared company-context keys, shared logical capabilities, dependencies, and the only cross-App handoffs or evidence returns Hermes may consider.
 
 A Pack is intentionally not a bulk installer. Selecting one changes nothing. Hermes inspects the Pack, follows the prerequisite chain for its default App, and brings every App through the same governed onboarding journey and separate approval boundaries. This gives a company an opinionated topology without turning a template into authority.

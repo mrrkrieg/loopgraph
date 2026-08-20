@@ -115,6 +115,7 @@ export * from "./app-installation-service";
 export * from "./app-quality-engine";
 export * from "./app-onboarding-journey";
 export * from "./department-pack-catalog";
+export * from "./company-blueprint-catalog";
 export * from "./app-publisher-catalog";
 export * from "./app-publisher";
 export * from "./app-tools";

@@ -1164,6 +1164,8 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 
 Use Loopgraph Apps when the user wants a complete installable business capability instead of designing one loop from scratch.
 
+When the user wants a company-wide operating system, asks how departments should share context, or wants one Hermes Brain across the company, call \`loopgraph_company_blueprints_search\` and then \`loopgraph_company_blueprint_get\`. Explain the canonical company objects and exact cross-department evidence conditions, then open only the returned dependency-safe Department Pack. A Company Blueprint is read-only composition: it never installs Packs or Apps and never grants routing or provider-write authority. Re-read it after any Department Pack changes.
+
 Before selecting an individual App, call \`loopgraph_department_packs_search\` when the user wants to start a department, asks what a company function can run, or needs several Apps to share context. Call \`loopgraph_department_pack_get\` for the selected Pack, explain its ordered Apps, shared context, shared capabilities, and permitted cross-App evidence handoffs, and use only its returned dependency-safe next App. A Department Pack is declarative and read-only: never bulk-install or activate its Apps. Re-read it after every App installation. Each App still requires its own onboarding journey, exact installation approval, conformance, and separate shadow approval.
 
 1. Call \`loopgraph_marketplace_search\` with the desired business outcome, then \`loopgraph_app_get\` for the selected app. Explain the result, included loops, supported presets, required connections, requested permissions, setup questions, and known test coverage in business language.
