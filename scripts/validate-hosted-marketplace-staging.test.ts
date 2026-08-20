@@ -161,6 +161,13 @@ function marketplaceVersion(): MarketplaceAppVersion {
     dependencies: [],
     permissions: [],
     requiredCapabilities: [],
+    optionalCapabilities: [],
+    includedLoopCount: 1,
+    preview: {
+      synthetic: true,
+      sampleData: true,
+      historicalReplay: "installed_read_only"
+    },
     presets: [],
     modules: [],
     maturity: "tested",

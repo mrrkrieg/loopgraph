@@ -20,6 +20,10 @@ import type {
   WorkspaceAppInstallation
 } from "loopgraph/core";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
+import {
+  deriveMarketplaceHistoricalPreviewStatus,
+  type MarketplaceHistoricalPreviewStatus
+} from "@/lib/app-platform/marketplace-preview";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 
 export type MarketplaceSearchEntry = {
@@ -28,6 +32,11 @@ export type MarketplaceSearchEntry = {
   matchedTerms: string[];
   installation?: WorkspaceAppInstallation;
   readiness?: AppReadiness;
+  previewStatus: {
+    syntheticAvailable: boolean;
+    sampleDataAvailable: boolean;
+    historicalReplay: MarketplaceHistoricalPreviewStatus;
+  };
 };
 
 export type MarketplaceViewData = {
@@ -226,7 +235,7 @@ export async function getMarketplaceViewData(input: {
       department: input.department,
       capability: input.capability,
       limit: 50
-    }) as Promise<{ results: Array<Omit<MarketplaceSearchEntry, "installation" | "readiness">> }>,
+    }) as Promise<{ results: Array<Omit<MarketplaceSearchEntry, "installation" | "readiness" | "previewStatus">> }>,
     callLoopgraphAppTool("loopgraph_company_blueprints_search", {
       projectRoot,
       query: input.query,
@@ -242,6 +251,12 @@ export async function getMarketplaceViewData(input: {
   ]);
   const installationByApp = new Map(installed.installations.map((installation) => [installation.appId, installation]));
   const readinessByInstallation = new Map(installed.readiness.map((readiness) => [readiness.installationId, readiness]));
+  const evaluationsByInstallation = new Map<string, AppEvalRun[]>();
+  for (const evaluation of installed.evaluations) {
+    const evaluations = evaluationsByInstallation.get(evaluation.installationId) ?? [];
+    evaluations.push(evaluation);
+    evaluationsByInstallation.set(evaluation.installationId, evaluations);
+  }
   return {
     ...input,
     installedCount: installed.installations.length,
@@ -249,10 +264,24 @@ export async function getMarketplaceViewData(input: {
     departmentPacks: departmentPacks.results,
     results: search.results.map((result) => {
       const installation = installationByApp.get(result.app.id);
+      const latestVersion = result.app.versions.find((version) => version.version === result.app.latestVersion);
+      const evaluations = installation ? evaluationsByInstallation.get(installation.id) ?? [] : [];
+      const readiness = installation ? readinessByInstallation.get(installation.id) : undefined;
+      const connectionChecks = readiness?.checks.filter((check) => check.category === "connection") ?? [];
+      const connectionsReady = connectionChecks.length > 0 && connectionChecks.every((check) => check.status === "pass");
       return {
         ...result,
         installation,
-        readiness: installation ? readinessByInstallation.get(installation.id) : undefined
+        readiness,
+        previewStatus: {
+          syntheticAvailable: latestVersion?.preview.synthetic ?? false,
+          sampleDataAvailable: latestVersion?.preview.sampleData ?? false,
+          historicalReplay: deriveMarketplaceHistoricalPreviewStatus({
+            installed: Boolean(installation),
+            connectionsReady,
+            evaluations
+          })
+        }
       };
     })
   };

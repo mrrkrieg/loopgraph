@@ -377,8 +377,19 @@ export const marketplaceAppVersionSchema = z.object({
   dependencies: z.array(packDependencySchema).default([]),
   permissions: z.array(packPermissionSchema),
   requiredCapabilities: z.array(logicalCapabilitySchema),
+  optionalCapabilities: z.array(logicalCapabilitySchema).default([]),
   presets: z.array(packPresetSchema),
   modules: z.array(packModuleSchema),
+  includedLoopCount: z.number().int().nonnegative().default(0),
+  preview: z.object({
+    synthetic: z.boolean(),
+    sampleData: z.boolean(),
+    historicalReplay: z.literal("installed_read_only")
+  }).strict().default({
+    synthetic: false,
+    sampleData: false,
+    historicalReplay: "installed_read_only"
+  }),
   maturity: appMaturitySchema,
   deprecated: z.boolean().default(false),
   deprecationMessage: z.string().min(1).optional(),
