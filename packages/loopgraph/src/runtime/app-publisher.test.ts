@@ -39,6 +39,34 @@ describe("Loopgraph App publisher", () => {
       expect.objectContaining({ id: "compile", status: "passed" }),
       expect.objectContaining({ id: "synthetic-conformance", status: "passed" })
     ]));
+    const developer = await publisher.inspectDeveloperApp(initialized.packRoot);
+    expect(developer).toMatchObject({
+      status: "ready",
+      writeBlocked: true,
+      previewAvailable: true,
+      app: { id: "acme.customer-success.customer-risk", department: "customer_success" },
+      inventory: { loops: expect.any(Array), graphNodes: expect.any(Number), graphEdges: expect.any(Number), setupQuestions: expect.any(Number), evaluationSuites: 1 }
+    });
+    expect(developer.inventory!.loops).toHaveLength(1);
+    expect(developer.inventory!.connectorRecipes.length).toBeGreaterThan(0);
+    expect(developer.permissions?.length).toBeGreaterThan(0);
+    expect(developer.permissions?.filter((permission) => permission.authority === "approve" || permission.authority === "execute")
+      .every((permission) => permission.defaultPolicy !== "allowed")).toBe(true);
+
+    const preview = await publisher.previewApp(initialized.packRoot, new Date("2026-08-09T00:00:00.000Z"));
+    expect(preview).toMatchObject({
+      appId: "acme.customer-success.customer-risk",
+      mode: "synthetic",
+      status: "passed",
+      writeBlocked: true,
+      providerWrites: 0,
+      readyForSigning: true,
+      publishable: false,
+      summary: { total: 13, failed: 0 }
+    });
+    expect(preview.scenarios).toHaveLength(13);
+    expect(preview.scenarios.every((scenario) => typeof scenario.approvalRequired === "boolean")).toBe(true);
+    expect(preview.graph.nodes.some((node) => node.type === "hermes_brain")).toBe(true);
   });
 
   it("signs immutable pack content and rejects public-key spoofing with a trusted key ID", async () => {

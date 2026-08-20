@@ -995,6 +995,28 @@ apps
   });
 
 apps
+  .command("dev")
+  .description("Inspect LoopPack inventory, graph, setup, connectors, permissions, and exact publisher blockers without installing it")
+  .argument("<pack-root>", "LoopPack directory")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (packRoot: string, options: { project: string }) => {
+    const result = await callLoopgraphAppTool("loopgraph_app_dev", { projectRoot: path.resolve(options.project), packRoot });
+    console.log(JSON.stringify(result, null, 2));
+    if (isRecord(result) && result.status === "needs_work") process.exitCode = 1;
+  });
+
+apps
+  .command("preview")
+  .description("Preview the compiled App graph and every synthetic Hermes routing decision with provider writes blocked")
+  .argument("<pack-root>", "LoopPack directory")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (packRoot: string, options: { project: string }) => {
+    const result = await callLoopgraphAppTool("loopgraph_app_preview", { projectRoot: path.resolve(options.project), packRoot });
+    console.log(JSON.stringify(result, null, 2));
+    if (isRecord(result) && result.status === "failed") process.exitCode = 1;
+  });
+
+apps
   .command("validate")
   .description("Validate, compile, secret-scan, and run the write-blocked publisher conformance suite")
   .argument("<pack-root>", "LoopPack directory")

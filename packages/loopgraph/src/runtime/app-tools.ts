@@ -97,6 +97,8 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_publisher_keys_get",
   "loopgraph_app_init",
   "loopgraph_app_capture",
+  "loopgraph_app_dev",
+  "loopgraph_app_preview",
   "loopgraph_app_validate",
   "loopgraph_app_pack",
   "loopgraph_app_sign",
@@ -112,6 +114,8 @@ const APP_PUBLISHER_TOOL_NAMES = new Set<LoopgraphAppToolName>([
   "loopgraph_app_publisher_keys_get",
   "loopgraph_app_init",
   "loopgraph_app_capture",
+  "loopgraph_app_dev",
+  "loopgraph_app_preview",
   "loopgraph_app_validate",
   "loopgraph_app_pack",
   "loopgraph_app_sign",
@@ -338,6 +342,8 @@ export const appCaptureInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   version: z.string().min(1).optional()
 }).strict();
+export const appDevInputSchema = projectSchema.extend({ packRoot: z.string().min(1) }).strict();
+export const appPreviewInputSchema = projectSchema.extend({ packRoot: z.string().min(1) }).strict();
 export const appValidateInputSchema = projectSchema.extend({ packRoot: z.string().min(1) }).strict();
 export const appPackInputSchema = appValidateInputSchema.extend({ destination: z.string().min(1) }).strict();
 export const appSignInputSchema = appValidateInputSchema.extend({ keyId: z.string().min(3).max(160) }).strict();
@@ -389,6 +395,8 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_publisher_keys_get", description: "List public publisher trust material and private-key availability without returning private keys.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_init", description: "Scaffold a complete private Loopgraph App with routing, setup, connector, policy, outcome, and 13-case conformance contracts.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_capture", description: "Capture an installed app as a private parameterized pack without copying credential or configuration values.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_dev", description: "Inspect one declarative LoopPack as a developer: inventory graph, loops, skills, setup, connectors, permissions, and exact validation blockers without installing it.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_preview", description: "Run every declared synthetic scenario through the compiled Hermes routing contracts and return a write-blocked graph and decision preview without installation or provider calls.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_validate", description: "Validate, compile, secret-scan, and run deterministic write-blocked conformance for a LoopPack.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_pack", description: "Create a content-addressed verified LoopPack archive after publisher validation passes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_sign", description: "Create and verify a detached Ed25519 signature over the exact immutable pack digest.", readOnly: false, idempotent: true, destructive: false },
@@ -679,6 +687,14 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_capture") {
     const parsed = appCaptureInputSchema.parse({ ...raw, projectRoot });
     return publisher.captureInstallation(parsed);
+  }
+  if (name === "loopgraph_app_dev") {
+    const parsed = appDevInputSchema.parse({ ...raw, projectRoot });
+    return publisher.inspectDeveloperApp(parsed.packRoot);
+  }
+  if (name === "loopgraph_app_preview") {
+    const parsed = appPreviewInputSchema.parse({ ...raw, projectRoot });
+    return publisher.previewApp(parsed.packRoot, options.now);
   }
   if (name === "loopgraph_app_validate") {
     const parsed = appValidateInputSchema.parse({ ...raw, projectRoot });

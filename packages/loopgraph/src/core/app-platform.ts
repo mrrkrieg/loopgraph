@@ -832,6 +832,7 @@ export const appEvalRunSchema = z.object({
     actualAction: z.enum(["route", "append_evidence", "request_human", "defer", "unhandled", "ignore"]).optional(),
     expectedRoute: z.string().min(1).optional(),
     actualRoute: z.string().min(1).optional(),
+    approvalRequired: z.boolean().optional(),
     reason: z.string().min(1).optional(),
     humanLabel: z.enum(["correct", "incomplete", "false_positive"]).optional(),
     evidenceRefs: z.array(z.string().min(1)).default([]),

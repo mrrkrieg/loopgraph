@@ -120,7 +120,7 @@ The strict Zod schemas and generated JSON Schemas live in `packages/loopgraph/sr
 
 ## Publisher and catalog trust
 
-The local-first publisher is a project-confined service shared by Hermes, MCP, and the CLI. `app init` creates a complete private starter and `app capture` derives a pack from an exact installed artifact. Capture never copies installation configuration values, secrets, credentials, or provider payloads; it reports only key names and overlay paths that require deliberate parameterization.
+The local-first publisher is a project-confined service shared by Hermes, MCP, and the CLI. `app init` creates a complete private starter and `app capture` derives a pack from an exact installed artifact. `app dev` inventories the compiled loops, skills, graph, setup, connectors, permissions, and validation blockers without installing the pack. `app preview` returns the full expected-versus-actual synthetic routing decision set with provider writes blocked. Capture never copies installation configuration values, secrets, credentials, or provider payloads; it reports only key names and overlay paths that require deliberate parameterization.
 
 Before signing, the service performs strict pack validation, generated LoopSpec compilation, connector/setup/evaluation parsing, secret scanning, and the complete deterministic conformance suite with provider writes blocked. Third-party packs cannot mark their publisher verified or claim official visibility.
 

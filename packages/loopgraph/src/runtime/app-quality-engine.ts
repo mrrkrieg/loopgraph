@@ -79,6 +79,7 @@ export async function runAppSyntheticConformance(input: {
         actualAction: decision.action,
         expectedRoute: scenario.expectedLoopId,
         actualRoute: decision.loopId,
+        approvalRequired: decision.approvalRequired,
         reason: decision.reason,
         evidenceRefs: [`fixture:${scenario.fixture}`]
       });
@@ -165,6 +166,7 @@ export function runAppHistoricalReplay(input: {
       actualAction: decision.action,
       expectedRoute: event.expectedLoopId,
       actualRoute: decision.loopId,
+      approvalRequired: decision.approvalRequired,
       reason: decision.reason,
       evidenceRefs: [...event.evidenceRefs, `historical-event:${event.id}`]
     };

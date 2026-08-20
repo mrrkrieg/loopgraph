@@ -322,12 +322,16 @@ npm run loopgraph -- app init apps/customer-risk \
   --department customer_success \
   --publisher acme
 
+npm run loopgraph -- app dev apps/customer-risk
+npm run loopgraph -- app preview apps/customer-risk
 npm run loopgraph -- app validate apps/customer-risk
 npm run loopgraph -- app keygen acme --id acme.release.primary
 npm run loopgraph -- app sign apps/customer-risk --key acme.release.primary
 npm run loopgraph -- app pack apps/customer-risk dist/customer-risk.loopgraph-pack
 npm run loopgraph -- app publish apps/customer-risk --catalog acme.private
 ```
+
+`app dev` returns the compiled loop, skill, connector, setup, permission, and graph inventory plus exact validation blockers without installing anything. `app preview` runs every declared fixture through the compiled Hermes routing contracts and shows expected versus actual route, abstention, deferral, and approval decisions. Both commands are declarative and provider-write-blocked; they do not call provider APIs or execute pack code.
 
 `app capture` turns an existing installation into a namespaced private pack, but it copies no configuration values, tokens, credentials, or private provider payloads. It returns only configuration key names and overlay paths that the author must deliberately parameterize.
 

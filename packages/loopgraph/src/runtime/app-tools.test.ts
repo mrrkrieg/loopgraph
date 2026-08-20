@@ -51,6 +51,8 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_publisher_keys_get",
       "loopgraph_app_init",
       "loopgraph_app_capture",
+      "loopgraph_app_dev",
+      "loopgraph_app_preview",
       "loopgraph_app_validate",
       "loopgraph_app_pack",
       "loopgraph_app_sign",
@@ -73,6 +75,12 @@ describe("shared Loopgraph App tools", () => {
       department: "product",
       publisherId: "acme"
     }) as { packRoot: string };
+    const developer = await callLoopgraphAppTool("loopgraph_app_dev", { projectRoot, packRoot: initialized.packRoot }) as { status: string; writeBlocked: boolean; inventory: { loops: unknown[] } };
+    expect(developer).toMatchObject({ status: "ready", writeBlocked: true });
+    expect(developer.inventory.loops).toHaveLength(1);
+    const preview = await callLoopgraphAppTool("loopgraph_app_preview", { projectRoot, packRoot: initialized.packRoot }) as { status: string; providerWrites: number; scenarios: unknown[] };
+    expect(preview).toMatchObject({ status: "passed", providerWrites: 0 });
+    expect(preview.scenarios).toHaveLength(13);
     const validation = await callLoopgraphAppTool("loopgraph_app_validate", { projectRoot, packRoot: initialized.packRoot }) as { ok: boolean };
     expect(validation.ok).toBe(true);
     const key = await callLoopgraphAppTool("loopgraph_app_publisher_key_generate", {
