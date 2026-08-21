@@ -569,6 +569,9 @@ describe("atomic app installation lifecycle", () => {
       expect.objectContaining({ kind: "connection_binding" }),
       expect.objectContaining({ kind: "field_mapping" })
     ]));
+    expect((await input.mappingStore.list()).filter((mapping) => input.mappingIds.includes(mapping.id)).every((mapping) =>
+      mapping.dependentInstallationIds.includes(duplicated.installation!.id)
+    )).toBe(true);
 
     const detached = await input.service.detach(
       duplicated.installation!.id,

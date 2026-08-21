@@ -14,9 +14,11 @@ import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
   getAppVerificationStore,
+  getConnectorFieldMappingStore,
   getHermesOperationsStore,
   getLoopSpecRegistryStore,
-  getOutcomeStore
+  getOutcomeStore,
+  getProviderSchemaSnapshotStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import { requireHostedMarketplaceContext } from "./hosted-marketplace-api";
 import {
@@ -98,6 +100,8 @@ export async function callLoopgraphAppTool(
   const callOptions = {
     ...options,
     appInstallationStoreFactory: (workspaceId: string) => getAppInstallationStore({ projectRoot, workspaceId }),
+    connectorFieldMappingStoreFactory: (workspaceId: string) => getConnectorFieldMappingStore({ projectRoot, workspaceId }),
+    providerSchemaSnapshotStoreFactory: (workspaceId: string) => getProviderSchemaSnapshotStore({ projectRoot, workspaceId }),
     loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
     ...(CONNECTION_AWARE_TOOLS.has(name) ? { connections: await trustedConnections() } : {}),
     ...(EVIDENCE_AWARE_TOOLS.has(name) ? {

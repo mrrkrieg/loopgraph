@@ -40,6 +40,8 @@ import { readConnectionInstances } from "./connector-registry";
 import {
   FileConnectorFieldMappingStore,
   FileProviderSchemaSnapshotStore,
+  type ConnectorFieldMappingStore,
+  type ProviderSchemaSnapshotStore,
   loadConnectorRecipes,
   normalizeConnectorProviderId,
   providerIdForCapability,
@@ -484,6 +486,8 @@ export async function callLoopgraphAppTool(
     hermesOperationsStore?: HermesOperationsStore;
     loopSpecStore?: LoopSpecRegistryStore;
     appInstallationStoreFactory?: (workspaceId: string) => AppInstallationStore;
+    connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
+    providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
   } = {}
 ): Promise<unknown> {
@@ -589,13 +593,18 @@ export async function callLoopgraphAppTool(
       path.join(projectRoot, ".loopgraph", "apps"),
       identity.workspaceId
     );
+    const mappingStore = connectorFieldMappingStore(
+      options,
+      path.join(projectRoot, ".loopgraph", "apps"),
+      identity.workspaceId
+    );
     const registry = await installationStore.read();
     const service = new AppInstallationService(
       marketplace,
       projectRoot,
       identity.workspaceId,
       identity.companyId,
-      { installationStore, loopSpecStore: options.loopSpecStore }
+      { installationStore, mappingStore, loopSpecStore: options.loopSpecStore }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
     const applications = await Promise.all(orderedDefinitions.map(async (definition) => {
@@ -841,6 +850,8 @@ export async function callLoopgraphAppTool(
     : undefined;
   const identity = await resolveIdentity(projectRoot, raw.workspaceId ?? planWorkspaceId, raw.companyId);
   const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
+  const mappingStore = connectorFieldMappingStore(options, appsRoot, identity.workspaceId);
+  const snapshotStore = providerSchemaSnapshotStore(options, appsRoot, identity.workspaceId);
   if (name === "loopgraph_connector_schema_record") {
     const parsed = connectorSchemaRecordInputSchema.parse({ ...raw, projectRoot, ...identity });
     const connections = await appConnections(projectRoot, options.connections);
@@ -858,8 +869,7 @@ export async function callLoopgraphAppTool(
       throw new Error("Provider schema snapshot is too old; inspect the connection again");
     }
     const expiresAt = new Date(Date.parse(inspectedAt) + parsed.ttlSeconds * 1000).toISOString();
-    const store = new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), identity.workspaceId);
-    return store.save({
+    return snapshotStore.save({
       connectionId: parsed.connectionId,
       providerId: parsed.providerId,
       source: parsed.source,
@@ -872,7 +882,16 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_field_mappings_get") {
     const parsed = appFieldMappingsGetInputSchema.parse({ ...raw, projectRoot, ...identity });
-    return buildAppFieldMappingPlan({ marketplace, projectRoot, workspaceId: identity.workspaceId, connections: await appConnections(projectRoot, options.connections), ...parsed, now: options.now });
+    return buildAppFieldMappingPlan({
+      marketplace,
+      projectRoot,
+      workspaceId: identity.workspaceId,
+      mappingStore,
+      snapshotStore,
+      connections: await appConnections(projectRoot, options.connections),
+      ...parsed,
+      now: options.now
+    });
   }
   if (name === "loopgraph_app_field_mapping_confirm") {
     const parsed = appFieldMappingConfirmInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -880,7 +899,6 @@ export async function callLoopgraphAppTool(
     if (!connections.some((connection) => connection.id === parsed.connectionId)) {
       throw new Error(`Connection not found: ${parsed.connectionId}`);
     }
-    const snapshotStore = new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), identity.workspaceId);
     const snapshot = await snapshotStore.get(parsed.connectionId, options.now);
     const providerFields = snapshot?.objects.find((object) => object.objectType === parsed.objectType)?.fields;
     if (providerFields) {
@@ -889,7 +907,6 @@ export async function callLoopgraphAppTool(
         throw new Error(`Provider fields are not present in the current schema snapshot: ${unknown.map((mapping) => mapping.providerField).join(", ")}`);
       }
     }
-    const mappingStore = new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), identity.workspaceId);
     const mappings = [];
     for (const mapping of parsed.mappings) {
       mappings.push(await mappingStore.saveConfirmed({
@@ -911,7 +928,7 @@ export async function callLoopgraphAppTool(
     projectRoot,
     identity.workspaceId,
     identity.companyId,
-    { installationStore, loopSpecStore: options.loopSpecStore }
+    { installationStore, mappingStore, loopSpecStore: options.loopSpecStore }
   );
   if (name === "loopgraph_app_onboarding_get") {
     const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -972,6 +989,8 @@ export async function callLoopgraphAppTool(
           appId: parsed.appId,
           version: version.version,
           presetId: parsed.presetId,
+          mappingStore,
+          snapshotStore,
           connections: await appConnections(projectRoot, options.connections),
           now: options.now
         })
@@ -1453,6 +1472,8 @@ async function buildAppFieldMappingPlan(input: {
   appId: string;
   version?: string;
   presetId: string;
+  mappingStore: ConnectorFieldMappingStore;
+  snapshotStore: ProviderSchemaSnapshotStore;
   connections: ConnectionInstance[];
   now?: Date;
 }): Promise<AppFieldMappingPlan> {
@@ -1476,10 +1497,7 @@ async function buildAppFieldMappingPlan(input: {
     connections: input.connections,
     selectedRecipeId
   });
-  const appsRoot = path.join(input.projectRoot, ".loopgraph", "apps");
-  const mappingStore = new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), input.workspaceId);
-  const snapshotStore = new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), input.workspaceId);
-  const confirmedMappings = await mappingStore.list();
+  const confirmedMappings = await input.mappingStore.list();
   const requirements = [];
   for (const requirement of recipe.fieldMappings) {
     const providerId = normalizeConnectorProviderId(requirement.providerId ?? recipe.providerId);
@@ -1500,7 +1518,7 @@ async function buildAppFieldMappingPlan(input: {
         objectType: requirement.objectType
       })
       : { complete: false, missing: [...requirement.requiredLogicalFields], unverified: [] as string[] };
-    const snapshot = connectionId ? await snapshotStore.get(connectionId, input.now) : undefined;
+    const snapshot = connectionId ? await input.snapshotStore.get(connectionId, input.now) : undefined;
     const snapshotFields = snapshot?.objects.find((object) => object.objectType === requirement.objectType)?.fields;
     const providerFields = connectionId
       ? snapshotFields ?? connectorMetadataFields(providerId, [...requirement.requiredLogicalFields, ...requirement.optionalLogicalFields])
@@ -1624,6 +1642,24 @@ function appInstallationStore(
   workspaceId: string
 ): AppInstallationStore {
   return options.appInstallationStoreFactory?.(workspaceId) ?? new FileAppInstallationStore(appsRoot, workspaceId);
+}
+
+function connectorFieldMappingStore(
+  options: { connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore },
+  appsRoot: string,
+  workspaceId: string
+): ConnectorFieldMappingStore {
+  return options.connectorFieldMappingStoreFactory?.(workspaceId) ??
+    new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), workspaceId);
+}
+
+function providerSchemaSnapshotStore(
+  options: { providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore },
+  appsRoot: string,
+  workspaceId: string
+): ProviderSchemaSnapshotStore {
+  return options.providerSchemaSnapshotStoreFactory?.(workspaceId) ??
+    new FileProviderSchemaSnapshotStore(path.join(appsRoot, "provider-schemas.json"), workspaceId);
 }
 
 async function appWorkspaceRegistry(projectRoot: string, store?: LoopSpecRegistryStore) {

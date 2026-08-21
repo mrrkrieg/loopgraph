@@ -36,6 +36,41 @@ export type CapabilityResolution = {
   reason: string;
 };
 
+export interface ProviderSchemaSnapshotStore {
+  readonly persistence: "file" | "distributed";
+  list(): Promise<ProviderSchemaSnapshot[]>;
+  get(connectionId: string, now?: Date): Promise<ProviderSchemaSnapshot | undefined>;
+  save(input: {
+    connectionId: string;
+    providerId: string;
+    source: ProviderSchemaSnapshot["source"];
+    samplePolicy: "redacted_only";
+    objects: ProviderSchemaSnapshot["objects"];
+    inspectedBy: string;
+    inspectedAt?: string;
+    expiresAt?: string;
+  }): Promise<ProviderSchemaSnapshot>;
+}
+
+export interface ConnectorFieldMappingStore {
+  readonly persistence: "file" | "distributed";
+  list(): Promise<ConnectorFieldMapping[]>;
+  saveConfirmed(input: {
+    connectionId: string;
+    objectType: string;
+    logicalField: string;
+    providerField: string;
+    direction: "read" | "write" | "bidirectional";
+    transform?: ConnectorFieldMapping["transform"];
+    confidence: number;
+    confirmedBy: string;
+    installationId?: string;
+    now?: Date;
+  }): Promise<ConnectorFieldMapping>;
+  attachInstallation(mappingIds: string[], installationId: string): Promise<ConnectorFieldMapping[]>;
+  detachInstallation(installationId: string, now?: Date): Promise<ConnectorFieldMapping[]>;
+}
+
 export async function loadConnectorRecipes(loaded: LoopPackLoadResult): Promise<ConnectorRecipe[]> {
   const recipes: ConnectorRecipe[] = [];
   for (const relativePath of loaded.manifest.entrypoints.connectors) {
@@ -121,7 +156,8 @@ export function normalizeConnectorProviderId(providerId: string): string {
   return aliases[normalized] ?? normalized.replace(/-/g, "_");
 }
 
-export class FileProviderSchemaSnapshotStore {
+export class FileProviderSchemaSnapshotStore implements ProviderSchemaSnapshotStore {
+  readonly persistence = "file" as const;
   constructor(private readonly filePath: string, private readonly workspaceId: string) {}
 
   async list(): Promise<ProviderSchemaSnapshot[]> {
@@ -213,7 +249,8 @@ export function validateFieldMappingCoverage(input: {
   return { complete: missing.length === 0 && unverified.length === 0, missing, unverified };
 }
 
-export class FileConnectorFieldMappingStore {
+export class FileConnectorFieldMappingStore implements ConnectorFieldMappingStore {
+  readonly persistence = "file" as const;
   constructor(private readonly filePath: string, private readonly workspaceId: string) {}
 
   async list(): Promise<ConnectorFieldMapping[]> {

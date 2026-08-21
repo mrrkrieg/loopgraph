@@ -32,6 +32,7 @@ import {
   type AppRolloutMode,
   type AppUpdatePlan,
   type ConnectionInstance,
+  type ConnectorFieldMapping,
   type WorkspaceAppInstallation
 } from "../core";
 import { appSetupDefinitionSchema } from "../core/app-pack-content";
@@ -42,6 +43,7 @@ import {
   resolveConnectorCapabilities,
   validateFieldMappingCoverage,
   type CapabilityResolution,
+  type ConnectorFieldMappingStore,
   FileConnectorFieldMappingStore
 } from "./app-connector-service";
 import { LocalAppMarketplace } from "./app-marketplace";
@@ -141,7 +143,7 @@ export type AppLifecycleMutationResult = {
 export class AppInstallationService {
   private readonly installationStore: AppInstallationStore;
   private readonly contextStore: FileCompanyContextStore;
-  private readonly mappingStore: FileConnectorFieldMappingStore;
+  private readonly mappingStore: ConnectorFieldMappingStore;
   private readonly loopSpecStore: LoopSpecRegistryStore;
 
   constructor(
@@ -152,7 +154,7 @@ export class AppInstallationService {
     dependencies: {
       installationStore?: AppInstallationStore;
       contextStore?: FileCompanyContextStore;
-      mappingStore?: FileConnectorFieldMappingStore;
+      mappingStore?: ConnectorFieldMappingStore;
       loopSpecStore?: LoopSpecRegistryStore;
     } = {}
   ) {
@@ -236,7 +238,7 @@ export class AppInstallationService {
         id: `field-mapping.${mapping.id}`,
         kind: "field_mapping" as const,
         action: "reuse" as const,
-        digest: canonicalAppDigest(mapping),
+        digest: fieldMappingAssetDigest(mapping),
         shared: true,
         dependencies: []
       }))
@@ -419,6 +421,9 @@ export class AppInstallationService {
           committedAt: timestamp,
           artifacts
         });
+        if (plan.fieldMappingIds.length > 0) {
+          await this.mappingStore.attachInstallation(plan.fieldMappingIds, installationId);
+        }
         const lock = createInstallationLock(nextRegistry);
         return { registry: nextRegistry, lock, value: { installation, lock, loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: true } };
       } catch (error) {
@@ -694,6 +699,9 @@ export class AppInstallationService {
         lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
         updatedAt: timestamp
       };
+      if (duplicate.fieldMappingIds.length > 0) {
+        await this.mappingStore.attachInstallation(duplicate.fieldMappingIds, installationId);
+      }
       const lock = createInstallationLock(nextRegistry);
       return { registry: nextRegistry, lock, value: { installation: duplicate, receipt, lock } };
     });
@@ -1806,6 +1814,21 @@ function findConnectionForRecipe(resolutions: CapabilityResolution[], recipeId: 
 
 function installationIdFor(workspaceId: string, appId: string): string {
   return `install.${contentHash({ workspaceId, appId })}`;
+}
+
+function fieldMappingAssetDigest(mapping: ConnectorFieldMapping): string {
+  return canonicalAppDigest({
+    id: mapping.id,
+    connectionId: mapping.connectionId,
+    objectType: mapping.objectType,
+    logicalField: mapping.logicalField,
+    providerField: mapping.providerField,
+    direction: mapping.direction,
+    transform: mapping.transform,
+    confidence: mapping.confidence,
+    verified: mapping.verified,
+    confirmedBy: mapping.confirmedBy
+  });
 }
 
 function createInstallationLock(registry: AppInstallationRegistry): AppInstallationLock {

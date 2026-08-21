@@ -16,10 +16,14 @@ const mocks = vi.hoisted(() => ({
   appInstallationStore: { persistence: "distributed" },
   appVerificationStore: { persistence: "distributed" },
   loopSpecStore: { persistence: "distributed" },
+  connectorFieldMappingStore: { persistence: "distributed" },
+  providerSchemaSnapshotStore: { persistence: "distributed" },
   getOutcomeStore: vi.fn(),
   getHermesOperationsStore: vi.fn(),
   getAppInstallationStore: vi.fn(),
   getLoopSpecRegistryStore: vi.fn(),
+  getConnectorFieldMappingStore: vi.fn(),
+  getProviderSchemaSnapshotStore: vi.fn(),
   getAppVerificationStore: vi.fn()
 }));
 
@@ -49,6 +53,8 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getHermesOperationsStore: mocks.getHermesOperationsStore,
   getAppInstallationStore: mocks.getAppInstallationStore,
   getLoopSpecRegistryStore: mocks.getLoopSpecRegistryStore,
+  getConnectorFieldMappingStore: mocks.getConnectorFieldMappingStore,
+  getProviderSchemaSnapshotStore: mocks.getProviderSchemaSnapshotStore,
   getAppVerificationStore: mocks.getAppVerificationStore
 }));
 vi.mock("@/lib/db/adapters/supabase-marketplace-registry-store", () => ({
@@ -73,6 +79,8 @@ beforeEach(() => {
   mocks.getHermesOperationsStore.mockReturnValue(mocks.hermesOperationsStore);
   mocks.getAppInstallationStore.mockReturnValue(mocks.appInstallationStore);
   mocks.getLoopSpecRegistryStore.mockReturnValue(mocks.loopSpecStore);
+  mocks.getConnectorFieldMappingStore.mockReturnValue(mocks.connectorFieldMappingStore);
+  mocks.getProviderSchemaSnapshotStore.mockReturnValue(mocks.providerSchemaSnapshotStore);
   mocks.getAppVerificationStore.mockReturnValue(mocks.appVerificationStore);
 });
 
@@ -102,6 +110,8 @@ describe("hosted app tool bridge", () => {
       });
       expect(options.appVerificationStoreFactory("acme")).toBe(mocks.appVerificationStore);
       expect(options.appInstallationStoreFactory("acme")).toBe(mocks.appInstallationStore);
+      expect(options.connectorFieldMappingStoreFactory("acme")).toBe(mocks.connectorFieldMappingStore);
+      expect(options.providerSchemaSnapshotStoreFactory("acme")).toBe(mocks.providerSchemaSnapshotStore);
       return { maturity: "concept" };
     });
     await callLoopgraphAppTool("loopgraph_app_maturity_get", {

@@ -13,6 +13,8 @@ import {
   FileOutcomeStore,
   FileAppInstallationStore,
   FileAppVerificationStore,
+  FileConnectorFieldMappingStore,
+  FileProviderSchemaSnapshotStore,
   FileRoutingStore,
   FileSemanticGraphStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
@@ -27,6 +29,8 @@ import {
   type OutcomeStore,
   type AppInstallationStore,
   type AppVerificationStore,
+  type ConnectorFieldMappingStore,
+  type ProviderSchemaSnapshotStore,
   type RoutingStore,
   type SemanticGraphStore
 } from "loopgraph/runtime";
@@ -77,6 +81,11 @@ import {
   createSupabaseAppInstallationStore,
   isSupabaseAppInstallationStoreEnabled
 } from "@/lib/db/adapters/supabase-app-installation-store";
+import {
+  createSupabaseConnectorFieldMappingStore,
+  createSupabaseProviderSchemaSnapshotStore,
+  isSupabaseAppConnectorMetadataStoreEnabled
+} from "@/lib/db/adapters/supabase-app-connector-metadata-store";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
@@ -92,6 +101,8 @@ const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
 const cachedAppInstallationStores = new Map<string, AppInstallationStore>();
 const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
+const cachedConnectorFieldMappingStores = new Map<string, ConnectorFieldMappingStore>();
+const cachedProviderSchemaSnapshotStores = new Map<string, ProviderSchemaSnapshotStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -464,6 +475,50 @@ export function getAppInstallationStore(options: {
   return store;
 }
 
+export function getConnectorFieldMappingStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): ConnectorFieldMappingStore {
+  const useSupabase = !options.forceFile && isSupabaseAppConnectorMetadataStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App field-mapping storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-field-mappings:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-field-mappings:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedConnectorFieldMappingStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseConnectorFieldMappingStore(options.workspaceId)
+    : new FileConnectorFieldMappingStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps", "field-mappings.json"), options.workspaceId);
+  cachedConnectorFieldMappingStores.set(cacheKey, store);
+  return store;
+}
+
+export function getProviderSchemaSnapshotStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): ProviderSchemaSnapshotStore {
+  const useSupabase = !options.forceFile && isSupabaseAppConnectorMetadataStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed provider-schema storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-provider-schemas:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-provider-schemas:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedProviderSchemaSnapshotStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseProviderSchemaSnapshotStore(options.workspaceId)
+    : new FileProviderSchemaSnapshotStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps", "provider-schemas.json"), options.workspaceId);
+  cachedProviderSchemaSnapshotStores.set(cacheKey, store);
+  return store;
+}
+
 export function getEntityResolutionStore(options?: { projectRoot?: string; forceFile?: boolean }): EntityResolutionStore {
   const useSupabase = !options?.forceFile && isSupabaseEntityResolutionStoreEnabled();
   if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) throw new Error("Distributed entity resolution is required for the hosted runtime");
@@ -491,6 +546,8 @@ export function resetStorageAdapterCache() {
   cachedEntityStores.clear();
   cachedAppInstallationStores.clear();
   cachedAppVerificationStores.clear();
+  cachedConnectorFieldMappingStores.clear();
+  cachedProviderSchemaSnapshotStores.clear();
 }
 
 const UUID_PATTERN =

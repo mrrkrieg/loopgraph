@@ -4,11 +4,13 @@ import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
   getAppVerificationStore,
+  getConnectorFieldMappingStore,
   getDiscoveryDesignStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopSpecRegistryStore,
   getStorageAdapter,
+  getProviderSchemaSnapshotStore,
   resetStorageAdapterCache,
   resolveHostedRuntimeProjectRoot
 } from "./storage-resolver";
@@ -145,6 +147,15 @@ describe("hosted runtime namespaces", () => {
     expect(secondWorkspace).not.toBe(first);
   });
 
+  it("scopes local App connector metadata by project and workspace", () => {
+    const mappings = getConnectorFieldMappingStore({ projectRoot: "/tmp/loopgraph-metadata-a", workspaceId: "acme", forceFile: true });
+    const mappingsAgain = getConnectorFieldMappingStore({ projectRoot: "/tmp/loopgraph-metadata-a", workspaceId: "acme", forceFile: true });
+    const schemas = getProviderSchemaSnapshotStore({ projectRoot: "/tmp/loopgraph-metadata-a", workspaceId: "acme", forceFile: true });
+    expect(mappings.persistence).toBe("file");
+    expect(schemas.persistence).toBe("file");
+    expect(mappingsAgain).toBe(mappings);
+  });
+
   it("fails closed instead of using file state for hosted controller data", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
@@ -163,6 +174,12 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getAppInstallationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App installation storage is required"
+    );
+    expect(() => getConnectorFieldMappingStore({ workspaceId: "acme" })).toThrow(
+      "Distributed App field-mapping storage is required"
+    );
+    expect(() => getProviderSchemaSnapshotStore({ workspaceId: "acme" })).toThrow(
+      "Distributed provider-schema storage is required"
     );
   });
 });
