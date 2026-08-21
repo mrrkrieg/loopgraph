@@ -20,6 +20,8 @@ describe("shared Loopgraph App tools", () => {
     expect(LOOPGRAPH_APP_TOOL_NAMES).toEqual([
       "loopgraph_company_blueprints_search",
       "loopgraph_company_blueprint_get",
+      "loopgraph_company_context_get",
+      "loopgraph_company_context_approve",
       "loopgraph_department_packs_search",
       "loopgraph_department_pack_get",
       "loopgraph_marketplace_search",
@@ -238,6 +240,63 @@ describe("shared Loopgraph App tools", () => {
     });
     const status = await callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as { installations: unknown[] };
     expect(status.installations).toEqual([]);
+  });
+
+  it("lets Hermes read approved company context but requires an accountable approval to persist it", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-company-context-tools-"));
+    temporaryDirectories.push(projectRoot);
+    const initial = await callLoopgraphAppTool("loopgraph_company_context_get", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company"
+    }) as { revision: number; values: unknown[] };
+    expect(initial).toMatchObject({ revision: 0, values: [] });
+
+    await callLoopgraphAppTool("loopgraph_company_context_approve", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      expectedRevision: 0,
+      approvedBy: "founder@example.com",
+      proposal: {
+        key: "company.primaryGoal",
+        type: "string",
+        value: "Increase qualified expansion revenue",
+        provenance: { source: "hermes_inference", sourceRef: "discovery.session-1" },
+        confidence: 0.91,
+        owner: "management",
+        visibility: "workspace",
+        explanation: "Hermes inferred this goal from the reviewed founder interview."
+      }
+    }, { now: new Date("2026-08-21T16:30:00.000Z") });
+    const approved = await callLoopgraphAppTool("loopgraph_company_context_get", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company"
+    }) as { revision: number; values: Array<{ key: string; verified: boolean; confirmedBy?: string }> };
+    expect(approved).toMatchObject({ revision: 1 });
+    expect(approved.values).toContainEqual(expect.objectContaining({
+      key: "company.primaryGoal",
+      verified: true,
+      confirmedBy: "founder@example.com"
+    }));
+
+    await expect(callLoopgraphAppTool("loopgraph_company_context_approve", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      expectedRevision: 1,
+      approvedBy: "founder@example.com",
+      proposal: {
+        key: "company.crm",
+        type: "object",
+        value: { access_token: "secret-value-that-must-not-persist" },
+        provenance: { source: "user" },
+        confidence: 1,
+        owner: "management",
+        explanation: "Invalid credential-bearing context."
+      }
+    })).rejects.toThrow(/Secret-like material was blocked/);
   });
 
   it("keeps a clean local workspace empty until an exact plan is installed", async () => {

@@ -9,6 +9,8 @@ Choose stack → Connect systems → Answer gaps → Confirm fields
 
 The source of truth is the read-only `loopgraph_app_onboarding_get` tool. It derives progress from the immutable Marketplace artifact, current connector and mapping registries, company configuration, installation lock, conformance evidence, and installed lifecycle state. There is no separate conversational checklist to become stale.
 
+Before asking a reusable business question, Hermes reads `loopgraph_company_context_get`. A proposed shared answer remains untrusted until an accountable operator approves its value, provenance, confidence, owner, visibility, and current revision through `loopgraph_company_context_approve`. Secret-like material and declared-type mismatches are rejected. A stale revision or changed value requires a fresh read and plan; Hermes cannot silently preserve an earlier inference.
+
 ## Contract
 
 The returned `loopgraph-app-onboarding/v1alpha1` object contains:

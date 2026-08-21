@@ -549,31 +549,44 @@ export const marketplaceCatalogSourceSchema = z.object({
 }).strict();
 
 export const companyContextValueSchema = z.object({
-  key: z.string().min(1),
+  key: z.string().min(1).max(500),
   type: z.enum(["string", "number", "boolean", "string_list", "object", "reference"]),
   value: jsonValueSchema,
   provenance: z.object({
     source: z.enum(["user", "hermes_inference", "provider", "import", "policy"]),
-    sourceRef: z.string().min(1).optional(),
+    sourceRef: z.string().min(1).max(1000).optional(),
     observedAt: isoDateTimeSchema
   }).strict(),
   verified: z.boolean(),
   confidence: z.number().min(0).max(1),
-  owner: z.string().min(1),
+  owner: z.string().min(1).max(300),
   visibility: z.enum(["workspace", "department", "installation", "private"]),
   confirmedAt: isoDateTimeSchema.optional(),
-  confirmedBy: z.string().min(1).optional(),
-  consumerInstallationIds: z.array(appIdSchema).default([])
-}).strict();
+  confirmedBy: z.string().min(1).max(300).optional(),
+  consumerInstallationIds: z.array(appIdSchema).max(1000).default([])
+}).strict().superRefine((entry, ctx) => {
+  const valid = entry.type === "string" || entry.type === "reference"
+    ? typeof entry.value === "string"
+    : entry.type === "number"
+      ? typeof entry.value === "number" && Number.isFinite(entry.value)
+      : entry.type === "boolean"
+        ? typeof entry.value === "boolean"
+        : entry.type === "string_list"
+          ? Array.isArray(entry.value) && entry.value.every((value) => typeof value === "string")
+          : Boolean(entry.value) && typeof entry.value === "object" && !Array.isArray(entry.value);
+  if (!valid) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["value"], message: `Company context value does not match declared type ${entry.type}` });
+  }
+});
 
 export const companyContextSchema = z.object({
   schemaVersion: z.literal(COMPANY_CONTEXT_SCHEMA_VERSION),
   workspaceId: appIdSchema,
   companyId: appIdSchema,
   revision: z.number().int().nonnegative(),
-  values: z.array(companyContextValueSchema).default([]),
+  values: z.array(companyContextValueSchema).max(500).default([]),
   updatedAt: isoDateTimeSchema,
-  updatedBy: z.string().min(1)
+  updatedBy: z.string().min(1).max(300)
 }).strict().superRefine((context, ctx) => {
   const keys = context.values.map((value) => value.key);
   if (new Set(keys).size !== keys.length) {

@@ -97,6 +97,8 @@ pack default
 
 Every resolved value retains its winning layer and provenance. Hermes should infer values from trusted context first, explain the evidence, ask only for missing or uncertain values, and request confirmation for high-impact values before saving them to shared company context.
 
+Hermes reads shared context through `loopgraph_company_context_get`; inference remains a proposal until an accountable operator calls `loopgraph_company_context_approve` against the exact current revision. The shared schema requires the JSON value to match its declared type, and the persistence boundary rejects secret-like material. Hosted context uses an organization/project/workspace/company-scoped, service-role-only Supabase record with optimistic revision checks and audit-chain receipts. Installation apply revalidates every company-context-derived configuration value against the current approved record and attaches consumer ownership. Changed context invalidates the stale plan instead of silently installing the old value.
+
 ## Connector recipes and field mappings
 
 A multi-provider recipe resolves each capability against the provider that owns its declared operation. The recipe's primary provider does not implicitly satisfy mail, messaging, analytics, or other secondary capabilities. Broad connection grants such as `crm.read` may satisfy narrower read-only requirements such as `crm.lead.read`, but never create write authority.

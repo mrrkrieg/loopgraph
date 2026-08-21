@@ -4,6 +4,7 @@ import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
   getAppVerificationStore,
+  getCompanyContextStore,
   getConnectorFieldMappingStore,
   getDiscoveryDesignStore,
   getLoopControllerStore,
@@ -156,6 +157,15 @@ describe("hosted runtime namespaces", () => {
     expect(mappingsAgain).toBe(mappings);
   });
 
+  it("scopes local company context by project, workspace, and company", () => {
+    const first = getCompanyContextStore({ projectRoot: "/tmp/loopgraph-context-a", workspaceId: "acme", companyId: "acme-company", forceFile: true });
+    const firstAgain = getCompanyContextStore({ projectRoot: "/tmp/loopgraph-context-a", workspaceId: "acme", companyId: "acme-company", forceFile: true });
+    const secondCompany = getCompanyContextStore({ projectRoot: "/tmp/loopgraph-context-a", workspaceId: "acme", companyId: "globex-company", forceFile: true });
+    expect(first.persistence).toBe("file");
+    expect(firstAgain).toBe(first);
+    expect(secondCompany).not.toBe(first);
+  });
+
   it("fails closed instead of using file state for hosted controller data", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
@@ -180,6 +190,9 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getProviderSchemaSnapshotStore({ workspaceId: "acme" })).toThrow(
       "Distributed provider-schema storage is required"
+    );
+    expect(() => getCompanyContextStore({ workspaceId: "acme", companyId: "acme-company" })).toThrow(
+      "Distributed company-context storage is required"
     );
   });
 });

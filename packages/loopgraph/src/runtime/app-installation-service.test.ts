@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchema } from "../core";
 import { FileConnectorFieldMappingStore } from "./app-connector-service";
+import { FileCompanyContextStore } from "./company-context-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
@@ -24,6 +25,7 @@ async function harness() {
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "marketplace"), packsRoot);
   await marketplace.refreshAllCatalogSources();
   const mappingStore = new FileConnectorFieldMappingStore(path.join(projectRoot, ".loopgraph", "apps", "field-mappings.json"), "acme");
+  const contextStore = new FileCompanyContextStore(path.join(projectRoot, ".loopgraph", "apps", "company-context.json"));
   const logicalFields = [
     ["lead", "lead.id", "id"],
     ["lead", "lead.email", "email"],
@@ -45,7 +47,7 @@ async function harness() {
       confirmedBy: "admin-1"
     }));
   }
-  const service = new AppInstallationService(marketplace, projectRoot, "acme", "acme-company", { mappingStore });
+  const service = new AppInstallationService(marketplace, projectRoot, "acme", "acme-company", { contextStore, mappingStore });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
     id: "hubspot-production",
@@ -57,7 +59,7 @@ async function harness() {
     readPolicy: "read_only",
     writePolicy: "not_allowed"
   });
-  return { projectRoot, service, marketplace, mappingStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
+  return { projectRoot, service, marketplace, contextStore, mappingStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
 }
 
 const installValues = {
@@ -140,6 +142,71 @@ async function addConflictingObjectCatalog(input: Awaited<ReturnType<typeof harn
 }
 
 describe("atomic app installation lifecycle", () => {
+  it("binds only current approved company context and records installation ownership", async () => {
+    const input = await harness();
+    const observedAt = "2026-08-08T11:00:00.000Z";
+    const proposal = (industries: string[]) => ({
+      key: "sales.icp",
+      type: "object" as const,
+      value: { industries, minimumEmployees: 50 },
+      provenance: { source: "hermes_inference" as const, sourceRef: "discovery.session-1", observedAt },
+      confidence: 0.9,
+      owner: "revenue-operations",
+      visibility: "workspace" as const,
+      explanation: "Derived from reviewed discovery evidence."
+    });
+    await input.contextStore.approveValue({
+      workspaceId: "acme",
+      companyId: "acme-company",
+      proposal: proposal(["software"]),
+      approvedBy: "admin-1",
+      expectedRevision: 0,
+      now: new Date("2026-08-08T11:01:00.000Z")
+    });
+    const installValuesWithoutIcp = Object.fromEntries(Object.entries(installValues).filter(([key]) => key !== "icpDefinition"));
+    const stalePlan = await input.service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [input.connection],
+      installValues: installValuesWithoutIcp,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T11:02:00.000Z")
+    });
+    expect(stalePlan.configuration.provenance.icpDefinition).toMatchObject({ layer: "company_context", sourceRef: "sales.icp" });
+    await input.contextStore.approveValue({
+      workspaceId: "acme",
+      companyId: "acme-company",
+      proposal: proposal(["software", "fintech"]),
+      approvedBy: "admin-1",
+      expectedRevision: 1,
+      now: new Date("2026-08-08T11:03:00.000Z")
+    });
+    await expect(input.service.apply(stalePlan, "admin-1", new Date("2026-08-08T11:04:00.000Z")))
+      .rejects.toThrow(/company context changed/i);
+
+    const freshPlan = await input.service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [input.connection],
+      installValues: installValuesWithoutIcp,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T11:05:00.000Z")
+    });
+    const applied = await input.service.apply(freshPlan, "admin-1", new Date("2026-08-08T11:06:00.000Z"));
+    const context = await input.contextStore.get("acme", "acme-company");
+    expect(context.values.find((value) => value.key === "sales.icp")?.consumerInstallationIds).toEqual([applied.installation.id]);
+  });
+
   it("plans, installs, tests, and activates the Sales app without enabling writes", async () => {
     const { projectRoot, service, connection, mappingIds } = await harness();
     const now = new Date("2026-08-08T12:00:00.000Z");

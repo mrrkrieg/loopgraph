@@ -19,6 +19,7 @@ import {
   canonicalAppDigest,
   contentHash,
   type AppConfigField,
+  type AppConfiguration,
   type AppActivationApprovalReceipt,
   type AppEvalRun,
   type AppEvalJudgment,
@@ -33,6 +34,7 @@ import {
   type AppUpdatePlan,
   type ConnectionInstance,
   type ConnectorFieldMapping,
+  type CompanyContext,
   type WorkspaceAppInstallation
 } from "../core";
 import { appSetupDefinitionSchema } from "../core/app-pack-content";
@@ -47,7 +49,11 @@ import {
   FileConnectorFieldMappingStore
 } from "./app-connector-service";
 import { LocalAppMarketplace } from "./app-marketplace";
-import { FileCompanyContextStore, resolveAppConfiguration } from "./company-context-service";
+import {
+  FileCompanyContextStore,
+  resolveAppConfiguration,
+  type CompanyContextStore
+} from "./company-context-service";
 import {
   FileLoopSpecRegistryStore,
   createStoredLoopSpecArtifact,
@@ -142,7 +148,7 @@ export type AppLifecycleMutationResult = {
 
 export class AppInstallationService {
   private readonly installationStore: AppInstallationStore;
-  private readonly contextStore: FileCompanyContextStore;
+  private readonly contextStore: CompanyContextStore;
   private readonly mappingStore: ConnectorFieldMappingStore;
   private readonly loopSpecStore: LoopSpecRegistryStore;
 
@@ -153,7 +159,7 @@ export class AppInstallationService {
     private readonly companyId: string,
     dependencies: {
       installationStore?: AppInstallationStore;
-      contextStore?: FileCompanyContextStore;
+      contextStore?: CompanyContextStore;
       mappingStore?: ConnectorFieldMappingStore;
       loopSpecStore?: LoopSpecRegistryStore;
     } = {}
@@ -355,6 +361,11 @@ export class AppInstallationService {
       const workspaceBefore = this.loopSpecStore.persistence === "file"
         ? await prepareLocalWorkspaceSnapshot(this.projectRoot)
         : undefined;
+      const contextKeys = companyContextKeys(plan.configuration);
+      const context = contextKeys.length > 0
+        ? await this.contextStore.get(this.workspaceId, this.companyId)
+        : undefined;
+      if (context) assertCompanyContextStillMatches(plan.configuration, context);
       const timestamp = now.toISOString();
       const ownedAssets = plan.assets.filter((asset) => !["retain", "remove"].includes(asset.action)).map((asset) => ({
         assetId: asset.id,
@@ -423,6 +434,17 @@ export class AppInstallationService {
         });
         if (plan.fieldMappingIds.length > 0) {
           await this.mappingStore.attachInstallation(plan.fieldMappingIds, installationId);
+        }
+        if (context && contextKeys.length > 0) {
+          await this.contextStore.attachConsumer({
+            workspaceId: this.workspaceId,
+            companyId: this.companyId,
+            contextKeys,
+            installationId,
+            expectedRevision: context.revision,
+            actor,
+            now
+          });
         }
         const lock = createInstallationLock(nextRegistry);
         return { registry: nextRegistry, lock, value: { installation, lock, loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: true } };
@@ -642,6 +664,11 @@ export class AppInstallationService {
         now
       }).configuration;
       const artifacts = await createInstallationArtifacts(compiled, loaded.root, installationId, loaded.manifest.metadata.department, timestamp, namespace);
+      const contextKeys = companyContextKeys(source.configuration);
+      const context = contextKeys.length > 0
+        ? await this.contextStore.get(this.workspaceId, this.companyId)
+        : undefined;
+      if (context) assertCompanyContextStillMatches(source.configuration, context);
       const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
       await this.loopSpecStore.commitMaterializationAtomically({
         commitId: `app-duplicate-${contentHash({ installationId, timestamp })}`,
@@ -701,6 +728,17 @@ export class AppInstallationService {
       };
       if (duplicate.fieldMappingIds.length > 0) {
         await this.mappingStore.attachInstallation(duplicate.fieldMappingIds, installationId);
+      }
+      if (context && contextKeys.length > 0) {
+        await this.contextStore.attachConsumer({
+          workspaceId: this.workspaceId,
+          companyId: this.companyId,
+          contextKeys,
+          installationId,
+          expectedRevision: context.revision,
+          actor: input.actor,
+          now
+        });
       }
       const lock = createInstallationLock(nextRegistry);
       return { registry: nextRegistry, lock, value: { installation: duplicate, receipt, lock } };
@@ -1829,6 +1867,22 @@ function fieldMappingAssetDigest(mapping: ConnectorFieldMapping): string {
     verified: mapping.verified,
     confirmedBy: mapping.confirmedBy
   });
+}
+
+function companyContextKeys(configuration: AppConfiguration): string[] {
+  return [...new Set(Object.values(configuration.provenance).flatMap((provenance) =>
+    provenance.layer === "company_context" && provenance.sourceRef ? [provenance.sourceRef] : []
+  ))].sort();
+}
+
+function assertCompanyContextStillMatches(configuration: AppConfiguration, context: CompanyContext): void {
+  for (const [fieldKey, provenance] of Object.entries(configuration.provenance)) {
+    if (provenance.layer !== "company_context" || !provenance.sourceRef) continue;
+    const current = context.values.find((value) => value.key === provenance.sourceRef && value.verified);
+    if (!current || canonicalAppDigest(current.value) !== canonicalAppDigest(configuration.values[fieldKey])) {
+      throw new Error(`Approved company context changed for ${provenance.sourceRef}; create a fresh installation plan`);
+    }
+  }
 }
 
 function createInstallationLock(registry: AppInstallationRegistry): AppInstallationLock {

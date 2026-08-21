@@ -13,6 +13,7 @@ import {
   FileOutcomeStore,
   FileAppInstallationStore,
   FileAppVerificationStore,
+  FileCompanyContextStore,
   FileConnectorFieldMappingStore,
   FileProviderSchemaSnapshotStore,
   FileRoutingStore,
@@ -29,6 +30,7 @@ import {
   type OutcomeStore,
   type AppInstallationStore,
   type AppVerificationStore,
+  type CompanyContextStore,
   type ConnectorFieldMappingStore,
   type ProviderSchemaSnapshotStore,
   type RoutingStore,
@@ -86,6 +88,10 @@ import {
   createSupabaseProviderSchemaSnapshotStore,
   isSupabaseAppConnectorMetadataStoreEnabled
 } from "@/lib/db/adapters/supabase-app-connector-metadata-store";
+import {
+  createSupabaseCompanyContextStore,
+  isSupabaseCompanyContextStoreEnabled
+} from "@/lib/db/adapters/supabase-company-context-store";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
@@ -101,6 +107,7 @@ const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
 const cachedAppInstallationStores = new Map<string, AppInstallationStore>();
 const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
+const cachedCompanyContextStores = new Map<string, CompanyContextStore>();
 const cachedConnectorFieldMappingStores = new Map<string, ConnectorFieldMappingStore>();
 const cachedProviderSchemaSnapshotStores = new Map<string, ProviderSchemaSnapshotStore>();
 
@@ -497,6 +504,29 @@ export function getConnectorFieldMappingStore(options: {
   return store;
 }
 
+export function getCompanyContextStore(options: {
+  workspaceId: string;
+  companyId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): CompanyContextStore {
+  const useSupabase = !options.forceFile && isSupabaseCompanyContextStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed company-context storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-company-context:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}:${options.companyId}`
+    : `file-company-context:${projectRoot}:${options.workspaceId}:${options.companyId}`;
+  const existing = cachedCompanyContextStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseCompanyContextStore(options.workspaceId, options.companyId)
+    : new FileCompanyContextStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps", "company-context.json"));
+  cachedCompanyContextStores.set(cacheKey, store);
+  return store;
+}
+
 export function getProviderSchemaSnapshotStore(options: {
   workspaceId: string;
   projectRoot?: string;
@@ -546,6 +576,7 @@ export function resetStorageAdapterCache() {
   cachedEntityStores.clear();
   cachedAppInstallationStores.clear();
   cachedAppVerificationStores.clear();
+  cachedCompanyContextStores.clear();
   cachedConnectorFieldMappingStores.clear();
   cachedProviderSchemaSnapshotStores.clear();
 }

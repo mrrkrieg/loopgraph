@@ -14,6 +14,7 @@ import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
   getAppVerificationStore,
+  getCompanyContextStore,
   getConnectorFieldMappingStore,
   getHermesOperationsStore,
   getLoopSpecRegistryStore,
@@ -100,6 +101,7 @@ export async function callLoopgraphAppTool(
   const callOptions = {
     ...options,
     appInstallationStoreFactory: (workspaceId: string) => getAppInstallationStore({ projectRoot, workspaceId }),
+    companyContextStoreFactory: (workspaceId: string, companyId: string) => getCompanyContextStore({ projectRoot, workspaceId, companyId }),
     connectorFieldMappingStoreFactory: (workspaceId: string) => getConnectorFieldMappingStore({ projectRoot, workspaceId }),
     providerSchemaSnapshotStoreFactory: (workspaceId: string) => getProviderSchemaSnapshotStore({ projectRoot, workspaceId }),
     loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),

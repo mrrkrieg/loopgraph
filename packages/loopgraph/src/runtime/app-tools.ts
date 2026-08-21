@@ -56,6 +56,7 @@ import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import type { LoopSpecRegistryStore } from "./loop-spec-store";
+import { FileCompanyContextStore, type CompanyContextStore } from "./company-context-service";
 import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
 import { deriveAppOnboardingJourney } from "./app-onboarding-journey";
 import {
@@ -80,6 +81,8 @@ const MAX_MARKETPLACE_CHANGELOG_BYTES = 64 * 1024;
 export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_company_blueprints_search",
   "loopgraph_company_blueprint_get",
+  "loopgraph_company_context_get",
+  "loopgraph_company_context_approve",
   "loopgraph_department_packs_search",
   "loopgraph_department_pack_get",
   "loopgraph_marketplace_search",
@@ -160,6 +163,32 @@ export const companyBlueprintGetInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
   blueprintId: z.string().min(1)
+}).strict();
+
+export const companyContextGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional()
+}).strict();
+
+export const companyContextApproveInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  expectedRevision: z.number().int().nonnegative(),
+  approvedBy: z.string().min(1).max(300),
+  proposal: z.object({
+    key: z.string().min(1).max(500),
+    type: z.enum(["string", "number", "boolean", "string_list", "object", "reference"]),
+    value: z.unknown(),
+    provenance: z.object({
+      source: z.enum(["user", "hermes_inference", "provider", "import", "policy"]),
+      sourceRef: z.string().min(1).max(1000).optional(),
+      observedAt: z.string().datetime().optional()
+    }).strict(),
+    confidence: z.number().min(0).max(1),
+    owner: z.string().min(1).max(300),
+    visibility: z.enum(["workspace", "department", "installation", "private"]).default("workspace"),
+    explanation: z.string().min(1).max(4000)
+  }).strict()
 }).strict();
 
 export const departmentPacksSearchInputSchema = projectSchema.extend({
@@ -418,6 +447,8 @@ export const marketplaceSourceRefreshInputSchema = projectSchema.extend({ source
 export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_company_blueprints_search", description: "Search read-only company-wide Hermes Brain blueprints that compose Department Packs, canonical company objects, and cross-department evidence contracts.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_company_blueprint_get", description: "Inspect one company-wide Blueprint, Department Pack progress, canonical object contracts, cross-department topology, and the exact dependency-safe next Pack without installing anything.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_company_context_get", description: "Read the approved, provenance-bearing company context Hermes may reuse when deciding which App setup questions are still missing.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_company_context_approve", description: "Persist one explicitly reviewed business-context value with provenance and optimistic concurrency; rejects credentials and unreviewed inference.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_department_packs_search", description: "Search curated, read-only Department Pack topologies that group official Apps, shared context, and permitted cross-App handoffs for Hermes.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_department_pack_get", description: "Inspect one curated Department Pack, current per-App readiness, declared topology, and the exact next App onboarding action without bulk-installing or activating anything.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_marketplace_search", description: "Search available Loopgraph Apps by business outcome, department, capability, or maturity.", readOnly: true, idempotent: true, destructive: false },
@@ -486,6 +517,7 @@ export async function callLoopgraphAppTool(
     hermesOperationsStore?: HermesOperationsStore;
     loopSpecStore?: LoopSpecRegistryStore;
     appInstallationStoreFactory?: (workspaceId: string) => AppInstallationStore;
+    companyContextStoreFactory?: (workspaceId: string, companyId: string) => CompanyContextStore;
     connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
     providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
@@ -598,13 +630,14 @@ export async function callLoopgraphAppTool(
       path.join(projectRoot, ".loopgraph", "apps"),
       identity.workspaceId
     );
+    const contextStore = companyContextStore(options, path.join(projectRoot, ".loopgraph", "apps"), identity.workspaceId, identity.companyId);
     const registry = await installationStore.read();
     const service = new AppInstallationService(
       marketplace,
       projectRoot,
       identity.workspaceId,
       identity.companyId,
-      { installationStore, mappingStore, loopSpecStore: options.loopSpecStore }
+      { installationStore, contextStore, mappingStore, loopSpecStore: options.loopSpecStore }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
     const applications = await Promise.all(orderedDefinitions.map(async (definition) => {
@@ -852,6 +885,28 @@ export async function callLoopgraphAppTool(
   const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
   const mappingStore = connectorFieldMappingStore(options, appsRoot, identity.workspaceId);
   const snapshotStore = providerSchemaSnapshotStore(options, appsRoot, identity.workspaceId);
+  const contextStore = companyContextStore(options, appsRoot, identity.workspaceId, identity.companyId);
+  if (name === "loopgraph_company_context_get") {
+    companyContextGetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return contextStore.get(identity.workspaceId, identity.companyId);
+  }
+  if (name === "loopgraph_company_context_approve") {
+    const parsed = companyContextApproveInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return contextStore.approveValue({
+      workspaceId: identity.workspaceId,
+      companyId: identity.companyId,
+      expectedRevision: parsed.expectedRevision,
+      approvedBy: parsed.approvedBy,
+      proposal: {
+        ...parsed.proposal,
+        provenance: {
+          ...parsed.proposal.provenance,
+          observedAt: parsed.proposal.provenance.observedAt ?? (options.now ?? new Date()).toISOString()
+        }
+      },
+      now: options.now
+    });
+  }
   if (name === "loopgraph_connector_schema_record") {
     const parsed = connectorSchemaRecordInputSchema.parse({ ...raw, projectRoot, ...identity });
     const connections = await appConnections(projectRoot, options.connections);
@@ -928,7 +983,7 @@ export async function callLoopgraphAppTool(
     projectRoot,
     identity.workspaceId,
     identity.companyId,
-    { installationStore, mappingStore, loopSpecStore: options.loopSpecStore }
+    { installationStore, contextStore, mappingStore, loopSpecStore: options.loopSpecStore }
   );
   if (name === "loopgraph_app_onboarding_get") {
     const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -1651,6 +1706,16 @@ function connectorFieldMappingStore(
 ): ConnectorFieldMappingStore {
   return options.connectorFieldMappingStoreFactory?.(workspaceId) ??
     new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), workspaceId);
+}
+
+function companyContextStore(
+  options: { companyContextStoreFactory?: (workspaceId: string, companyId: string) => CompanyContextStore },
+  appsRoot: string,
+  workspaceId: string,
+  companyId: string
+): CompanyContextStore {
+  return options.companyContextStoreFactory?.(workspaceId, companyId) ??
+    new FileCompanyContextStore(path.join(appsRoot, "company-context.json"));
 }
 
 function providerSchemaSnapshotStore(

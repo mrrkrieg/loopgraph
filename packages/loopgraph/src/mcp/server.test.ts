@@ -363,12 +363,14 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(141);
+    expect(listLoopgraphMcpTools()).toHaveLength(143);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
       "loopgraph_hermes_execution_event_ingest",
       "loopgraph_agent_operations_get",
+      "loopgraph_company_context_get",
+      "loopgraph_company_context_approve",
       "loopgraph_marketplace_search",
       "loopgraph_app_get",
       "loopgraph_app_onboarding_get",
