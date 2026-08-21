@@ -102,8 +102,10 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     ...connectionGaps.map((gap) => ({
       kind: "connection" as const,
       id: gap.capability,
-      summary: `${gap.capability} is ${gap.status}.`,
-      remediation: "Connect the declared provider through the Hermes Connector Broker with only the required capability and scopes."
+      summary: gap.reason ?? `${gap.capability} is ${gap.status}.`,
+      remediation: gap.executor === "unavailable"
+        ? "Choose a supported connector preset or install a reviewed bounded adapter for the declared provider operation."
+        : "Connect the declared provider through the Hermes Connector Broker with only the required capability and scopes."
     })),
     ...missingConfiguration.map((key) => ({
       kind: "configuration" as const,

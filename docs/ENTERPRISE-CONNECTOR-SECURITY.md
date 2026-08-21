@@ -25,6 +25,9 @@ flowchart LR
    capability, have every minimum OAuth scope, and pass the immutable prepare/commit fingerprint.
    Privileged writes additionally require a server-side human-approval receipt; draft writes stay
    fingerprint-bound without inventing an unnecessary human approval.
+   App installation enforces the same catalog boundary earlier: every logical capability resolves
+   through its immutable Connector Recipe to a persisted exact operation binding. A connection's
+   self-advertised capability label cannot authorize an operation absent from the compiled catalog.
 3. The installation must belong to the same organization/project and be active. Revocation removes
    allowed capabilities before remote cleanup, so a broker outage cannot leave new actions enabled.
 4. Credentials are resolved only inside the selected handler and cannot be returned. Broker output,

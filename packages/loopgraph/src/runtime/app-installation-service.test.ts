@@ -414,6 +414,21 @@ describe("atomic app installation lifecycle", () => {
     const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T12:05:00.000Z"));
     expect(applied.created).toBe(true);
     expect(applied.installation.state).toBe("ready_to_test");
+    expect(applied.installation.operationBindings).toMatchObject({
+      "crm.lead.read": {
+        providerId: "hubspot",
+        providerOperation: "hubspot.contacts.read",
+        operation: "crm.contacts.read",
+        executor: "connector_broker",
+        connectionId: "hubspot-production",
+        brokerCapability: "provider.data.read"
+      },
+      "crm.account.read": {
+        providerId: "hubspot",
+        operation: "crm.companies.read",
+        connectionId: "hubspot-production"
+      }
+    });
     expect(applied.loopIds).toHaveLength(6);
     expect(applied.lock.installations[0]).toMatchObject({ appId: plan.appId, version: "1.0.0", artifactDigest: plan.artifactDigest });
 

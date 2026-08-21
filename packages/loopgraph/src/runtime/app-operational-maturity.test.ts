@@ -47,6 +47,16 @@ const installation = workspaceAppInstallationSchema.parse({
     completedAt: now
   },
   connectionBindings: { "crm.account.read": "connection.crm" },
+  operationBindings: {
+    "crm.account.read": {
+      providerId: "hubspot",
+      providerOperation: "hubspot.companies.read",
+      operation: "crm.companies.read",
+      executor: "connector_broker",
+      connectionId: "connection.crm",
+      brokerCapability: "provider.data.read"
+    }
+  },
   fieldMappingIds: ["mapping.account"],
   permissions: [],
   ownedAssets: [],

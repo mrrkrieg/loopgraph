@@ -319,11 +319,21 @@ export class AppInstallationService {
     const installationId = installationIdFor(input.workspaceId, input.appId);
     const candidateAssets: AppInstallPlan["assets"] = [
       ...compilePlannedAssets(compiled, installationId),
-      ...capabilityResolutions.flatMap((resolution) => resolution.connectionId ? [{
+      ...capabilityResolutions.flatMap((resolution) => resolution.connectionId && isExecutableCapabilityResolution(resolution) ? [{
         id: `connection-binding.${contentHash({ capability: resolution.capability, connectionId: resolution.connectionId }).slice(0, 32)}`,
         kind: "connection_binding" as const,
         action: "reuse" as const,
-        digest: canonicalAppDigest({ capability: resolution.capability, connectionId: resolution.connectionId, recipeId: resolution.recipeId }),
+        digest: canonicalAppDigest({
+          capability: resolution.capability,
+          connectionId: resolution.connectionId,
+          recipeId: resolution.recipeId,
+          providerId: resolution.providerId,
+          providerOperation: resolution.providerOperation,
+          operation: resolution.operation,
+          executor: resolution.executor,
+          brokerCapability: resolution.brokerCapability,
+          minimumScopes: resolution.minimumScopes
+        }),
         shared: true,
         dependencies: []
       }] : []),
@@ -391,7 +401,20 @@ export class AppInstallationService {
         digest: canonicalAppDigest(`unresolved:${dependency.appId}`),
         reused: false
       })),
-      capabilityResolutions: capabilityResolutions.map(({ capability, required, connectionId, recipeId, status }) => ({ capability, required, connectionId, recipeId, status })),
+      capabilityResolutions: capabilityResolutions.map((resolution) => ({
+        capability: resolution.capability,
+        required: resolution.required,
+        connectionId: resolution.connectionId,
+        recipeId: resolution.recipeId,
+        providerId: resolution.providerId,
+        providerOperation: resolution.providerOperation,
+        operation: resolution.operation,
+        executor: resolution.executor,
+        brokerCapability: resolution.brokerCapability,
+        minimumScopes: resolution.minimumScopes,
+        status: resolution.status,
+        reason: resolution.reason
+      })),
       missingConfigurationKeys: [
         ...configurationResolution.missing.map((field) => field.key),
         ...configurationResolution.needsConfirmation.map(({ field }) => `confirmation:${field.key}`),
@@ -508,7 +531,8 @@ export class AppInstallationService {
           selectedModules: plan.selectedModules,
           presetId: plan.presetId,
           configuration: plan.configuration,
-          connectionBindings: Object.fromEntries(plan.capabilityResolutions.flatMap((resolution) => resolution.connectionId ? [[resolution.capability, resolution.connectionId]] : [])),
+          connectionBindings: connectionBindingsFromPlan(plan.capabilityResolutions),
+          operationBindings: operationBindingsFromPlan(plan.capabilityResolutions),
           fieldMappingIds: plan.fieldMappingIds,
           permissions: plan.permissions,
           ownedAssets,
@@ -1001,7 +1025,8 @@ export class AppInstallationService {
         mode: "simulation",
         configuration,
         overlay,
-        connectionBindings: Object.fromEntries(plan.baseInstallPlan.capabilityResolutions.flatMap((resolution) => resolution.connectionId ? [[resolution.capability, resolution.connectionId]] : [])),
+        connectionBindings: connectionBindingsFromPlan(plan.baseInstallPlan.capabilityResolutions),
+        operationBindings: operationBindingsFromPlan(plan.baseInstallPlan.capabilityResolutions),
         fieldMappingIds: plan.baseInstallPlan.fieldMappingIds,
         permissions: plan.baseInstallPlan.permissions,
         ownedAssets,
@@ -1060,6 +1085,7 @@ export class AppInstallationService {
         configuration: revision.configuration,
         overlay: revision.overlay,
         connectionBindings: revision.connectionBindings,
+        operationBindings: revision.operationBindings,
         fieldMappingIds: revision.fieldMappingIds,
         permissions: revision.permissions,
         ownedAssets: revision.ownedAssets,
@@ -1476,7 +1502,15 @@ export class AppInstallationService {
       ...loaded.manifest.requiredCapabilities.filter((capability) => activeCapabilities.has(capability)),
       ...compiled.loopSpecs.flatMap((spec) => spec.routing?.requiredConnections ?? [])
     ]);
-    const missingCapabilities = [...requiredCapabilities].filter((capability) => !installation.connectionBindings[capability]).sort();
+    const missingCapabilities = [...requiredCapabilities].filter((capability) => {
+      const operationBinding = installation.operationBindings[capability];
+      if (!operationBinding) return true;
+      if (operationBinding.executor === "loopgraph_runtime") return false;
+      return Boolean(
+        operationBinding.connectionId &&
+        installation.connectionBindings[capability] === operationBinding.connectionId
+      ) === false;
+    }).sort();
     const preset = loaded.manifest.presets.find((candidate) => candidate.id === installation.presetId);
     const presetDocument = preset ? await readPackYaml(loaded.root, preset.path) : undefined;
     const recipeId = isRecord(presetDocument) && typeof presetDocument.recipe === "string" ? presetDocument.recipe : installation.presetId;
@@ -1499,10 +1533,13 @@ export class AppInstallationService {
         summary: requiredCapabilities.size === 0
           ? "This selected composition declares no required provider capability."
           : connectionsPassed
-            ? `All ${requiredCapabilities.size} required logical capabilities are bound.`
-            : `Missing required capability bindings: ${missingCapabilities.join(", ")}.`,
-        evidenceRefs: [...new Set(Object.values(installation.connectionBindings))],
-        ...(!connectionsPassed && requiredCapabilities.size > 0 ? { remediation: "Reconnect or re-plan the App with every required logical capability." } : {})
+            ? `All ${requiredCapabilities.size} required logical capabilities resolve to exact executable operations.`
+            : `Missing executable operation bindings for required capabilities: ${missingCapabilities.join(", ")}.`,
+        evidenceRefs: [...new Set([
+          ...Object.values(installation.connectionBindings),
+          ...Object.values(installation.operationBindings).map((binding) => `${binding.providerId}:${binding.operation}`)
+        ])],
+        ...(!connectionsPassed && requiredCapabilities.size > 0 ? { remediation: "Reconnect or re-plan the App so every required logical capability resolves to an allowlisted Connector Broker or Loopgraph runtime operation." } : {})
       },
       {
         id: "mappings",
@@ -1581,7 +1618,12 @@ export class AppInstallationService {
 
 export function installPlanBlockers(plan: AppInstallPlan): string[] {
   const blockers = [...plan.missingConfigurationKeys.map((key) => `Missing configuration or mapping: ${key}`)];
-  blockers.push(...plan.capabilityResolutions.filter((resolution) => resolution.required && resolution.status !== "connected" && resolution.status !== "reusable").map((resolution) => `Required capability ${resolution.capability} is ${resolution.status}`));
+  blockers.push(...plan.capabilityResolutions.filter((resolution) => resolution.required && resolution.status !== "connected" && resolution.status !== "reusable").map((resolution) => `Required capability ${resolution.capability} is ${resolution.status}: ${resolution.reason ?? "no executable operation binding is available"}`));
+  blockers.push(...plan.capabilityResolutions.filter((resolution) =>
+    resolution.required &&
+    ["connected", "reusable"].includes(resolution.status) &&
+    !isExecutableCapabilityResolution(resolution)
+  ).map((resolution) => `Required capability ${resolution.capability} has no exact executable operation binding`));
   blockers.push(...plan.permissions.filter((permission) => permission.decision === "unresolved").map((permission) => `Permission ${permission.capability} is unresolved`));
   blockers.push(...plan.conflicts.filter((conflict) => conflict.blocking).map((conflict) => `Blocking ${conflict.kind.replace(/_/g, " ")} conflict for ${conflict.resourceId}: ${conflict.reason}`));
   return blockers;
@@ -1638,6 +1680,7 @@ function appendHistory(
     configuration: installation.configuration,
     overlay: installation.overlay,
     connectionBindings: installation.connectionBindings,
+    operationBindings: installation.operationBindings,
     fieldMappingIds: installation.fieldMappingIds,
     permissions: installation.permissions,
     ownedAssets: installation.ownedAssets,
@@ -1646,6 +1689,47 @@ function appendHistory(
     reason
   };
   return [...installation.history.slice(-19), snapshot];
+}
+
+function operationBindingsFromPlan(
+  resolutions: AppInstallPlan["capabilityResolutions"]
+): WorkspaceAppInstallation["operationBindings"] {
+  return Object.fromEntries(resolutions.flatMap((resolution) => {
+    if (!isExecutableCapabilityResolution(resolution)) return [];
+    return [[resolution.capability, {
+      providerId: resolution.providerId,
+      providerOperation: resolution.providerOperation,
+      operation: resolution.operation,
+      executor: resolution.executor,
+      connectionId: resolution.connectionId,
+      brokerCapability: resolution.brokerCapability,
+      minimumScopes: resolution.minimumScopes ?? []
+    }]];
+  }));
+}
+
+function connectionBindingsFromPlan(
+  resolutions: AppInstallPlan["capabilityResolutions"]
+): WorkspaceAppInstallation["connectionBindings"] {
+  return Object.fromEntries(resolutions.flatMap((resolution) =>
+    isExecutableCapabilityResolution(resolution) && resolution.connectionId
+      ? [[resolution.capability, resolution.connectionId]]
+      : []
+  ));
+}
+
+function isExecutableCapabilityResolution(
+  resolution: AppInstallPlan["capabilityResolutions"][number]
+): resolution is AppInstallPlan["capabilityResolutions"][number] & {
+  providerId: string;
+  providerOperation: string;
+  operation: string;
+  executor: "connector_broker" | "loopgraph_runtime";
+} {
+  if (!["connected", "reusable"].includes(resolution.status)) return false;
+  if (!resolution.providerId || !resolution.providerOperation || !resolution.operation) return false;
+  if (resolution.executor === "loopgraph_runtime") return !resolution.connectionId;
+  return resolution.executor === "connector_broker" && Boolean(resolution.connectionId && resolution.brokerCapability);
 }
 
 function lifecycleMutation(
@@ -2014,9 +2098,9 @@ function assertInstalledCompositionAuthority(
     throw new Error(`Module enablement introduces permissions that require a fresh install plan: ${introducedCapabilities.sort().join(", ")}`);
   }
   const requiredConnections = new Set(compiled.loopSpecs.flatMap((spec) => spec.routing?.requiredConnections ?? []));
-  const missingConnections = [...requiredConnections].filter((capability) => !installation.connectionBindings[capability]);
-  if (missingConnections.length > 0) {
-    throw new Error(`Module enablement requires connector bindings that need a fresh install plan: ${missingConnections.sort().join(", ")}`);
+  const missingOperations = [...requiredConnections].filter((capability) => !installation.operationBindings[capability]);
+  if (missingOperations.length > 0) {
+    throw new Error(`Module enablement requires executable operation bindings that need a fresh install plan: ${missingOperations.sort().join(", ")}`);
   }
   return activeCapabilities;
 }

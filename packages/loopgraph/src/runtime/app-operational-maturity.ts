@@ -47,7 +47,7 @@ export function assessAppOperationalMaturity(input: {
   const connectionChecks = input.readiness.checks.filter((check) => check.category === "connection");
   const supportingChecks = input.readiness.checks.filter((check) => ["mapping", "configuration", "permission"].includes(check.category));
   const connected = tested &&
-    Object.keys(input.installation.connectionBindings).length > 0 &&
+    Object.keys(input.installation.operationBindings).length > 0 &&
     connectionChecks.length > 0 &&
     connectionChecks.every((check) => check.status === "pass") &&
     supportingChecks.every((check) => !["fail", "warn"].includes(check.status));
@@ -100,12 +100,15 @@ export function assessAppOperationalMaturity(input: {
       level: "connected",
       status: connected ? "achieved" : "blocked",
       summary: connected
-        ? `${Object.keys(input.installation.connectionBindings).length} capability bindings and their setup checks are ready.`
-        : "Every required capability, mapping, configuration value, and permission decision must be ready after testing passes.",
+        ? `${Object.keys(input.installation.operationBindings).length} executable capability bindings and their setup checks are ready.`
+        : "Every required capability must resolve to an exact executable operation, and every mapping, configuration value, and permission decision must be ready after testing passes.",
       evidenceRefs: connected
-        ? [...Object.values(input.installation.connectionBindings), ...connectionChecks.flatMap((check) => check.evidenceRefs)]
+        ? [
+            ...Object.values(input.installation.operationBindings).map((binding) => `${binding.providerId}:${binding.operation}`),
+            ...connectionChecks.flatMap((check) => check.evidenceRefs)
+          ]
         : [],
-      ...(!connected ? { remediation: "Resolve all required connection, mapping, configuration, and permission readiness checks." } : {})
+      ...(!connected ? { remediation: "Re-plan unsupported operations, then resolve all required connection, mapping, configuration, and permission readiness checks." } : {})
     },
     {
       level: "production_proven",

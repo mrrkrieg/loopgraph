@@ -81,6 +81,7 @@ export function createSyntheticValidationInstallation(
       completedAt: new Date(0).toISOString()
     },
     connectionBindings: {},
+    operationBindings: {},
     fieldMappingIds: [],
     permissions: manifest.permissions.map((permission) => ({
       capability: permission.capability,

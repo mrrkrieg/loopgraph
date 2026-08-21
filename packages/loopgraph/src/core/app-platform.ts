@@ -799,6 +799,32 @@ const permissionDecisionSchema = z.object({
   changedFromInstalled: z.boolean().default(false)
 }).strict();
 
+export const appConnectorExecutorSchema = z.enum(["connector_broker", "loopgraph_runtime", "unavailable"]);
+const executableAppConnectorSchema = z.enum(["connector_broker", "loopgraph_runtime"]);
+
+export const appConnectorOperationBindingSchema = z.object({
+  providerId: appIdSchema,
+  providerOperation: z.string().min(3).max(240),
+  operation: z.string().min(3).max(240),
+  executor: executableAppConnectorSchema,
+  connectionId: appIdSchema.optional(),
+  brokerCapability: z.string().min(3).max(160).optional(),
+  minimumScopes: z.array(z.string().min(1).max(300)).max(100).default([])
+}).strict().superRefine((binding, ctx) => {
+  if (binding.executor === "connector_broker" && !binding.connectionId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["connectionId"], message: "Connector Broker operation bindings require a connection" });
+  }
+  if (binding.executor === "connector_broker" && !binding.brokerCapability) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerCapability"], message: "Connector Broker operation bindings require an allowlisted broker capability" });
+  }
+  if (binding.executor === "loopgraph_runtime" && binding.connectionId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["connectionId"], message: "Loopgraph runtime operation bindings cannot reference a provider connection" });
+  }
+  if (binding.executor === "loopgraph_runtime" && binding.providerId !== "loopgraph") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["providerId"], message: "Loopgraph runtime operation bindings must use the Loopgraph provider" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -820,7 +846,14 @@ export const appInstallPlanSchema = z.object({
     required: z.boolean(),
     connectionId: appIdSchema.optional(),
     recipeId: appIdSchema.optional(),
-    status: z.enum(["connected", "reusable", "missing", "degraded"])
+    providerId: appIdSchema.optional(),
+    providerOperation: z.string().min(3).max(240).optional(),
+    operation: z.string().min(3).max(240).optional(),
+    executor: appConnectorExecutorSchema.optional(),
+    brokerCapability: z.string().min(3).max(160).optional(),
+    minimumScopes: z.array(z.string().min(1).max(300)).max(100).optional(),
+    status: z.enum(["connected", "reusable", "missing", "degraded"]),
+    reason: z.string().min(1).max(1_000).optional()
   }).strict()).default([]),
   missingConfigurationKeys: z.array(z.string().min(1)).default([]),
   configuration: appConfigurationSchema,
@@ -883,6 +916,7 @@ export const appInstallationRevisionSchema = z.object({
   configuration: appConfigurationSchema,
   overlay: appOverlaySchema.optional(),
   connectionBindings: z.record(appIdSchema).default({}),
+  operationBindings: z.record(appConnectorOperationBindingSchema).default({}),
   fieldMappingIds: z.array(appIdSchema).default([]),
   permissions: z.array(permissionDecisionSchema),
   ownedAssets: z.array(appAssetOwnershipSchema),
@@ -905,6 +939,7 @@ export const workspaceAppInstallationSchema = z.object({
   configuration: appConfigurationSchema,
   overlay: appOverlaySchema.optional(),
   connectionBindings: z.record(appIdSchema).default({}),
+  operationBindings: z.record(appConnectorOperationBindingSchema).default({}),
   fieldMappingIds: z.array(appIdSchema).default([]),
   permissions: z.array(permissionDecisionSchema),
   ownedAssets: z.array(appAssetOwnershipSchema),
@@ -1313,6 +1348,7 @@ export type AppOperationalMaturityAssessment = z.infer<typeof appOperationalMatu
 export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSourceSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
+export type AppConnectorOperationBinding = z.infer<typeof appConnectorOperationBindingSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;

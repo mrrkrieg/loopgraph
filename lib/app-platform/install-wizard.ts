@@ -118,7 +118,7 @@ export function installPlanBlockersForView(plan: AppInstallPlan): string[] {
     ...plan.missingConfigurationKeys.map((key) => `Resolve ${readableBlocker(key)}.`),
     ...plan.capabilityResolutions
       .filter((resolution) => resolution.required && !["connected", "reusable"].includes(resolution.status))
-      .map((resolution) => `Connect ${resolution.capability} (${resolution.status}).`),
+      .map((resolution) => resolution.reason ?? `Connect ${resolution.capability} (${resolution.status}).`),
     ...plan.permissions
       .filter((permission) => permission.decision === "unresolved")
       .map((permission) => `Review permission ${permission.capability}.`),
