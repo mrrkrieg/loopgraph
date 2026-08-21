@@ -10,7 +10,13 @@ const mocks = vi.hoisted(() => ({
   hostedSearch: vi.fn(),
   getDatabase: vi.fn(),
   listInstallations: vi.fn(),
-  activeProjectRoot: vi.fn()
+  activeProjectRoot: vi.fn(),
+  outcomeStore: { persistence: "distributed" },
+  hermesOperationsStore: {},
+  appVerificationStore: { persistence: "distributed" },
+  getOutcomeStore: vi.fn(),
+  getHermesOperationsStore: vi.fn(),
+  getAppVerificationStore: vi.fn()
 }));
 
 vi.mock("loopgraph/runtime", () => ({
@@ -34,7 +40,10 @@ vi.mock("@/lib/connector-broker/admin", () => ({
   listConnectorInstallations: mocks.listInstallations
 }));
 vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
-  getActiveLoopgraphProjectRoot: mocks.activeProjectRoot
+  getActiveLoopgraphProjectRoot: mocks.activeProjectRoot,
+  getOutcomeStore: mocks.getOutcomeStore,
+  getHermesOperationsStore: mocks.getHermesOperationsStore,
+  getAppVerificationStore: mocks.getAppVerificationStore
 }));
 vi.mock("@/lib/db/adapters/supabase-marketplace-registry-store", () => ({
   SupabaseMarketplaceRegistryStore: class {
@@ -54,9 +63,32 @@ beforeEach(() => {
   mocks.listInstallations.mockResolvedValue([]);
   mocks.hasCachedArtifact.mockResolvedValue(false);
   mocks.activeProjectRoot.mockReturnValue("/srv/loopgraph/tenant/main");
+  mocks.getOutcomeStore.mockReturnValue(mocks.outcomeStore);
+  mocks.getHermesOperationsStore.mockReturnValue(mocks.hermesOperationsStore);
+  mocks.getAppVerificationStore.mockReturnValue(mocks.appVerificationStore);
 });
 
 describe("hosted app tool bridge", () => {
+  it("injects distributed operating evidence and workspace verification trust into maturity reads", async () => {
+    mocks.runtimeTool.mockImplementation(async (_name, _input, options) => {
+      expect(options).toMatchObject({
+        outcomeStore: mocks.outcomeStore,
+        hermesOperationsStore: mocks.hermesOperationsStore
+      });
+      expect(options.appVerificationStoreFactory("acme")).toBe(mocks.appVerificationStore);
+      return { maturity: "concept" };
+    });
+    await callLoopgraphAppTool("loopgraph_app_maturity_get", {
+      projectRoot: "/tmp/untrusted",
+      installationId: "install.app"
+    });
+    expect(mocks.getOutcomeStore).toHaveBeenCalledWith({ projectRoot: "/srv/loopgraph/tenant/main" });
+    expect(mocks.getAppVerificationStore).toHaveBeenCalledWith({
+      projectRoot: "/srv/loopgraph/tenant/main",
+      workspaceId: "acme"
+    });
+  });
+
   it("merges local and RLS-visible hosted metadata without downloading artifacts", async () => {
     const localApp = appFixture("acme.sales.local", "filesystem.local", "1.0.0", "a");
     const hostedApp = appFixture("acme.product.hosted", "hosted.tenant", "2.0.0", "b");

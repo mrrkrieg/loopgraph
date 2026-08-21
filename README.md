@@ -365,14 +365,15 @@ loopgraph apps maturity <installation-id>
 loopgraph apps verifier-trust --file verifier-public-key.json
 
 # Import a content-bound signed verification receipt for the installed digest.
-loopgraph apps verification-import --file verification-receipt.json
+loopgraph apps verification-import --file verification-receipt.json \
+  --imported-by security-admin --reference change:SEC-42
 
 # Revoke compromised or retired trust immediately.
 loopgraph apps verifier-revoke <verifier-id> <key-id> \
   --revoked-by security-admin --reference incident:IR-42
 ```
 
-The verifier signs outside Loopgraph. These commands never accept a verifier private key. Unknown, forged, revoked-key, wrong-installation, wrong-App, and stale-artifact receipts are rejected before persistence. Local trust state is workspace-bound and written with owner-only permissions; hosted operators must expose the mutating tools only through their audited organization-admin control plane.
+The verifier signs outside Loopgraph. These commands never accept a verifier private key. Unknown, forged, revoked-key, wrong-installation, wrong-App, and stale-artifact receipts are rejected before persistence. Local trust state is workspace-bound and written with owner-only permissions. Hosted mode uses tenant/project/workspace-scoped Supabase tables, service-role-only access, bounded mutation functions, and the tamper-evident security audit chain; it fails closed if distributed verification storage is unavailable instead of falling back to ephemeral server disk.
 
 Hosted deployments add a tenant-scoped private marketplace behind organization
 RLS. Search remains metadata-only; when an operator opens or plans a

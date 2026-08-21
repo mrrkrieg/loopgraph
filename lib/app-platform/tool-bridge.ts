@@ -12,6 +12,7 @@ import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
 import { listConnectorInstallations } from "@/lib/connector-broker/admin";
 import {
   getActiveLoopgraphProjectRoot,
+  getAppVerificationStore,
   getHermesOperationsStore,
   getOutcomeStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
@@ -33,6 +34,13 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get"
+]);
+
+const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_maturity_get",
+  "loopgraph_app_verifier_trust_add",
+  "loopgraph_app_verifier_trust_revoke",
+  "loopgraph_app_verification_import"
 ]);
 
 const HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
@@ -85,6 +93,9 @@ export async function callLoopgraphAppTool(
     ...(EVIDENCE_AWARE_TOOLS.has(name) ? {
       outcomeStore: getOutcomeStore({ projectRoot }),
       hermesOperationsStore: getHermesOperationsStore({ rootDir: path.join(projectRoot, ".loopgraph") })
+    } : {}),
+    ...(VERIFICATION_AWARE_TOOLS.has(name) ? {
+      appVerificationStoreFactory: (workspaceId: string) => getAppVerificationStore({ projectRoot, workspaceId })
     } : {}),
     hostedMarketplaceClient: null
   };

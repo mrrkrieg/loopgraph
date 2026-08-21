@@ -667,15 +667,19 @@ apps
   .command("verification-import")
   .description("Verify and import a signed receipt for the exact installed App artifact")
   .requiredOption("--file <path>", "JSON AppIndependentVerificationReceipt; never a verifier private key")
+  .requiredOption("--imported-by <id>", "Accountable importing administrator")
+  .requiredOption("--reference <ref>", "Approval, change, or audit reference for this import")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--workspace <id>", "Workspace ID")
   .option("--company <id>", "Company ID")
-  .action(async (options: { file: string; project: string; workspace?: string; company?: string }) => {
+  .action(async (options: { file: string; importedBy: string; reference: string; project: string; workspace?: string; company?: string }) => {
     await printAppTool("loopgraph_app_verification_import", {
       projectRoot: options.project,
       workspaceId: options.workspace,
       companyId: options.company,
-      receipt: await readJsonRecord(path.resolve(options.file))
+      receipt: await readJsonRecord(path.resolve(options.file)),
+      importedBy: options.importedBy,
+      importRef: options.reference
     });
   });
 

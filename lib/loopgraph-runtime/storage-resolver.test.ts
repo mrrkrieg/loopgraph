@@ -2,6 +2,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
+  getAppVerificationStore,
   getDiscoveryDesignStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
@@ -125,6 +126,15 @@ describe("hosted runtime namespaces", () => {
     expect(secondOpportunities).not.toBe(firstOpportunities);
   });
 
+  it("scopes local App verification trust by project and workspace", () => {
+    const first = getAppVerificationStore({ projectRoot: "/tmp/loopgraph-app-trust-a", workspaceId: "acme", forceFile: true });
+    const firstAgain = getAppVerificationStore({ projectRoot: "/tmp/loopgraph-app-trust-a", workspaceId: "acme", forceFile: true });
+    const secondWorkspace = getAppVerificationStore({ projectRoot: "/tmp/loopgraph-app-trust-a", workspaceId: "globex", forceFile: true });
+    expect(first.persistence).toBe("local");
+    expect(firstAgain).toBe(first);
+    expect(secondWorkspace).not.toBe(first);
+  });
+
   it("fails closed instead of using file state for hosted controller data", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
@@ -137,6 +147,9 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getLoopOpportunityStore()).toThrow(
       "Supabase loop opportunity storage requires"
+    );
+    expect(() => getAppVerificationStore({ workspaceId: "acme" })).toThrow(
+      "Distributed App verification storage is required"
     );
   });
 });

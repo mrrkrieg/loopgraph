@@ -27,7 +27,11 @@ import {
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
-import { FileAppVerificationStore, type AppVerificationRegistry } from "./app-verification-store";
+import {
+  FileAppVerificationStore,
+  type AppVerificationRegistry,
+  type AppVerificationStore
+} from "./app-verification-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { satisfiesVersionRange } from "./app-pack-loader";
 import { compileLoopPack } from "./app-pack-compiler";
@@ -243,7 +247,9 @@ export const appVerifierTrustRevokeInputSchema = projectSchema.extend({
 export const appVerificationImportInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
-  receipt: appIndependentVerificationReceiptSchema
+  receipt: appIndependentVerificationReceiptSchema,
+  importedBy: z.string().min(1).max(300),
+  importRef: z.string().min(1).max(1000)
 }).strict();
 
 export const connectorSchemaRecordInputSchema = projectSchema.extend({
@@ -468,6 +474,7 @@ export async function callLoopgraphAppTool(
     hostedMarketplaceClient?: HostedMarketplaceClient | null;
     outcomeStore?: OutcomeStore;
     hermesOperationsStore?: HermesOperationsStore;
+    appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
   } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
@@ -1038,7 +1045,7 @@ export async function callLoopgraphAppTool(
         companyId: parsed.companyId!,
         eventType: "run.completed"
       }),
-      new FileAppVerificationStore(appsRoot, parsed.workspaceId!).read()
+      appVerificationStore(options, appsRoot, parsed.workspaceId!).read()
     ]);
     const relevantOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
     const relevantValue = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
@@ -1061,7 +1068,8 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_verifier_trust_add") {
     const parsed = appVerifierTrustAddInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const registry = await new FileAppVerificationStore(
+    const registry = await appVerificationStore(
+      options,
       path.join(projectRoot, ".loopgraph", "apps"),
       parsed.workspaceId!
     ).trustVerifierKey(parsed.key);
@@ -1069,7 +1077,8 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_verifier_trust_revoke") {
     const parsed = appVerifierTrustRevokeInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const registry = await new FileAppVerificationStore(
+    const registry = await appVerificationStore(
+      options,
       path.join(projectRoot, ".loopgraph", "apps"),
       parsed.workspaceId!
     ).revokeVerifierKey({
@@ -1090,7 +1099,11 @@ export async function callLoopgraphAppTool(
     if (installation.appId !== parsed.receipt.appId || installation.artifactDigest !== parsed.receipt.artifactDigest) {
       throw new Error("Independent verification receipt does not match the exact installed App artifact");
     }
-    const registry = await new FileAppVerificationStore(appsRoot, parsed.workspaceId!).importReceipt(parsed.receipt);
+    const registry = await appVerificationStore(options, appsRoot, parsed.workspaceId!).importReceipt(parsed.receipt, {
+      importedBy: parsed.importedBy,
+      importRef: parsed.importRef,
+      importedAt: (options.now ?? new Date()).toISOString()
+    });
     return publicVerificationRegistry(registry);
   }
   if (name === "loopgraph_app_historical_replay") {
@@ -1570,4 +1583,12 @@ function publicVerificationRegistry(registry: AppVerificationRegistry) {
     updatedAt: registry.updatedAt,
     privateKeyMaterialAccepted: false
   };
+}
+
+function appVerificationStore(
+  options: { appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore },
+  appsRoot: string,
+  workspaceId: string
+): AppVerificationStore {
+  return options.appVerificationStoreFactory?.(workspaceId) ?? new FileAppVerificationStore(appsRoot, workspaceId);
 }

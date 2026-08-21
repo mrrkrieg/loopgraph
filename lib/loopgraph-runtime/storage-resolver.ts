@@ -11,6 +11,7 @@ import {
   FileLoopSpecRegistryStore,
   FileMeasurementStore,
   FileOutcomeStore,
+  FileAppVerificationStore,
   FileRoutingStore,
   FileSemanticGraphStore,
   getLoopgraphRoot as getPackageLoopgraphRoot,
@@ -23,6 +24,7 @@ import {
   type LoopSpecRegistryStore,
   type MeasurementStore,
   type OutcomeStore,
+  type AppVerificationStore,
   type RoutingStore,
   type SemanticGraphStore
 } from "loopgraph/runtime";
@@ -65,6 +67,10 @@ import {
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import { createSupabaseEvidenceStore, isSupabaseEvidenceStoreEnabled } from "@/lib/db/adapters/supabase-evidence-store";
 import { createSupabaseEntityResolutionStore, isSupabaseEntityResolutionStoreEnabled } from "@/lib/db/adapters/supabase-entity-resolution-store";
+import {
+  createSupabaseAppVerificationStore,
+  isSupabaseAppVerificationStoreEnabled
+} from "@/lib/db/adapters/supabase-app-verification-store";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
@@ -78,6 +84,7 @@ const cachedSemanticGraphStores = new Map<string, SemanticGraphStore>();
 const cachedMeasurementStores = new Map<string, MeasurementStore>();
 const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
+const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
   if (isHostedAuthRequired()) {
@@ -403,6 +410,28 @@ export function getOutcomeStore(options?: { projectRoot?: string; forceFile?: bo
   if (existing) return existing;
   const store = useSupabase ? createSupabaseEvidenceStore() : new FileOutcomeStore(getPackageLoopgraphRoot(projectRoot));
   cachedOutcomeStores.set(cacheKey, store);
+  return store;
+}
+
+export function getAppVerificationStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): AppVerificationStore {
+  const useSupabase = !options.forceFile && isSupabaseAppVerificationStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App verification storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-verification:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-verification:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedAppVerificationStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseAppVerificationStore(options.workspaceId)
+    : new FileAppVerificationStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps"), options.workspaceId);
+  cachedAppVerificationStores.set(cacheKey, store);
   return store;
 }
 

@@ -540,7 +540,9 @@ describe("shared Loopgraph App tools", () => {
     });
     const imported = await callLoopgraphAppTool("loopgraph_app_verification_import", {
       projectRoot,
-      receipt: verificationReceipt
+      receipt: verificationReceipt,
+      importedBy: "security-admin",
+      importRef: "change:SEC-47"
     }) as { receipts: unknown[]; privateKeyMaterialAccepted: boolean };
     expect(imported).toMatchObject({ receipts: [verificationReceipt], privateKeyMaterialAccepted: false });
     const revoked = await callLoopgraphAppTool("loopgraph_app_verifier_trust_revoke", {
