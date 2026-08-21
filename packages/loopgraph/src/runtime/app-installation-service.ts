@@ -579,7 +579,7 @@ export class AppInstallationService {
   async configure(input: ConfigureAppInstallationInput): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, input.installationId);
+      const installation = requireOperableInstallation(registry, input.installationId);
       if (canonicalAppDigest(installation.configuration) !== input.expectedConfigurationDigest) {
         throw new Error("Installed app configuration changed; create a fresh configure request");
       }
@@ -621,7 +621,7 @@ export class AppInstallationService {
   async applyOverlay(input: ApplyAppOverlayInput): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, input.installationId);
+      const installation = requireOperableInstallation(registry, input.installationId);
       if (installation.artifactDigest !== input.expectedArtifactDigest) {
         throw new Error("Installed artifact changed; create a fresh overlay request");
       }
@@ -701,7 +701,7 @@ export class AppInstallationService {
 
   async repair(installationId: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, installationId);
+      const installation = requireOperableInstallation(registry, installationId);
       const loaded = await this.loadInstallationArtifact(installation);
       const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
       const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
@@ -753,7 +753,7 @@ export class AppInstallationService {
     const now = input.now ?? new Date();
     const derivedAppId = appIdSchema.parse(input.derivedAppId);
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const source = requireInstallation(registry, input.installationId);
+      const source = requireOperableInstallation(registry, input.installationId);
       if (registry.installations.some((installation) => installation.derivation?.derivedAppId === derivedAppId)) {
         throw new Error(`Private derived app already exists: ${derivedAppId}`);
       }
@@ -945,7 +945,7 @@ export class AppInstallationService {
     if (unapproved.length > 0) throw new Error(`Permission changes require explicit review: ${unapproved.map((change) => change.capability).join(", ")}`);
 
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, plan.installationId);
+      const installation = requireOperableInstallation(registry, plan.installationId);
       if (installation.version !== plan.fromVersion || installation.artifactDigest !== plan.fromDigest) {
         throw new Error("Installed app changed after the update plan was created");
       }
@@ -1028,7 +1028,7 @@ export class AppInstallationService {
 
   async rollback(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, installationId);
+      const installation = requireOperableInstallation(registry, installationId);
       if (installation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh rollback request");
       const revision = installation.history.at(-1);
       if (!revision) throw new Error("No reversible installed-app revision is available");
@@ -1081,7 +1081,7 @@ export class AppInstallationService {
 
   async detach(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
     const registry = await this.installationStore.read();
-    const installation = requireInstallation(registry, installationId);
+    const installation = requireOperableInstallation(registry, installationId);
     if (!installation.derivation) throw new Error("Only a private derived app can detach from upstream");
     if (installation.derivation.detachedAt) throw new Error("Private app is already detached from upstream");
     if (installation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh detach request");
@@ -1090,7 +1090,7 @@ export class AppInstallationService {
     const snapshotPath = path.join(".loopgraph", "apps", "private-snapshots", installation.derivation.derivedAppId, installation.version);
     await cp(loaded.root, path.join(this.projectRoot, snapshotPath), { recursive: true, force: true });
     return this.installationStore.withExclusiveUpdate(async (current) => {
-      const fresh = requireInstallation(current, installationId);
+      const fresh = requireOperableInstallation(current, installationId);
       if (fresh.artifactDigest !== expectedArtifactDigest || fresh.derivation?.detachedAt) throw new Error("Installed app changed while detaching");
       const updated: WorkspaceAppInstallation = {
         ...fresh,
@@ -1243,7 +1243,7 @@ export class AppInstallationService {
 
   async test(installationId: string, actor: string, now = new Date()): Promise<AppEvalRun> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, installationId);
+      const installation = requireOperableInstallation(registry, installationId);
       if (!["ready_to_test", "simulation_passed", "shadow", "rolled_back"].includes(installation.state)) {
         throw new Error(`App cannot run synthetic conformance tests from ${installation.state}`);
       }
@@ -1268,7 +1268,7 @@ export class AppInstallationService {
   async historicalReplay(requestInput: AppHistoricalReplayRequest, now = new Date()): Promise<AppEvalRun> {
     const request = appHistoricalReplayRequestSchema.parse(requestInput);
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, request.installationId);
+      const installation = requireOperableInstallation(registry, request.installationId);
       const passedSynthetic = [...registry.evaluations].reverse().find((run) =>
         run.installationId === installation.id && run.level === "synthetic" && run.status === "passed");
       if (!passedSynthetic) throw new Error("Historical replay requires a passing synthetic conformance run");
@@ -1373,7 +1373,7 @@ export class AppInstallationService {
       throw new Error("Activation approval expiry must be between 60 and 3600 seconds");
     }
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, input.installationId);
+      const installation = requireOperableInstallation(registry, input.installationId);
       assertLifecycleTransition(installation.state, input.mode, input.mode);
       const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installation.id && run.status === "passed");
       if (!latestPassed) throw new Error("App must pass conformance before activation");
@@ -1422,7 +1422,7 @@ export class AppInstallationService {
     now = new Date()
   ): Promise<WorkspaceAppInstallation> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, installationId);
+      const installation = requireOperableInstallation(registry, installationId);
       const approval = registry.activationApprovals.find((candidate) => candidate.id === approvalReceiptId);
       if (!approval) throw new Error(`App activation approval receipt not found: ${approvalReceiptId}`);
       if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
@@ -1542,7 +1542,7 @@ export class AppInstallationService {
     validate: (installation: WorkspaceAppInstallation, registry: AppInstallationRegistry) => WorkspaceAppInstallation["state"]
   ): Promise<WorkspaceAppInstallation> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, installationId);
+      const installation = requireOperableInstallation(registry, installationId);
       const state = validate(installation, registry);
       assertLifecycleTransition(installation.state, requestedState, state);
       const timestamp = new Date().toISOString();
@@ -2096,6 +2096,16 @@ function mergeAssetOwnership(existing: AppInstallationRegistry["assets"], added:
 function requireInstallation(registry: AppInstallationRegistry, id: string): WorkspaceAppInstallation {
   const installation = registry.installations.find((candidate) => candidate.id === id);
   if (!installation) throw new Error(`App installation not found: ${id}`);
+  return installation;
+}
+
+function requireOperableInstallation(registry: AppInstallationRegistry, id: string): WorkspaceAppInstallation {
+  const installation = requireInstallation(registry, id);
+  const unfinished = registry.lifecycleOperations.find((operation) =>
+    operation.installationId === id && operation.status !== "completed");
+  if (unfinished) {
+    throw new Error(`App lifecycle operation ${unfinished.id} must be reconciled before another operation can run`);
+  }
   return installation;
 }
 

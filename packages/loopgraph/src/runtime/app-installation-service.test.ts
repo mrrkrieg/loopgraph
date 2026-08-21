@@ -257,6 +257,8 @@ describe("atomic app installation lifecycle", () => {
     expect(interrupted.installations).toHaveLength(1);
     expect(interrupted.lifecycleOperations.find((operation) => operation.action === "uninstall"))
       .toMatchObject({ status: "requires_reconciliation" });
+    await expect(service.test(applied.installation.id, "admin-1", new Date("2026-08-08T10:12:30.000Z")))
+      .rejects.toThrow(/must be reconciled before another operation/i);
 
     const recovered = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:13:00.000Z") });
     const replayed = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:14:00.000Z") });
