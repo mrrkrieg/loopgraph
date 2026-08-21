@@ -11,6 +11,29 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
 - `npm run release:evidence:build` binds the current run's four receipts to one deployment, tenant/project, database identity, and exact marketplace artifact. `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any substituted, stale, or mixed receipt.
+- App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
+  snapshot exports aggregate pending, interrupted, stale, affected-workspace, and oldest-age
+  metrics without exposing App or installation identifiers. The default stale threshold is 900
+  seconds; set `LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS` only to a reviewed integer from 60
+  through 86400. An invalid value fails hosted configuration readiness.
+
+## App lifecycle recovery runbook
+
+An unfinished `prepared` operation can be normal while the worker is still applying the exact
+content-bound plan. A `requires_reconciliation` operation means cross-store work was interrupted;
+it is degraded immediately. Any unfinished operation older than the configured threshold is stale.
+
+1. Confirm the alert is tenant/project scoped and compare
+   `loopgraph_app_lifecycle_recovery_oldest_age_seconds` with the exported threshold.
+2. Open Installed Apps or ask Hermes for App onboarding status. Both surfaces resolve the same
+   metadata-only operation and exact retry instruction.
+3. Submit the original install request with the same approved plan, or the original uninstall
+   request for that installation. Never invent a replacement plan, manually delete one owned
+   resource, or start a competing configuration/update operation.
+4. Confirm the operation becomes `completed`, the installation registry revision advances, and
+   pending/interrupted/stale metrics return to zero. Preserve the corresponding audit-chain events.
+5. If exact retry cannot complete, pause promotion and investigate the owning store or lease. Do
+   not copy registry payloads into tickets or logs; record bounded operation status and timestamps.
 
 ## Release evidence
 

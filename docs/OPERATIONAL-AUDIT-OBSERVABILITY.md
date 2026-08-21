@@ -94,6 +94,13 @@ Wire the protected metrics into the deployment monitoring system and begin with:
   inspect the compiler or task-application error;
 - sustained `loopgraph_hermes_callback_expired_leases > 0` or increasing
   `loopgraph_hermes_callback_oldest_due_seconds`: inspect callback-worker health and capacity;
+- any `loopgraph_app_lifecycle_recovery_requires_reconciliation > 0`: warn the App platform owner
+  and run the exact install or uninstall request recorded by the recovery workflow; do not create a
+  replacement plan or start another mutation;
+- any `loopgraph_app_lifecycle_recovery_stale > 0`, or
+  `loopgraph_app_lifecycle_recovery_oldest_age_seconds` exceeding
+  `loopgraph_app_lifecycle_recovery_stale_after_seconds`: page the App platform owner and block
+  production promotion until the exact retry completes;
 - increasing `loopgraph_discovery_oldest_active_seconds` while a design is expected to progress:
   inspect unresolved evidence, outbound Hermes delivery, and proposals waiting for review;
 - increasing `loopgraph_discovery_sessions_active` with no increase in
@@ -101,9 +108,11 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 - an audit-chain verification response of `409`: stop promotion and preserve database evidence.
 
 The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
-Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, and
-immutable design artifacts. Controller lag, measurement lag, and graph-transaction lag remain
-file-backed and are not emitted as deployment metrics.
+Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, immutable
+design artifacts, and App lifecycle recovery. App recovery metrics contain aggregate counts and age
+only; App IDs, installation IDs, actors, connector fields, and company-context keys are excluded.
+`loopgraph_operational_degraded` reports recoverable operator work without returning a public
+readiness failure that could remove healthy workers and make reconciliation harder.
 
 ## Deployment check
 
@@ -117,3 +126,5 @@ After applying migrations to staging:
 6. Verify a repeated machine request returns `409` and a broken audit chain would block export.
 7. Run `npm run audit:drain` and verify the external Ed25519 acknowledgement, predecessor digest,
    and immutable-until deadline. See [Independent audit retention protocol](./AUDIT-RETENTION-PROTOCOL.md).
+8. Interrupt one staging-only App install after its prepared record, verify the protected metrics
+   show pending recovery, retry the exact request, and verify every recovery metric returns to zero.

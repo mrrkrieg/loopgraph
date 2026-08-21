@@ -58,11 +58,20 @@ export type OperationalMetrics = {
   graphRehearsalsTotal: number;
   graphCommitsTotal: number;
   latestGraphSequence: number;
+  appInstallationsTotal: number;
+  appLifecycleRecoveryPending: number;
+  appLifecycleRecoveryPrepared: number;
+  appLifecycleRecoveryRequiresReconciliation: number;
+  appLifecycleRecoveryStale: number;
+  appLifecycleRecoveryWorkspacesAffected: number;
+  appLifecycleRecoveryOldestAgeSeconds: number;
+  appLifecycleRecoveryStaleAfterSeconds: number;
   lastMachineRequestAt?: string;
 };
 
 export type OperationalReadiness = {
   ready: boolean;
+  degraded: boolean;
   mode: "local" | "preview" | "hosted";
   checkedAt: string;
   checks: {
@@ -70,6 +79,7 @@ export type OperationalReadiness = {
     database: boolean | null;
     audit: boolean | null;
     runtimeNamespace: boolean | null;
+    appLifecycleRecovery: boolean | null;
   };
   metrics: OperationalMetrics;
 };
@@ -159,7 +169,15 @@ const EMPTY_METRICS: OperationalMetrics = {
   graphPromotionsTotal: 0,
   graphRehearsalsTotal: 0,
   graphCommitsTotal: 0,
-  latestGraphSequence: 0
+  latestGraphSequence: 0,
+  appInstallationsTotal: 0,
+  appLifecycleRecoveryPending: 0,
+  appLifecycleRecoveryPrepared: 0,
+  appLifecycleRecoveryRequiresReconciliation: 0,
+  appLifecycleRecoveryStale: 0,
+  appLifecycleRecoveryWorkspacesAffected: 0,
+  appLifecycleRecoveryOldestAgeSeconds: 0,
+  appLifecycleRecoveryStaleAfterSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -167,13 +185,15 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
   if (!isHostedAuthRequired()) {
     return {
       ready: true,
+      degraded: false,
       mode: isPublicHostedPreviewEnvironment() ? "preview" : "local",
       checkedAt,
       checks: {
         configuration: true,
         database: null,
         audit: null,
-        runtimeNamespace: null
+        runtimeNamespace: null,
+        appLifecycleRecovery: null
       },
       metrics: EMPTY_METRICS
     };
@@ -181,6 +201,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
 
   const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const lifecycleStaleAfterSeconds = parseLifecycleStaleAfterSeconds(
+    process.env.LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS
+  );
   let runtimeNamespace = false;
   try {
     resolveHostedRuntimeProjectRoot(process.env);
@@ -188,9 +211,16 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
   } catch {
     runtimeNamespace = false;
   }
-  const configuration = Boolean(organizationId && runtimeNamespace);
+  const configuration = Boolean(
+    organizationId && runtimeNamespace && lifecycleStaleAfterSeconds !== undefined
+  );
   const supabase = createSupabaseAdminClient();
-  if (!configuration || !organizationId || !supabase) {
+  if (
+    !configuration ||
+    !organizationId ||
+    !supabase ||
+    lifecycleStaleAfterSeconds === undefined
+  ) {
     emitOperationalLog({
       level: "error",
       event: "operational.readiness.failed",
@@ -201,13 +231,15 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     });
     return {
       ready: false,
+      degraded: false,
       mode: "hosted",
       checkedAt,
       checks: {
         configuration,
         database: Boolean(supabase),
         audit: false,
-        runtimeNamespace
+        runtimeNamespace,
+        appLifecycleRecovery: false
       },
       metrics: EMPTY_METRICS
     };
@@ -219,7 +251,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     discoveryDesign,
     loopSpecRegistry,
     opportunityController,
-    semanticGraph
+    semanticGraph,
+    appLifecycleRecovery
   ] =
     await Promise.all([
       supabase.rpc("get_loopgraph_operational_snapshot", {
@@ -245,6 +278,11 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       supabase.rpc("get_semantic_graph_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      supabase.rpc("get_app_lifecycle_recovery_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_stale_after_seconds: lifecycleStaleAfterSeconds
       })
     ]);
   if (
@@ -254,12 +292,14 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     loopSpecRegistry.error ||
     opportunityController.error ||
     semanticGraph.error ||
+    appLifecycleRecovery.error ||
     !isRecord(operational.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
     !isRecord(loopSpecRegistry.data) ||
     !isRecord(opportunityController.data) ||
     !isRecord(semanticGraph.data) ||
+    !isRecord(appLifecycleRecovery.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -272,36 +312,46 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     });
     return {
       ready: false,
+      degraded: false,
       mode: "hosted",
       checkedAt,
       checks: {
         configuration: true,
         database: false,
         audit: false,
-        runtimeNamespace: true
+        runtimeNamespace: true,
+        appLifecycleRecovery: false
       },
       metrics: EMPTY_METRICS
     };
   }
 
+  const metrics = parseMetrics({
+    ...operational.data,
+    ...callbacks.data,
+    ...discoveryDesign.data,
+    ...loopSpecRegistry.data,
+    ...opportunityController.data,
+    ...semanticGraph.data,
+    ...appLifecycleRecovery.data
+  });
+  const lifecycleRecoveryHealthy =
+    metrics.appLifecycleRecoveryRequiresReconciliation === 0 &&
+    metrics.appLifecycleRecoveryStale === 0;
+
   return {
     ready: true,
+    degraded: !lifecycleRecoveryHealthy,
     mode: "hosted",
     checkedAt,
     checks: {
       configuration: true,
       database: true,
       audit: true,
-      runtimeNamespace: true
+      runtimeNamespace: true,
+      appLifecycleRecovery: lifecycleRecoveryHealthy
     },
-    metrics: parseMetrics({
-      ...operational.data,
-      ...callbacks.data,
-      ...discoveryDesign.data,
-      ...loopSpecRegistry.data,
-      ...opportunityController.data,
-      ...semanticGraph.data
-    })
+    metrics
   };
 }
 
@@ -430,6 +480,9 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_ready Whether the deployment passed its readiness checks.",
     "# TYPE loopgraph_ready gauge",
     `loopgraph_ready ${readiness.ready ? 1 : 0}`,
+    "# HELP loopgraph_operational_degraded Whether recoverable tenant work requires operator attention without making the service unavailable.",
+    "# TYPE loopgraph_operational_degraded gauge",
+    `loopgraph_operational_degraded ${readiness.degraded ? 1 : 0}`,
     "# HELP loopgraph_machine_requests_5m Durable machine request receipts in five minutes.",
     "# TYPE loopgraph_machine_requests_5m gauge",
     `loopgraph_machine_requests_5m ${metrics.machineRequests5m}`,
@@ -586,6 +639,30 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_latest_graph_sequence Latest semantic graph snapshot sequence.",
     "# TYPE loopgraph_latest_graph_sequence gauge",
     `loopgraph_latest_graph_sequence ${metrics.latestGraphSequence}`,
+    "# HELP loopgraph_app_installations_total Installed Apps in this tenant project.",
+    "# TYPE loopgraph_app_installations_total gauge",
+    `loopgraph_app_installations_total ${metrics.appInstallationsTotal}`,
+    "# HELP loopgraph_app_lifecycle_recovery_pending Prepared or interrupted App lifecycle operations requiring an exact retry.",
+    "# TYPE loopgraph_app_lifecycle_recovery_pending gauge",
+    `loopgraph_app_lifecycle_recovery_pending ${metrics.appLifecycleRecoveryPending}`,
+    "# HELP loopgraph_app_lifecycle_recovery_prepared App lifecycle operations prepared but not yet completed.",
+    "# TYPE loopgraph_app_lifecycle_recovery_prepared gauge",
+    `loopgraph_app_lifecycle_recovery_prepared ${metrics.appLifecycleRecoveryPrepared}`,
+    "# HELP loopgraph_app_lifecycle_recovery_requires_reconciliation Interrupted App lifecycle operations requiring reconciliation.",
+    "# TYPE loopgraph_app_lifecycle_recovery_requires_reconciliation gauge",
+    `loopgraph_app_lifecycle_recovery_requires_reconciliation ${metrics.appLifecycleRecoveryRequiresReconciliation}`,
+    "# HELP loopgraph_app_lifecycle_recovery_stale App lifecycle operations older than the configured recovery threshold.",
+    "# TYPE loopgraph_app_lifecycle_recovery_stale gauge",
+    `loopgraph_app_lifecycle_recovery_stale ${metrics.appLifecycleRecoveryStale}`,
+    "# HELP loopgraph_app_lifecycle_recovery_workspaces_affected Workspaces with unfinished App lifecycle operations.",
+    "# TYPE loopgraph_app_lifecycle_recovery_workspaces_affected gauge",
+    `loopgraph_app_lifecycle_recovery_workspaces_affected ${metrics.appLifecycleRecoveryWorkspacesAffected}`,
+    "# HELP loopgraph_app_lifecycle_recovery_oldest_age_seconds Age of the oldest unfinished App lifecycle operation.",
+    "# TYPE loopgraph_app_lifecycle_recovery_oldest_age_seconds gauge",
+    `loopgraph_app_lifecycle_recovery_oldest_age_seconds ${metrics.appLifecycleRecoveryOldestAgeSeconds}`,
+    "# HELP loopgraph_app_lifecycle_recovery_stale_after_seconds Configured age at which unfinished App lifecycle work is stale.",
+    "# TYPE loopgraph_app_lifecycle_recovery_stale_after_seconds gauge",
+    `loopgraph_app_lifecycle_recovery_stale_after_seconds ${metrics.appLifecycleRecoveryStaleAfterSeconds}`,
     ""
   ].join("\n");
 }
@@ -670,10 +747,35 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     graphRehearsalsTotal: nonnegative(data.graph_rehearsals_total),
     graphCommitsTotal: nonnegative(data.graph_commits_total),
     latestGraphSequence: nonnegative(data.latest_graph_sequence),
+    appInstallationsTotal: nonnegative(data.app_installations_total),
+    appLifecycleRecoveryPending: nonnegative(data.app_lifecycle_recovery_pending),
+    appLifecycleRecoveryPrepared: nonnegative(data.app_lifecycle_recovery_prepared),
+    appLifecycleRecoveryRequiresReconciliation: nonnegative(
+      data.app_lifecycle_recovery_requires_reconciliation
+    ),
+    appLifecycleRecoveryStale: nonnegative(data.app_lifecycle_recovery_stale),
+    appLifecycleRecoveryWorkspacesAffected: nonnegative(
+      data.app_lifecycle_recovery_workspaces_affected
+    ),
+    appLifecycleRecoveryOldestAgeSeconds: nonnegative(
+      data.app_lifecycle_recovery_oldest_age_seconds
+    ),
+    appLifecycleRecoveryStaleAfterSeconds: nonnegative(
+      data.app_lifecycle_recovery_stale_after_seconds
+    ),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})
   };
+}
+
+function parseLifecycleStaleAfterSeconds(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === "") return 900;
+  if (!/^[0-9]+$/.test(value.trim())) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 60 && parsed <= 86_400
+    ? parsed
+    : undefined;
 }
 
 function nonnegative(value: unknown): number {

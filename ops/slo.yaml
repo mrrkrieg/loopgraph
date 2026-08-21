@@ -41,6 +41,13 @@ objectives:
     target: 100
     indicator: successful_revoked_workload_denials / scheduled_marketplace_revocation_checks
     alert: { consecutive_failures: 1 }
+  - id: app_lifecycle_recovery_freshness
+    target: 100
+    indicator: completed_or_reconciled_app_lifecycle_operations / started_app_lifecycle_operations
+    alert:
+      interrupted_operations: 1
+      stale_operations: 1
+      default_stale_after_seconds: 900
 ownership:
   primary: platform-on-call
   security: security-owner
@@ -49,3 +56,4 @@ runbooks:
   routing: docs/OPERATIONAL-AUDIT-OBSERVABILITY.md
   restore: docs/PRODUCTION-OPERATIONS.md
   audit: docs/PRODUCTION-OPERATIONS.md
+  app_lifecycle_recovery: docs/PRODUCTION-OPERATIONS.md

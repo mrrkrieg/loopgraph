@@ -112,6 +112,21 @@ describe("operational status", () => {
           error: null
         };
       }
+      if (name === "get_app_lifecycle_recovery_snapshot") {
+        return {
+          data: {
+            app_installations_total: 5,
+            app_lifecycle_recovery_pending: 1,
+            app_lifecycle_recovery_prepared: 1,
+            app_lifecycle_recovery_requires_reconciliation: 0,
+            app_lifecycle_recovery_stale: 0,
+            app_lifecycle_recovery_workspaces_affected: 1,
+            app_lifecycle_recovery_oldest_age_seconds: 30,
+            app_lifecycle_recovery_stale_after_seconds: 900
+          },
+          error: null
+        };
+      }
       return {
           data: {
             database_ready: true,
@@ -142,12 +157,14 @@ describe("operational status", () => {
 
     expect(readiness).toMatchObject({
       ready: true,
+      degraded: false,
       mode: "hosted",
       checks: {
         configuration: true,
         database: true,
         audit: true,
-        runtimeNamespace: true
+        runtimeNamespace: true,
+        appLifecycleRecovery: true
       },
       metrics: {
         machineRequests5m: 8,
@@ -193,7 +210,15 @@ describe("operational status", () => {
         controllerTriggersFailed: 1,
         controllerTriggerExpiredLeases: 1,
         controllerOldestPendingSeconds: 80,
-        controllerActiveLeases: 1
+        controllerActiveLeases: 1,
+        appInstallationsTotal: 5,
+        appLifecycleRecoveryPending: 1,
+        appLifecycleRecoveryPrepared: 1,
+        appLifecycleRecoveryRequiresReconciliation: 0,
+        appLifecycleRecoveryStale: 0,
+        appLifecycleRecoveryWorkspacesAffected: 1,
+        appLifecycleRecoveryOldestAgeSeconds: 30,
+        appLifecycleRecoveryStaleAfterSeconds: 900
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
@@ -224,6 +249,67 @@ describe("operational status", () => {
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_graph_commits_total 4"
     );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_lifecycle_recovery_pending 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_lifecycle_recovery_stale 0"
+    );
+    expect(rpc).toHaveBeenCalledWith("get_app_lifecycle_recovery_snapshot", {
+      p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
+      p_project_key: "main",
+      p_stale_after_seconds: 900
+    });
+  });
+
+  it("reports stale or interrupted App lifecycle work as degraded without failing traffic readiness", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_app_lifecycle_recovery_snapshot"
+          ? {
+              app_lifecycle_recovery_pending: 2,
+              app_lifecycle_recovery_prepared: 1,
+              app_lifecycle_recovery_requires_reconciliation: 1,
+              app_lifecycle_recovery_stale: 1,
+              app_lifecycle_recovery_workspaces_affected: 1,
+              app_lifecycle_recovery_oldest_age_seconds: 1_200,
+              app_lifecycle_recovery_stale_after_seconds: 900
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { appLifecycleRecovery: false },
+      metrics: {
+        appLifecycleRecoveryPending: 2,
+        appLifecycleRecoveryRequiresReconciliation: 1,
+        appLifecycleRecoveryStale: 1,
+        appLifecycleRecoveryOldestAgeSeconds: 1_200
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_operational_degraded 1"
+    );
+  });
+
+  it("fails hosted readiness when the lifecycle recovery threshold is invalid", async () => {
+    hostedEnvironment();
+    vi.stubEnv("LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS", "not-a-number");
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      checks: { configuration: false, appLifecycleRecovery: false }
+    });
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("exports bounded audit pages and verifies their hash chain", async () => {

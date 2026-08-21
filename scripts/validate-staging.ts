@@ -129,7 +129,11 @@ export async function validateStagingDeployment(
   );
   for (const requiredMetric of [
     "loopgraph_ready 1",
-    "loopgraph_security_audit_head_sequence"
+    "loopgraph_security_audit_head_sequence",
+    "loopgraph_operational_degraded 0",
+    "loopgraph_app_lifecycle_recovery_pending 0",
+    "loopgraph_app_lifecycle_recovery_stale 0",
+    "loopgraph_app_lifecycle_recovery_oldest_age_seconds"
   ]) {
     if (!metrics.includes(requiredMetric)) {
       throw new Error(`Staging operational metrics omitted ${requiredMetric}`);

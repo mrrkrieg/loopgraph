@@ -42,7 +42,11 @@ describe("staging deployment validation", () => {
       if (url.pathname === "/api/operations/metrics") {
         return new Response([
           "loopgraph_ready 1",
-          "loopgraph_security_audit_head_sequence 42"
+          "loopgraph_security_audit_head_sequence 42",
+          "loopgraph_operational_degraded 0",
+          "loopgraph_app_lifecycle_recovery_pending 0",
+          "loopgraph_app_lifecycle_recovery_stale 0",
+          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0"
         ].join("\n"));
       }
       return json({
@@ -110,7 +114,14 @@ describe("staging deployment validation", () => {
       const url = new URL(input instanceof URL ? input : String(input));
       if (url.pathname === "/api/health/ready") return json({ status: "ready" });
       if (url.pathname === "/api/operations/metrics") {
-        return new Response("loopgraph_ready 1\nloopgraph_security_audit_head_sequence 1");
+        return new Response([
+          "loopgraph_ready 1",
+          "loopgraph_security_audit_head_sequence 1",
+          "loopgraph_operational_degraded 0",
+          "loopgraph_app_lifecycle_recovery_pending 0",
+          "loopgraph_app_lifecycle_recovery_stale 0",
+          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0"
+        ].join("\n"));
       }
       if (url.pathname === "/api/operations/audit-export") {
         return json({ integrity: { valid: true, headSequence: 1, headHash: "b".repeat(64) } });
