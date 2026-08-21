@@ -210,6 +210,24 @@ describe("atomic app installation lifecycle", () => {
     expect(afterInterruption.lifecycleOperations).toEqual([
       expect.objectContaining({ action: "install", status: "requires_reconciliation", failureCode: "operation_interrupted" })
     ]);
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      appId: "loopgraph.sales.qualify-route-inbound-leads"
+    }) as {
+      stage: string;
+      recovery: { action: string; status: string; affected: { loops: number; fieldMappings: number } };
+      nextAction: { kind: string; requiresHumanConfirmation: boolean; input: Record<string, unknown> };
+    };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      recovery: {
+        action: "install",
+        status: "requires_reconciliation",
+        affected: { loops: afterInterruption.lifecycleOperations[0].desired.loopIds.length, fieldMappings: input.mappingIds.length }
+      },
+      nextAction: { kind: "retry_exact_request", requiresHumanConfirmation: true }
+    });
+    expect(journey.nextAction.input).toMatchObject({ installationId: expect.any(String), targetArtifactDigest: plan.artifactDigest });
 
     const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T11:00:00.000Z"));
     expect(applied.created).toBe(true);

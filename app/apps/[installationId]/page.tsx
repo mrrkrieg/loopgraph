@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppStatusPill } from "@/components/apps/app-status-pill";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
+import { AppLifecycleRecoveryNotice, recoveryInstruction } from "@/components/apps/app-lifecycle-recovery";
 import { InstalledAppActivityPanel, InstalledAppOutcomesPanel, InstalledAppTopologyPanel } from "@/components/apps/installed-app-operations";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
@@ -35,6 +36,8 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
   const latestSynthetic = data.evaluations.filter((evaluation) => evaluation.level === "synthetic").at(-1);
   const latestReplay = data.evaluations.filter((evaluation) => evaluation.level === "historical_replay").at(-1);
   const installedLoopByName = new Map(data.installedLoops.map((loop) => [loop.name, loop]));
+  const unfinishedOperations = data.lifecycleOperations.filter((operation) => operation.status !== "completed");
+  const recovery = unfinishedOperations[0];
   return (
     <>
       <div className="mb-4 text-sm text-ink/50"><Link className="hover:text-ink" href="/apps">Installed Apps</Link> / {data.detail.app.name}</div>
@@ -44,6 +47,8 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
         description={data.detail.app.summary}
         action={<AppStatusPill state={data.installation.state} readiness={data.readiness.state} />}
       />
+
+      {unfinishedOperations.length > 0 ? <div className="mb-6"><AppLifecycleRecoveryNotice operations={unfinishedOperations} /></div> : null}
 
       <div className="mb-6">
         <AppOnboardingProgress compact journey={appOnboardingProgressForView(data.onboardingJourney)} />
@@ -228,21 +233,21 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
             <div className="space-y-3">
               {data.diff.history.length > 0 ? <form action={rollbackInstalledAppAction} className="rounded-md border border-orange-200 bg-orange-50 p-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><div className="text-sm font-semibold text-orange-950">Roll back to the prior exact revision</div><p className="mt-1 text-xs leading-5 text-orange-900/70">The restored revision returns to simulation and must pass conformance again.</p><button className="mt-3 rounded-md border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-950" type="submit">Roll back</button></form> : null}
               {data.installation.derivation && !data.installation.derivation.detachedAt ? <form action={detachInstalledAppAction} className="rounded-md border border-orange-200 bg-orange-50 p-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><div className="text-sm font-semibold text-orange-950">Detach private app from upstream</div><p className="mt-1 text-xs leading-5 text-orange-900/70">Pins a local immutable snapshot and permanently disables upstream updates.</p><button className="mt-3 rounded-md border border-orange-300 bg-white px-4 py-2 text-sm font-semibold text-orange-950" type="submit">Detach from upstream</button></form> : null}
-              <details className="rounded-md border border-red-200 bg-red-50 p-4"><summary className="cursor-pointer text-sm font-semibold text-red-950">Uninstall app</summary><form action={uninstallInstalledAppAction} className="mt-4 space-y-3"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><input className="w-full rounded-md border border-red-200 bg-white px-3 py-2 text-sm" name="reason" placeholder="Why is this app being removed?" required /><input className="w-full rounded-md border border-red-200 bg-white px-3 py-2 font-mono text-sm" name="confirmation" placeholder="Type UNINSTALL" required /><p className="text-xs leading-5 text-red-900/70">Only exclusively owned generated assets are removed. Shared connections, mappings, company context, identities, and evidence remain.</p><button className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white" type="submit">Uninstall owned assets</button></form></details>
+              <details className="rounded-md border border-red-200 bg-red-50 p-4" id="app-uninstall" open={recovery?.action === "uninstall"}><summary className="cursor-pointer text-sm font-semibold text-red-950">{recovery?.action === "uninstall" ? "Finish interrupted uninstall" : "Uninstall app"}</summary><form action={uninstallInstalledAppAction} className="mt-4 space-y-3"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} /><input className="w-full rounded-md border border-red-200 bg-white px-3 py-2 text-sm" name="reason" placeholder="Why is this app being removed?" required /><input className="w-full rounded-md border border-red-200 bg-white px-3 py-2 font-mono text-sm" name="confirmation" placeholder="Type UNINSTALL" required /><p className="text-xs leading-5 text-red-900/70">Only exclusively owned generated assets are removed. Shared connections, mappings, company context, identities, and evidence remain. Retrying the exact interrupted removal is idempotent.</p><button className="rounded-md bg-red-700 px-4 py-2 text-sm font-semibold text-white" type="submit">{recovery?.action === "uninstall" ? "Reconcile and finish uninstall" : "Uninstall owned assets"}</button></form></details>
             </div>
           </SectionCard>
         </div>
 
         <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
           <SectionCard title="Recommended next action">
-            <p className="text-sm leading-6 text-ink/65">{nextAction(data.installation.state, data.readiness.state)}</p>
-            <div className="mt-4 space-y-2">
+            <p className="text-sm leading-6 text-ink/65">{recovery ? recoveryInstruction(recovery) : nextAction(data.installation.state, data.readiness.state)}</p>
+            {recovery ? <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href="#app-uninstall">Finish recovery</a> : <div className="mt-4 space-y-2">
               {data.installation.state === "ready_to_test" || data.installation.state === "broken" ? <OperationForm action="test" installationId={data.installation.id} label="Run conformance tests" primary /> : null}
               {data.installation.state === "simulation_passed" ? <ActivationForm installationId={data.installation.id} mode="shadow" label="Activate in shadow" /> : null}
               {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationForm installationId={data.installation.id} mode="recommend" label="Promote to recommend" /> : null}
               {data.installation.state === "paused" ? <OperationForm action="resume" installationId={data.installation.id} label="Resume app" primary /> : <OperationForm action="pause" installationId={data.installation.id} label="Pause app" />}
               <OperationForm action="repair" installationId={data.installation.id} label="Repair generated assets" />
-            </div>
+            </div>}
           </SectionCard>
           <SectionCard title="Pinned installation">
             <Definition label="Installation" value={data.installation.id} mono />

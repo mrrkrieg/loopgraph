@@ -22,6 +22,7 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 - the current content-bound install plan and field-mapping plan when applicable;
 - an exact impact projection of every LoopSpec, skill, route, event contract, schedule, metric, fixture, evaluation, dashboard, connector binding, field mapping, and graph asset to create or reuse, including conflicts, permissions, and evidence/learning edges;
 - persisted installation, readiness, and write-blocked evaluation state;
+- an unfinished install/uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker stopped between stores;
 - one exact next action, including a tool name when a safe tool call exists;
 - an explicit `requiresHumanConfirmation` boundary.
 
@@ -34,10 +35,11 @@ Module selection is part of the content-bound plan. Unselected module loops and 
 1. Search by business outcome and inspect the chosen App.
 2. Call `loopgraph_app_onboarding_get` with the App ID.
 3. If the stage is `choose_preset`, present only the declared presets.
-4. Ask only returned questions and resolve only returned blockers.
-5. Re-read the journey after every state change.
-6. Use only the returned exact install plan and `nextAction.toolName`.
-7. Stop whenever `requiresHumanConfirmation` is true.
+4. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install or uninstall identity.
+5. Ask only returned questions and resolve only returned blockers.
+6. Re-read the journey after every state change.
+7. Use only the returned exact install plan and `nextAction.toolName`.
+8. Stop whenever `requiresHumanConfirmation` is true.
 
 Installation and shadow activation are deliberately separate approvals. Installation writes only the immutable asset inventory approved in the content-bound plan and cannot enable provider writes. Duplicate LoopSpecs and incompatible shared contracts block before the transaction starts. Synthetic conformance runs with writes blocked. Shadow mode records real routing decisions while continuing to block provider writes.
 
@@ -56,7 +58,7 @@ The command prints the same versioned journey Hermes and the browser use. It doe
 
 ## Browser
 
-The Marketplace installer and Installed App detail page render the same eight-step contract. Before approval, the installer expands the content-bound plan into an exact impact review: every created asset, reused company resource, blocking shared-object conflict, provider-authority decision, declared outcome metric, and signed evidence edge is visible. The current step and human approval boundary remain visible before and after installation, so the user is not dropped into a generic status dashboard and asked to infer what comes next.
+The Marketplace installer and Installed App detail page render the same eight-step contract. Before approval, the installer expands the content-bound plan into an exact impact review: every created asset, reused company resource, blocking shared-object conflict, provider-authority decision, declared outcome metric, and signed evidence edge is visible. The current step and human approval boundary remain visible before and after installation, so the user is not dropped into a generic status dashboard and asked to infer what comes next. The Installed Apps list and detail page also render unfinished lifecycle recovery above normal controls, show the affected LoopSpec/mapping/context counts, and replace competing actions with the exact reconciliation path.
 
 ## Safety invariants
 
@@ -67,3 +69,4 @@ The Marketplace installer and Installed App detail page render the same eight-st
 - A failed conformance run stops at `resolve_test_failures`.
 - A passing test does not imply permission to activate; shadow requires a separate human decision.
 - Revoked, deprecated, or uninstalling Apps do not receive an automatic transition.
+- An unfinished install or uninstall returns `recover_lifecycle`; test, activation, configuration, overlay, repair, update, rollback, duplicate, detach, pause, and resume mutations remain blocked until the exact operation completes.

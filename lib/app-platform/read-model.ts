@@ -20,6 +20,7 @@ import type {
   MarketplaceAppVersion,
   WorkspaceAppInstallation
 } from "loopgraph/core";
+import type { AppLifecycleOperation } from "loopgraph/runtime";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import { getInstalledAppEvidenceData } from "@/lib/app-platform/installed-app-evidence-data";
 import {
@@ -210,6 +211,7 @@ export type InstalledAppsViewData = {
   installedLoops: Array<{ installationId: string; loops: Array<{ id: string; name: string; path: string }> }>;
   evaluations: AppEvalRun[];
   lifecycleReceipts: AppLifecycleReceipt[];
+  lifecycleOperations: AppLifecycleOperation[];
   lock?: AppInstallationLock;
 };
 
@@ -388,6 +390,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   diff: InstalledAppDiff;
   updatePlan?: AppUpdatePlan;
   lifecycleReceipts: AppLifecycleReceipt[];
+  lifecycleOperations: AppLifecycleOperation[];
   installedLoops: Array<{ id: string; name: string; path: string }>;
   onboardingJourney: AppOnboardingJourney;
   operations: InstalledAppOperationsView;
@@ -458,6 +461,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     diff,
     updatePlan,
     lifecycleReceipts: installed.lifecycleReceipts.filter((receipt) => receipt.installationId === installationId),
+    lifecycleOperations: installed.lifecycleOperations.filter((operation) => operation.installationId === installationId),
     installedLoops,
     onboardingJourney,
     operations,

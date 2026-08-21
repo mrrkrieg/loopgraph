@@ -991,17 +991,23 @@ export async function callLoopgraphAppTool(
     const installation = parsed.installationId
       ? registry.installations.find((candidate) => candidate.id === parsed.installationId)
       : registry.installations.find((candidate) => candidate.appId === parsed.appId);
-    if (parsed.installationId && !installation) throw new Error(`App installation not found: ${parsed.installationId}`);
+    const lifecycleOperation = [...registry.lifecycleOperations].reverse().find((operation) =>
+      operation.status !== "completed"
+      && (parsed.installationId ? operation.installationId === parsed.installationId : operation.appId === parsed.appId));
+    if (parsed.installationId && !installation && !lifecycleOperation) throw new Error(`App installation not found: ${parsed.installationId}`);
     if (installation && installation.appId !== parsed.appId) {
       throw new Error(`Installation ${installation.id} does not belong to ${parsed.appId}`);
     }
-    const version = await marketplace.resolveAppVersion(
-      parsed.appId,
-      installation?.version ?? parsed.versionRange
-    );
-    const loaded = await marketplace.getAppArtifact(parsed.appId, version.version, version.digest);
     const app = await marketplace.getApp(parsed.appId);
     if (!app) throw new Error(`Marketplace app not found: ${parsed.appId}`);
+    const recoveryVersion = lifecycleOperation
+      ? app.versions.find((candidate) => candidate.digest === lifecycleOperation.targetArtifactDigest)
+      : undefined;
+    const version = await marketplace.resolveAppVersion(
+      parsed.appId,
+      installation?.version ?? recoveryVersion?.version ?? parsed.versionRange
+    );
+    const loaded = await marketplace.getAppArtifact(parsed.appId, version.version, version.digest);
     const setup = await Promise.all(loaded.manifest.entrypoints.setup.map(async (entry) =>
       appSetupDefinitionSchema.parse(await readPackDocument(loaded.root, entry))
     ));
@@ -1017,6 +1023,7 @@ export async function callLoopgraphAppTool(
         readiness: await service.readiness(installation.id, options.now),
         evaluations: registry.evaluations,
         activationApprovals: registry.activationApprovals,
+        lifecycleOperation,
         now: options.now
       });
     }
@@ -1059,6 +1066,7 @@ export async function callLoopgraphAppTool(
       presetId: parsed.presetId,
       plan,
       mappingPlan,
+      lifecycleOperation,
       now: options.now
     });
   }

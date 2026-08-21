@@ -13,6 +13,7 @@ import {
   type MarketplaceAppVersion,
   type WorkspaceAppInstallation
 } from "../core";
+import type { AppLifecycleOperation } from "./app-installation-store";
 
 type JourneyInput = {
   workspaceId: string;
@@ -27,6 +28,7 @@ type JourneyInput = {
   readiness?: AppReadiness;
   evaluations?: AppEvalRun[];
   activationApprovals?: AppActivationApprovalReceipt[];
+  lifecycleOperation?: AppLifecycleOperation;
   now?: Date;
 };
 
@@ -70,6 +72,7 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
         !approval.consumedAt &&
         Date.parse(approval.expiresAt) > now.getTime())
     : undefined;
+  const recovery = input.lifecycleOperation?.status === "completed" ? undefined : input.lifecycleOperation;
 
   const missingConfiguration = input.plan?.missingConfigurationKeys.filter((key) =>
     !key.startsWith("mapping:") && !key.startsWith("mapping_confirmation:")
@@ -141,8 +144,19 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     configurationGaps: missingConfiguration.length,
     mappingGaps: mappingGaps.length,
     permissionGaps: permissionGaps.length,
-    activationApprovalReceiptId: pendingShadowApproval?.id
+    activationApprovalReceiptId: pendingShadowApproval?.id,
+    lifecycleOperation: recovery
   });
+  if (recovery) {
+    blockers.unshift({
+      kind: "lifecycle",
+      id: recovery.id,
+      summary: `${recovery.action} is ${recovery.status.replace(/_/g, " ")}.`,
+      remediation: recovery.action === "install"
+        ? "Retry the exact previously approved install request; do not generate or approve a different plan for this App."
+        : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
+    });
+  }
   if (decision.stage === "resolve_test_failures") {
     blockers.push({
       kind: "test",
@@ -193,6 +207,21 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     ...(input.mappingPlan ? { mappingPlan: input.mappingPlan } : {}),
     ...(input.installation ? { installation: input.installation } : {}),
     ...(input.readiness ? { readiness: input.readiness } : {}),
+    ...(recovery ? {
+      recovery: {
+        operationId: recovery.id,
+        action: recovery.action,
+        status: recovery.status,
+        targetArtifactDigest: recovery.targetArtifactDigest,
+        startedAt: recovery.startedAt,
+        updatedAt: recovery.updatedAt,
+        affected: {
+          loops: recovery.desired.loopIds.length,
+          fieldMappings: recovery.desired.fieldMappingIds.length,
+          companyContextValues: recovery.desired.companyContextKeys.length
+        }
+      }
+    } : {}),
     evidence: {
       syntheticStatus,
       historicalReplayStatus,
@@ -214,12 +243,36 @@ function decideStage(input: {
   mappingGaps: number;
   permissionGaps: number;
   activationApprovalReceiptId?: string;
+  lifecycleOperation?: AppLifecycleOperation;
 }): {
   stage: AppOnboardingJourney["stage"];
   currentStep: StepId;
   headline: string;
   nextAction: AppOnboardingJourney["nextAction"];
 } {
+  if (input.lifecycleOperation) {
+    const action = input.lifecycleOperation.action;
+    return {
+      stage: "recover_lifecycle",
+      currentStep: action === "install" ? "review" : "operate",
+      headline: action === "install"
+        ? "An exact App installation was interrupted and must be resumed before another plan can be applied."
+        : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
+      nextAction: {
+        kind: "retry_exact_request",
+        summary: action === "install"
+          ? "Retry the exact previously approved install request. Loopgraph will replay only unfinished idempotent work."
+          : "Repeat the uninstall confirmation for this exact installation and artifact digest. Loopgraph will replay only unfinished idempotent work.",
+        requiresHumanConfirmation: true,
+        input: {
+          operationId: input.lifecycleOperation.id,
+          action,
+          installationId: input.lifecycleOperation.installationId,
+          targetArtifactDigest: input.lifecycleOperation.targetArtifactDigest
+        }
+      }
+    };
+  }
   const installationId = input.installation?.id;
   if (input.installation) {
     if (input.installation.state === "paused") {

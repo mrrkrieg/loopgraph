@@ -1088,6 +1088,7 @@ export const appOnboardingStageSchema = z.enum([
   "connect_systems",
   "confirm_mappings",
   "review_install",
+  "recover_lifecycle",
   "run_conformance",
   "resolve_test_failures",
   "activate_shadow",
@@ -1147,13 +1148,26 @@ export const appOnboardingJourneySchema = z.object({
   mappingPlan: appFieldMappingPlanSchema.optional(),
   installation: workspaceAppInstallationSchema.optional(),
   readiness: appReadinessSchema.optional(),
+  recovery: z.object({
+    operationId: z.string().min(1).max(160),
+    action: z.enum(["install", "uninstall"]),
+    status: z.enum(["prepared", "requires_reconciliation"]),
+    targetArtifactDigest: artifactDigestSchema,
+    startedAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    affected: z.object({
+      loops: z.number().int().nonnegative().max(100),
+      fieldMappings: z.number().int().nonnegative().max(200),
+      companyContextValues: z.number().int().nonnegative().max(100)
+    }).strict()
+  }).strict().optional(),
   evidence: z.object({
     syntheticStatus: z.enum(["not_run", "passed", "failed"]),
     historicalReplayStatus: z.enum(["not_run", "passed", "failed"]),
     providerWritesBlocked: z.boolean()
   }).strict(),
   nextAction: z.object({
-    kind: z.enum(["choose_preset", "answer_questions", "connect_providers", "confirm_mappings", "review_plan", "call_tool", "inspect_failures", "monitor", "none"]),
+    kind: z.enum(["choose_preset", "answer_questions", "connect_providers", "confirm_mappings", "review_plan", "retry_exact_request", "call_tool", "inspect_failures", "monitor", "none"]),
     summary: z.string().min(1).max(1000),
     toolName: z.string().min(1).max(160).optional(),
     requiresHumanConfirmation: z.boolean(),
