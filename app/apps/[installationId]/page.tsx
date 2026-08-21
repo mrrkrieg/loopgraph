@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppStatusPill } from "@/components/apps/app-status-pill";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
+import { InstalledAppActivityPanel, InstalledAppOutcomesPanel } from "@/components/apps/installed-app-operations";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
@@ -54,6 +55,10 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
         <ScoreCard label="Conformance" value={latestSynthetic?.status ?? "not run"} detail={latestSynthetic ? `${latestSynthetic.metrics.passed}/${latestSynthetic.metrics.total} scenarios` : "Provider writes remain blocked"} />
         <ScoreCard label="Historical preview" value={latestReplay?.status ?? "not run"} detail={latestReplay ? `${latestReplay.metrics.eventCount} events · ${latestReplay.metrics.providerWrites} writes` : "Bounded and read-only"} />
         <ScoreCard label="Mode" value={data.installation.mode.replace(/_/g, " ")} detail={`v${data.installation.version} pinned`} />
+      </div>
+
+      <div className="mt-6">
+        <InstalledAppActivityPanel operations={data.operations} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
@@ -128,6 +133,8 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
             </div>
             <div className="space-y-3">{data.promotionRecommendation.gates.map((gate) => <div className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-[10rem_minmax(0,1fr)_5rem]" key={gate.id}><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{gate.id.replace(/-/g, " ")}</div><div className="text-sm text-ink/70">{gate.summary}</div><div className={`text-right text-xs font-semibold uppercase ${gate.status === "pass" ? "text-emerald-700" : gate.status === "fail" ? "text-red-700" : "text-orange-700"}`}>{gate.status}</div></div>)}</div>
           </SectionCard>
+
+          <InstalledAppOutcomesPanel operations={data.operations} />
 
           <SectionCard title="Capability and permission bindings">
             <div className="overflow-x-auto"><table className="w-full min-w-[42rem] text-left text-sm"><thead className="text-xs uppercase tracking-[0.1em] text-ink/40"><tr><th className="pb-3">Capability</th><th className="pb-3">Provider binding</th><th className="pb-3">Authority</th><th className="pb-3">Decision</th></tr></thead><tbody className="divide-y divide-line">{data.installation.permissions.map((permission) => <tr key={permission.capability}><td className="py-3 font-mono text-xs">{permission.capability}</td><td className="py-3 font-mono text-xs">{data.installation.connectionBindings[permission.capability] ?? "not connected"}</td><td className="py-3 capitalize">{permission.authority}</td><td className="py-3 capitalize">{permission.decision.replace(/_/g, " ")}</td></tr>)}</tbody></table></div>

@@ -35,6 +35,8 @@ The platform must not collapse three different sources of truth:
 
 Marketplace metadata cannot prove that an app is installed. An installation record cannot prove that its generated loops are active. Runtime resources cannot reconstruct publisher provenance or installation intent on their own.
 
+The Installed App operating view therefore performs an explicit ownership join rather than copying global operations into an application page. The installation registry supplies the exact generated runtime loop IDs; recent Hermes event/run activity, outcome evaluations, and value-ledger entries are admitted only when their `loopId` belongs to that set. Routing accuracy and review burden come from the latest human-labeled historical replay for the same installation. An empty ownership set must return an empty operating view, never all workspace activity.
+
 ## Trust and safety boundary
 
 A pack is data, not executable code. It is untrusted until all of these checks pass:

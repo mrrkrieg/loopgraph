@@ -14,6 +14,7 @@ import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const AGENT_OPERATIONS_READ_MODEL_SCHEMA_VERSION = "agent-operations/v1alpha1" as const;
+const AGENT_OPERATIONS_DEFAULT_LIMIT = 200;
 
 export type AgentOperationsFilters = {
   source?: string;
@@ -114,7 +115,7 @@ export async function loadAgentOperationsReadModel(input: AgentOperationsFilters
   const [routing, agents, executionEvents, runSummaries] = await Promise.all([
     loadEventRoutingOperations({
       projectRoot,
-      limit: input.limit ?? 250,
+      limit: input.limit ?? AGENT_OPERATIONS_DEFAULT_LIMIT,
       store: routingStore,
       loopSpecStore: input.loopSpecStore,
       source: filters.source,
@@ -135,7 +136,7 @@ export async function loadAgentOperationsReadModel(input: AgentOperationsFilters
     .filter((row) => !filters.agentInstanceId || row.agentInstanceId === filters.agentInstanceId)
     .filter((row) => !filters.status || row.jobStatus === filters.status || row.traceStatus === filters.status)
     .filter((row) => filters.needsAttention !== true || row.needsAttention)
-    .slice(0, input.limit ?? 250);
+    .slice(0, input.limit ?? AGENT_OPERATIONS_DEFAULT_LIMIT);
   const decoratedAgents = agents.map((agent) => {
     const secondsSinceHeartbeat = Math.max(0, Math.floor((now.getTime() - Date.parse(agent.lastHeartbeatAt)) / 1_000));
     return { ...agent, healthy: ["online", "degraded"].includes(agent.status) && secondsSinceHeartbeat <= 180, secondsSinceHeartbeat };
