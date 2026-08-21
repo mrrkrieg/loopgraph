@@ -13,6 +13,44 @@ import {
   type AppInstallationLock
 } from "../core";
 
+export const APP_LIFECYCLE_OPERATION_LIMIT = 100;
+
+export const appLifecycleOperationSchema = z.object({
+  id: z.string().min(1).max(160),
+  idempotencyKey: z.string().min(16).max(160),
+  installationId: z.string().min(1).max(160),
+  appId: z.string().min(1).max(160),
+  action: z.enum(["install", "uninstall"]),
+  targetArtifactDigest: z.string().min(16).max(160),
+  status: z.enum(["prepared", "requires_reconciliation", "completed"]),
+  desired: z.object({
+    loopIds: z.array(z.string().min(1).max(160)).max(100),
+    fieldMappingIds: z.array(z.string().min(1).max(160)).max(200),
+    companyContextKeys: z.array(z.string().min(1).max(160)).max(100)
+  }).strict(),
+  actor: z.string().min(1).max(160),
+  startedAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+  completedAt: z.string().datetime().optional(),
+  resultReceiptId: z.string().min(1).max(160).optional(),
+  failureCode: z.literal("operation_interrupted").optional()
+}).strict().superRefine((operation, context) => {
+  if (operation.status === "completed" && !operation.completedAt) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["completedAt"], message: "Completed lifecycle operations require a completion time" });
+  }
+  if (operation.status !== "completed" && (operation.completedAt || operation.resultReceiptId)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: "Incomplete lifecycle operations cannot contain result fields" });
+  }
+  if ((operation.status === "requires_reconciliation") !== Boolean(operation.failureCode)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["failureCode"], message: "Only interrupted lifecycle operations may contain a failure code" });
+  }
+  if (operation.resultReceiptId && operation.action !== "uninstall") {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Only completed uninstall operations may reference a lifecycle receipt" });
+  }
+});
+
+export type AppLifecycleOperation = z.infer<typeof appLifecycleOperationSchema>;
+
 export const appInstallationRegistrySchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   workspaceId: z.string().min(1),
@@ -21,6 +59,7 @@ export const appInstallationRegistrySchema = z.object({
   assets: z.array(appAssetOwnershipSchema),
   evaluations: z.array(appEvalRunSchema),
   lifecycleReceipts: z.array(appLifecycleReceiptSchema).default([]),
+  lifecycleOperations: z.array(appLifecycleOperationSchema).max(APP_LIFECYCLE_OPERATION_LIMIT).default([]),
   activationApprovals: z.array(appActivationApprovalReceiptSchema).default([]),
   updatedAt: z.string().datetime()
 }).strict();
@@ -49,6 +88,7 @@ export function emptyAppInstallationRegistry(workspaceId: string): AppInstallati
     assets: [],
     evaluations: [],
     lifecycleReceipts: [],
+    lifecycleOperations: [],
     activationApprovals: [],
     updatedAt: new Date(0).toISOString()
   };

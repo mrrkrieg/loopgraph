@@ -60,21 +60,22 @@ import {
   type LoopSpecRegistryStore
 } from "./loop-spec-store";
 import {
-  initLoopgraphWorkspace,
-  readLoopgraphWorkspace,
-  writeLoopgraphWorkspace,
   type LoopgraphWorkspaceRegistry
 } from "./workspace";
 import {
+  APP_LIFECYCLE_OPERATION_LIMIT,
   FileAppInstallationStore,
+  appLifecycleOperationSchema,
   type AppInstallationRegistry,
-  type AppInstallationStore
+  type AppInstallationStore,
+  type AppLifecycleOperation
 } from "./app-installation-store";
 import {
   createPromotionRecommendation,
   runAppHistoricalReplay,
   runAppSyntheticConformance
 } from "./app-quality-engine";
+import { assertSecretFree } from "./secret-redaction";
 
 export type PlanAppInstallationInput = {
   projectRoot: string;
@@ -146,6 +147,10 @@ export type AppLifecycleMutationResult = {
   lock: AppInstallationLock;
 };
 
+type PrepareLifecycleOperationInput = Omit<AppLifecycleOperation, "status" | "startedAt" | "updatedAt" | "completedAt" | "resultReceiptId" | "failureCode"> & {
+  now: Date;
+};
+
 export class AppInstallationService {
   private readonly installationStore: AppInstallationStore;
   private readonly contextStore: CompanyContextStore;
@@ -169,6 +174,88 @@ export class AppInstallationService {
     this.contextStore = dependencies.contextStore ?? new FileCompanyContextStore(path.join(appsRoot, "company-context.json"));
     this.mappingStore = dependencies.mappingStore ?? new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), workspaceId);
     this.loopSpecStore = dependencies.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
+  }
+
+  private async prepareLifecycleOperation(input: PrepareLifecycleOperationInput): Promise<AppLifecycleOperation> {
+    return this.installationStore.withExclusiveUpdate(async (registry) => {
+      const existing = registry.lifecycleOperations.find((operation) => operation.id === input.id);
+      if (existing) {
+        assertSameLifecycleOperation(existing, input);
+        if (existing.status !== "requires_reconciliation") return { registry, value: existing };
+        const resumed = appLifecycleOperationSchema.parse({
+          ...existing,
+          status: "prepared",
+          failureCode: undefined,
+          updatedAt: input.now.toISOString()
+        });
+        const nextRegistry: AppInstallationRegistry = {
+          ...registry,
+          revision: registry.revision + 1,
+          lifecycleOperations: replaceLifecycleOperation(registry.lifecycleOperations, resumed),
+          updatedAt: resumed.updatedAt
+        };
+        return {
+          registry: nextRegistry,
+          lock: createInstallationLock(nextRegistry),
+          value: resumed
+        };
+      }
+      const conflicting = registry.lifecycleOperations.find((operation) =>
+        operation.installationId === input.installationId && operation.status !== "completed");
+      if (conflicting) {
+        throw new Error(`App lifecycle operation ${conflicting.id} requires reconciliation before another operation can start`);
+      }
+      const timestamp = input.now.toISOString();
+      const { now: _now, ...operationInput } = input;
+      void _now;
+      assertSecretFree(operationInput, "app_lifecycle_operation");
+      const operation = appLifecycleOperationSchema.parse({
+        ...operationInput,
+        status: "prepared",
+        startedAt: timestamp,
+        updatedAt: timestamp
+      });
+      const nextRegistry: AppInstallationRegistry = {
+        ...registry,
+        revision: registry.revision + 1,
+        lifecycleOperations: retainLifecycleOperations([...registry.lifecycleOperations, operation]),
+        updatedAt: timestamp
+      };
+      return {
+        registry: nextRegistry,
+        lock: createInstallationLock(nextRegistry),
+        value: operation
+      };
+    });
+  }
+
+  private async markLifecycleOperationInterrupted(operationId: string, now: Date): Promise<void> {
+    try {
+      await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const operation = registry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+        if (!operation || operation.status === "completed") return { registry, value: undefined };
+        const interrupted = appLifecycleOperationSchema.parse({
+          ...operation,
+          status: "requires_reconciliation",
+          failureCode: "operation_interrupted",
+          updatedAt: now.toISOString()
+        });
+        const nextRegistry: AppInstallationRegistry = {
+          ...registry,
+          revision: registry.revision + 1,
+          lifecycleOperations: replaceLifecycleOperation(registry.lifecycleOperations, interrupted),
+          updatedAt: interrupted.updatedAt
+        };
+        return {
+          registry: nextRegistry,
+          lock: createInstallationLock(nextRegistry),
+          value: undefined
+        };
+      });
+    } catch {
+      // A process or database failure can also prevent this best-effort marker.
+      // The durable prepared record remains the recovery signal in that case.
+    }
   }
 
   async plan(input: PlanAppInstallationInput, options: { replacingInstallationId?: string } = {}): Promise<AppInstallPlan> {
@@ -341,70 +428,103 @@ export class AppInstallationService {
   async apply(planInput: AppInstallPlan, actor: string, now = new Date()): Promise<ApplyAppInstallationResult> {
     const plan = appInstallPlanSchema.parse(planInput);
     if (plan.workspaceId !== this.workspaceId) throw new Error("Install plan belongs to another workspace");
-    if (Date.parse(plan.expiresAt) <= now.getTime()) throw new Error("Install plan expired; create a fresh content-bound plan");
+    const installationId = installationIdFor(this.workspaceId, plan.appId);
+    const operationId = lifecycleOperationId("install", installationId, plan.artifactDigest, plan.planDigest);
+    if (Date.parse(plan.expiresAt) <= now.getTime()) {
+      const registry = await this.installationStore.read();
+      const recovery = registry.lifecycleOperations.find((operation) => operation.id === operationId);
+      if (!recovery || recovery.status === "completed") throw new Error("Install plan expired; create a fresh content-bound plan");
+    }
     const blockers = installPlanBlockers(plan);
     if (blockers.length > 0) throw new Error(`Install plan is not ready:\n- ${blockers.join("\n- ")}`);
     const loaded = await this.marketplace.getAppArtifact(plan.appId, plan.version, plan.artifactDigest);
     const compiled = await compileLoopPack(loaded, { selectedModules: plan.selectedModules });
-    const installationId = installationIdFor(this.workspaceId, plan.appId);
     assertPlanMatchesCompiledComposition(plan, compiled, installationId);
-    return this.installationStore.withExclusiveUpdate<ApplyAppInstallationResult>(async (registry) => {
-      const existing = registry.installations.find((installation) => installation.id === installationId);
-      if (existing) {
-        if (existing.artifactDigest !== plan.artifactDigest) throw new Error("App is already installed at a different immutable version; use upgrade");
-        if (canonicalAppDigest(existing.selectedModules) !== canonicalAppDigest(plan.selectedModules)) {
-          throw new Error("App is already installed with a different module composition; use a reviewed module overlay");
-        }
-        return { registry, value: { installation: existing, lock: createInstallationLock(registry), loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: false } };
-      }
-
-      const workspaceBefore = this.loopSpecStore.persistence === "file"
-        ? await prepareLocalWorkspaceSnapshot(this.projectRoot)
-        : undefined;
-      const contextKeys = companyContextKeys(plan.configuration);
-      const context = contextKeys.length > 0
-        ? await this.contextStore.get(this.workspaceId, this.companyId)
-        : undefined;
-      if (context) assertCompanyContextStillMatches(plan.configuration, context);
-      const timestamp = now.toISOString();
-      const ownedAssets = plan.assets.filter((asset) => !["retain", "remove"].includes(asset.action)).map((asset) => ({
-        assetId: asset.id,
-        kind: asset.kind,
-        ownerInstallationIds: [installationId],
-        refCount: 1,
-        shared: asset.shared,
-        digest: asset.digest ?? canonicalAppDigest(asset)
-      }));
-      const installation: WorkspaceAppInstallation = {
-        schemaVersion: APP_INSTALL_SCHEMA_VERSION,
-        id: installationId,
-        workspaceId: this.workspaceId,
-        appId: plan.appId,
-        version: plan.version,
-        artifactDigest: plan.artifactDigest,
-        state: "ready_to_test",
-        mode: plan.initialMode,
-        selectedModules: plan.selectedModules,
-        presetId: plan.presetId,
-        configuration: plan.configuration,
-        connectionBindings: Object.fromEntries(plan.capabilityResolutions.flatMap((resolution) => resolution.connectionId ? [[resolution.capability, resolution.connectionId]] : [])),
+    const loopIds = compiled.loopSpecs.map((spec) => spec.metadata.id);
+    const contextKeys = companyContextKeys(plan.configuration);
+    if (contextKeys.length > 0) {
+      const plannedContext = await this.contextStore.get(this.workspaceId, this.companyId);
+      assertCompanyContextStillMatches(plan.configuration, plannedContext);
+    }
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey: plan.planDigest,
+      installationId,
+      appId: plan.appId,
+      action: "install",
+      targetArtifactDigest: plan.artifactDigest,
+      desired: {
+        loopIds,
         fieldMappingIds: plan.fieldMappingIds,
-        permissions: plan.permissions,
-        ownedAssets,
-        history: [],
-        installedAt: timestamp,
-        updatedAt: timestamp,
-        installedBy: actor
-      };
-      const nextRegistry: AppInstallationRegistry = {
-        ...registry,
-        revision: registry.revision + 1,
-        installations: [...registry.installations, installation].sort((left, right) => left.id.localeCompare(right.id)),
-        assets: mergeAssetOwnership(registry.assets, ownedAssets),
-        evaluations: registry.evaluations,
-        updatedAt: timestamp
-      };
-      try {
+        companyContextKeys: contextKeys
+      },
+      actor,
+      now
+    });
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      const existing = requireInstallation(registry, installationId);
+      return { installation: existing, lock: createInstallationLock(registry), loopIds, created: false };
+    }
+    try {
+      return await this.installationStore.withExclusiveUpdate<ApplyAppInstallationResult>(async (registry) => {
+        const existing = registry.installations.find((installation) => installation.id === installationId);
+        if (existing) {
+          if (existing.artifactDigest !== plan.artifactDigest) throw new Error("App is already installed at a different immutable version; use upgrade");
+          if (canonicalAppDigest(existing.selectedModules) !== canonicalAppDigest(plan.selectedModules)) {
+            throw new Error("App is already installed with a different module composition; use a reviewed module overlay");
+          }
+          const completedRegistry = completeLifecycleOperation({
+            ...registry,
+            revision: registry.revision + 1,
+            updatedAt: now.toISOString()
+          }, operation.id, now);
+          const lock = createInstallationLock(completedRegistry);
+          return { registry: completedRegistry, lock, value: { installation: existing, lock, loopIds, created: false } };
+        }
+
+        const context = contextKeys.length > 0
+          ? await this.contextStore.get(this.workspaceId, this.companyId)
+          : undefined;
+        if (context) assertCompanyContextStillMatches(plan.configuration, context);
+        const timestamp = now.toISOString();
+        const ownedAssets = plan.assets.filter((asset) => !["retain", "remove"].includes(asset.action)).map((asset) => ({
+          assetId: asset.id,
+          kind: asset.kind,
+          ownerInstallationIds: [installationId],
+          refCount: 1,
+          shared: asset.shared,
+          digest: asset.digest ?? canonicalAppDigest(asset)
+        }));
+        const installation: WorkspaceAppInstallation = {
+          schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+          id: installationId,
+          workspaceId: this.workspaceId,
+          appId: plan.appId,
+          version: plan.version,
+          artifactDigest: plan.artifactDigest,
+          state: "ready_to_test",
+          mode: plan.initialMode,
+          selectedModules: plan.selectedModules,
+          presetId: plan.presetId,
+          configuration: plan.configuration,
+          connectionBindings: Object.fromEntries(plan.capabilityResolutions.flatMap((resolution) => resolution.connectionId ? [[resolution.capability, resolution.connectionId]] : [])),
+          fieldMappingIds: plan.fieldMappingIds,
+          permissions: plan.permissions,
+          ownedAssets,
+          history: [],
+          installedAt: timestamp,
+          updatedAt: timestamp,
+          installedBy: actor
+        };
+        const nextRegistry: AppInstallationRegistry = {
+          ...registry,
+          revision: registry.revision + 1,
+          installations: [...registry.installations, installation].sort((left, right) => left.id.localeCompare(right.id)),
+          assets: mergeAssetOwnership(registry.assets, ownedAssets),
+          evaluations: registry.evaluations,
+          updatedAt: timestamp
+        };
         const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
         const artifacts = await Promise.all(compiled.loopSpecs.map(async (rawSpec) => {
           const { spec, fixtures } = await prepareInstalledSpec(rawSpec, loaded.root, installationId);
@@ -446,13 +566,14 @@ export class AppInstallationService {
             now
           });
         }
-        const lock = createInstallationLock(nextRegistry);
-        return { registry: nextRegistry, lock, value: { installation, lock, loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: true } };
-      } catch (error) {
-        if (workspaceBefore) await rollbackGeneratedInstallation(this.projectRoot, installationId, workspaceBefore);
-        throw error;
-      }
-    });
+        const completedRegistry = completeLifecycleOperation(nextRegistry, operation.id, now);
+        const lock = createInstallationLock(completedRegistry);
+        return { registry: completedRegistry, lock, value: { installation, lock, loopIds, created: true } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async configure(input: ConfigureAppInstallationInput): Promise<AppLifecycleMutationResult> {
@@ -1003,67 +1124,121 @@ export class AppInstallationService {
   }): Promise<AppLifecycleMutationResult> {
     if (!input.confirmed) throw new Error("Uninstall requires an explicit confirmation");
     const now = input.now ?? new Date();
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireInstallation(registry, input.installationId);
-      if (installation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
-      const timestamp = now.toISOString();
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const loopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const sharedLoopIds = new Set(installation.ownedAssets.flatMap((asset) => {
-        const registryAsset = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
-        return asset.kind === "loop_spec" && (registryAsset?.ownerInstallationIds.length ?? 0) > 1 && asset.assetId.startsWith("loop.")
-          ? [asset.assetId.slice("loop.".length)]
-          : [];
-      }));
-      const removableLoopIds = loopIds.filter((loopId) => !sharedLoopIds.has(loopId));
-      if (removableLoopIds.length > 0) {
-        await this.loopSpecStore.commitMaterializationAtomically({
-          commitId: `app-uninstall-${contentHash({ installationId: installation.id, digest: installation.artifactDigest, timestamp })}`,
-          idempotencyKey: canonicalAppDigest({ action: "uninstall", installationId: installation.id, digest: installation.artifactDigest, timestamp }),
-          expectedRevision: workspaceSnapshot.revision,
-          projectRoot: this.projectRoot,
-          committedAt: timestamp,
-          artifacts: [],
-          removeLoopIds: removableLoopIds
-        });
-      }
-      const { assets, removedAssetIds, preservedSharedAssetIds } = releaseOwnedAssets(registry.assets, installation.id);
-      await this.mappingStore.detachInstallation(installation.id, now);
-      await this.contextStore.detachConsumer({
-        workspaceId: this.workspaceId,
-        companyId: this.companyId,
-        installationId: installation.id,
-        actor: input.actor,
-        now
-      });
-      if (sharedLoopIds.size === 0) {
-        await rm(path.join(this.projectRoot, ".loopgraph", "apps", "installations", installation.id), { recursive: true, force: true });
-      }
-      const nextRevision = registry.revision + 1;
-      const receipt = createLifecycleReceipt(registry, {
-        installationId: installation.id,
-        action: "uninstall",
-        actor: input.actor,
-        reason: input.reason,
-        previousArtifactDigest: installation.artifactDigest,
-        removedAssetIds,
-        preservedSharedAssetIds,
-        evidenceRetained: true,
-        reversible: false,
-        createdAt: timestamp,
-        resultingRevision: nextRevision
-      });
-      const nextRegistry: AppInstallationRegistry = {
-        ...registry,
-        revision: nextRevision,
-        installations: registry.installations.filter((candidate) => candidate.id !== installation.id),
-        assets,
-        lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
-        updatedAt: timestamp
-      };
-      const lock = createInstallationLock(nextRegistry);
-      return { registry: nextRegistry, lock, value: { receipt, lock } };
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+    if (!observedInstallation) {
+      const completed = [...observedRegistry.lifecycleOperations]
+        .reverse()
+        .find((candidate) =>
+          candidate.action === "uninstall"
+          && candidate.installationId === input.installationId
+          && candidate.targetArtifactDigest === input.expectedArtifactDigest
+          && candidate.status === "completed");
+      const receipt = completed?.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!receipt) throw new Error(`App installation not found: ${input.installationId}`);
+      return { receipt, lock: createInstallationLock(observedRegistry) };
+    }
+    if (observedInstallation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
+    const idempotencyKey = canonicalAppDigest({
+      action: "uninstall",
+      workspaceId: this.workspaceId,
+      installationId: input.installationId,
+      artifactDigest: input.expectedArtifactDigest,
+      installedAt: observedInstallation.installedAt
     });
+    const operationId = lifecycleOperationId("uninstall", input.installationId, input.expectedArtifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    if (existingOperation?.status === "completed") {
+      const receipt = existingOperation.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === existingOperation.resultReceiptId)
+        : undefined;
+      if (!receipt) throw new Error("Completed uninstall operation is missing its durable lifecycle receipt");
+      return { receipt, lock: createInstallationLock(observedRegistry) };
+    }
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: observedInstallation.id,
+      appId: observedInstallation.appId,
+      action: "uninstall",
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: installationLoopIds(observedWorkspace.workspace, observedInstallation.id),
+        fieldMappingIds: observedInstallation.fieldMappingIds,
+        companyContextKeys: companyContextKeys(observedInstallation.configuration)
+      },
+      actor: input.actor,
+      now
+    });
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, input.installationId);
+        if (installation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
+        const timestamp = now.toISOString();
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const loopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+        const sharedLoopIds = new Set(installation.ownedAssets.flatMap((asset) => {
+          const registryAsset = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
+          return asset.kind === "loop_spec" && (registryAsset?.ownerInstallationIds.length ?? 0) > 1 && asset.assetId.startsWith("loop.")
+            ? [asset.assetId.slice("loop.".length)]
+            : [];
+        }));
+        const removableLoopIds = loopIds.filter((loopId) => !sharedLoopIds.has(loopId));
+        if (removableLoopIds.length > 0) {
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: timestamp,
+            artifacts: [],
+            removeLoopIds: removableLoopIds
+          });
+        }
+        const { assets, removedAssetIds, preservedSharedAssetIds } = releaseOwnedAssets(registry.assets, installation.id);
+        await this.mappingStore.detachInstallation(installation.id, now);
+        await this.contextStore.detachConsumer({
+          workspaceId: this.workspaceId,
+          companyId: this.companyId,
+          installationId: installation.id,
+          actor: input.actor,
+          now
+        });
+        if (sharedLoopIds.size === 0) {
+          await rm(path.join(this.projectRoot, ".loopgraph", "apps", "installations", installation.id), { recursive: true, force: true });
+        }
+        const nextRevision = registry.revision + 1;
+        const receipt = createLifecycleReceipt(registry, {
+          installationId: installation.id,
+          action: "uninstall",
+          actor: input.actor,
+          reason: input.reason,
+          previousArtifactDigest: installation.artifactDigest,
+          removedAssetIds,
+          preservedSharedAssetIds,
+          evidenceRetained: true,
+          reversible: false,
+          createdAt: timestamp,
+          resultingRevision: nextRevision
+        });
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: nextRevision,
+          installations: registry.installations.filter((candidate) => candidate.id !== installation.id),
+          assets,
+          lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
+          updatedAt: timestamp
+        }, operation.id, now, receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async test(installationId: string, actor: string, now = new Date()): Promise<AppEvalRun> {
@@ -1924,6 +2099,78 @@ function requireInstallation(registry: AppInstallationRegistry, id: string): Wor
   return installation;
 }
 
+function lifecycleOperationId(
+  action: AppLifecycleOperation["action"],
+  installationId: string,
+  targetArtifactDigest: string,
+  idempotencyKey: string
+): string {
+  return `lifecycle.${contentHash({ action, installationId, targetArtifactDigest, idempotencyKey })}`;
+}
+
+function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: PrepareLifecycleOperationInput): void {
+  const { now: _now, ...intent } = input;
+  void _now;
+  const existingIntent = {
+    id: existing.id,
+    idempotencyKey: existing.idempotencyKey,
+    installationId: existing.installationId,
+    appId: existing.appId,
+    action: existing.action,
+    targetArtifactDigest: existing.targetArtifactDigest,
+    desired: existing.desired,
+    actor: existing.actor
+  };
+  if (canonicalAppDigest(existingIntent) !== canonicalAppDigest(intent)) {
+    throw new Error(`App lifecycle idempotency conflict for ${existing.id}`);
+  }
+}
+
+function replaceLifecycleOperation(
+  operations: AppLifecycleOperation[],
+  replacement: AppLifecycleOperation
+): AppLifecycleOperation[] {
+  return operations
+    .map((operation) => operation.id === replacement.id ? replacement : operation)
+    .sort((left, right) => left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id));
+}
+
+function retainLifecycleOperations(operations: AppLifecycleOperation[]): AppLifecycleOperation[] {
+  const pending = operations.filter((operation) => operation.status !== "completed");
+  if (pending.length > APP_LIFECYCLE_OPERATION_LIMIT) {
+    throw new Error("Too many App lifecycle operations require reconciliation");
+  }
+  const completed = operations
+    .filter((operation) => operation.status === "completed")
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return [...pending, ...completed.slice(0, APP_LIFECYCLE_OPERATION_LIMIT - pending.length)]
+    .sort((left, right) => left.startedAt.localeCompare(right.startedAt) || left.id.localeCompare(right.id));
+}
+
+function completeLifecycleOperation(
+  registry: AppInstallationRegistry,
+  operationId: string,
+  now: Date,
+  resultReceiptId?: string
+): AppInstallationRegistry {
+  const operation = registry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+  if (!operation) throw new Error(`App lifecycle recovery record not found: ${operationId}`);
+  if (operation.status === "completed") return registry;
+  const timestamp = now.toISOString();
+  const completed = appLifecycleOperationSchema.parse({
+    ...operation,
+    status: "completed",
+    failureCode: undefined,
+    completedAt: timestamp,
+    updatedAt: timestamp,
+    resultReceiptId
+  });
+  return {
+    ...registry,
+    lifecycleOperations: retainLifecycleOperations(replaceLifecycleOperation(registry.lifecycleOperations, completed))
+  };
+}
+
 function replaceInstallation(installations: WorkspaceAppInstallation[], replacement: WorkspaceAppInstallation): WorkspaceAppInstallation[] {
   return installations.map((installation) => installation.id === replacement.id ? replacement : installation);
 }
@@ -1938,17 +2185,6 @@ function assertLifecycleTransition(from: WorkspaceAppInstallation["state"], requ
     paused: ["shadow", "recommend", "execute_with_approval"]
   };
   if (!(allowed[from] ?? []).includes(resolved)) throw new Error(`Invalid app lifecycle transition: ${from} -> ${resolved}`);
-}
-
-async function rollbackGeneratedInstallation(projectRoot: string, installationId: string, workspace: LoopgraphWorkspaceRegistry): Promise<void> {
-  await writeLoopgraphWorkspace(workspace, projectRoot);
-  const installationRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps", "installations", installationId);
-  await rm(installationRoot, { recursive: true, force: true });
-}
-
-async function prepareLocalWorkspaceSnapshot(projectRoot: string): Promise<LoopgraphWorkspaceRegistry> {
-  await initLoopgraphWorkspace({ projectRoot });
-  return readLoopgraphWorkspace(projectRoot);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

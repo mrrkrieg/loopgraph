@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
 import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchema } from "../core";
-import { FileConnectorFieldMappingStore } from "./app-connector-service";
+import { FileConnectorFieldMappingStore, type ConnectorFieldMappingStore } from "./app-connector-service";
 import { FileCompanyContextStore } from "./company-context-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
@@ -71,6 +71,42 @@ const installValues = {
   followUpSlaMinutes: 30,
   customerFacingPolicy: "draft_only"
 };
+
+class InterruptOnceMappingStore implements ConnectorFieldMappingStore {
+  readonly persistence = "file" as const;
+  private interrupted = false;
+
+  constructor(
+    private readonly delegate: ConnectorFieldMappingStore,
+    private readonly interruptAfter: "attach" | "detach"
+  ) {}
+
+  list() {
+    return this.delegate.list();
+  }
+
+  saveConfirmed(input: Parameters<ConnectorFieldMappingStore["saveConfirmed"]>[0]) {
+    return this.delegate.saveConfirmed(input);
+  }
+
+  async attachInstallation(mappingIds: string[], installationId: string) {
+    const result = await this.delegate.attachInstallation(mappingIds, installationId);
+    if (!this.interrupted && this.interruptAfter === "attach") {
+      this.interrupted = true;
+      throw new Error("simulated worker interruption after mapping attachment");
+    }
+    return result;
+  }
+
+  async detachInstallation(installationId: string, now?: Date) {
+    const result = await this.delegate.detachInstallation(installationId, now);
+    if (!this.interrupted && this.interruptAfter === "detach") {
+      this.interrupted = true;
+      throw new Error("simulated worker interruption after mapping detachment");
+    }
+    return result;
+  }
+}
 
 async function installSalesApp(input: Awaited<ReturnType<typeof harness>>, now = new Date("2026-08-08T12:00:00.000Z")) {
   const plan = await input.service.plan({
@@ -142,6 +178,119 @@ async function addConflictingObjectCatalog(input: Awaited<ReturnType<typeof harn
 }
 
 describe("atomic app installation lifecycle", () => {
+  it("resumes an interrupted install without duplicating shared ownership", async () => {
+    const input = await harness();
+    const mappingStore = new InterruptOnceMappingStore(input.mappingStore, "attach");
+    const service = new AppInstallationService(input.marketplace, input.projectRoot, "acme", "acme-company", {
+      contextStore: input.contextStore,
+      mappingStore
+    });
+    const plan = await service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [input.connection],
+      installValues,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T10:00:00.000Z")
+    });
+
+    await expect(service.apply(plan, "Bearer eyJabcdefgh.abcdefgh.abcdefgh", new Date("2026-08-08T10:00:30.000Z")))
+      .rejects.toThrow(/Secret-like material was blocked/);
+    expect((await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).lifecycleOperations)
+      .toHaveLength(0);
+    await expect(service.apply(plan, "admin-1", new Date("2026-08-08T10:01:00.000Z")))
+      .rejects.toThrow(/simulated worker interruption/);
+    const afterInterruption = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(afterInterruption.installations).toHaveLength(0);
+    expect(afterInterruption.lifecycleOperations).toEqual([
+      expect.objectContaining({ action: "install", status: "requires_reconciliation", failureCode: "operation_interrupted" })
+    ]);
+
+    const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T11:00:00.000Z"));
+    expect(applied.created).toBe(true);
+    const recovered = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(recovered.lifecycleOperations).toEqual([
+      expect.objectContaining({ action: "install", status: "completed", completedAt: "2026-08-08T11:00:00.000Z" })
+    ]);
+    expect((await input.mappingStore.list()).every((mapping) =>
+      mapping.dependentInstallationIds.filter((id) => id === applied.installation.id).length === 1
+    )).toBe(true);
+  });
+
+  it("resumes an interrupted uninstall and replays its durable result", async () => {
+    const input = await harness();
+    const mappingStore = new InterruptOnceMappingStore(input.mappingStore, "detach");
+    const service = new AppInstallationService(input.marketplace, input.projectRoot, "acme", "acme-company", {
+      contextStore: input.contextStore,
+      mappingStore
+    });
+    const plan = await service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [input.connection],
+      installValues,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T10:10:00.000Z")
+    });
+    const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T10:11:00.000Z"));
+    const uninstall = {
+      installationId: applied.installation.id,
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      actor: "admin-1",
+      reason: "Verify durable uninstall recovery.",
+      confirmed: true
+    };
+
+    await expect(service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:12:00.000Z") }))
+      .rejects.toThrow(/simulated worker interruption/);
+    const interrupted = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(interrupted.installations).toHaveLength(1);
+    expect(interrupted.lifecycleOperations.find((operation) => operation.action === "uninstall"))
+      .toMatchObject({ status: "requires_reconciliation" });
+
+    const recovered = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:13:00.000Z") });
+    const replayed = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:14:00.000Z") });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    const registry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(registry.installations).toHaveLength(0);
+    expect(registry.lifecycleOperations.find((operation) => operation.action === "uninstall"))
+      .toMatchObject({ status: "completed", resultReceiptId: recovered.receipt.id });
+
+    const reinstallPlan = await service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [input.connection],
+      installValues,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T10:15:00.000Z")
+    });
+    const reinstalled = await service.apply(reinstallPlan, "admin-1", new Date("2026-08-08T10:16:00.000Z"));
+    const secondUninstall = await service.uninstall({
+      ...uninstall,
+      expectedArtifactDigest: reinstalled.installation.artifactDigest,
+      now: new Date("2026-08-08T10:17:00.000Z")
+    });
+    expect(secondUninstall.receipt.id).not.toBe(recovered.receipt.id);
+    const finalRegistry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
+    expect(finalRegistry.lifecycleOperations.filter((candidate) => candidate.action === "uninstall" && candidate.status === "completed"))
+      .toHaveLength(2);
+  });
+
   it("binds only current approved company context and records installation ownership", async () => {
     const input = await harness();
     const observedAt = "2026-08-08T11:00:00.000Z";
@@ -296,8 +445,9 @@ describe("atomic app installation lifecycle", () => {
     const browserStyleStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
       projectRoot,
       installationId: applied.installation.id
-    }) as { installations: Array<{ workspaceId: string }> };
+    }) as { installations: Array<{ workspaceId: string }>; lifecycleOperations: Array<{ action: string; status: string }> };
     expect(browserStyleStatus.installations[0].workspaceId).toBe("acme");
+    expect(browserStyleStatus.lifecycleOperations).toContainEqual(expect.objectContaining({ action: "install", status: "completed" }));
   });
 
   it("rejects missing, mismatched, expired, and replayed App activation approvals", async () => {

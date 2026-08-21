@@ -132,6 +132,8 @@ Published artifacts are immutable. Company changes are typed overlay operations.
 
 Every configure, overlay, repair, duplicate, detach, update, rollback, and uninstall mutation records a versioned lifecycle receipt with the previous and resulting registry revisions, artifact digests, accountable actor, retained-evidence flag, removed assets, and preserved shared assets. Mutations use optimistic content bindings so stale CLI, Hermes, or browser clients cannot overwrite a newer configuration, overlay, or artifact.
 
+Install and uninstall cross the installation registry, LoopSpec registry, field-mapping ownership, and company-context ownership boundaries. A bounded lifecycle-operation journal is therefore committed before those side effects begin. The journal contains only immutable digests and resource identifiers, never credentials or provider payloads. Interrupted operations remain `prepared` or `requires_reconciliation`; retrying the exact idempotency identity safely replays LoopSpec materialization and idempotent ownership changes before the registry mutation and operation completion commit together. A different lifecycle action for the same installation is blocked until that recovery record is completed.
+
 Private duplication namespaces every generated LoopSpec and installation-owned asset, so a derived app can coexist with its upstream installation without overwriting active routes. Detach copies the exact verified LoopPack bytes into a confined workspace snapshot, records the snapshot path, and disables future upstream updates. It does not rewrite the original marketplace artifact.
 
 ## Removal and shared assets

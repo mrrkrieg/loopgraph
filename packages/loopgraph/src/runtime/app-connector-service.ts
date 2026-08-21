@@ -308,6 +308,9 @@ export class FileConnectorFieldMappingStore implements ConnectorFieldMappingStor
     const requested = new Set(mappingIds);
     const missing = mappingIds.filter((id) => !mappings.some((mapping) => mapping.id === id));
     if (missing.length > 0) throw new Error(`Field mappings not found: ${missing.join(", ")}`);
+    if (mappings.every((mapping) => !requested.has(mapping.id) || mapping.dependentInstallationIds.includes(installationId))) {
+      return mappings;
+    }
     const timestamp = new Date().toISOString();
     const next = mappings.map((mapping) => requested.has(mapping.id)
       ? connectorFieldMappingSchema.parse({
@@ -322,6 +325,7 @@ export class FileConnectorFieldMappingStore implements ConnectorFieldMappingStor
 
   async detachInstallation(installationId: string, now = new Date()): Promise<ConnectorFieldMapping[]> {
     const mappings = await this.list();
+    if (mappings.every((mapping) => !mapping.dependentInstallationIds.includes(installationId))) return mappings;
     const timestamp = now.toISOString();
     const next = mappings.map((mapping) => mapping.dependentInstallationIds.includes(installationId)
       ? connectorFieldMappingSchema.parse({

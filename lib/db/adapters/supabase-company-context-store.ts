@@ -59,6 +59,7 @@ export class SupabaseCompanyContextStore implements CompanyContextStore {
   async attachConsumer(input: AttachCompanyContextConsumerInput): Promise<CompanyContext> {
     const current = await this.get(input.workspaceId, input.companyId);
     const next = attachCompanyContextConsumer(current, input);
+    if (next === current) return current;
     await this.commit(current.revision, next, "attach", input.actor, input.installationId);
     return next;
   }
@@ -66,6 +67,7 @@ export class SupabaseCompanyContextStore implements CompanyContextStore {
   async detachConsumer(input: DetachCompanyContextConsumerInput): Promise<CompanyContext> {
     const current = await this.get(input.workspaceId, input.companyId);
     const next = detachCompanyContextConsumer(current, input);
+    if (next === current) return current;
     await this.commit(current.revision, next, "detach", input.actor, input.installationId);
     return next;
   }

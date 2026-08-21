@@ -456,7 +456,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_onboarding_get", description: "Return one state-derived, resumable App journey with only the unresolved questions, blockers, evidence, and exact safe next action for Hermes, CLI, or browser.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
-  { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
@@ -1113,6 +1113,7 @@ export async function callLoopgraphAppTool(
       readiness,
       evaluations: registry.evaluations,
       lifecycleReceipts: registry.lifecycleReceipts,
+      lifecycleOperations: registry.lifecycleOperations,
       lock: await installationStore.readLockfile()
     };
   }
