@@ -173,6 +173,15 @@ export function verifyAppIndependentVerificationReceipt(
   }
 }
 
+export function validateAppVerifierPublicKey(keyInput: AppVerifierTrustKey): boolean {
+  const key = appVerifierTrustKeySchema.parse(keyInput);
+  try {
+    return createPublicKey(key.publicKey).asymmetricKeyType === "ed25519";
+  } catch {
+    return false;
+  }
+}
+
 export function createAppIndependentVerificationReceipt(input: {
   installationId: string;
   appId: string;

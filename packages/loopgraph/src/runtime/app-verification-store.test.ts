@@ -23,6 +23,15 @@ describe("App independent verification registry", () => {
       publicKeyEncoding: { type: "spki", format: "pem" },
       privateKeyEncoding: { type: "pkcs8", format: "pem" }
     });
+    await expect(store.trustVerifierKey({
+      verifierId: "unsafe-verifier",
+      keyId: "unsafe-verifier.primary",
+      algorithm: "ed25519",
+      publicKey: keys.privateKey,
+      approvedBy: "security-admin",
+      approvalRef: "change:rejected",
+      approvedAt: now
+    })).rejects.toThrow(/public keys only/);
     const trusted = await store.trustVerifierKey({
       verifierId: "independent-auditor",
       keyId: "independent-auditor.primary",

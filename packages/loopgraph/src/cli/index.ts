@@ -642,6 +642,20 @@ apps
   });
 
 apps
+  .command("verification-status")
+  .description("List verifier public-key trust, revocations, and imported independent receipts")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (options: { project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_verification_registry_get", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company
+    });
+  });
+
+apps
   .command("verifier-revoke")
   .description("Immediately revoke one trusted verifier key with an accountable reference")
   .argument("<verifier-id>", "Verifier identity")

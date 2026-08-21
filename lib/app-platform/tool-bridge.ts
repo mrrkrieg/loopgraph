@@ -38,6 +38,7 @@ const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
+  "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
   "loopgraph_app_verifier_trust_revoke",
   "loopgraph_app_verification_import"

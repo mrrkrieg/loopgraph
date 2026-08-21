@@ -29,6 +29,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
       "loopgraph_app_maturity_get",
+      "loopgraph_app_verification_registry_get",
       "loopgraph_app_verifier_trust_add",
       "loopgraph_app_verifier_trust_revoke",
       "loopgraph_app_verification_import",
@@ -545,6 +546,14 @@ describe("shared Loopgraph App tools", () => {
       importRef: "change:SEC-47"
     }) as { receipts: unknown[]; privateKeyMaterialAccepted: boolean };
     expect(imported).toMatchObject({ receipts: [verificationReceipt], privateKeyMaterialAccepted: false });
+    const verificationStatus = await callLoopgraphAppTool("loopgraph_app_verification_registry_get", {
+      projectRoot
+    }) as { trustedVerifierKeys: unknown[]; receipts: unknown[]; privateKeyMaterialAccepted: boolean };
+    expect(verificationStatus).toMatchObject({
+      trustedVerifierKeys: [expect.objectContaining({ verifierId: "independent-auditor" })],
+      receipts: [verificationReceipt],
+      privateKeyMaterialAccepted: false
+    });
     const revoked = await callLoopgraphAppTool("loopgraph_app_verifier_trust_revoke", {
       projectRoot,
       verifierId: "independent-auditor",

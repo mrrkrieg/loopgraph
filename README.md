@@ -361,6 +361,9 @@ Hermes, the CLI, and the browser use the same maturity service and durable works
 # Inspect the evidence-derived ceiling for one exact installation.
 loopgraph apps maturity <installation-id>
 
+# Inspect current public-key trust, revocations, and receipts.
+loopgraph apps verification-status
+
 # Trust only an approved verifier PUBLIC key with approver and change references.
 loopgraph apps verifier-trust --file verifier-public-key.json
 
@@ -374,6 +377,8 @@ loopgraph apps verifier-revoke <verifier-id> <key-id> \
 ```
 
 The verifier signs outside Loopgraph. These commands never accept a verifier private key. Unknown, forged, revoked-key, wrong-installation, wrong-App, and stale-artifact receipts are rejected before persistence. Local trust state is workspace-bound and written with owner-only permissions. Hosted mode uses tenant/project/workspace-scoped Supabase tables, service-role-only access, bounded mutation functions, and the tamper-evident security audit chain; it fails closed if distributed verification storage is unavailable instead of falling back to ephemeral server disk.
+
+Organization admins can manage the same contract at `/settings/app-verification`. The console shows public-key fingerprints, approval and revocation accountability, imported receipt provenance, and exact artifact identities. Hosted mutations require the `integrations.manage` permission plus recent step-up authentication; viewers can inspect trust without changing it.
 
 Hosted deployments add a tenant-scoped private marketplace behind organization
 RLS. Search remains metadata-only; when an operator opens or plans a

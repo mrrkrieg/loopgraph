@@ -138,7 +138,9 @@ export const appVerifierTrustKeySchema = z.object({
   verifierId: z.string().min(1).max(300),
   keyId: appIdSchema,
   algorithm: z.literal("ed25519"),
-  publicKey: z.string().min(32),
+  publicKey: z.string().min(32).refine((value) => !/-----BEGIN (?:(?:ENCRYPTED|RSA|EC|OPENSSH) )?PRIVATE KEY-----/.test(value), {
+    message: "Verifier trust accepts public keys only"
+  }),
   approvedBy: z.string().min(1).max(300),
   approvalRef: z.string().min(1).max(1000),
   approvedAt: isoDateTimeSchema,

@@ -9,6 +9,7 @@ import {
 } from "loopgraph/core";
 import {
   APP_VERIFICATION_REGISTRY_SCHEMA_VERSION,
+  validateAppVerifierPublicKey,
   verifyAppIndependentVerificationReceipt,
   type AppVerificationImportContext,
   type AppVerificationRegistry,
@@ -65,6 +66,7 @@ export class SupabaseAppVerificationStore implements AppVerificationStore {
 
   async trustVerifierKey(input: AppVerifierTrustKey): Promise<AppVerificationRegistry> {
     const key = appVerifierTrustKeySchema.parse(input);
+    if (!validateAppVerifierPublicKey(key)) throw new Error("Verifier public key must be a valid Ed25519 public key");
     const { error } = await this.supabase.rpc("trust_loopgraph_app_verifier_key", {
       p_organization_id: this.scope.organizationId,
       p_project_key: this.scope.projectKey,
