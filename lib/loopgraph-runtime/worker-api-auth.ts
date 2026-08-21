@@ -21,6 +21,7 @@ export type MachineCapability =
   | "hermes.agent_register"
   | "hermes.agent_heartbeat"
   | "hermes.execution_events"
+  | "hermes.app_operations"
   | "measurements.collect"
   | "marketplace.consume"
   | "marketplace.verify"
@@ -455,7 +456,9 @@ function verifySenderBinding(request: Request, expected?: string): string | null
 }
 
 function shouldRequireDurableWorkloadGrant(capability: MachineCapability) {
-  if (!capability.startsWith("provider.") && capability !== "marketplace.consume") return false;
+  if (!capability.startsWith("provider.") &&
+      capability !== "marketplace.consume" &&
+      capability !== "hermes.app_operations") return false;
   return process.env.NODE_ENV === "production" || process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS === "true";
 }
 

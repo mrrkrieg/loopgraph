@@ -2,6 +2,10 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { DepartmentTypeSchema } from "./department-skills";
 import { contentDigest } from "./hash";
+import {
+  connectorActionPrepareResponseSchema,
+  connectorBrokerResponseSchema
+} from "./connector-broker";
 
 /**
  * Public, versioned contracts for the Loopgraph App Platform.
@@ -26,6 +30,7 @@ export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evid
 export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
 export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
+export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -866,6 +871,43 @@ export const appOperationResolutionSchema = z.object({
   }
 });
 
+export const appOperationExecutionResultSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_EXECUTION_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  loopId: appIdSchema,
+  loopVersionHash: artifactDigestSchema,
+  capability: logicalCapabilitySchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160),
+  disposition: z.enum(["invoke_read", "prepare_action"]),
+  resolutionDigest: artifactDigestSchema,
+  requestId: z.string().min(8).max(128),
+  idempotencyKey: z.string().min(8).max(192),
+  brokerResponse: z.union([
+    connectorBrokerResponseSchema,
+    connectorActionPrepareResponseSchema
+  ]),
+  completedAt: isoDateTimeSchema,
+  executionDigest: artifactDigestSchema
+}).strict().superRefine((execution, ctx) => {
+  if (execution.disposition === "invoke_read" && execution.brokerResponse.status === "prepared") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Read operation execution cannot return a prepared action" });
+  }
+  if (execution.disposition === "prepare_action" && execution.brokerResponse.status !== "prepared") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Action preparation must return a prepared action" });
+  }
+  if (execution.brokerResponse.requestId !== execution.requestId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requestId"], message: "Broker response request identity does not match the execution result" });
+  }
+  if (canonicalAppDigest({ ...execution, executionDigest: undefined }) !== execution.executionDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["executionDigest"], message: "Operation execution digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1391,6 +1433,7 @@ export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSc
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
 export type AppConnectorOperationBinding = z.infer<typeof appConnectorOperationBindingSchema>;
 export type AppOperationResolution = z.infer<typeof appOperationResolutionSchema>;
+export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionResultSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1436,6 +1479,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     AppConnectorOperationBinding: zodToJsonSchema(appConnectorOperationBindingSchema, "AppConnectorOperationBinding") as Record<string, unknown>,
     AppOperationResolution: zodToJsonSchema(appOperationResolutionSchema, "AppOperationResolution") as Record<string, unknown>,
+    AppOperationExecutionResult: zodToJsonSchema(appOperationExecutionResultSchema, "AppOperationExecutionResult") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,

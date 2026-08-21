@@ -35,6 +35,17 @@ flowchart LR
 5. Every accepted, denied, or failed call produces an idempotent receipt containing hashes—not raw
    inputs or outputs—and appends an event to the tenant security audit chain.
 
+Installed Apps add a route-bound authority check before this broker boundary. Hermes cannot submit
+a provider, operation, connection, URL, tenant, workspace, or company object. It supplies a logical
+capability and durable execution identity; Loopgraph derives the exact pinned App binding and
+requires an active matching route job, exact LoopSpec hash, fresh assigned agent, matching durable
+event/problem subject, exact Broker environment, current scopes, and healthy secret-free connection
+projection. Reads may execute, while any write returns only a prepared-action fingerprint for the
+separate approval and commit controls. Secret-shaped operation input is rejected before the Broker.
+The headless endpoint requires a dedicated `hermes.app_operations` durable workload grant and binds
+the tenant from verified deployment configuration; browser session authority and the broader
+provider-broker grant do not authorize this route.
+
 Before a provider handler runs, a tenant-scoped idempotency lease is atomically reserved. Concurrent
 duplicates return `request_in_progress`, and reuse of the key for a different actor, environment,
 company object, loop, route job, installation, capability, operation, or input returns

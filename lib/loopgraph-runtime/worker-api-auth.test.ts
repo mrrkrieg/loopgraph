@@ -43,6 +43,20 @@ describe("route-job HTTP API authorization", () => {
     });
   });
 
+  it("keeps Hermes App execution on its own non-provider durable grant", () => {
+    const request = new Request("https://example.test/api/hermes/apps/operations/invoke", {
+      headers: {
+        "x-loopgraph-provider-capability": "provider.action.execute",
+        "x-loopgraph-connection-id": "hubspot-prod"
+      }
+    });
+
+    expect(resolveDurableWorkloadGrantScope(request, "hermes.app_operations")).toEqual({
+      capability: "hermes.app_operations",
+      connectionId: null
+    });
+  });
+
   it("retains fine-grained provider grant selection for provider operations", () => {
     const request = new Request("https://example.test/api/integrations/broker", {
       headers: {

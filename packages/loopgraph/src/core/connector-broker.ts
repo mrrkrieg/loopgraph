@@ -46,7 +46,7 @@ export const brokerCapabilitySchema = z.enum([
  */
 export const workloadCapabilitySchema = z.union([
   brokerCapabilitySchema,
-  z.enum(["marketplace.consume"])
+  z.enum(["marketplace.consume", "hermes.app_operations"])
 ]);
 
 export const connectorOperationSchema = z.string()

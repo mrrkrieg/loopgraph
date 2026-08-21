@@ -24,10 +24,12 @@ import {
   providerSchemaFieldSchema,
   type AppFieldMappingPlan,
   type ConnectionInstance,
+  type ConnectorTenant,
   type MarketplaceApp
 } from "../core";
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
+import { AppOperationExecutionService, type AppOperationTransport } from "./app-operation-execution";
 import { FileAppInstallationStore, type AppInstallationStore } from "./app-installation-store";
 import {
   FileAppVerificationStore,
@@ -56,6 +58,7 @@ import { PROVIDER_ONBOARDING_CATALOG } from "./provider-onboarding";
 import { HostedMarketplaceClient } from "./hosted-marketplace-client";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
+import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
 import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { FileCompanyContextStore, type CompanyContextStore } from "./company-context-service";
@@ -94,6 +97,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
   "loopgraph_app_operation_resolve",
+  "loopgraph_app_operation_invoke",
   "loopgraph_app_maturity_get",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
@@ -264,6 +268,18 @@ export const appOperationResolveInputSchema = projectSchema.extend({
   installationId: appIdSchema,
   loopId: appIdSchema,
   capability: logicalCapabilitySchema
+}).strict();
+
+export const appOperationInvokeInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  installationId: appIdSchema,
+  loopId: appIdSchema,
+  capability: logicalCapabilitySchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
+  input: z.record(z.string(), z.unknown()).default({})
 }).strict();
 
 export const appMaturityGetInputSchema = projectSchema.extend({
@@ -469,6 +485,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_resolve", description: "Resolve one App-owned loop capability to its exact installation-scoped broker or Loopgraph runtime operation without accepting provider, operation, connection, URL, or credential choices from the caller.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_operation_invoke", description: "Invoke one resolved App capability for an active durable route job through its exact trusted Connector Broker binding; reads execute and writes only create fingerprint-bound prepared actions.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
@@ -533,6 +550,9 @@ export async function callLoopgraphAppTool(
     connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
     providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
+    connectorBroker?: AppOperationTransport;
+    connectorTenant?: ConnectorTenant;
+    routingStore?: RoutingStore;
   } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
@@ -1143,6 +1163,32 @@ export async function callLoopgraphAppTool(
       installationId: parsed.installationId,
       loopId: parsed.loopId,
       capability: parsed.capability,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_operation_invoke") {
+    const parsed = appOperationInvokeInputSchema.parse({ ...raw, projectRoot, ...identity });
+    if (!options.connectorBroker || !options.connectorTenant) {
+      throw new Error("App operation invocation requires a trusted Connector Broker transport and tenant binding");
+    }
+    const execution = new AppOperationExecutionService({
+      appService: service,
+      routingStore: options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      operationsStore: options.hermesOperationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot)),
+      broker: options.connectorBroker,
+      tenant: options.connectorTenant,
+      workspaceId: identity.workspaceId,
+      companyId: identity.companyId,
+      connections: await appConnections(projectRoot, options.connections)
+    });
+    return execution.invoke({
+      installationId: parsed.installationId,
+      loopId: parsed.loopId,
+      capability: parsed.capability,
+      routeJobId: parsed.routeJobId,
+      agentInstanceId: parsed.agentInstanceId,
+      callId: parsed.callId,
+      input: parsed.input,
       now: options.now
     });
   }

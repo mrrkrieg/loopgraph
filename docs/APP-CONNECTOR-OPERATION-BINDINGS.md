@@ -103,11 +103,34 @@ The disposition is deliberately narrow:
 - `prepare_action` permits preparation of an action; it is not execution or approval.
 - `blocked` includes explicit reasons and has no executable binding.
 
-Resolution itself never calls a provider and never returns secrets. A later executor must re-resolve
-or verify the complete resolution, validate operation-specific inputs, and let the Connector Broker
-recheck current tenant identity, scopes, connection health, kill switches, idempotency, and audit
-policy at the moment of use. Provider writes must continue through exact prepared-action approval
-and commit controls.
+Resolution itself never calls a provider and never returns secrets. The
+`loopgraph_app_operation_invoke` executor accepts only the same installation, loop, and logical
+capability plus a durable route-job ID, registered Hermes agent ID, call ID, and bounded operation
+input. It re-resolves the binding immediately before use and derives the tenant, provider,
+connection, canonical operation, company object, LoopSpec hash, environment, and activation mode
+from trusted installation and routing state.
+
+Invocation fails before the Connector Broker unless all of the following remain true:
+
+- the route job is active, belongs to the selected loop, requires the capability, and is bound to
+  the exact active LoopSpec version;
+- the selected Hermes agent has a fresh heartbeat, the capability, the correct environment and
+  organization, and an assignment to the loop;
+- the durable event and business problem agree on workspace, company, and company-object identity;
+- the current Broker projection still has the exact provider, environment, capability, scopes,
+  connection identity, and healthy state used by the binding; and
+- the operation input is JSON-bounded and passes the central secret boundary.
+
+A read disposition executes the exact allowlisted Broker read. A write disposition can only call
+`prepareAction`, returning the immutable fingerprint that a separate approval and commit path must
+consume. This executor has no provider-write commit method and no arbitrary HTTP fallback. The
+workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
+operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the
+caller. That route requires its own durable, tenant-scoped `hermes.app_operations` workload grant;
+the broader Connector Broker capability cannot substitute for it. The machine tenant is derived
+from the verified deployment binding rather than a browser cookie. The Connector Broker
+independently rechecks tenant identity, scopes, connection health, kill switches, idempotency, and
+audit policy at the moment of use.
 
 ## Rollout and graph state
 
@@ -123,7 +146,9 @@ content-addressed, so an exact retry is idempotent but a later pause/resume cycl
 transaction. The LoopSpec change is committed before the App registry state: if registry persistence
 is interrupted, the older App state remains the stricter provider-operation authority.
 
-This binding proves that a requested operation has a bounded implementation. It does not prove that
-a real provider account is healthy or that an OAuth application has been registered. Those facts
-still require live tenant onboarding, sandbox verification, webhook/transformer validation, and the
-existing staged activation gates.
+This binding and executor prove that a routed job has a bounded implementation and current trusted
+connection. They do not prove that a new OAuth application has been registered correctly or that a
+prepared write should be approved. Those facts still require live tenant onboarding, sandbox
+verification, webhook/transformer validation, and the existing staged activation and action-commit
+gates. Governed `loopgraph_runtime` operation handlers are also a separate registry; they are not
+silently treated as provider operations.

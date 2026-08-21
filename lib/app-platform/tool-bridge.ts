@@ -7,9 +7,12 @@ import {
   type LoopgraphAppToolName
 } from "loopgraph/runtime";
 import { marketplaceAppSchema, type ConnectionInstance, type MarketplaceApp } from "loopgraph/core";
-import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
-import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
-import { listConnectorInstallations } from "@/lib/connector-broker/admin";
+import { getHostedOrganizationId, isHostedAuthRequired } from "@/lib/auth/hosted-config";
+import { getWorkspaceDatabase, type WorkspaceDatabase } from "@/lib/db/workspace-database";
+import {
+  getExternalConnectorBrokerClient,
+  listConnectorInstallations
+} from "@/lib/connector-broker/admin";
 import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
@@ -19,7 +22,8 @@ import {
   getHermesOperationsStore,
   getLoopSpecRegistryStore,
   getOutcomeStore,
-  getProviderSchemaSnapshotStore
+  getProviderSchemaSnapshotStore,
+  getRoutingStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import { requireHostedMarketplaceContext } from "./hosted-marketplace-api";
 import {
@@ -31,6 +35,7 @@ import { SupabaseMarketplaceRegistryStore } from "@/lib/db/adapters/supabase-mar
 const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
+  "loopgraph_app_operation_invoke",
   "loopgraph_connector_schema_record",
   "loopgraph_app_field_mappings_get",
   "loopgraph_app_field_mapping_confirm",
@@ -98,6 +103,9 @@ export async function callLoopgraphAppTool(
     });
   }
   const projectRoot = pathFromInput(effectiveInput, options.projectRoot);
+  const operationExecutionOptions = name === "loopgraph_app_operation_invoke"
+    ? await trustedOperationExecution(projectRoot)
+    : undefined;
   const callOptions = {
     ...options,
     appInstallationStoreFactory: (workspaceId: string) => getAppInstallationStore({ projectRoot, workspaceId }),
@@ -105,7 +113,9 @@ export async function callLoopgraphAppTool(
     connectorFieldMappingStoreFactory: (workspaceId: string) => getConnectorFieldMappingStore({ projectRoot, workspaceId }),
     providerSchemaSnapshotStoreFactory: (workspaceId: string) => getProviderSchemaSnapshotStore({ projectRoot, workspaceId }),
     loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
-    ...(CONNECTION_AWARE_TOOLS.has(name) ? { connections: await trustedConnections() } : {}),
+    ...(CONNECTION_AWARE_TOOLS.has(name) ? {
+      connections: await trustedConnections(operationExecutionOptions?.connectorTenant.organizationId)
+    } : {}),
     ...(EVIDENCE_AWARE_TOOLS.has(name) ? {
       outcomeStore: getOutcomeStore({ projectRoot }),
       hermesOperationsStore: getHermesOperationsStore({ rootDir: path.join(projectRoot, ".loopgraph") })
@@ -113,6 +123,7 @@ export async function callLoopgraphAppTool(
     ...(VERIFICATION_AWARE_TOOLS.has(name) ? {
       appVerificationStoreFactory: (workspaceId: string) => getAppVerificationStore({ projectRoot, workspaceId })
     } : {}),
+    ...(operationExecutionOptions ?? {}),
     hostedMarketplaceClient: null
   };
   try {
@@ -183,12 +194,35 @@ async function combinedMarketplaceSearch(
   };
 }
 
-async function trustedConnections(): Promise<ConnectionInstance[]> {
-  const database = await getWorkspaceDatabase("integrations.read");
+async function trustedConnections(machineOrganizationId?: string): Promise<ConnectionInstance[]> {
+  const database: WorkspaceDatabase = machineOrganizationId
+    ? { client: null, organizationId: machineOrganizationId, hosted: true }
+    : await getWorkspaceDatabase("integrations.read");
   const installations = await listConnectorInstallations(database);
   return installations.map((installation) =>
     connectionInstanceFromBrokerInstallation(installation)
   );
+}
+
+async function trustedOperationExecution(projectRoot: string) {
+  const organizationId = getHostedOrganizationId();
+  if (!organizationId) {
+    throw new Error("Hosted App operation invocation requires an organization-bound workspace");
+  }
+  const connectorBroker = getExternalConnectorBrokerClient();
+  if (!connectorBroker) {
+    throw new Error("Hosted App operation invocation requires the external Connector Broker URL and audience");
+  }
+  const projectKey = hostedWorkspaceId();
+  return {
+    connectorBroker,
+    connectorTenant: {
+      organizationId,
+      projectKey
+    },
+    routingStore: getRoutingStore({ rootDir: path.join(projectRoot, ".loopgraph") }),
+    hermesOperationsStore: getHermesOperationsStore({ rootDir: path.join(projectRoot, ".loopgraph") })
+  };
 }
 
 function hostedArtifactRequest(

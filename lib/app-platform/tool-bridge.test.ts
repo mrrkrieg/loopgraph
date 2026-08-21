@@ -10,9 +10,11 @@ const mocks = vi.hoisted(() => ({
   hostedSearch: vi.fn(),
   getDatabase: vi.fn(),
   listInstallations: vi.fn(),
+  externalBroker: { execute: vi.fn(), prepareAction: vi.fn() },
   activeProjectRoot: vi.fn(),
   outcomeStore: { persistence: "distributed" },
   hermesOperationsStore: {},
+  routingStore: {},
   appInstallationStore: { persistence: "distributed" },
   appVerificationStore: { persistence: "distributed" },
   companyContextStore: { persistence: "distributed" },
@@ -21,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   providerSchemaSnapshotStore: { persistence: "distributed" },
   getOutcomeStore: vi.fn(),
   getHermesOperationsStore: vi.fn(),
+  getRoutingStore: vi.fn(),
   getAppInstallationStore: vi.fn(),
   getCompanyContextStore: vi.fn(),
   getLoopSpecRegistryStore: vi.fn(),
@@ -34,7 +37,8 @@ vi.mock("loopgraph/runtime", () => ({
   connectionInstanceFromBrokerInstallation: vi.fn((installation) => installation)
 }));
 vi.mock("@/lib/auth/hosted-config", () => ({
-  isHostedAuthRequired: vi.fn(() => true)
+  isHostedAuthRequired: vi.fn(() => true),
+  getHostedOrganizationId: vi.fn(() => "123e4567-e89b-12d3-a456-426614174000")
 }));
 vi.mock("./hosted-marketplace-cache", () => ({
   ensureHostedMarketplaceArtifact: mocks.ensureArtifact,
@@ -47,12 +51,14 @@ vi.mock("@/lib/db/workspace-database", () => ({
   getWorkspaceDatabase: mocks.getDatabase
 }));
 vi.mock("@/lib/connector-broker/admin", () => ({
-  listConnectorInstallations: mocks.listInstallations
+  listConnectorInstallations: mocks.listInstallations,
+  getExternalConnectorBrokerClient: vi.fn(() => mocks.externalBroker)
 }));
 vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot: mocks.activeProjectRoot,
   getOutcomeStore: mocks.getOutcomeStore,
   getHermesOperationsStore: mocks.getHermesOperationsStore,
+  getRoutingStore: mocks.getRoutingStore,
   getAppInstallationStore: mocks.getAppInstallationStore,
   getCompanyContextStore: mocks.getCompanyContextStore,
   getLoopSpecRegistryStore: mocks.getLoopSpecRegistryStore,
@@ -80,6 +86,7 @@ beforeEach(() => {
   mocks.activeProjectRoot.mockReturnValue("/srv/loopgraph/tenant/main");
   mocks.getOutcomeStore.mockReturnValue(mocks.outcomeStore);
   mocks.getHermesOperationsStore.mockReturnValue(mocks.hermesOperationsStore);
+  mocks.getRoutingStore.mockReturnValue(mocks.routingStore);
   mocks.getAppInstallationStore.mockReturnValue(mocks.appInstallationStore);
   mocks.getCompanyContextStore.mockReturnValue(mocks.companyContextStore);
   mocks.getLoopSpecRegistryStore.mockReturnValue(mocks.loopSpecStore);
@@ -137,6 +144,41 @@ describe("hosted app tool bridge", () => {
       workspaceId: "acme",
       companyId: "acme-company"
     });
+  });
+
+  it("binds headless Hermes App execution to the verified machine tenant without a browser session", async () => {
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    mocks.runtimeTool.mockImplementation(async (name, input, options) => {
+      expect(name).toBe("loopgraph_app_operation_invoke");
+      expect(input).toMatchObject({ workspaceId: "main", companyId: "main" });
+      expect(options).toMatchObject({
+        connectorBroker: mocks.externalBroker,
+        connectorTenant: {
+          organizationId: "123e4567-e89b-12d3-a456-426614174000",
+          projectKey: "main"
+        },
+        routingStore: mocks.routingStore,
+        hermesOperationsStore: mocks.hermesOperationsStore,
+        connections: []
+      });
+      return { disposition: "invoke_read" };
+    });
+
+    await callLoopgraphAppTool("loopgraph_app_operation_invoke", {
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.read",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-read-lead-1",
+      input: { leadId: "lead-42" }
+    });
+
+    expect(mocks.getDatabase).not.toHaveBeenCalled();
+    expect(mocks.listInstallations).toHaveBeenCalledWith(expect.objectContaining({
+      organizationId: "123e4567-e89b-12d3-a456-426614174000",
+      hosted: true
+    }));
   });
 
   it("merges local and RLS-visible hosted metadata without downloading artifacts", async () => {

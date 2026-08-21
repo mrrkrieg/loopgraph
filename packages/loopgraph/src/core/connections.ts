@@ -98,6 +98,7 @@ export const connectionInstanceSchema = z.object({
   status: connectionCapabilityStatusSchema,
   statusReason: z.string().optional(),
   environment: connectionEnvironmentSchema.default("simulate"),
+  brokerEnvironment: z.enum(["development", "staging", "production"]).optional(),
   readPolicy: z.enum(["not_allowed", "manual_fallback", "read_only"]).default("manual_fallback"),
   writePolicy: z.enum(["not_allowed", "draft_only", "approved_only"]).default("not_allowed"),
   lastHealthCheckAt: z.string().datetime().optional(),
