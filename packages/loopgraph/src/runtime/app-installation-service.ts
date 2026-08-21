@@ -5,6 +5,7 @@ import {
   APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
+  APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
   appActivationApprovalReceiptSchema,
   appIdSchema,
   appEvalJudgmentSchema,
@@ -14,11 +15,14 @@ import {
   appInstallationLockSchema,
   appLifecycleReceiptSchema,
   appOverlaySchema,
+  appOperationResolutionSchema,
   appReadinessSchema,
   appUpdatePlanSchema,
   canonicalAppDigest,
   contentHash,
+  loopSpecVersionHash,
   type AppConfigField,
+  type AppConnectorOperationBinding,
   type AppConfiguration,
   type AppActivationApprovalReceipt,
   type AppEvalRun,
@@ -28,6 +32,7 @@ import {
   type AppInstallationLock,
   type AppLifecycleReceipt,
   type AppOverlay,
+  type AppOperationResolution,
   type AppReadiness,
   type AppPromotionRecommendation,
   type AppRolloutMode,
@@ -138,6 +143,13 @@ export type ApplyAppUpdateInput = {
   plan: AppUpdatePlan;
   approvedPermissionCapabilities?: string[];
   actor: string;
+  now?: Date;
+};
+
+export type ResolveAppOperationInput = {
+  installationId: string;
+  loopId: string;
+  capability: string;
   now?: Date;
 };
 
@@ -1572,6 +1584,77 @@ export class AppInstallationService {
     });
   }
 
+  async resolveOperation(input: ResolveAppOperationInput): Promise<AppOperationResolution> {
+    const now = input.now ?? new Date();
+    const registry = await this.installationStore.read();
+    const installation = requireInstallation(registry, input.installationId);
+    const artifact = await this.loopSpecStore.getActiveLoopSpec(this.projectRoot, input.loopId);
+    if (!artifact) throw new Error(`Active LoopSpec not found: ${input.loopId}`);
+    if (artifact.spec.metadata.labels?.installationId !== installation.id) {
+      throw new Error(`Loop ${input.loopId} is not owned by App installation ${installation.id}`);
+    }
+
+    const binding = installation.operationBindings[input.capability];
+    const permission = installation.permissions.find((candidate) => candidate.capability === input.capability);
+    const blockers: string[] = [];
+    const unfinished = registry.lifecycleOperations.find((operation) =>
+      operation.installationId === installation.id && operation.status !== "completed");
+    if (unfinished) blockers.push(`App lifecycle operation ${unfinished.id} requires reconciliation.`);
+    const toolClaimsCapability = artifact.spec.tools.some((tool) => tool.adapterId === `capability:${input.capability}`);
+    if (!toolClaimsCapability) blockers.push(`Loop ${input.loopId} does not declare capability ${input.capability}.`);
+    if (!binding) blockers.push(`Installed App has no executable binding for ${input.capability}.`);
+    if (!permission) blockers.push(`Installed App has no permission decision for ${input.capability}.`);
+    if (permission?.decision === "forbid") blockers.push(`Permission ${input.capability} is forbidden.`);
+    if (permission?.decision === "unresolved") blockers.push(`Permission ${input.capability} is unresolved.`);
+    if (!["shadow", "recommend", "execute_with_approval", "live"].includes(installation.state)) {
+      blockers.push(`App state ${installation.state} does not permit provider or governed runtime invocation.`);
+    }
+    if (binding?.executor === "connector_broker" && (
+      !binding.connectionId || installation.connectionBindings[input.capability] !== binding.connectionId
+    )) {
+      blockers.push(`The exact connection binding for ${input.capability} changed or is missing.`);
+    }
+
+    const readOnly = binding ? operationBindingIsReadOnly(binding, permission?.authority) : false;
+    if (permission && readOnly && permission.decision !== "allow") {
+      blockers.push(`Read capability ${input.capability} is not explicitly allowed.`);
+    }
+    if (binding && !readOnly && !["execute_with_approval", "live"].includes(installation.mode)) {
+      blockers.push(`App mode ${installation.mode} cannot prepare provider or governed runtime actions.`);
+    }
+
+    const disposition = blockers.length > 0
+      ? "blocked" as const
+      : binding!.executor === "loopgraph_runtime" && readOnly
+        ? "invoke_loopgraph_runtime" as const
+        : readOnly
+          ? "invoke_read" as const
+          : "prepare_action" as const;
+    const resolvedAt = now.toISOString();
+    const base = {
+      schemaVersion: APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
+      workspaceId: this.workspaceId,
+      installationId: installation.id,
+      appId: installation.appId,
+      artifactDigest: installation.artifactDigest,
+      loopId: artifact.loopId,
+      loopVersionHash: `sha256:${loopSpecVersionHash(artifact.spec)}`,
+      capability: input.capability,
+      state: installation.state,
+      mode: installation.mode,
+      binding,
+      permission,
+      disposition,
+      blockers,
+      resolvedAt,
+      expiresAt: new Date(now.getTime() + 5 * 60_000).toISOString()
+    };
+    return appOperationResolutionSchema.parse({
+      ...base,
+      resolutionDigest: canonicalAppDigest({ ...base, resolutionDigest: undefined })
+    });
+  }
+
   private async transition(
     installationId: string,
     requestedState: WorkspaceAppInstallation["state"],
@@ -1706,6 +1789,15 @@ function operationBindingsFromPlan(
       minimumScopes: resolution.minimumScopes ?? []
     }]];
   }));
+}
+
+function operationBindingIsReadOnly(
+  binding: AppConnectorOperationBinding,
+  authority: "read" | "draft" | "approve" | "execute" | undefined
+): boolean {
+  if (authority !== "read") return false;
+  if (binding.executor === "loopgraph_runtime") return true;
+  return binding.brokerCapability === "provider.data.read" || binding.brokerCapability === "provider.health.read";
 }
 
 function connectionBindingsFromPlan(

@@ -10,6 +10,7 @@ import {
   historicalReplayEventSchema,
   appInstallPlanSchema,
   appIndependentVerificationReceiptSchema,
+  appIdSchema,
   appFieldMappingPlanSchema,
   appRolloutModeSchema,
   appUpdatePlanSchema,
@@ -19,6 +20,7 @@ import {
   DepartmentTypeSchema,
   marketplaceCatalogSourceSchema,
   marketplaceAppSchema,
+  logicalCapabilitySchema,
   providerSchemaFieldSchema,
   type AppFieldMappingPlan,
   type ConnectionInstance,
@@ -91,6 +93,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
+  "loopgraph_app_operation_resolve",
   "loopgraph_app_maturity_get",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
@@ -253,6 +256,14 @@ export const appInstallStatusInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
   installationId: z.string().min(1).optional()
+}).strict();
+
+export const appOperationResolveInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  installationId: appIdSchema,
+  loopId: appIdSchema,
+  capability: logicalCapabilitySchema
 }).strict();
 
 export const appMaturityGetInputSchema = projectSchema.extend({
@@ -457,6 +468,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_operation_resolve", description: "Resolve one App-owned loop capability to its exact installation-scoped broker or Loopgraph runtime operation without accepting provider, operation, connection, URL, or credential choices from the caller.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
@@ -1124,6 +1136,15 @@ export async function callLoopgraphAppTool(
       lifecycleOperations: registry.lifecycleOperations,
       lock: await installationStore.readLockfile()
     };
+  }
+  if (name === "loopgraph_app_operation_resolve") {
+    const parsed = appOperationResolveInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.resolveOperation({
+      installationId: parsed.installationId,
+      loopId: parsed.loopId,
+      capability: parsed.capability,
+      now: options.now
+    });
   }
   if (name === "loopgraph_app_maturity_get") {
     const parsed = appMaturityGetInputSchema.parse({ ...raw, projectRoot, ...identity });

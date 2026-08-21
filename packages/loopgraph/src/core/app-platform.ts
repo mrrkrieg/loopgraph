@@ -25,6 +25,7 @@ export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
 export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
+export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -825,6 +826,46 @@ export const appConnectorOperationBindingSchema = z.object({
   }
 });
 
+export const appOperationDispositionSchema = z.enum([
+  "invoke_read",
+  "prepare_action",
+  "invoke_loopgraph_runtime",
+  "blocked"
+]);
+
+export const appOperationResolutionSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_RESOLUTION_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  loopId: appIdSchema,
+  loopVersionHash: artifactDigestSchema,
+  capability: logicalCapabilitySchema,
+  state: appInstallationStateSchema,
+  mode: appRolloutModeSchema,
+  binding: appConnectorOperationBindingSchema.optional(),
+  permission: permissionDecisionSchema.optional(),
+  disposition: appOperationDispositionSchema,
+  blockers: z.array(z.string().min(1).max(1_000)).max(20).default([]),
+  resolvedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  resolutionDigest: artifactDigestSchema
+}).strict().superRefine((resolution, ctx) => {
+  if (resolution.disposition === "blocked" && resolution.blockers.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["blockers"], message: "Blocked operation resolutions require an explanation" });
+  }
+  if (resolution.disposition !== "blocked" && !resolution.binding) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["binding"], message: "Executable operation resolutions require an exact binding" });
+  }
+  if (Date.parse(resolution.expiresAt) <= Date.parse(resolution.resolvedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Operation resolution expiry must follow resolution time" });
+  }
+  if (canonicalAppDigest({ ...resolution, resolutionDigest: undefined }) !== resolution.resolutionDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resolutionDigest"], message: "Operation resolution digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1349,6 +1390,7 @@ export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSource
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
 export type AppConnectorOperationBinding = z.infer<typeof appConnectorOperationBindingSchema>;
+export type AppOperationResolution = z.infer<typeof appOperationResolutionSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1392,6 +1434,8 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppOperationalMaturityAssessment: zodToJsonSchema(appOperationalMaturityAssessmentSchema, "AppOperationalMaturityAssessment") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
+    AppConnectorOperationBinding: zodToJsonSchema(appConnectorOperationBindingSchema, "AppConnectorOperationBinding") as Record<string, unknown>,
+    AppOperationResolution: zodToJsonSchema(appOperationResolutionSchema, "AppOperationResolution") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,

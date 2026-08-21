@@ -30,6 +30,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_install_plan",
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
+      "loopgraph_app_operation_resolve",
       "loopgraph_app_maturity_get",
       "loopgraph_app_verification_registry_get",
       "loopgraph_app_verifier_trust_add",

@@ -431,6 +431,16 @@ describe("atomic app installation lifecycle", () => {
     });
     expect(applied.loopIds).toHaveLength(6);
     expect(applied.lock.installations[0]).toMatchObject({ appId: plan.appId, version: "1.0.0", artifactDigest: plan.artifactDigest });
+    const preActivationResolution = await service.resolveOperation({
+      installationId: applied.installation.id,
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.read",
+      now: new Date("2026-08-08T12:05:30.000Z")
+    });
+    expect(preActivationResolution).toMatchObject({
+      disposition: "blocked",
+      blockers: [expect.stringContaining("ready_to_test")]
+    });
 
     const evaluation = await service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:06:00.000Z"));
     expect(evaluation.status).toBe("passed");
@@ -454,6 +464,35 @@ describe("atomic app installation lifecycle", () => {
     );
     expect(activated.state).toBe("shadow");
     expect(activated.mode).toBe("shadow");
+    const operationResolution = await service.resolveOperation({
+      installationId: applied.installation.id,
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.read",
+      now: new Date("2026-08-08T12:08:30.000Z")
+    });
+    expect(operationResolution).toMatchObject({
+      installationId: applied.installation.id,
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.read",
+      disposition: "invoke_read",
+      blockers: [],
+      binding: {
+        providerId: "hubspot",
+        operation: "crm.contacts.read",
+        connectionId: "hubspot-production"
+      }
+    });
+    expect(operationResolution.resolutionDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    const crossLoopResolution = await service.resolveOperation({
+      installationId: applied.installation.id,
+      loopId: "sales-inbound-account-research",
+      capability: "crm.lead.read",
+      now: new Date("2026-08-08T12:08:31.000Z")
+    });
+    expect(crossLoopResolution).toMatchObject({
+      disposition: "blocked",
+      blockers: [expect.stringContaining("does not declare capability crm.lead.read")]
+    });
     const readiness = await service.readiness(applied.installation.id);
     expect(readiness.state).toBe("ready_for_recommend");
     expect(readiness.score).toBe(100);
@@ -483,6 +522,16 @@ describe("atomic app installation lifecycle", () => {
     }) as { installations: Array<{ workspaceId: string }>; lifecycleOperations: Array<{ action: string; status: string }> };
     expect(browserStyleStatus.installations[0].workspaceId).toBe("acme");
     expect(browserStyleStatus.lifecycleOperations).toContainEqual(expect.objectContaining({ action: "install", status: "completed" }));
+    const hermesOperationResolution = await callLoopgraphAppTool("loopgraph_app_operation_resolve", {
+      projectRoot,
+      installationId: applied.installation.id,
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.read"
+    }) as { disposition: string; binding: { providerId: string; operation: string } };
+    expect(hermesOperationResolution).toMatchObject({
+      disposition: "invoke_read",
+      binding: { providerId: "hubspot", operation: "crm.contacts.read" }
+    });
   });
 
   it("rejects missing, mismatched, expired, and replayed App activation approvals", async () => {

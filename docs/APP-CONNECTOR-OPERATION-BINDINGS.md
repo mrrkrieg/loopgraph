@@ -79,6 +79,36 @@ Installed App screen shows the canonical `provider:operation` route and connecti
 access token, refresh token, webhook secret, credential namespace, or vault reference enters the App
 registry.
 
+## Hermes resolution boundary
+
+Hermes does not send a provider ID, provider operation, connection ID, URL, headers, or credentials.
+It requests one logical capability for one loop owned by one installation:
+
+```text
+installation ID + loop ID + logical capability
+```
+
+The read-only `loopgraph_app_operation_resolve` tool resolves that request against the current
+installation registry and the exact active LoopSpec. It fails closed when the installation does not
+own the loop, the loop does not declare the capability, a lifecycle operation needs recovery, the
+exact connection changed, permission is forbidden or unresolved, or the App is not in an active
+mode. A successful result binds the pinned App digest, LoopSpec version hash, permission, provider,
+canonical operation, executor, broker capability, scopes, and connection into a five-minute,
+content-digested resolution.
+
+The disposition is deliberately narrow:
+
+- `invoke_read` permits a bounded Connector Broker read.
+- `invoke_loopgraph_runtime` permits a bounded internal read.
+- `prepare_action` permits preparation of an action; it is not execution or approval.
+- `blocked` includes explicit reasons and has no executable binding.
+
+Resolution itself never calls a provider and never returns secrets. A later executor must re-resolve
+or verify the complete resolution, validate operation-specific inputs, and let the Connector Broker
+recheck current tenant identity, scopes, connection health, kill switches, idempotency, and audit
+policy at the moment of use. Provider writes must continue through exact prepared-action approval
+and commit controls.
+
 This binding proves that a requested operation has a bounded implementation. It does not prove that
 a real provider account is healthy or that an OAuth application has been registered. Those facts
 still require live tenant onboarding, sandbox verification, webhook/transformer validation, and the
