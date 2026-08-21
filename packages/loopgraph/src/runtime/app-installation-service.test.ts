@@ -112,6 +112,32 @@ async function addUpdateCatalog(input: Awaited<ReturnType<typeof harness>>): Pro
   await input.marketplace.refreshCatalogSource("test-updates");
 }
 
+async function addConflictingObjectCatalog(input: Awaited<ReturnType<typeof harness>>): Promise<string> {
+  const catalogRoot = path.join(input.projectRoot, "conflicting-object-catalog");
+  const sourcePack = path.join(packsRoot, "official", "sales", "qualify-route-inbound-leads");
+  const targetPack = path.join(catalogRoot, "sales", "conflicting-inbound-leads");
+  await cp(sourcePack, targetPack, { recursive: true });
+  const manifestPath = path.join(targetPack, "loopgraph.pack.yaml");
+  const manifest = YAML.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+  const metadata = manifest.metadata as Record<string, unknown>;
+  metadata.id = "private.sales.conflicting-inbound-leads";
+  metadata.name = "Conflicting Inbound Leads";
+  metadata.visibility = "private";
+  const topology = manifest.topology as { objects: Array<Record<string, unknown>> };
+  topology.objects[0].description = "A deliberately incompatible shared lead contract used to verify pre-install conflict review.";
+  await writeFile(manifestPath, YAML.stringify(manifest), "utf8");
+  await input.marketplace.addCatalogSource({
+    schemaVersion: MARKETPLACE_SCHEMA_VERSION,
+    id: "test-conflicting-objects",
+    type: "filesystem",
+    uri: catalogRoot,
+    enabled: true,
+    trustPolicy: "explicit_local"
+  });
+  await input.marketplace.refreshCatalogSource("test-conflicting-objects");
+  return metadata.id as string;
+}
+
 describe("atomic app installation lifecycle", () => {
   it("plans, installs, tests, and activates the Sales app without enabling writes", async () => {
     const { projectRoot, service, connection, mappingIds } = await harness();
@@ -272,6 +298,34 @@ describe("atomic app installation lifecycle", () => {
       expect.stringContaining("crm.account.read")
     ]));
     await expect(service.apply(plan, "admin-1", new Date("2026-08-08T12:05:00.000Z"))).rejects.toThrow(/not ready/i);
+  });
+
+  it("returns shared-object conflicts in the read-only plan and blocks apply", async () => {
+    const input = await harness();
+    await installSalesApp(input);
+    const appId = await addConflictingObjectCatalog(input);
+    const plan = await input.service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId,
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      connections: [input.connection],
+      installValues,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T12:10:00.000Z")
+    });
+
+    expect(plan.conflicts).toContainEqual(expect.objectContaining({
+      kind: "shared_company_object",
+      resourceId: "graph-node.object.inbound-lead",
+      blocking: true
+    }));
+    expect(plan.graphDiff.nodesReused).not.toContain("object.inbound-lead");
+    expect(installPlanBlockers(plan)).toContainEqual(expect.stringContaining("shared company object conflict"));
+    await expect(input.service.apply(plan, "admin-1", new Date("2026-08-08T12:11:00.000Z"))).rejects.toThrow(/not ready/i);
   });
 
   it("rejects tampering and expired content-bound plans", async () => {

@@ -709,6 +709,14 @@ export const appInstallPlanSchema = z.object({
     edgesAdded: z.array(appIdSchema).default([]),
     edgesRemoved: z.array(appIdSchema).default([])
   }).strict(),
+  conflicts: z.array(z.object({
+    kind: z.enum(["shared_company_object", "dependency", "graph"]),
+    resourceId: appIdSchema,
+    reason: z.string().min(1),
+    currentDigest: artifactDigestSchema.optional(),
+    proposedDigest: artifactDigestSchema.optional(),
+    blocking: z.boolean().default(true)
+  }).strict()).default([]),
   requiredTests: z.array(z.string().min(1)).min(1),
   initialMode: z.enum(["simulation", "shadow"]),
   rollback: z.object({

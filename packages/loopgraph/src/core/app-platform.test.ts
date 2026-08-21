@@ -254,6 +254,7 @@ describe("Loopgraph App Platform contracts", () => {
         edgesAdded: ["edge.sales.inbound"],
         edgesRemoved: []
       },
+      conflicts: [],
       requiredTests: ["high-fit", "ambiguous-account"],
       initialMode: "shadow",
       rollback: { removeStagedAssets: true, preserveSharedAssets: true },

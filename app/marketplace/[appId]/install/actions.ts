@@ -9,6 +9,7 @@ import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import {
   configurationFromInstallForm,
   appOnboardingProgressForView,
+  buildAppInstallImpactView,
   type InstallWizardState
 } from "@/lib/app-platform/install-wizard";
 import type { MarketplaceAppDetail } from "@/lib/app-platform/read-model";
@@ -43,6 +44,7 @@ export async function planMarketplaceAppInstallAction(
     return {
       stage: "review",
       plan,
+      impact: buildAppInstallImpactView(plan, detail),
       mappingPlan: journey.mappingPlan ?? previousState.mappingPlan,
       journey: appOnboardingProgressForView(journey),
       unresolvedQuestionKeys: journey.questions.map((question) => question.key),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appOnboardingProgressForView, configurationFromInstallForm, installPlanBlockersForView } from "./install-wizard";
+import { appOnboardingProgressForView, buildAppInstallImpactView, configurationFromInstallForm, installPlanBlockersForView } from "./install-wizard";
 
 describe("guided app installation", () => {
   it("parses typed setup answers without requiring YAML or JSON for ordinary fields", () => {
@@ -30,15 +30,51 @@ describe("guided app installation", () => {
     const blockers = installPlanBlockersForView({
       missingConfigurationKeys: ["confirmation:icpDefinition", "mapping:lead:lead.email"],
       capabilityResolutions: [{ capability: "crm.lead.read", required: true, status: "missing" }],
-      permissions: [{ capability: "crm.lead.update", decision: "unresolved" }]
+      permissions: [{ capability: "crm.lead.update", decision: "unresolved" }],
+      conflicts: [{ kind: "shared_company_object", resourceId: "graph-node.object.account", blocking: true, reason: "Contract differs." }]
     } as never);
 
     expect(blockers).toEqual([
       "Resolve confirmation for icpDefinition.",
       "Resolve field mapping for lead / lead.email.",
       "Connect crm.lead.read (missing).",
-      "Review permission crm.lead.update."
+      "Review permission crm.lead.update.",
+      "Resolve shared company object conflict for graph-node.object.account: Contract differs."
     ]);
+  });
+
+  it("projects exact additions, reuse, metrics, and signed evidence edges for review", () => {
+    const impact = buildAppInstallImpactView({
+      assets: [
+        { id: "loop.sales.qualify", kind: "loop_spec", action: "create" },
+        { id: "graph-node.object.account", kind: "graph_node", action: "reuse" }
+      ],
+      graphDiff: { nodesReused: ["object.account"] },
+      capabilityResolutions: [{ capability: "crm.lead.read", status: "reusable", connectionId: "hubspot.production" }],
+      dependencyResolutions: [{ appId: "loopgraph.identity", version: "1.2.0", reused: true }],
+      fieldMappingIds: ["mapping.lead.email"],
+      conflicts: [],
+      permissions: [{ capability: "crm.lead.read", authority: "read", decision: "allow", reason: "Read leads." }]
+    } as never, {
+      graphPreview: {
+        nodes: [
+          { id: "object.account", label: "Account", type: "company_object" },
+          { id: "sales.qualify", label: "Lead Qualification", type: "loop" }
+        ],
+        edges: [
+          { id: "account-to-qualify", source: "object.account", target: "sales.qualify", type: "evidence_in", reason: "Account evidence is required." }
+        ]
+      },
+      sampleOutputs: [{ id: "qualified-rate", loopName: "Lead Qualification", metric: "qualified lead rate", direction: "increase" }]
+    });
+
+    expect(impact.additions).toEqual([{ id: "loop.sales.qualify", kind: "loop_spec" }]);
+    expect(impact.reusedGraphNodes).toEqual([{ id: "object.account", label: "Account", type: "company_object" }]);
+    expect(impact.reusedCapabilities).toEqual([{ capability: "crm.lead.read", connectionId: "hubspot.production" }]);
+    expect(impact.reusedDependencies).toEqual([{ appId: "loopgraph.identity", version: "1.2.0" }]);
+    expect(impact.reusedFieldMappingCount).toBe(1);
+    expect(impact.metrics[0]?.metric).toBe("qualified lead rate");
+    expect(impact.evidenceEdges).toEqual([expect.objectContaining({ source: "Account", target: "Lead Qualification", type: "evidence_in" })]);
   });
 
   it("projects only progress fields across the client boundary", () => {

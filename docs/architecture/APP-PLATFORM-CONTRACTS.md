@@ -93,6 +93,8 @@ A multi-provider recipe resolves each capability against the provider that owns 
 
 Provider field discovery is also separate from permission discovery. An authenticated connector records a connection-bound, expiring schema snapshot with a mandatory `redacted_only` sample policy. Loopgraph may use that snapshot—or clearly labelled connector metadata when no live snapshot exists—to produce explainable suggestions. Suggestions are never trusted automatically. A named operator or Hermes acting for that operator must confirm each logical-to-provider mapping before it can satisfy an installation plan. Confirmed mappings are workspace resources and may be reused by later apps without being deleted when one app is uninstalled.
 
+The pre-install impact review is a projection of the same content-bound plan, not a second planner. It enumerates immutable assets to create, company graph nodes and connection resources to reuse, exact provider authority decisions, declared outcome metrics, and signed evidence/learning edges. Shared company objects whose installed digest differs from the proposed contract are returned as blocking plan conflicts with both digests; they are reviewable but cannot be applied. The service-level install blocker enforces the same rule for browser, Hermes, MCP, and CLI callers.
+
 Every field mapping in an official multi-provider connector recipe declares the provider that owns the provider-side field. Catalog generation rejects an official pack when that ownership is absent. This prevents a same-named field from being silently resolved against the recipe's primary provider.
 
 ### Broker-to-App connection projection

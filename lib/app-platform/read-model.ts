@@ -29,6 +29,10 @@ import {
   deriveMarketplaceHistoricalPreviewStatus,
   type MarketplaceHistoricalPreviewStatus
 } from "@/lib/app-platform/marketplace-preview";
+import {
+  buildAppInstallImpactView,
+  type AppInstallImpactView
+} from "@/lib/app-platform/install-wizard";
 import { getAgentOperationsViewData } from "@/lib/loopgraph-runtime/agent-operations-view-data";
 import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
 
@@ -348,6 +352,7 @@ export async function getInstalledAppsViewData(
 export async function getAppInstallPlanViewData(appId: string, presetId: string): Promise<{
   detail: MarketplaceAppDetail;
   plan: AppInstallPlan;
+  impact: AppInstallImpactView;
   mappingPlan: AppFieldMappingPlan;
   journey: AppOnboardingJourney;
 }> {
@@ -364,7 +369,13 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
     }) as Promise<AppOnboardingJourney>
   ]);
   if (!journey.plan || !journey.mappingPlan) throw new Error("App onboarding journey did not return its exact plan and mapping requirements");
-  return { detail, plan: journey.plan, mappingPlan: journey.mappingPlan, journey };
+  return {
+    detail,
+    plan: journey.plan,
+    impact: buildAppInstallImpactView(journey.plan, detail),
+    mappingPlan: journey.mappingPlan,
+    journey
+  };
 }
 
 export async function getInstalledAppViewData(installationId: string): Promise<{

@@ -48,6 +48,7 @@ export default async function AppInstallPlanPage({
           questions: data.detail.setupQuestions
         }}
         initialPlan={data.plan}
+        initialImpact={data.impact}
         initialJourney={appOnboardingProgressForView(data.journey)}
         initialQuestionKeys={data.journey.questions.map((question) => question.key)}
         mappingPlan={data.mappingPlan}

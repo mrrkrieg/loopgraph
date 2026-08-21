@@ -7,6 +7,7 @@ import {
   displayConfigurationValue,
   installPlanBlockersForView,
   type InstallWizardApp,
+  type AppInstallImpactView,
   type AppOnboardingProgressView,
   type InstallWizardQuestion,
   type InstallWizardState
@@ -17,9 +18,10 @@ import {
   planMarketplaceAppInstallAction
 } from "@/app/marketplace/[appId]/install/actions";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
+import { InstallImpactReview } from "@/components/apps/install-impact-review";
 
-export function InstallWizard({ app, initialPlan, initialJourney, initialQuestionKeys, mappingPlan }: { app: InstallWizardApp; initialPlan: AppInstallPlan; initialJourney: AppOnboardingProgressView; initialQuestionKeys: string[]; mappingPlan: AppFieldMappingPlan }) {
-  const initialState: InstallWizardState = { stage: "configure", plan: initialPlan, mappingPlan, journey: initialJourney, unresolvedQuestionKeys: initialQuestionKeys };
+export function InstallWizard({ app, initialPlan, initialImpact, initialJourney, initialQuestionKeys, mappingPlan }: { app: InstallWizardApp; initialPlan: AppInstallPlan; initialImpact: AppInstallImpactView; initialJourney: AppOnboardingProgressView; initialQuestionKeys: string[]; mappingPlan: AppFieldMappingPlan }) {
+  const initialState: InstallWizardState = { stage: "configure", plan: initialPlan, impact: initialImpact, mappingPlan, journey: initialJourney, unresolvedQuestionKeys: initialQuestionKeys };
   const [state, planAction, isPlanning] = useActionState(planMarketplaceAppInstallAction, initialState);
   const blockers = installPlanBlockersForView(state.plan);
   const ready = blockers.length === 0;
@@ -104,21 +106,9 @@ export function InstallWizard({ app, initialPlan, initialJourney, initialQuestio
 
       <section className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-6">
         <div className="text-xs font-semibold uppercase tracking-[0.14em] text-signal">Step 5 · exact transaction review</div>
-        <h2 className="mt-2 text-xl font-semibold">Graph, permissions, and tests</h2>
-        <div className="mt-5 grid gap-5 lg:grid-cols-3">
-          <ReviewColumn title="Company graph">
-            <ReviewMetric label="Nodes added" value={state.plan.graphDiff.nodesAdded.length} />
-            <ReviewMetric label="Nodes reused" value={state.plan.graphDiff.nodesReused.length} />
-            <ReviewMetric label="Edges added" value={state.plan.graphDiff.edgesAdded.length} />
-          </ReviewColumn>
-          <ReviewColumn title="Provider authority">
-            {state.plan.permissions.map((permission) => <div className="border-b border-line py-2 text-xs last:border-0" key={permission.capability}><div className="font-mono font-semibold">{permission.capability}</div><div className="mt-1 capitalize text-ink/50">{permission.authority} · {permission.decision.replace(/_/g, " ")}</div></div>)}
-          </ReviewColumn>
-          <ReviewColumn title="Required tests">
-            {state.plan.requiredTests.map((test) => <div className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold" key={test}>{test.replace(/_/g, " ")}</div>)}
-          </ReviewColumn>
-        </div>
-        <div className="mt-5 rounded-md bg-paper p-3 font-mono text-xs leading-5 text-ink/60">Hermes Brain → {app.department.replace(/_/g, " ")} → {app.name} → {state.plan.assets.filter((asset) => asset.kind === "loop_spec").length} loops</div>
+        <h2 className="mt-2 text-xl font-semibold">Review the complete App impact</h2>
+        <p className="mt-2 text-sm leading-6 text-ink/55">This is the content-bound transaction Hermes and Loopgraph will apply. Nothing below is inferred after you approve it.</p>
+        <InstallImpactReview appName={app.name} department={app.department} impact={state.impact} plan={state.plan} />
         <div className="mt-3 break-all text-[0.68rem] text-ink/40">Plan digest {state.plan.planDigest} · expires {new Date(state.plan.expiresAt).toLocaleString()}</div>
 
         <form action={applyReviewedAppInstallAction} className="mt-6 border-t border-line pt-5">
@@ -232,12 +222,4 @@ function QuestionField({ plan, question }: { plan: AppInstallPlan; question: Ins
       {question.confirmWhenInferred && value !== undefined ? <span className="mt-2 block text-[0.68rem] font-semibold uppercase tracking-[0.1em] text-orange-700">Confirm inferred value</span> : null}
     </label>
   );
-}
-
-function ReviewColumn({ children, title }: { children: React.ReactNode; title: string }) {
-  return <div><h3 className="text-sm font-semibold">{title}</h3><div className="mt-3 space-y-2">{children}</div></div>;
-}
-
-function ReviewMetric({ label, value }: { label: string; value: number }) {
-  return <div className="flex items-center justify-between rounded-md bg-paper px-3 py-2 text-sm"><span className="text-ink/55">{label}</span><strong>{value}</strong></div>;
 }

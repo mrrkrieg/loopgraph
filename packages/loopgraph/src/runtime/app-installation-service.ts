@@ -219,13 +219,22 @@ export class AppInstallationService {
     const assets = compilePlannedAssets(compiled, installationId);
     const existingRegistry = await this.installationStore.read();
     const existingAssetById = new Map(existingRegistry.assets.map((asset) => [asset.assetId, asset]));
+    const conflicts: AppInstallPlan["conflicts"] = [];
     for (const asset of assets.filter((candidate) => candidate.kind === "graph_node" && candidate.shared)) {
       const existing = existingAssetById.get(asset.id);
       if (existing && existing.digest !== asset.digest) {
-        throw new Error(`Shared company object conflict: ${asset.id} has a different installed contract`);
+        conflicts.push({
+          kind: "shared_company_object",
+          resourceId: asset.id,
+          reason: "The installed shared company object has a different immutable contract. Resolve the object identity or schema before installing this App.",
+          currentDigest: existing.digest,
+          proposedDigest: asset.digest,
+          blocking: true
+        });
       }
     }
     const installationScopedGraphNodes = compiled.graph.nodes.filter((node) => node.installationScoped);
+    const conflictedGraphAssetIds = new Set(conflicts.map((conflict) => conflict.resourceId));
     const permissions = loaded.manifest.permissions.map((permission) => ({
       capability: permission.capability,
       authority: permission.authority,
@@ -267,12 +276,13 @@ export class AppInstallationService {
           .filter((node) => !existingAssetById.has(`graph-node.${node.id}`))
           .map((node) => node.id),
         nodesReused: [
-          ...compiled.graph.nodes.filter((node) => !node.installationScoped),
-          ...installationScopedGraphNodes.filter((node) => existingAssetById.has(`graph-node.${node.id}`))
+          ...compiled.graph.nodes.filter((node) => !node.installationScoped && !conflictedGraphAssetIds.has(`graph-node.${node.id}`)),
+          ...installationScopedGraphNodes.filter((node) => existingAssetById.has(`graph-node.${node.id}`) && !conflictedGraphAssetIds.has(`graph-node.${node.id}`))
         ].map((node) => node.id),
         edgesAdded: compiled.graph.edges.map((edge) => edge.id),
         edgesRemoved: []
       },
+      conflicts,
       requiredTests: ["schema", "policy", "routing", "duplicate", "ambiguous", "connector_unavailable", "approval", "replay", "rollback"],
       initialMode: loaded.manifest.defaultRolloutMode,
       rollback: { removeStagedAssets: true, preserveSharedAssets: true },
@@ -1227,6 +1237,7 @@ export function installPlanBlockers(plan: AppInstallPlan): string[] {
   const blockers = [...plan.missingConfigurationKeys.map((key) => `Missing configuration or mapping: ${key}`)];
   blockers.push(...plan.capabilityResolutions.filter((resolution) => resolution.required && resolution.status !== "connected" && resolution.status !== "reusable").map((resolution) => `Required capability ${resolution.capability} is ${resolution.status}`));
   blockers.push(...plan.permissions.filter((permission) => permission.decision === "unresolved").map((permission) => `Permission ${permission.capability} is unresolved`));
+  blockers.push(...plan.conflicts.filter((conflict) => conflict.blocking).map((conflict) => `Blocking ${conflict.kind.replace(/_/g, " ")} conflict for ${conflict.resourceId}: ${conflict.reason}`));
   return blockers;
 }
 
