@@ -11,6 +11,7 @@ import {
   FileLoopSpecRegistryStore,
   FileMeasurementStore,
   FileOutcomeStore,
+  FileAppInstallationStore,
   FileAppVerificationStore,
   FileRoutingStore,
   FileSemanticGraphStore,
@@ -24,6 +25,7 @@ import {
   type LoopSpecRegistryStore,
   type MeasurementStore,
   type OutcomeStore,
+  type AppInstallationStore,
   type AppVerificationStore,
   type RoutingStore,
   type SemanticGraphStore
@@ -71,6 +73,10 @@ import {
   createSupabaseAppVerificationStore,
   isSupabaseAppVerificationStoreEnabled
 } from "@/lib/db/adapters/supabase-app-verification-store";
+import {
+  createSupabaseAppInstallationStore,
+  isSupabaseAppInstallationStoreEnabled
+} from "@/lib/db/adapters/supabase-app-installation-store";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
@@ -84,6 +90,7 @@ const cachedSemanticGraphStores = new Map<string, SemanticGraphStore>();
 const cachedMeasurementStores = new Map<string, MeasurementStore>();
 const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
+const cachedAppInstallationStores = new Map<string, AppInstallationStore>();
 const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
 
 export function getActiveLoopgraphProjectRoot(projectRoot?: string) {
@@ -435,6 +442,28 @@ export function getAppVerificationStore(options: {
   return store;
 }
 
+export function getAppInstallationStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): AppInstallationStore {
+  const useSupabase = !options.forceFile && isSupabaseAppInstallationStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App installation storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-installations:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-installations:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedAppInstallationStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseAppInstallationStore(options.workspaceId)
+    : new FileAppInstallationStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps"), options.workspaceId);
+  cachedAppInstallationStores.set(cacheKey, store);
+  return store;
+}
+
 export function getEntityResolutionStore(options?: { projectRoot?: string; forceFile?: boolean }): EntityResolutionStore {
   const useSupabase = !options?.forceFile && isSupabaseEntityResolutionStoreEnabled();
   if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) throw new Error("Distributed entity resolution is required for the hosted runtime");
@@ -460,6 +489,8 @@ export function resetStorageAdapterCache() {
   cachedMeasurementStores.clear();
   cachedOutcomeStores.clear();
   cachedEntityStores.clear();
+  cachedAppInstallationStores.clear();
+  cachedAppVerificationStores.clear();
 }
 
 const UUID_PATTERN =

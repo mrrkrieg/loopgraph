@@ -1,5 +1,5 @@
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { marketplaceAppSchema, type MarketplaceApp } from "loopgraph/core";
 
 const mocks = vi.hoisted(() => ({
@@ -13,9 +13,13 @@ const mocks = vi.hoisted(() => ({
   activeProjectRoot: vi.fn(),
   outcomeStore: { persistence: "distributed" },
   hermesOperationsStore: {},
+  appInstallationStore: { persistence: "distributed" },
   appVerificationStore: { persistence: "distributed" },
+  loopSpecStore: { persistence: "distributed" },
   getOutcomeStore: vi.fn(),
   getHermesOperationsStore: vi.fn(),
+  getAppInstallationStore: vi.fn(),
+  getLoopSpecRegistryStore: vi.fn(),
   getAppVerificationStore: vi.fn()
 }));
 
@@ -43,6 +47,8 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot: mocks.activeProjectRoot,
   getOutcomeStore: mocks.getOutcomeStore,
   getHermesOperationsStore: mocks.getHermesOperationsStore,
+  getAppInstallationStore: mocks.getAppInstallationStore,
+  getLoopSpecRegistryStore: mocks.getLoopSpecRegistryStore,
   getAppVerificationStore: mocks.getAppVerificationStore
 }));
 vi.mock("@/lib/db/adapters/supabase-marketplace-registry-store", () => ({
@@ -65,17 +71,37 @@ beforeEach(() => {
   mocks.activeProjectRoot.mockReturnValue("/srv/loopgraph/tenant/main");
   mocks.getOutcomeStore.mockReturnValue(mocks.outcomeStore);
   mocks.getHermesOperationsStore.mockReturnValue(mocks.hermesOperationsStore);
+  mocks.getAppInstallationStore.mockReturnValue(mocks.appInstallationStore);
+  mocks.getLoopSpecRegistryStore.mockReturnValue(mocks.loopSpecStore);
   mocks.getAppVerificationStore.mockReturnValue(mocks.appVerificationStore);
 });
 
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
 describe("hosted app tool bridge", () => {
+  it("binds App state to the server project instead of a client-selected workspace", async () => {
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    mocks.runtimeTool.mockImplementation(async (_name, input) => {
+      expect(input).toMatchObject({ workspaceId: "main", companyId: "main" });
+      return { installations: [] };
+    });
+    await callLoopgraphAppTool("loopgraph_app_install_status", {
+      workspaceId: "other-tenant",
+      companyId: "other-company"
+    });
+  });
+
   it("injects distributed operating evidence and workspace verification trust into maturity reads", async () => {
     mocks.runtimeTool.mockImplementation(async (_name, _input, options) => {
       expect(options).toMatchObject({
         outcomeStore: mocks.outcomeStore,
-        hermesOperationsStore: mocks.hermesOperationsStore
+        hermesOperationsStore: mocks.hermesOperationsStore,
+        loopSpecStore: mocks.loopSpecStore
       });
       expect(options.appVerificationStoreFactory("acme")).toBe(mocks.appVerificationStore);
+      expect(options.appInstallationStoreFactory("acme")).toBe(mocks.appInstallationStore);
       return { maturity: "concept" };
     });
     await callLoopgraphAppTool("loopgraph_app_maturity_get", {
@@ -84,6 +110,10 @@ describe("hosted app tool bridge", () => {
     });
     expect(mocks.getOutcomeStore).toHaveBeenCalledWith({ projectRoot: "/srv/loopgraph/tenant/main" });
     expect(mocks.getAppVerificationStore).toHaveBeenCalledWith({
+      projectRoot: "/srv/loopgraph/tenant/main",
+      workspaceId: "acme"
+    });
+    expect(mocks.getAppInstallationStore).toHaveBeenCalledWith({
       projectRoot: "/srv/loopgraph/tenant/main",
       workspaceId: "acme"
     });

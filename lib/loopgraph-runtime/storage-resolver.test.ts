@@ -2,6 +2,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
+  getAppInstallationStore,
   getAppVerificationStore,
   getDiscoveryDesignStore,
   getLoopControllerStore,
@@ -135,6 +136,15 @@ describe("hosted runtime namespaces", () => {
     expect(secondWorkspace).not.toBe(first);
   });
 
+  it("scopes local App installation registries by project and workspace", () => {
+    const first = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
+    const firstAgain = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
+    const secondWorkspace = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "globex", forceFile: true });
+    expect(first.persistence).toBe("file");
+    expect(firstAgain).toBe(first);
+    expect(secondWorkspace).not.toBe(first);
+  });
+
   it("fails closed instead of using file state for hosted controller data", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
@@ -150,6 +160,9 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getAppVerificationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App verification storage is required"
+    );
+    expect(() => getAppInstallationStore({ workspaceId: "acme" })).toThrow(
+      "Distributed App installation storage is required"
     );
   });
 });

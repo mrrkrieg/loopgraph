@@ -9,10 +9,11 @@ import {
   appLifecycleReceiptSchema,
   appInstallationLockSchema,
   workspaceAppInstallationSchema,
+  contentHash,
   type AppInstallationLock
 } from "../core";
 
-const appInstallationRegistrySchema = z.object({
+export const appInstallationRegistrySchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   workspaceId: z.string().min(1),
   revision: z.number().int().nonnegative(),
@@ -26,7 +27,50 @@ const appInstallationRegistrySchema = z.object({
 
 export type AppInstallationRegistry = z.infer<typeof appInstallationRegistrySchema>;
 
-export class FileAppInstallationStore {
+export type AppInstallationUpdate<T> = {
+  registry: AppInstallationRegistry;
+  value: T;
+  lock?: AppInstallationLock;
+};
+
+export interface AppInstallationStore {
+  readonly persistence: "file" | "distributed";
+  read(): Promise<AppInstallationRegistry>;
+  readLockfile(): Promise<AppInstallationLock | undefined>;
+  withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T>;
+}
+
+export function emptyAppInstallationRegistry(workspaceId: string): AppInstallationRegistry {
+  return {
+    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+    workspaceId,
+    revision: 0,
+    installations: [],
+    assets: [],
+    evaluations: [],
+    lifecycleReceipts: [],
+    activationApprovals: [],
+    updatedAt: new Date(0).toISOString()
+  };
+}
+
+export function assertAppInstallationRegistryRevision(
+  current: AppInstallationRegistry,
+  next: AppInstallationRegistry
+): void {
+  if (
+    next.revision < current.revision ||
+    (next.revision === current.revision && contentHash(next) !== contentHash(current))
+  ) {
+    throw new Error("Installation registry revision must increase for a mutation");
+  }
+  if (next.revision > current.revision + 1) {
+    throw new Error("Installation registry revision may advance by only one per mutation");
+  }
+}
+
+export class FileAppInstallationStore implements AppInstallationStore {
+  readonly persistence = "file" as const;
   private readonly registryPath: string;
   private readonly lockfilePath: string;
   private readonly mutexPath: string;
@@ -54,17 +98,7 @@ export class FileAppInstallationStore {
       return registry;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return {
-        schemaVersion: APP_INSTALL_SCHEMA_VERSION,
-        workspaceId: this.workspaceId,
-        revision: 0,
-        installations: [],
-        assets: [],
-        evaluations: [],
-        lifecycleReceipts: [],
-        activationApprovals: [],
-        updatedAt: new Date(0).toISOString()
-      };
+      return emptyAppInstallationRegistry(this.workspaceId);
     }
   }
 
@@ -77,20 +111,14 @@ export class FileAppInstallationStore {
     }
   }
 
-  async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<{
-    registry: AppInstallationRegistry;
-    value: T;
-    lock?: AppInstallationLock;
-  }>): Promise<T> {
+  async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
     await mkdir(this.appsRoot, { recursive: true, mode: 0o700 });
     const handle = await acquireLock(this.mutexPath);
     try {
       const current = await this.read();
       const result = await operation(current);
       const next = appInstallationRegistrySchema.parse(result.registry);
-      if (next.revision < current.revision || (next.revision === current.revision && next !== current)) {
-        throw new Error("Installation registry revision must increase for a mutation");
-      }
+      assertAppInstallationRegistryRevision(current, next);
       await atomicWriteJson(this.registryPath, next);
       if (result.lock) await atomicWriteJson(this.lockfilePath, appInstallationLockSchema.parse(result.lock));
       return result.value;

@@ -12,8 +12,10 @@ import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
 import { listConnectorInstallations } from "@/lib/connector-broker/admin";
 import {
   getActiveLoopgraphProjectRoot,
+  getAppInstallationStore,
   getAppVerificationStore,
   getHermesOperationsStore,
+  getLoopSpecRegistryStore,
   getOutcomeStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 import { requireHostedMarketplaceContext } from "./hosted-marketplace-api";
@@ -67,7 +69,12 @@ export async function callLoopgraphAppTool(
 ): Promise<unknown> {
   const hostedMode = isHostedAuthRequired();
   const effectiveInput = hostedMode
-    ? { ...asRecord(input), projectRoot: pathFromInput(input, options.projectRoot) }
+    ? {
+        ...asRecord(input),
+        projectRoot: pathFromInput(input, options.projectRoot),
+        workspaceId: hostedWorkspaceId(),
+        companyId: hostedWorkspaceId()
+      }
     : input;
   if (name === "loopgraph_marketplace_search" && hostedMode) {
     return combinedMarketplaceSearch(effectiveInput, options);
@@ -90,6 +97,8 @@ export async function callLoopgraphAppTool(
   const projectRoot = pathFromInput(effectiveInput, options.projectRoot);
   const callOptions = {
     ...options,
+    appInstallationStoreFactory: (workspaceId: string) => getAppInstallationStore({ projectRoot, workspaceId }),
+    loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
     ...(CONNECTION_AWARE_TOOLS.has(name) ? { connections: await trustedConnections() } : {}),
     ...(EVIDENCE_AWARE_TOOLS.has(name) ? {
       outcomeStore: getOutcomeStore({ projectRoot }),
@@ -113,6 +122,14 @@ export async function callLoopgraphAppTool(
     });
     return callRuntimeAppTool(name, effectiveInput, callOptions);
   }
+}
+
+function hostedWorkspaceId(): string {
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(projectKey)) {
+    throw new Error("LOOPGRAPH_HOSTED_PROJECT_KEY is not a valid hosted workspace identity");
+  }
+  return projectKey;
 }
 
 async function combinedMarketplaceSearch(

@@ -26,7 +26,7 @@ import {
 } from "../core";
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
-import { FileAppInstallationStore } from "./app-installation-store";
+import { FileAppInstallationStore, type AppInstallationStore } from "./app-installation-store";
 import {
   FileAppVerificationStore,
   type AppVerificationRegistry,
@@ -53,6 +53,7 @@ import { HostedMarketplaceClient } from "./hosted-marketplace-client";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
 import { getLoopgraphRoot } from "./storage-resolver";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
 import { deriveAppOnboardingJourney } from "./app-onboarding-journey";
 import {
@@ -481,6 +482,8 @@ export async function callLoopgraphAppTool(
     hostedMarketplaceClient?: HostedMarketplaceClient | null;
     outcomeStore?: OutcomeStore;
     hermesOperationsStore?: HermesOperationsStore;
+    loopSpecStore?: LoopSpecRegistryStore;
+    appInstallationStoreFactory?: (workspaceId: string) => AppInstallationStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
   } = {}
 ): Promise<unknown> {
@@ -514,7 +517,8 @@ export async function callLoopgraphAppTool(
     const blueprint = getOfficialCompanyBlueprint(parsed.blueprintId);
     if (!blueprint) throw new Error(`Company Blueprint not found: ${parsed.blueprintId}`);
     const identity = await resolveIdentity(projectRoot, parsed.workspaceId, parsed.companyId);
-    const registry = await new FileAppInstallationStore(
+    const registry = await appInstallationStore(
+      options,
       path.join(projectRoot, ".loopgraph", "apps"),
       identity.workspaceId
     ).read();
@@ -580,7 +584,8 @@ export async function callLoopgraphAppTool(
     const pack = getOfficialDepartmentPack(parsed.packId);
     if (!pack) throw new Error(`Department Pack not found: ${parsed.packId}`);
     const identity = await resolveIdentity(projectRoot, parsed.workspaceId, parsed.companyId);
-    const installationStore = new FileAppInstallationStore(
+    const installationStore = appInstallationStore(
+      options,
       path.join(projectRoot, ".loopgraph", "apps"),
       identity.workspaceId
     );
@@ -589,7 +594,8 @@ export async function callLoopgraphAppTool(
       marketplace,
       projectRoot,
       identity.workspaceId,
-      identity.companyId
+      identity.companyId,
+      { installationStore, loopSpecStore: options.loopSpecStore }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
     const applications = await Promise.all(orderedDefinitions.map(async (definition) => {
@@ -899,10 +905,16 @@ export async function callLoopgraphAppTool(
     }
     return { schemaVersion: "loopgraph-field-mapping-confirmation/v1alpha1", connectionId: parsed.connectionId, objectType: parsed.objectType, mappings };
   }
-  const service = new AppInstallationService(marketplace, projectRoot, identity.workspaceId, identity.companyId);
+  const installationStore = appInstallationStore(options, appsRoot, identity.workspaceId);
+  const service = new AppInstallationService(
+    marketplace,
+    projectRoot,
+    identity.workspaceId,
+    identity.companyId,
+    { installationStore, loopSpecStore: options.loopSpecStore }
+  );
   if (name === "loopgraph_app_onboarding_get") {
     const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const installationStore = new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), parsed.workspaceId!);
     const registry = await installationStore.read();
     const installation = parsed.installationId
       ? registry.installations.find((candidate) => candidate.id === parsed.installationId)
@@ -999,8 +1011,7 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_install_status") {
     const parsed = appInstallStatusInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const store = new FileAppInstallationStore(path.join(projectRoot, ".loopgraph", "apps"), parsed.workspaceId!);
-    const registry = await store.read();
+    const registry = await installationStore.read();
     const installations = parsed.installationId
       ? registry.installations.filter((installation) => installation.id === parsed.installationId)
       : registry.installations;
@@ -1010,10 +1021,10 @@ export async function callLoopgraphAppTool(
       installation,
       app: await marketplace.getApp(installation.appId)
     })))).filter((entry) => Boolean(entry.app));
-    const workspace = await inspectLoopgraphWorkspace({ projectRoot, createIfMissing: true });
+    const workspace = await appWorkspaceRegistry(projectRoot, options.loopSpecStore);
     const installedLoops = installations.map((installation) => ({
       installationId: installation.id,
-      loops: workspace.registry.registeredSpecs.filter((entry) => entry.path.split(/[\\/]/).includes(installation.id)).map((entry) => ({
+      loops: workspace.registeredSpecs.filter((entry) => entry.path.split(/[\\/]/).includes(installation.id)).map((entry) => ({
         id: entry.id,
         name: entry.name,
         path: entry.path
@@ -1028,18 +1039,17 @@ export async function callLoopgraphAppTool(
       readiness,
       evaluations: registry.evaluations,
       lifecycleReceipts: registry.lifecycleReceipts,
-      lock: await store.readLockfile()
+      lock: await installationStore.readLockfile()
     };
   }
   if (name === "loopgraph_app_maturity_get") {
     const parsed = appMaturityGetInputSchema.parse({ ...raw, projectRoot, ...identity });
     const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
-    const installationStore = new FileAppInstallationStore(appsRoot, parsed.workspaceId!);
     const registry = await installationStore.read();
     const installation = registry.installations.find((candidate) => candidate.id === parsed.installationId);
     if (!installation) throw new Error(`App installation not found: ${parsed.installationId}`);
-    const workspace = await inspectLoopgraphWorkspace({ projectRoot, createIfMissing: true });
-    const loopIds = new Set(workspace.registry.registeredSpecs
+    const workspace = await appWorkspaceRegistry(projectRoot, options.loopSpecStore);
+    const loopIds = new Set(workspace.registeredSpecs
       .filter((entry) => entry.path.split(/[\\/]/).includes(installation.id))
       .map((entry) => entry.id));
     const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
@@ -1108,7 +1118,7 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_verification_import") {
     const parsed = appVerificationImportInputSchema.parse({ ...raw, projectRoot, ...identity });
     const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
-    const installationRegistry = await new FileAppInstallationStore(appsRoot, parsed.workspaceId!).read();
+    const installationRegistry = await installationStore.read();
     const installation = installationRegistry.installations.find((candidate) => candidate.id === parsed.receipt.installationId);
     if (!installation) throw new Error(`App installation not found: ${parsed.receipt.installationId}`);
     if (installation.appId !== parsed.receipt.appId || installation.artifactDigest !== parsed.receipt.artifactDigest) {
@@ -1606,4 +1616,17 @@ function appVerificationStore(
   workspaceId: string
 ): AppVerificationStore {
   return options.appVerificationStoreFactory?.(workspaceId) ?? new FileAppVerificationStore(appsRoot, workspaceId);
+}
+
+function appInstallationStore(
+  options: { appInstallationStoreFactory?: (workspaceId: string) => AppInstallationStore },
+  appsRoot: string,
+  workspaceId: string
+): AppInstallationStore {
+  return options.appInstallationStoreFactory?.(workspaceId) ?? new FileAppInstallationStore(appsRoot, workspaceId);
+}
+
+async function appWorkspaceRegistry(projectRoot: string, store?: LoopSpecRegistryStore) {
+  if (store) return (await store.getWorkspace(projectRoot)).workspace;
+  return (await inspectLoopgraphWorkspace({ projectRoot, createIfMissing: true })).registry;
 }

@@ -18,7 +18,7 @@ export async function planMarketplaceAppInstallAction(
   previousState: InstallWizardState,
   formData: FormData
 ): Promise<InstallWizardState> {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedInstallActor();
   const projectRoot = getActiveLoopgraphProjectRoot();
   try {
     const appId = requiredFormString(formData, "appId");
@@ -37,7 +37,7 @@ export async function planMarketplaceAppInstallAction(
       selectedModules,
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
-      actor: "loopgraph-browser"
+      actor
     }) as AppOnboardingJourney;
     if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");
     const plan = journey.plan;
@@ -62,7 +62,7 @@ export async function planMarketplaceAppInstallAction(
 }
 
 export async function applyReviewedAppInstallAction(formData: FormData): Promise<void> {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedInstallActor();
   if (formData.get("confirmPlan") !== "on") throw new Error("Confirm the reviewed installation plan before applying it");
   const projectRoot = getActiveLoopgraphProjectRoot();
   const rawPlan = requiredFormString(formData, "plan", 2_000_000);
@@ -78,7 +78,7 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   const result = await callLoopgraphAppTool("loopgraph_app_install_apply", {
     projectRoot,
     plan,
-    actor: "loopgraph-browser"
+    actor
   }) as { installation: { id: string } };
   revalidatePath("/marketplace");
   revalidatePath("/apps");
@@ -87,7 +87,7 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
 }
 
 export async function confirmAppFieldMappingsAction(formData: FormData): Promise<void> {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedInstallActor();
   if (formData.get("confirmMappings") !== "on") throw new Error("Confirm the reviewed field mappings before saving them");
   const projectRoot = getActiveLoopgraphProjectRoot();
   const appId = requiredFormString(formData, "appId");
@@ -108,7 +108,7 @@ export async function confirmAppFieldMappingsAction(formData: FormData): Promise
     connectionId,
     objectType,
     mappings,
-    actor: "loopgraph-browser"
+    actor
   });
   revalidatePath(`/marketplace/${encodeURIComponent(appId)}/install`);
   redirect(`/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`);
@@ -120,4 +120,9 @@ function requiredFormString(formData: FormData, key: string, maxLength = 240): s
     throw new Error(`Missing or invalid form field: ${key}`);
   }
   return value.trim();
+}
+
+async function authorizedInstallActor(): Promise<string> {
+  const identity = await requireHostedPermission("organization.manage");
+  return identity?.email?.trim() || identity?.userId || "local-browser";
 }

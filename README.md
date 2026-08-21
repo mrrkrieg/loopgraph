@@ -380,6 +380,8 @@ The verifier signs outside Loopgraph. These commands never accept a verifier pri
 
 Organization admins can manage the same contract at `/settings/app-verification`. The console shows public-key fingerprints, approval and revocation accountability, imported receipt provenance, and exact artifact identities. Hosted mutations require the `integrations.manage` permission plus recent step-up authentication; viewers can inspect trust without changing it.
 
+Hosted App lifecycle state is also distributed rather than written to one deployment's filesystem. Organization, project, and server-derived workspace scope key a revisioned Supabase installation registry; a bounded lease serializes install, configure, test, activation, update, rollback, pause, and uninstall mutations across instances. Browser lifecycle actions derive the accountable actor from the authenticated session. The App registry and its lock commit together, while generated LoopSpecs commit through the existing distributed LoopSpec registry. A stale plan, concurrent lease, expired lease, cross-workspace payload, oversized registry, or unavailable database fails closed. Local mode keeps the same service contract with an owner-private atomic file registry.
+
 Hosted deployments add a tenant-scoped private marketplace behind organization
 RLS. Search remains metadata-only; when an operator opens or plans a
 hosted app, the server fetches only that exact verified release, validates its

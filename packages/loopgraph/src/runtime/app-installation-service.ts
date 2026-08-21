@@ -48,7 +48,8 @@ import { LocalAppMarketplace } from "./app-marketplace";
 import { FileCompanyContextStore, resolveAppConfiguration } from "./company-context-service";
 import {
   FileLoopSpecRegistryStore,
-  createStoredLoopSpecArtifact
+  createStoredLoopSpecArtifact,
+  type LoopSpecRegistryStore
 } from "./loop-spec-store";
 import {
   initLoopgraphWorkspace,
@@ -56,7 +57,11 @@ import {
   writeLoopgraphWorkspace,
   type LoopgraphWorkspaceRegistry
 } from "./workspace";
-import { FileAppInstallationStore, type AppInstallationRegistry } from "./app-installation-store";
+import {
+  FileAppInstallationStore,
+  type AppInstallationRegistry,
+  type AppInstallationStore
+} from "./app-installation-store";
 import {
   createPromotionRecommendation,
   runAppHistoricalReplay,
@@ -134,10 +139,10 @@ export type AppLifecycleMutationResult = {
 };
 
 export class AppInstallationService {
-  private readonly installationStore: FileAppInstallationStore;
+  private readonly installationStore: AppInstallationStore;
   private readonly contextStore: FileCompanyContextStore;
   private readonly mappingStore: FileConnectorFieldMappingStore;
-  private readonly loopSpecStore: FileLoopSpecRegistryStore;
+  private readonly loopSpecStore: LoopSpecRegistryStore;
 
   constructor(
     private readonly marketplace: LocalAppMarketplace,
@@ -145,10 +150,10 @@ export class AppInstallationService {
     private readonly workspaceId: string,
     private readonly companyId: string,
     dependencies: {
-      installationStore?: FileAppInstallationStore;
+      installationStore?: AppInstallationStore;
       contextStore?: FileCompanyContextStore;
       mappingStore?: FileConnectorFieldMappingStore;
-      loopSpecStore?: FileLoopSpecRegistryStore;
+      loopSpecStore?: LoopSpecRegistryStore;
     } = {}
   ) {
     const appsRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps");
@@ -345,8 +350,9 @@ export class AppInstallationService {
         return { registry, value: { installation: existing, lock: createInstallationLock(registry), loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: false } };
       }
 
-      await initLoopgraphWorkspace({ projectRoot: this.projectRoot });
-      const workspaceBefore = await readLoopgraphWorkspace(this.projectRoot);
+      const workspaceBefore = this.loopSpecStore.persistence === "file"
+        ? await prepareLocalWorkspaceSnapshot(this.projectRoot)
+        : undefined;
       const timestamp = now.toISOString();
       const ownedAssets = plan.assets.filter((asset) => !["retain", "remove"].includes(asset.action)).map((asset) => ({
         assetId: asset.id,
@@ -416,7 +422,7 @@ export class AppInstallationService {
         const lock = createInstallationLock(nextRegistry);
         return { registry: nextRegistry, lock, value: { installation, lock, loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: true } };
       } catch (error) {
-        await rollbackGeneratedInstallation(this.projectRoot, installationId, workspaceBefore);
+        if (workspaceBefore) await rollbackGeneratedInstallation(this.projectRoot, installationId, workspaceBefore);
         throw error;
       }
     });
@@ -1861,6 +1867,11 @@ async function rollbackGeneratedInstallation(projectRoot: string, installationId
   await writeLoopgraphWorkspace(workspace, projectRoot);
   const installationRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps", "installations", installationId);
   await rm(installationRoot, { recursive: true, force: true });
+}
+
+async function prepareLocalWorkspaceSnapshot(projectRoot: string): Promise<LoopgraphWorkspaceRegistry> {
+  await initLoopgraphWorkspace({ projectRoot });
+  return readLoopgraphWorkspace(projectRoot);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -78,6 +78,7 @@ export const RECOVERY_TABLES = [
   "loop_spec_registry",
   "loop_spec_commits",
   "loopgraph_evidence_records",
+  "loopgraph_app_installation_registries",
   "loopgraph_app_verification_registries",
   "loopgraph_app_verifier_keys",
   "loopgraph_app_verification_receipts",
