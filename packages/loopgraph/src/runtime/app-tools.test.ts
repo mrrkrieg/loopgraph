@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -6,6 +7,7 @@ import { connectorInstallationViewSchema, type AppOnboardingJourney } from "../c
 import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
 import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
+import { createAppIndependentVerificationReceipt } from "./app-operational-maturity";
 
 const temporaryDirectories: string[] = [];
 
@@ -26,6 +28,10 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_install_plan",
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
+      "loopgraph_app_maturity_get",
+      "loopgraph_app_verifier_trust_add",
+      "loopgraph_app_verifier_trust_revoke",
+      "loopgraph_app_verification_import",
       "loopgraph_connector_schema_record",
       "loopgraph_app_field_mappings_get",
       "loopgraph_app_field_mapping_confirm",
@@ -473,7 +479,7 @@ describe("shared Loopgraph App tools", () => {
       projectRoot,
       plan: review.plan,
       actor: "sales-operations"
-    }) as { installation: { id: string } };
+    }) as { installation: { id: string; appId: string; artifactDigest: string } };
 
     const rehearse = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
@@ -490,6 +496,61 @@ describe("shared Loopgraph App tools", () => {
       actor: "hermes"
     }) as { status: string; writeBlocked: boolean };
     expect(conformance).toMatchObject({ status: "passed", writeBlocked: true });
+    const maturity = await callLoopgraphAppTool("loopgraph_app_maturity_get", {
+      projectRoot,
+      installationId: applied.installation.id
+    }) as { maturity: string; gates: Array<{ level: string; status: string }> };
+    expect(maturity).toMatchObject({
+      maturity: "connected",
+      gates: [
+        { level: "tested", status: "achieved" },
+        { level: "connected", status: "achieved" },
+        { level: "production_proven", status: "blocked" },
+        { level: "loopgraph_verified", status: "blocked" }
+      ]
+    });
+
+    const verifierKeys = generateKeyPairSync("ed25519", {
+      publicKeyEncoding: { type: "spki", format: "pem" },
+      privateKeyEncoding: { type: "pkcs8", format: "pem" }
+    });
+    await callLoopgraphAppTool("loopgraph_app_verifier_trust_add", {
+      projectRoot,
+      key: {
+        verifierId: "independent-auditor",
+        keyId: "independent-auditor.primary",
+        algorithm: "ed25519",
+        publicKey: verifierKeys.publicKey,
+        approvedBy: "security-admin",
+        approvalRef: "change:SEC-44",
+        approvedAt: "2026-08-21T12:00:00.000Z"
+      }
+    });
+    const verificationReceipt = createAppIndependentVerificationReceipt({
+      installationId: applied.installation.id,
+      appId: applied.installation.appId,
+      artifactDigest: applied.installation.artifactDigest,
+      verifierId: "independent-auditor",
+      verifierType: "accredited_third_party",
+      status: "passed",
+      evidenceRefs: ["audit:independent-review"],
+      verifiedAt: "2026-08-21T12:00:00.000Z",
+      keyId: "independent-auditor.primary",
+      privateKeyPem: verifierKeys.privateKey
+    });
+    const imported = await callLoopgraphAppTool("loopgraph_app_verification_import", {
+      projectRoot,
+      receipt: verificationReceipt
+    }) as { receipts: unknown[]; privateKeyMaterialAccepted: boolean };
+    expect(imported).toMatchObject({ receipts: [verificationReceipt], privateKeyMaterialAccepted: false });
+    const revoked = await callLoopgraphAppTool("loopgraph_app_verifier_trust_revoke", {
+      projectRoot,
+      verifierId: "independent-auditor",
+      keyId: "independent-auditor.primary",
+      revokedBy: "security-admin",
+      revocationRef: "incident:IR-10"
+    }) as { trustedVerifierKeys: Array<{ revokedAt?: string; revokedBy?: string }> };
+    expect(revoked.trustedVerifierKeys[0]).toMatchObject({ revokedBy: "security-admin" });
 
     const activate = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,

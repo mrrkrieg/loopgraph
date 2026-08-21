@@ -114,6 +114,7 @@ export * from "./app-installation-store";
 export * from "./app-installation-service";
 export * from "./app-quality-engine";
 export * from "./app-operational-maturity";
+export * from "./app-verification-store";
 export * from "./app-onboarding-journey";
 export * from "./department-pack-catalog";
 export * from "./company-blueprint-catalog";

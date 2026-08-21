@@ -10,7 +10,11 @@ import { marketplaceAppSchema, type ConnectionInstance, type MarketplaceApp } fr
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
 import { listConnectorInstallations } from "@/lib/connector-broker/admin";
-import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesOperationsStore,
+  getOutcomeStore
+} from "@/lib/loopgraph-runtime/storage-resolver";
 import { requireHostedMarketplaceContext } from "./hosted-marketplace-api";
 import {
   ensureHostedMarketplaceArtifact,
@@ -25,6 +29,10 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_field_mappings_get",
   "loopgraph_app_field_mapping_confirm",
   "loopgraph_app_update_plan"
+]);
+
+const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_maturity_get"
 ]);
 
 const HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
@@ -70,16 +78,22 @@ export async function callLoopgraphAppTool(
       includeDeprecated: hostedReadMayUseDeprecated(name)
     });
   }
-  const callOptions = CONNECTION_AWARE_TOOLS.has(name)
-    ? { ...options, connections: await trustedConnections(), hostedMarketplaceClient: null }
-    : { ...options, hostedMarketplaceClient: null };
+  const projectRoot = pathFromInput(effectiveInput, options.projectRoot);
+  const callOptions = {
+    ...options,
+    ...(CONNECTION_AWARE_TOOLS.has(name) ? { connections: await trustedConnections() } : {}),
+    ...(EVIDENCE_AWARE_TOOLS.has(name) ? {
+      outcomeStore: getOutcomeStore({ projectRoot }),
+      hermesOperationsStore: getHermesOperationsStore({ rootDir: path.join(projectRoot, ".loopgraph") })
+    } : {}),
+    hostedMarketplaceClient: null
+  };
   try {
     return await callRuntimeAppTool(name, effectiveInput, callOptions);
   } catch (error) {
     if (!hostedIdentity || !hostedMode || !isMissingMarketplaceArtifact(error)) {
       throw error;
     }
-    const projectRoot = pathFromInput(effectiveInput, options.projectRoot);
     await ensureHostedMarketplaceArtifact({
       projectRoot,
       ...hostedIdentity,

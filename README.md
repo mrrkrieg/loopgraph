@@ -355,6 +355,25 @@ Every marketplace version carries its exact source ID, transport, URI, commit wh
 
 After installation, Loopgraph computes a stricter operational maturity ceiling that cannot skip gates. `connected` means every required logical capability and setup contract is ready for the exact tested artifact. `production_proven` requires reviewed historical routing plus completed work and observed outcome/value records—not task volume or modeled savings. `loopgraph_verified` additionally requires a signed receipt from an explicitly trusted independent verifier key. The installed-App view shows all four gates, their evidence references, and the next action needed to advance safely.
 
+Hermes, the CLI, and the browser use the same maturity service and durable workspace trust registry:
+
+```bash
+# Inspect the evidence-derived ceiling for one exact installation.
+loopgraph apps maturity <installation-id>
+
+# Trust only an approved verifier PUBLIC key with approver and change references.
+loopgraph apps verifier-trust --file verifier-public-key.json
+
+# Import a content-bound signed verification receipt for the installed digest.
+loopgraph apps verification-import --file verification-receipt.json
+
+# Revoke compromised or retired trust immediately.
+loopgraph apps verifier-revoke <verifier-id> <key-id> \
+  --revoked-by security-admin --reference incident:IR-42
+```
+
+The verifier signs outside Loopgraph. These commands never accept a verifier private key. Unknown, forged, revoked-key, wrong-installation, wrong-App, and stale-artifact receipts are rejected before persistence. Local trust state is workspace-bound and written with owner-only permissions; hosted operators must expose the mutating tools only through their audited organization-admin control plane.
+
 Hosted deployments add a tenant-scoped private marketplace behind organization
 RLS. Search remains metadata-only; when an operator opens or plans a
 hosted app, the server fetches only that exact verified release, validates its

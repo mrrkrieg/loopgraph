@@ -610,6 +610,76 @@ apps
   });
 
 apps
+  .command("maturity")
+  .description("Derive one installed App's operational maturity from shared Hermes evidence and trusted verification receipts")
+  .argument("<installation-id>", "Installed app ID")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_maturity_get", {
+      projectRoot: options.project,
+      installationId,
+      workspaceId: options.workspace,
+      companyId: options.company
+    });
+  });
+
+apps
+  .command("verifier-trust")
+  .description("Trust an approved verifier public key; the JSON file must not contain private key material")
+  .requiredOption("--file <path>", "JSON AppVerifierTrustKey containing approval accountability")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (options: { file: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_verifier_trust_add", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      key: await readJsonRecord(path.resolve(options.file))
+    });
+  });
+
+apps
+  .command("verifier-revoke")
+  .description("Immediately revoke one trusted verifier key with an accountable reference")
+  .argument("<verifier-id>", "Verifier identity")
+  .argument("<key-id>", "Verifier public key ID")
+  .requiredOption("--revoked-by <id>", "Accountable revoking administrator")
+  .requiredOption("--reference <ref>", "Incident, approval, or administrative reference")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (verifierId: string, keyId: string, options: { revokedBy: string; reference: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_verifier_trust_revoke", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      verifierId,
+      keyId,
+      revokedBy: options.revokedBy,
+      revocationRef: options.reference
+    });
+  });
+
+apps
+  .command("verification-import")
+  .description("Verify and import a signed receipt for the exact installed App artifact")
+  .requiredOption("--file <path>", "JSON AppIndependentVerificationReceipt; never a verifier private key")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (options: { file: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_verification_import", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      receipt: await readJsonRecord(path.resolve(options.file))
+    });
+  });
+
+apps
   .command("mappings")
   .description("Inspect required provider fields, live schema snapshots, suggestions, and confirmed reusable mappings")
   .argument("<app-id>", "Marketplace app ID")

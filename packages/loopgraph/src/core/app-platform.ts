@@ -139,8 +139,17 @@ export const appVerifierTrustKeySchema = z.object({
   keyId: appIdSchema,
   algorithm: z.literal("ed25519"),
   publicKey: z.string().min(32),
-  revokedAt: isoDateTimeSchema.optional()
-}).strict();
+  approvedBy: z.string().min(1).max(300),
+  approvalRef: z.string().min(1).max(1000),
+  approvedAt: isoDateTimeSchema,
+  revokedAt: isoDateTimeSchema.optional(),
+  revokedBy: z.string().min(1).max(300).optional(),
+  revocationRef: z.string().min(1).max(1000).optional()
+}).strict().superRefine((key, ctx) => {
+  if (new Set([Boolean(key.revokedAt), Boolean(key.revokedBy), Boolean(key.revocationRef)]).size > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["revokedAt"], message: "Verifier key revocation requires timestamp, actor, and reference together" });
+  }
+});
 
 const appOperationalMaturityGateSchema = z.object({
   level: appMaturitySchema.exclude(["concept"]),

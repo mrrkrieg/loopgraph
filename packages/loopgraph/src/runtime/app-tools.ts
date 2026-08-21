@@ -9,11 +9,13 @@ import {
   appHistoricalReplayRequestSchema,
   historicalReplayEventSchema,
   appInstallPlanSchema,
+  appIndependentVerificationReceiptSchema,
   appFieldMappingPlanSchema,
   appRolloutModeSchema,
   appUpdatePlanSchema,
   artifactDigestSchema,
   appSetupDefinitionSchema,
+  appVerifierTrustKeySchema,
   DepartmentTypeSchema,
   marketplaceCatalogSourceSchema,
   marketplaceAppSchema,
@@ -22,8 +24,10 @@ import {
   type ConnectionInstance,
   type MarketplaceApp
 } from "../core";
+import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
 import { FileAppInstallationStore } from "./app-installation-store";
+import { FileAppVerificationStore, type AppVerificationRegistry } from "./app-verification-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { satisfiesVersionRange } from "./app-pack-loader";
 import { compileLoopPack } from "./app-pack-compiler";
@@ -42,6 +46,9 @@ import {
 import { inspectLoopgraphWorkspace } from "./workspace";
 import { PROVIDER_ONBOARDING_CATALOG } from "./provider-onboarding";
 import { HostedMarketplaceClient } from "./hosted-marketplace-client";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
+import { getLoopgraphRoot } from "./storage-resolver";
 import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
 import { deriveAppOnboardingJourney } from "./app-onboarding-journey";
 import {
@@ -74,6 +81,10 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
+  "loopgraph_app_maturity_get",
+  "loopgraph_app_verifier_trust_add",
+  "loopgraph_app_verifier_trust_revoke",
+  "loopgraph_app_verification_import",
   "loopgraph_connector_schema_record",
   "loopgraph_app_field_mappings_get",
   "loopgraph_app_field_mapping_confirm",
@@ -205,6 +216,34 @@ export const appInstallStatusInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
   installationId: z.string().min(1).optional()
+}).strict();
+
+export const appMaturityGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  installationId: z.string().min(1)
+}).strict();
+
+export const appVerifierTrustAddInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  key: appVerifierTrustKeySchema
+}).strict();
+
+export const appVerifierTrustRevokeInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  verifierId: z.string().min(1).max(300),
+  keyId: z.string().min(1).max(160),
+  revokedBy: z.string().min(1).max(300),
+  revocationRef: z.string().min(1).max(1000),
+  revokedAt: z.string().datetime().optional()
+}).strict();
+
+export const appVerificationImportInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  receipt: appIndependentVerificationReceiptSchema
 }).strict();
 
 export const connectorSchemaRecordInputSchema = projectSchema.extend({
@@ -372,6 +411,10 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_verifier_trust_revoke", description: "Immediately revoke one trusted verifier public key with an accountable actor and revocation reference.", readOnly: false, idempotent: true, destructive: true },
+  { name: "loopgraph_app_verification_import", description: "Verify and import a signed independent App verification receipt for the exact installed artifact digest.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_connector_schema_record", description: "Record a connection-bound provider field schema returned by an authenticated connector without storing credentials or unrestricted provider payloads.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_field_mappings_get", description: "Build an explainable field-mapping plan from an app recipe, reusable connection, live provider schema snapshot, and confirmed workspace mappings.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_field_mapping_confirm", description: "Confirm exact logical-to-provider field mappings for one connection; never silently confirms inferred mappings.", readOnly: false, idempotent: true, destructive: false },
@@ -423,6 +466,8 @@ export async function callLoopgraphAppTool(
     now?: Date;
     connections?: ConnectionInstance[];
     hostedMarketplaceClient?: HostedMarketplaceClient | null;
+    outcomeStore?: OutcomeStore;
+    hermesOperationsStore?: HermesOperationsStore;
   } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
@@ -972,6 +1017,82 @@ export async function callLoopgraphAppTool(
       lock: await store.readLockfile()
     };
   }
+  if (name === "loopgraph_app_maturity_get") {
+    const parsed = appMaturityGetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
+    const installationStore = new FileAppInstallationStore(appsRoot, parsed.workspaceId!);
+    const registry = await installationStore.read();
+    const installation = registry.installations.find((candidate) => candidate.id === parsed.installationId);
+    if (!installation) throw new Error(`App installation not found: ${parsed.installationId}`);
+    const workspace = await inspectLoopgraphWorkspace({ projectRoot, createIfMissing: true });
+    const loopIds = new Set(workspace.registry.registeredSpecs
+      .filter((entry) => entry.path.split(/[\\/]/).includes(installation.id))
+      .map((entry) => entry.id));
+    const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
+    const operationsStore = options.hermesOperationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot));
+    const [outcomes, valueEntries, completedEvents, verificationRegistry] = await Promise.all([
+      outcomeStore.listObservedOutcomes({ workspaceId: parsed.workspaceId!, companyId: parsed.companyId! }),
+      outcomeStore.listValueLedgerEntries({ workspaceId: parsed.workspaceId!, companyId: parsed.companyId! }),
+      operationsStore.listExecutionEvents({
+        workspaceId: parsed.workspaceId!,
+        companyId: parsed.companyId!,
+        eventType: "run.completed"
+      }),
+      new FileAppVerificationStore(appsRoot, parsed.workspaceId!).read()
+    ]);
+    const relevantOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
+    const relevantValue = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
+    const completedRunRefs = uniqueStrings(completedEvents
+      .filter((event) => loopIds.has(event.loopId))
+      .map((event) => `run:${event.runId}`));
+    return assessAppOperationalMaturity({
+      installation,
+      readiness: await service.readiness(installation.id, options.now),
+      evaluations: registry.evaluations,
+      operatingEvidence: {
+        completedRunRefs,
+        observedOutcomeRefs: relevantOutcomes.map((outcome) => `outcome:${outcome.id}`),
+        observedValueRefs: relevantValue.map((entry) => `value:${entry.id}`)
+      },
+      verificationReceipts: verificationRegistry.receipts,
+      trustedVerifierKeys: verificationRegistry.trustedVerifierKeys,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_verifier_trust_add") {
+    const parsed = appVerifierTrustAddInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const registry = await new FileAppVerificationStore(
+      path.join(projectRoot, ".loopgraph", "apps"),
+      parsed.workspaceId!
+    ).trustVerifierKey(parsed.key);
+    return publicVerificationRegistry(registry);
+  }
+  if (name === "loopgraph_app_verifier_trust_revoke") {
+    const parsed = appVerifierTrustRevokeInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const registry = await new FileAppVerificationStore(
+      path.join(projectRoot, ".loopgraph", "apps"),
+      parsed.workspaceId!
+    ).revokeVerifierKey({
+      verifierId: parsed.verifierId,
+      keyId: parsed.keyId,
+      revokedBy: parsed.revokedBy,
+      revocationRef: parsed.revocationRef,
+      revokedAt: parsed.revokedAt ?? (options.now ?? new Date()).toISOString()
+    });
+    return publicVerificationRegistry(registry);
+  }
+  if (name === "loopgraph_app_verification_import") {
+    const parsed = appVerificationImportInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
+    const installationRegistry = await new FileAppInstallationStore(appsRoot, parsed.workspaceId!).read();
+    const installation = installationRegistry.installations.find((candidate) => candidate.id === parsed.receipt.installationId);
+    if (!installation) throw new Error(`App installation not found: ${parsed.receipt.installationId}`);
+    if (installation.appId !== parsed.receipt.appId || installation.artifactDigest !== parsed.receipt.artifactDigest) {
+      throw new Error("Independent verification receipt does not match the exact installed App artifact");
+    }
+    const registry = await new FileAppVerificationStore(appsRoot, parsed.workspaceId!).importReceipt(parsed.receipt);
+    return publicVerificationRegistry(registry);
+  }
   if (name === "loopgraph_app_historical_replay") {
     const parsed = appHistoricalReplayInputSchema.parse({ ...raw, projectRoot, ...identity });
     const timestamp = (options.now ?? new Date()).toISOString();
@@ -1433,4 +1554,20 @@ function providerMatchesConnection(providerId: string, manifestId: string): bool
   const expected = normalizeConnectorProviderId(providerId);
   const actual = normalizeConnectorProviderId(manifestId);
   return actual === expected || actual.startsWith(`${expected}.`) || actual.startsWith(`${expected}-`);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+function publicVerificationRegistry(registry: AppVerificationRegistry) {
+  return {
+    schemaVersion: registry.schemaVersion,
+    workspaceId: registry.workspaceId,
+    revision: registry.revision,
+    trustedVerifierKeys: registry.trustedVerifierKeys,
+    receipts: registry.receipts,
+    updatedAt: registry.updatedAt,
+    privateKeyMaterialAccepted: false
+  };
 }

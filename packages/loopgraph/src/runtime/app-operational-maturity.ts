@@ -83,17 +83,7 @@ export function assessAppOperationalMaturity(input: {
         candidate.verifierId === receipt.verifierId &&
         candidate.keyId === receipt.signature.keyId &&
         candidate.algorithm === receipt.signature.algorithm);
-      if (!key) return false;
-      try {
-        return verifyDigest(
-          null,
-          Buffer.from(receipt.verificationDigest, "utf8"),
-          createPublicKey(key.publicKey),
-          Buffer.from(receipt.signature.value, "base64url")
-        );
-      } catch {
-        return false;
-      }
+      return key ? verifyAppIndependentVerificationReceipt(receipt, key) : false;
     });
   const verified = productionProven && Boolean(verification);
   const gates: AppOperationalMaturityAssessment["gates"] = [
@@ -157,6 +147,30 @@ export function assessAppOperationalMaturity(input: {
     evaluatedAt: (input.now ?? new Date()).toISOString(),
     evidenceDerived: true
   });
+}
+
+export function verifyAppIndependentVerificationReceipt(
+  receiptInput: AppIndependentVerificationReceipt,
+  keyInput: AppVerifierTrustKey
+): boolean {
+  const receipt = appIndependentVerificationReceiptSchema.parse(receiptInput);
+  const key = appVerifierTrustKeySchema.parse(keyInput);
+  if (
+    key.revokedAt ||
+    key.verifierId !== receipt.verifierId ||
+    key.keyId !== receipt.signature.keyId ||
+    key.algorithm !== receipt.signature.algorithm
+  ) return false;
+  try {
+    return verifyDigest(
+      null,
+      Buffer.from(receipt.verificationDigest, "utf8"),
+      createPublicKey(key.publicKey),
+      Buffer.from(receipt.signature.value, "base64url")
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function createAppIndependentVerificationReceipt(input: {

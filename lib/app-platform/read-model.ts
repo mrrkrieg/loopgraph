@@ -20,7 +20,6 @@ import type {
   MarketplaceAppVersion,
   WorkspaceAppInstallation
 } from "loopgraph/core";
-import { assessAppOperationalMaturity } from "loopgraph/runtime";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import { getInstalledAppEvidenceData } from "@/lib/app-platform/installed-app-evidence-data";
 import {
@@ -404,7 +403,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
   const installedLoops = installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? [];
   const evaluations = installed.evaluations.filter((evaluation) => evaluation.installationId === installationId);
-  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence] = await Promise.all([
+  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence, maturity] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", {
       projectRoot,
       appId: installation.appId,
@@ -424,7 +423,11 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
       installationId
     }) as Promise<AppOnboardingJourney>,
     getAgentOperationsViewData(),
-    getInstalledAppEvidenceData(installedLoops.map((loop) => loop.id))
+    getInstalledAppEvidenceData(installedLoops.map((loop) => loop.id)),
+    callLoopgraphAppTool("loopgraph_app_maturity_get", {
+      projectRoot,
+      installationId
+    }) as Promise<AppOperationalMaturityAssessment>
   ]);
   const updatePlan = diff.updateAvailable
     ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
@@ -445,16 +448,6 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     evaluations,
     outcomes: evidence.outcomes,
     valueEntries: evidence.valueEntries
-  });
-  const maturity = assessAppOperationalMaturity({
-    installation,
-    readiness,
-    evaluations,
-    operatingEvidence: {
-      completedRunRefs: operations.activity.filter((row) => row.jobStatus === "completed").map((row) => `run:${row.runId}`),
-      observedOutcomeRefs: operations.outcomes.filter((outcome) => outcome.truthStatus === "observed").map((outcome) => `outcome:${outcome.id}`),
-      observedValueRefs: operations.valueEntries.filter((entry) => entry.truthStatus === "observed").map((entry) => `value:${entry.id}`)
-    }
   });
   return {
     installation,

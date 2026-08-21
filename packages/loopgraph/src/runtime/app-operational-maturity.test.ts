@@ -21,7 +21,10 @@ const trustedVerifierKeys = [{
   verifierId: "loopgraph-verifier",
   keyId: "loopgraph.verifier.primary",
   algorithm: "ed25519" as const,
-  publicKey: verifierKey.publicKey
+  publicKey: verifierKey.publicKey,
+  approvedBy: "security-admin",
+  approvalRef: "change:verifier-trust-1",
+  approvedAt: now
 }];
 const installation = workspaceAppInstallationSchema.parse({
   schemaVersion: APP_INSTALL_SCHEMA_VERSION,
