@@ -25,6 +25,8 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 
 The journey is derived, not separately mutable. After any connection, answer, field confirmation, install, test, activation, pause, or repair, the caller reads it again. That makes retries and handoff between Hermes, CLI, and browser resumable without trusting chat history.
 
+Module selection is part of the content-bound plan. Unselected module loops and their exclusive assets do not reach the workspace registry or Hermes candidate library. Dependencies and shared skills are closed automatically, while invalid or empty compositions are rejected. Changing modules after installation is a reviewed overlay transaction that rematerializes the backend in write-blocked simulation; an enablement that would add authority or require another connector must return to planning.
+
 ## Hermes procedure
 
 1. Search by business outcome and inspect the chosen App.

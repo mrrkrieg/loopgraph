@@ -51,7 +51,11 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
                 {app.modules.map((module) => (
                   <label className="flex gap-3 rounded-lg border border-line p-4" key={module.id}>
                     <input defaultChecked={state.plan.selectedModules.includes(module.id)} name="selectedModule" type="checkbox" value={module.id} />
-                    <span><span className="block text-sm font-semibold">{module.name}</span><span className="mt-1 block text-xs leading-5 text-ink/55">{module.description}</span></span>
+                    <span>
+                      <span className="block text-sm font-semibold">{module.name}</span>
+                      <span className="mt-1 block text-xs leading-5 text-ink/55">{module.description}</span>
+                      <span className="mt-1 block text-[0.68rem] font-medium text-ink/40">{module.dependsOn.length > 0 ? `Requires ${module.dependsOn.join(", ")}` : "Independent module"}</span>
+                    </span>
                   </label>
                 ))}
               </div>

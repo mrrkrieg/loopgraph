@@ -163,18 +163,19 @@ export class AppInstallationService {
     const now = input.now ?? new Date();
     const version = await this.marketplace.resolveAppVersion(input.appId, input.versionRange ?? "latest");
     const loaded = await this.marketplace.getAppArtifact(input.appId, version.version, version.digest);
-    const compiled = await compileLoopPack(loaded);
+    const selectedModules = resolveSelectedModules(loaded.manifest.modules, input.selectedModules);
+    const compiled = await compileLoopPack(loaded, { selectedModules });
+    const activeCapabilities = compiledCapabilityKeys(compiled);
     const preset = loaded.manifest.presets.find((candidate) => candidate.id === input.presetId);
     if (!preset) throw new Error(`Preset ${input.presetId} does not exist in ${input.appId}@${version.version}`);
-    const selectedModules = resolveSelectedModules(loaded.manifest.modules, input.selectedModules);
     const recipes = await loadConnectorRecipes(loaded);
     const presetDocument = await readPackYaml(loaded.root, preset.path);
     const selectedRecipeId = isRecord(presetDocument) && typeof presetDocument.recipe === "string"
       ? presetDocument.recipe
       : preset.id;
     const capabilityResolutions = resolveConnectorCapabilities({
-      requiredCapabilities: loaded.manifest.requiredCapabilities,
-      optionalCapabilities: loaded.manifest.optionalCapabilities,
+      requiredCapabilities: loaded.manifest.requiredCapabilities.filter((capability) => activeCapabilities.has(capability)),
+      optionalCapabilities: loaded.manifest.optionalCapabilities.filter((capability) => activeCapabilities.has(capability)),
       recipes,
       connections: input.connections,
       selectedRecipeId
@@ -264,7 +265,7 @@ export class AppInstallationService {
     });
     const installationScopedGraphNodes = compiled.graph.nodes.filter((node) => node.installationScoped);
     const plannedAssetById = new Map(assets.map((asset) => [asset.id, asset]));
-    const permissions = loaded.manifest.permissions.map((permission) => ({
+    const permissions = loaded.manifest.permissions.filter((permission) => activeCapabilities.has(permission.capability)).map((permission) => ({
       capability: permission.capability,
       authority: permission.authority,
       decision: permission.defaultPolicy === "allowed"
@@ -331,12 +332,16 @@ export class AppInstallationService {
     const blockers = installPlanBlockers(plan);
     if (blockers.length > 0) throw new Error(`Install plan is not ready:\n- ${blockers.join("\n- ")}`);
     const loaded = await this.marketplace.getAppArtifact(plan.appId, plan.version, plan.artifactDigest);
-    const compiled = await compileLoopPack(loaded);
+    const compiled = await compileLoopPack(loaded, { selectedModules: plan.selectedModules });
     const installationId = installationIdFor(this.workspaceId, plan.appId);
+    assertPlanMatchesCompiledComposition(plan, compiled, installationId);
     return this.installationStore.withExclusiveUpdate<ApplyAppInstallationResult>(async (registry) => {
       const existing = registry.installations.find((installation) => installation.id === installationId);
       if (existing) {
         if (existing.artifactDigest !== plan.artifactDigest) throw new Error("App is already installed at a different immutable version; use upgrade");
+        if (canonicalAppDigest(existing.selectedModules) !== canonicalAppDigest(plan.selectedModules)) {
+          throw new Error("App is already installed with a different module composition; use a reviewed module overlay");
+        }
         return { registry, value: { installation: existing, lock: createInstallationLock(registry), loopIds: compiled.loopSpecs.map((spec) => spec.metadata.id), created: false } };
       }
 
@@ -484,6 +489,8 @@ export class AppInstallationService {
         createdBy: input.actor
       });
       const selectedModules = applyModuleOverlay(loaded.manifest.modules, installation.selectedModules, overlay.operations);
+      const compiled = await compileLoopPack(loaded, { selectedModules });
+      const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
       const configuration = resolveAppConfiguration({
         appId: installation.appId,
         version: installation.version,
@@ -492,11 +499,34 @@ export class AppInstallationService {
         overlay,
         now
       }).configuration;
+      const namespace = installationNamespace(installation);
+      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
+      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
+      for (const asset of ownedAssets) {
+        const existing = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
+        if (existing && existing.digest !== asset.digest && existing.ownerInstallationIds.some((ownerId) => ownerId !== installation.id)) {
+          throw new Error(`Module composition conflicts with shared asset ${asset.assetId}; create a fresh install plan`);
+        }
+      }
+      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
+      await this.loopSpecStore.commitMaterializationAtomically({
+        commitId: `app-overlay-${overlay.id}`,
+        idempotencyKey: canonicalAppDigest({ action: "overlay", installationId: installation.id, overlay }),
+        expectedRevision: workspaceSnapshot.revision,
+        projectRoot: this.projectRoot,
+        committedAt: timestamp,
+        artifacts,
+        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+      });
       const updated: WorkspaceAppInstallation = {
         ...installation,
         overlay,
         selectedModules,
         configuration,
+        permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+        ownedAssets,
         state: "ready_to_test",
         mode: "simulation",
         history: appendHistory(installation, input.actor, "overlay", timestamp),
@@ -506,11 +536,12 @@ export class AppInstallationService {
       return lifecycleMutation(registry, updated, {
         action: "overlay",
         actor: input.actor,
-        reason: "Stored workspace customization as a version-bound overlay without mutating the pinned LoopPack.",
+        reason: "Applied the version-bound overlay and atomically rematerialized the selected module composition without mutating the pinned LoopPack.",
         evidenceRetained: true,
         reversible: true,
+        removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
         createdAt: timestamp
-      });
+      }, replaceOwnedAssets(registry.assets, installation.id, ownedAssets));
     });
   }
 
@@ -518,7 +549,8 @@ export class AppInstallationService {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
       const installation = requireInstallation(registry, installationId);
       const loaded = await this.loadInstallationArtifact(installation);
-      const compiled = await compileLoopPack(loaded);
+      const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
+      const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
       const timestamp = now.toISOString();
       const namespace = installationNamespace(installation);
       const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
@@ -539,6 +571,7 @@ export class AppInstallationService {
         ...installation,
         state: "ready_to_test",
         mode: "simulation",
+        permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
         ownedAssets,
         history: appendHistory(installation, actor, "repair", timestamp),
         updatedAt: timestamp,
@@ -573,7 +606,6 @@ export class AppInstallationService {
       const timestamp = now.toISOString();
       const installationId = installationIdFor(this.workspaceId, `${source.appId}:${derivedAppId}`);
       const loaded = await this.loadInstallationArtifact(source);
-      const compiled = await compileLoopPack(loaded);
       const namespace = contentHash({ installationId }).slice(0, 10);
       const overlay = appOverlaySchema.parse({
         schemaVersion: "loopgraph-app-configuration/v1alpha1",
@@ -588,6 +620,8 @@ export class AppInstallationService {
       });
       validateOverlayOperations(overlay.operations, loaded, source.configuration.fields.map((field) => field.key));
       const selectedModules = applyModuleOverlay(loaded.manifest.modules, source.selectedModules, overlay.operations);
+      const compiled = await compileLoopPack(loaded, { selectedModules });
+      const activeCapabilities = assertInstalledCompositionAuthority(compiled, source);
       const configuration = resolveAppConfiguration({
         appId: source.appId,
         version: source.version,
@@ -614,6 +648,7 @@ export class AppInstallationService {
         mode: "simulation",
         selectedModules,
         configuration,
+        permissions: source.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
         overlay,
         ownedAssets,
         derivation: {
@@ -685,8 +720,8 @@ export class AppInstallationService {
       this.marketplace.getAppArtifact(baseInstallPlan.appId, baseInstallPlan.version, baseInstallPlan.artifactDigest)
     ]);
     const [currentCompiled, nextCompiled] = await Promise.all([
-      compileLoopPack(currentLoaded),
-      compileLoopPack(nextLoaded)
+      compileLoopPack(currentLoaded, { selectedModules: installation.selectedModules }),
+      compileLoopPack(nextLoaded, { selectedModules: baseInstallPlan.selectedModules })
     ]);
     const permissionChanges = comparePermissions(currentLoaded, nextLoaded);
     const conflicts = detectOverlayConflicts(installation.overlay, nextLoaded, baseInstallPlan.configuration.values);
@@ -742,7 +777,7 @@ export class AppInstallationService {
         throw new Error("Installed app changed after the update plan was created");
       }
       const loaded = await this.marketplace.getAppArtifact(installation.appId, plan.toVersion, plan.toDigest);
-      const compiled = await compileLoopPack(loaded);
+      const compiled = await compileLoopPack(loaded, { selectedModules: plan.baseInstallPlan.selectedModules });
       const timestamp = now.toISOString();
       const namespace = installationNamespace(installation);
       const overlay = installation.overlay ? appOverlaySchema.parse({
@@ -825,7 +860,7 @@ export class AppInstallationService {
       const revision = installation.history.at(-1);
       if (!revision) throw new Error("No reversible installed-app revision is available");
       const loaded = await this.loadArtifactRevision(installation, revision.version, revision.artifactDigest);
-      const compiled = await compileLoopPack(loaded);
+      const compiled = await compileLoopPack(loaded, { selectedModules: revision.selectedModules });
       const timestamp = now.toISOString();
       const namespace = installationNamespace(installation);
       const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
@@ -986,7 +1021,7 @@ export class AppInstallationService {
         throw new Error(`App cannot run synthetic conformance tests from ${installation.state}`);
       }
       const loaded = await this.loadInstallationArtifact(installation);
-      const compiled = await compileLoopPack(loaded);
+      const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
       const run = await runAppSyntheticConformance({ loaded, compiled, installation, actor, now });
       const passed = run.status === "passed";
       const updated = { ...installation, state: passed ? "simulation_passed" as const : "broken" as const, updatedAt: run.completedAt!, ...(passed ? {} : { failureReason: "Synthetic conformance suite failed" }) };
@@ -1014,7 +1049,7 @@ export class AppInstallationService {
         throw new Error(`Historical replay is unavailable while the app is ${installation.state}`);
       }
       const loaded = await this.loadInstallationArtifact(installation);
-      const compiled = await compileLoopPack(loaded);
+      const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
       const run = runAppHistoricalReplay({ request, compiled, installation, now });
       return {
         registry: {
@@ -1296,6 +1331,25 @@ function installAssetConflictReason(kind: AppInstallPlan["conflicts"][number]["k
     return "The installed dependency does not satisfy the App contract.";
   }
   return "An installed App asset with this identity has a different immutable contract. Rename, reuse, or explicitly migrate the asset before installation.";
+}
+
+function assertPlanMatchesCompiledComposition(
+  plan: AppInstallPlan,
+  compiled: Awaited<ReturnType<typeof compileLoopPack>>,
+  installationId: string
+): void {
+  const expected = compilePlannedAssets(compiled, installationId);
+  const plannedById = new Map(plan.assets.map((asset) => [asset.id, asset]));
+  const expectedById = new Map(expected.map((asset) => [asset.id, asset]));
+  for (const asset of expected) {
+    const planned = plannedById.get(asset.id);
+    if (!planned || planned.kind !== asset.kind || planned.digest !== asset.digest) {
+      throw new Error(`Install plan does not match the selected module composition: ${asset.id}`);
+    }
+  }
+  const unexpected = plan.assets.find((asset) =>
+    !expectedById.has(asset.id) && !["connection_binding", "field_mapping"].includes(asset.kind));
+  if (unexpected) throw new Error(`Install plan contains an asset outside the selected module composition: ${unexpected.id}`);
 }
 
 function appendHistory(
@@ -1672,6 +1726,29 @@ function resolveSelectedModules(modules: Array<{ id: string; defaultEnabled: boo
     for (const dependency of moduleDefinition.dependsOn) if (!selected.has(dependency)) throw new Error(`Module ${moduleDefinition.id} requires ${dependency}`);
   }
   return [...selected].sort();
+}
+
+function compiledCapabilityKeys(compiled: Awaited<ReturnType<typeof compileLoopPack>>): Set<string> {
+  return new Set(compiled.loopSpecs.flatMap((spec) => spec.tools.flatMap((tool) =>
+    tool.adapterId.startsWith("capability:") ? [tool.adapterId.slice("capability:".length)] : [])));
+}
+
+function assertInstalledCompositionAuthority(
+  compiled: Awaited<ReturnType<typeof compileLoopPack>>,
+  installation: WorkspaceAppInstallation
+): Set<string> {
+  const activeCapabilities = compiledCapabilityKeys(compiled);
+  const introducedCapabilities = [...activeCapabilities].filter((capability) =>
+    !installation.permissions.some((permission) => permission.capability === capability));
+  if (introducedCapabilities.length > 0) {
+    throw new Error(`Module enablement introduces permissions that require a fresh install plan: ${introducedCapabilities.sort().join(", ")}`);
+  }
+  const requiredConnections = new Set(compiled.loopSpecs.flatMap((spec) => spec.routing?.requiredConnections ?? []));
+  const missingConnections = [...requiredConnections].filter((capability) => !installation.connectionBindings[capability]);
+  if (missingConnections.length > 0) {
+    throw new Error(`Module enablement requires connector bindings that need a fresh install plan: ${missingConnections.sort().join(", ")}`);
+  }
+  return activeCapabilities;
 }
 
 function findConnectionForRecipe(resolutions: CapabilityResolution[], recipeId: string): string | undefined {

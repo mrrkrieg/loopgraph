@@ -61,23 +61,28 @@ export async function runAppSyntheticConformance(input: {
   actor: string;
   now: Date;
 }): Promise<AppEvalRun> {
-  const suites = await loadEvalSuites(input.loaded);
+  const suites = await loadEvalSuites(input.loaded, input.compiled.activeEntrypoints.evals);
+  const activeLoopIds = new Set(input.compiled.loopSpecs.map((spec) => spec.metadata.id));
   const scenarios = [] as AppEvalRun["scenarios"];
   for (const suite of suites) {
     for (const scenario of suite.scenarios) {
       const fixture = asRecord(JSON.parse(await readFile(resolvePackFile(input.loaded.root, scenario.fixture), "utf8")));
       const event = fixtureToQualityEvent(fixture, scenario, input.compiled.routingCards);
       const decision = evaluateQualityEvent(event, input.compiled);
-      const passed = decision.action === scenario.expectedAction &&
-        (!scenario.expectedLoopId || decision.loopId === scenario.expectedLoopId) &&
-        decision.approvalRequired === scenario.expectedApproval;
+      const expectedLoopEnabled = !scenario.expectedLoopId || activeLoopIds.has(scenario.expectedLoopId);
+      const expectedAction = expectedLoopEnabled ? scenario.expectedAction : "unhandled" as const;
+      const expectedLoopId = expectedLoopEnabled ? scenario.expectedLoopId : undefined;
+      const expectedApproval = expectedLoopEnabled ? scenario.expectedApproval : false;
+      const passed = decision.action === expectedAction &&
+        (!expectedLoopId || decision.loopId === expectedLoopId) &&
+        decision.approvalRequired === expectedApproval;
       scenarios.push({
         id: scenario.id,
         status: passed ? "passed" : "failed",
         sourceEventId: event.id,
-        expectedAction: scenario.expectedAction,
+        expectedAction,
         actualAction: decision.action,
-        expectedRoute: scenario.expectedLoopId,
+        expectedRoute: expectedLoopId,
         actualRoute: decision.loopId,
         approvalRequired: decision.approvalRequired,
         reason: decision.reason,
@@ -380,8 +385,8 @@ function fixtureToQualityEvent(fixture: Record<string, unknown>, scenario: AppEv
   };
 }
 
-async function loadEvalSuites(loaded: LoopPackLoadResult): Promise<AppEvalSuite[]> {
-  return Promise.all(loaded.manifest.entrypoints.evals.map(async (relativePath) =>
+async function loadEvalSuites(loaded: LoopPackLoadResult, entrypoints = loaded.manifest.entrypoints.evals): Promise<AppEvalSuite[]> {
+  return Promise.all(entrypoints.map(async (relativePath) =>
     appEvalSuiteSchema.parse(YAML.parse(await readFile(resolvePackFile(loaded.root, relativePath), "utf8")))));
 }
 

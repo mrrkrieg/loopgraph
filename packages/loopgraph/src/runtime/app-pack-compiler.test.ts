@@ -42,4 +42,29 @@ describe("LoopPack compiler installation assets", () => {
     expect(compiled.installationAssets.find((asset) => asset.kind === "evaluation")?.dependencies.length).toBeGreaterThan(5);
     expect(compiled.installationAssets.find((asset) => asset.kind === "dashboard")?.dependencies.length).toBeGreaterThan(5);
   });
+
+  it("compiles only the selected module composition and removes disabled topology", async () => {
+    const loaded = await loadLoopPackDirectory(path.resolve(process.cwd(), "packs/official/hr-talent/operate-people-workflows"));
+    const compiled = await compileLoopPack(loaded, {
+      selectedModules: ["candidate-flow", "manager-support", "onboarding-progress", "performance-review"]
+    });
+
+    expect(compiled.loopSpecs.map((spec) => spec.metadata.id)).not.toContain("hr-retention-review");
+    expect(compiled.skills.map((skill) => skill.id)).toContain("hr-fairness-and-boundary-review");
+    expect(compiled.activeEntrypoints.skills).toContain("skills/fairness-and-boundary-review.yaml");
+    expect(compiled.installationAssets.map((asset) => asset.id).join("\n")).not.toContain("hr-retention-review");
+    expect(compiled.graph.nodes.map((node) => node.id)).not.toContain("loop.hr-retention-review");
+    expect(compiled.graph.nodes.map((node) => node.id)).not.toContain("object.retention-review-case");
+    expect(compiled.graph.edges.some((edge) => edge.source.includes("hr-retention-review") || edge.target.includes("hr-retention-review"))).toBe(false);
+  });
+
+  it("rejects a selected module when its dependency is absent", async () => {
+    const loaded = await loadLoopPackDirectory(path.resolve(process.cwd(), "packs/official/sales/qualify-route-inbound-leads"));
+    await expect(compileLoopPack(loaded, { selectedModules: ["governed-follow-up"] })).rejects.toThrow(/requires account-research/i);
+  });
+
+  it("rejects an empty composition when every loop belongs to a disabled module", async () => {
+    const loaded = await loadLoopPackDirectory(path.resolve(process.cwd(), "packs/official/hr-talent/operate-people-workflows"));
+    await expect(compileLoopPack(loaded, { selectedModules: [] })).rejects.toThrow(/at least one LoopSpec/i);
+  });
 });

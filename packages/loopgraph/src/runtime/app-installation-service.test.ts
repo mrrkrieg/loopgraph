@@ -9,6 +9,7 @@ import { AppInstallationService, installPlanBlockers } from "./app-installation-
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { callLoopgraphAppTool } from "./app-tools";
+import { readLoopgraphWorkspace } from "./workspace";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -294,6 +295,42 @@ describe("atomic app installation lifecycle", () => {
     )).rejects.toThrow("already been consumed");
   });
 
+  it("plans, materializes, and tests only the modules selected by the operator", async () => {
+    const input = await harness();
+    const plan = await input.service.plan({
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      selectedModules: ["account-research"],
+      connections: [input.connection],
+      installValues,
+      fieldMappingIds: input.mappingIds,
+      actor: "admin-1",
+      now: new Date("2026-08-08T12:00:00.000Z")
+    });
+
+    expect(installPlanBlockers(plan)).toEqual([]);
+    expect(plan.selectedModules).toEqual(["account-research"]);
+    expect(plan.assets).not.toContainEqual(expect.objectContaining({ id: "loop.sales-inbound-follow-up" }));
+    expect(plan.assets).not.toContainEqual(expect.objectContaining({ id: "skill.sales-personalized-follow-up" }));
+    expect(plan.permissions.map((permission) => permission.capability)).not.toContain("mail.message.send");
+    expect(plan.graphDiff.edgesAdded.some((edgeId) => edgeId.includes("routing-returns-to-follow-up"))).toBe(false);
+
+    const applied = await input.service.apply(plan, "admin-1", new Date("2026-08-08T12:01:00.000Z"));
+    expect(applied.loopIds).toHaveLength(5);
+    expect(applied.loopIds).not.toContain("sales-inbound-follow-up");
+    const evaluation = await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+    expect(evaluation.status).toBe("passed");
+    expect(evaluation.scenarios.find((scenario) => scenario.id === "customer-facing-action")).toMatchObject({
+      expectedAction: "unhandled",
+      actualAction: "unhandled",
+      status: "passed"
+    });
+  });
+
   it("returns an explainable read-only plan when connections, mappings, and answers are missing", async () => {
     const { projectRoot, service } = await harness();
     const plan = await service.plan({
@@ -368,6 +405,12 @@ describe("atomic app installation lifecycle", () => {
       now: new Date("2026-08-08T12:00:00.000Z")
     });
     await expect(service.apply({ ...plan, presetId: "salesforce-outlook-teams" }, "admin-1", new Date("2026-08-08T12:05:00.000Z"))).rejects.toThrow(/digest/i);
+    const tamperedComposition = {
+      ...plan,
+      selectedModules: ["account-research"],
+      planDigest: canonicalAppDigest({ ...plan, selectedModules: ["account-research"], planDigest: undefined })
+    };
+    await expect(service.apply(tamperedComposition, "admin-1", new Date("2026-08-08T12:05:00.000Z"))).rejects.toThrow(/selected module composition/i);
     await expect(service.apply(plan, "admin-1", new Date("2026-08-08T13:00:00.000Z"))).rejects.toThrow(/expired/i);
   });
 
@@ -477,14 +520,29 @@ describe("atomic app installation lifecycle", () => {
 
     const overlaid = await input.service.applyOverlay({
       installationId: applied.installation.id,
-      operations: [{ op: "set", path: "/values/qualificationThreshold", value: { qualified: 90, reviewMin: 70 } }],
+      operations: [
+        { op: "set", path: "/values/qualificationThreshold", value: { qualified: 90, reviewMin: 70 } },
+        { op: "disable_module", moduleId: "governed-follow-up" }
+      ],
       expectedArtifactDigest: applied.installation.artifactDigest,
       expectedOverlayRevision: 0,
       actor: "sales-admin",
       now: new Date("2026-08-08T12:03:00.000Z")
     });
     expect(overlaid.installation?.overlay?.revision).toBe(1);
+    expect(overlaid.installation?.selectedModules).toEqual(["account-research"]);
+    expect(overlaid.installation?.ownedAssets).not.toContainEqual(expect.objectContaining({ assetId: "loop.sales-inbound-follow-up" }));
+    expect(overlaid.installation?.permissions.map((permission) => permission.capability)).not.toContain("mail.message.send");
+    expect((await readLoopgraphWorkspace(input.projectRoot)).registeredSpecs.map((entry) => entry.id)).not.toContain("sales-inbound-follow-up");
     expect(overlaid.receipt.action).toBe("overlay");
+    await expect(input.service.applyOverlay({
+      installationId: applied.installation.id,
+      operations: [{ op: "enable_module", moduleId: "governed-follow-up" }],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedOverlayRevision: 1,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:03:30.000Z")
+    })).rejects.toThrow(/fresh install plan/i);
 
     const repaired = await input.service.repair(applied.installation.id, "sales-admin", new Date("2026-08-08T12:04:00.000Z"));
     expect(repaired.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
