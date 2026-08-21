@@ -310,7 +310,7 @@ npm run loopgraph -- apps rollback <installation-id> --expected <artifact-digest
 npm run loopgraph -- apps uninstall <installation-id> --expected <artifact-digest> --reason "Replaced by private variant" --yes
 ```
 
-Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach pins a local immutable snapshot. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence.
+Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach pins a local immutable snapshot. Rollout changes are graph transactions: activation synchronizes every LoopSpec owned by the installation to the approved routing mode, pause moves those loops back to shadow, and resume restores the last approved mode. A missing or stale owned LoopSpec fails the transition instead of leaving the App badge and runtime graph inconsistent. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence.
 
 ### Build and share a private App
 

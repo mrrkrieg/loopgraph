@@ -109,6 +109,20 @@ recheck current tenant identity, scopes, connection health, kill switches, idemp
 policy at the moment of use. Provider writes must continue through exact prepared-action approval
 and commit controls.
 
+## Rollout and graph state
+
+App rollout is not a display-only installation flag. Activating an App atomically rewrites the
+routing mode of every active LoopSpec owned by that installation through the canonical LoopSpec
+registry. Shadow and recommend modes remain non-executing routes; execute-with-approval makes the
+owned loops eligible to produce governed route jobs. Pause returns all owned LoopSpecs to shadow,
+while resume restores the last approved App mode.
+
+The transition verifies that the installation still owns a complete active LoopSpec set. Missing
+specs or routing contracts block the change. Each synchronization is revision-bound and
+content-addressed, so an exact retry is idempotent but a later pause/resume cycle creates a new graph
+transaction. The LoopSpec change is committed before the App registry state: if registry persistence
+is interrupted, the older App state remains the stricter provider-operation authority.
+
 This binding proves that a requested operation has a bounded implementation. It does not prove that
 a real provider account is healthy or that an OAuth application has been registered. Those facts
 still require live tenant onboarding, sandbox verification, webhook/transformer validation, and the

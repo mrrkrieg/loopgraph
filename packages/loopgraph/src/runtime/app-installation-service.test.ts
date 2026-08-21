@@ -10,6 +10,7 @@ import { AppInstallationService, installPlanBlockers } from "./app-installation-
 import { FileAppInstallationStore } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { callLoopgraphAppTool } from "./app-tools";
+import { FileLoopSpecRegistryStore } from "./loop-spec-store";
 import { readLoopgraphWorkspace } from "./workspace";
 
 const temporaryDirectories: string[] = [];
@@ -532,6 +533,57 @@ describe("atomic app installation lifecycle", () => {
       disposition: "invoke_read",
       binding: { providerId: "hubspot", operation: "crm.contacts.read" }
     });
+  });
+
+  it("keeps installed LoopSpec routing synchronized with App rollout, pause, and resume", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "admin-1",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const activate = async (
+      mode: "shadow" | "recommend" | "execute_with_approval",
+      approvedAt: string,
+      activatedAt: string
+    ) => {
+      const approval = await input.service.approveActivation({
+        installationId: applied.installation.id,
+        mode,
+        approvedBy: "admin-1",
+        reason: `Promote the exact tested App to ${mode}.`,
+        evidenceRefs: [evaluation.id],
+        now: new Date(approvedAt)
+      });
+      return input.service.activate(
+        applied.installation.id,
+        mode,
+        approval.id,
+        "admin-1",
+        new Date(activatedAt)
+      );
+    };
+    const routingModes = async () => {
+      const specs = await new FileLoopSpecRegistryStore(input.projectRoot).listActiveLoopSpecs(input.projectRoot);
+      return specs
+        .filter((artifact) => artifact.spec.metadata.labels?.installationId === applied.installation.id)
+        .map((artifact) => artifact.spec.routing?.activationMode);
+    };
+
+    await activate("shadow", "2026-08-08T12:03:00.000Z", "2026-08-08T12:04:00.000Z");
+    expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    await activate("recommend", "2026-08-08T12:05:00.000Z", "2026-08-08T12:06:00.000Z");
+    expect(new Set(await routingModes())).toEqual(new Set(["recommend"]));
+    await activate("execute_with_approval", "2026-08-08T12:07:00.000Z", "2026-08-08T12:08:00.000Z");
+    expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
+
+    const paused = await input.service.pause(applied.installation.id, "admin-1");
+    expect(paused).toMatchObject({ state: "paused", mode: "execute_with_approval" });
+    expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    const resumed = await input.service.resume(applied.installation.id, "admin-1");
+    expect(resumed).toMatchObject({ state: "execute_with_approval", mode: "execute_with_approval" });
+    expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
   });
 
   it("rejects missing, mismatched, expired, and replayed App activation approvals", async () => {

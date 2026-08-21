@@ -1478,6 +1478,7 @@ export class AppInstallationService {
       }
       assertLifecycleTransition(installation.state, mode, mode);
       const timestamp = now.toISOString();
+      await this.synchronizeOwnedLoopActivation(installation.id, mode, timestamp);
       const updated: WorkspaceAppInstallation = { ...installation, state: mode, mode, updatedAt: timestamp, failureReason: undefined };
       const consumedApproval = appActivationApprovalReceiptSchema.parse({ ...approval, consumedAt: timestamp, consumedBy: actor });
       const nextRegistry: AppInstallationRegistry = {
@@ -1492,11 +1493,11 @@ export class AppInstallationService {
   }
 
   async pause(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, "paused", actor, () => "paused");
+    return this.transition(installationId, actor, () => "paused");
   }
 
   async resume(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, "shadow", actor, (installation) => {
+    return this.transition(installationId, actor, (installation) => {
       if (installation.mode !== "shadow" && installation.mode !== "recommend" && installation.mode !== "execute_with_approval") {
         throw new Error("Paused installation has no safe resumable rollout mode");
       }
@@ -1657,21 +1658,80 @@ export class AppInstallationService {
 
   private async transition(
     installationId: string,
-    requestedState: WorkspaceAppInstallation["state"],
     actor: string,
     validate: (installation: WorkspaceAppInstallation, registry: AppInstallationRegistry) => WorkspaceAppInstallation["state"]
   ): Promise<WorkspaceAppInstallation> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
       const installation = requireOperableInstallation(registry, installationId);
       const state = validate(installation, registry);
-      assertLifecycleTransition(installation.state, requestedState, state);
+      assertLifecycleTransition(installation.state, state, state);
       const timestamp = new Date().toISOString();
       const mode = ["shadow", "recommend", "execute_with_approval", "live"].includes(state) ? state as AppRolloutMode : installation.mode;
+      const routingMode = state === "paused"
+        ? "shadow"
+        : state === "shadow" || state === "recommend" || state === "execute_with_approval"
+          ? state
+          : undefined;
+      if (!routingMode) throw new Error(`App state ${state} has no safe LoopSpec routing mode`);
+      await this.synchronizeOwnedLoopActivation(
+        installation.id,
+        routingMode,
+        timestamp
+      );
       const updated = { ...installation, state, mode, updatedAt: timestamp, failureReason: undefined };
       return {
         registry: { ...registry, revision: registry.revision + 1, installations: replaceInstallation(registry.installations, updated), updatedAt: timestamp },
         value: updated
       };
+    });
+  }
+
+  private async synchronizeOwnedLoopActivation(
+    installationId: string,
+    activationMode: "shadow" | "recommend" | "execute_with_approval",
+    timestamp: string
+  ): Promise<void> {
+    const snapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const loopIds = installationLoopIds(snapshot.workspace, installationId);
+    if (loopIds.length === 0) {
+      throw new Error(`App installation ${installationId} owns no active LoopSpecs`);
+    }
+    const loopIdSet = new Set(loopIds);
+    const active = (await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot))
+      .filter((artifact) => loopIdSet.has(artifact.loopId));
+    const missing = loopIds.filter((loopId) => !active.some((artifact) => artifact.loopId === loopId));
+    if (missing.length > 0) {
+      throw new Error(`App installation ${installationId} is missing active LoopSpecs: ${missing.join(", ")}`);
+    }
+    const changed = active.filter((artifact) => artifact.spec.routing?.activationMode !== activationMode);
+    if (changed.length === 0) return;
+    const artifacts = active.map((artifact) => {
+      if (!artifact.spec.routing) {
+        throw new Error(`Installed App LoopSpec ${artifact.loopId} has no Hermes routing contract`);
+      }
+      const spec = {
+        ...artifact.spec,
+        routing: { ...artifact.spec.routing, activationMode }
+      };
+      return {
+        ...artifact,
+        spec,
+        versionHash: loopSpecVersionHash(spec)
+      };
+    });
+    const identity = contentHash({
+      installationId,
+      activationMode,
+      expectedRevision: snapshot.revision,
+      versions: artifacts.map((artifact) => ({ loopId: artifact.loopId, versionHash: artifact.versionHash }))
+    });
+    await this.loopSpecStore.commitMaterializationAtomically({
+      commitId: `app-rollout-${installationId}-${identity}`,
+      idempotencyKey: `app-rollout-${identity}`,
+      expectedRevision: snapshot.revision,
+      projectRoot: this.projectRoot,
+      committedAt: timestamp,
+      artifacts
     });
   }
 
