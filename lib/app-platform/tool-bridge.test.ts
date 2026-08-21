@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getDatabase: vi.fn(),
   listInstallations: vi.fn(),
   externalBroker: { execute: vi.fn(), prepareAction: vi.fn() },
+  getExternalBroker: vi.fn(),
   activeProjectRoot: vi.fn(),
   outcomeStore: { persistence: "distributed" },
   hermesOperationsStore: {},
@@ -52,7 +53,7 @@ vi.mock("@/lib/db/workspace-database", () => ({
 }));
 vi.mock("@/lib/connector-broker/admin", () => ({
   listConnectorInstallations: mocks.listInstallations,
-  getExternalConnectorBrokerClient: vi.fn(() => mocks.externalBroker)
+  getExternalConnectorBrokerClient: mocks.getExternalBroker
 }));
 vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot: mocks.activeProjectRoot,
@@ -82,6 +83,7 @@ beforeEach(() => {
   });
   mocks.getDatabase.mockResolvedValue({});
   mocks.listInstallations.mockResolvedValue([]);
+  mocks.getExternalBroker.mockReturnValue(mocks.externalBroker);
   mocks.hasCachedArtifact.mockResolvedValue(false);
   mocks.activeProjectRoot.mockReturnValue("/srv/loopgraph/tenant/main");
   mocks.getOutcomeStore.mockReturnValue(mocks.outcomeStore);
@@ -159,6 +161,7 @@ describe("hosted app tool bridge", () => {
         },
         routingStore: mocks.routingStore,
         hermesOperationsStore: mocks.hermesOperationsStore,
+        outcomeStore: mocks.outcomeStore,
         connections: []
       });
       return { disposition: "invoke_read" };
@@ -179,6 +182,29 @@ describe("hosted app tool bridge", () => {
       organizationId: "123e4567-e89b-12d3-a456-426614174000",
       hosted: true
     }));
+  });
+
+  it("allows internal Loopgraph reads without requiring an external provider Broker", async () => {
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    mocks.getExternalBroker.mockReturnValue(undefined);
+    mocks.runtimeTool.mockImplementation(async (_name, _input, options) => {
+      expect(options.connectorBroker).toBeUndefined();
+      expect(options.connectorTenant).toEqual({
+        organizationId: "123e4567-e89b-12d3-a456-426614174000",
+        projectKey: "main"
+      });
+      return { disposition: "invoke_loopgraph_runtime" };
+    });
+
+    await callLoopgraphAppTool("loopgraph_app_operation_invoke", {
+      installationId: "installed-management-app",
+      loopId: "management-review",
+      capability: "loopgraph.topology.read",
+      routeJobId: "job-management-read",
+      agentInstanceId: "hermes-management",
+      callId: "task-read-topology-1",
+      input: { limit: 20 }
+    });
   });
 
   it("merges local and RLS-visible hosted metadata without downloading artifacts", async () => {

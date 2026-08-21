@@ -46,6 +46,12 @@ The headless endpoint requires a dedicated `hermes.app_operations` durable workl
 the tenant from verified deployment configuration; browser session authority and the broader
 provider-broker grant do not authorize this route.
 
+Bindings owned by the Loopgraph provider do not fall through to the Connector Broker. Three
+allowlisted internal reads—topology, routing decisions, and outcome/value evidence—run in a separate
+fixed registry after the same route/agent/tenant checks. They expose bounded summaries, omit raw
+provider payloads and model metadata, enforce tenant filters, reject secret-shaped input and output,
+and have no dynamic module, arbitrary file, SQL, URL, graph mutation, or action-commit mechanism.
+
 Before a provider handler runs, a tenant-scoped idempotency lease is atomically reserved. Concurrent
 duplicates return `request_in_progress`, and reuse of the key for a different actor, environment,
 company object, loop, route job, installation, capability, operation, or input returns

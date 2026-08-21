@@ -30,6 +30,10 @@ import {
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
 import { AppOperationExecutionService, type AppOperationTransport } from "./app-operation-execution";
+import {
+  LoopgraphAppRuntimeOperationRegistry,
+  type AppRuntimeOperationTransport
+} from "./app-runtime-operations";
 import { FileAppInstallationStore, type AppInstallationStore } from "./app-installation-store";
 import {
   FileAppVerificationStore,
@@ -60,7 +64,7 @@ import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
 import { getLoopgraphRoot } from "./storage-resolver";
-import type { LoopSpecRegistryStore } from "./loop-spec-store";
+import { FileLoopSpecRegistryStore, type LoopSpecRegistryStore } from "./loop-spec-store";
 import { FileCompanyContextStore, type CompanyContextStore } from "./company-context-service";
 import { ensureRemoteHostedMarketplaceArtifact } from "./hosted-marketplace-cache";
 import { deriveAppOnboardingJourney } from "./app-onboarding-journey";
@@ -553,6 +557,7 @@ export async function callLoopgraphAppTool(
     connectorBroker?: AppOperationTransport;
     connectorTenant?: ConnectorTenant;
     routingStore?: RoutingStore;
+    appRuntimeOperations?: AppRuntimeOperationTransport;
   } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
@@ -1168,14 +1173,20 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_operation_invoke") {
     const parsed = appOperationInvokeInputSchema.parse({ ...raw, projectRoot, ...identity });
-    if (!options.connectorBroker || !options.connectorTenant) {
-      throw new Error("App operation invocation requires a trusted Connector Broker transport and tenant binding");
-    }
+    const routingStore = options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
+    const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
+    const loopSpecStore = options.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
     const execution = new AppOperationExecutionService({
       appService: service,
-      routingStore: options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      routingStore,
       operationsStore: options.hermesOperationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot)),
       broker: options.connectorBroker,
+      runtime: options.appRuntimeOperations ?? new LoopgraphAppRuntimeOperationRegistry({
+        projectRoot,
+        loopSpecStore,
+        routingStore,
+        outcomeStore
+      }),
       tenant: options.connectorTenant,
       workspaceId: identity.workspaceId,
       companyId: identity.companyId,

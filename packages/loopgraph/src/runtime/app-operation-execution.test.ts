@@ -6,6 +6,8 @@ import {
   CONNECTOR_BROKER_PROTOCOL_VERSION,
   CONNECTOR_AUDIT_RECEIPT_VERSION,
   CONNECTOR_PREPARED_ACTION_VERSION,
+  APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION,
+  canonicalAppDigest,
   businessProblemSchema,
   eventReceiptSchema,
   hermesAgentInstanceSchema,
@@ -20,6 +22,7 @@ import {
   AppOperationExecutionService,
   type AppOperationTransport
 } from "./app-operation-execution";
+import type { AppRuntimeOperationTransport } from "./app-runtime-operations";
 import { FileHermesOperationsStore } from "./hermes-operations-store";
 import { FileRoutingStore } from "./routing-store";
 
@@ -107,6 +110,44 @@ describe("App operation execution", () => {
     expect(fixture.broker.execute).not.toHaveBeenCalled();
   });
 
+  it("executes an allowlisted Loopgraph runtime read through the same durable route authority", async () => {
+    const fixture = await createFixture("invoke_loopgraph_runtime", {
+      logicalCapability: "loopgraph.topology.read",
+      runtimeOperation: "graph.read",
+      omitTenant: true
+    });
+
+    const result = await fixture.service.invoke({
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "loopgraph.topology.read",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-read-topology-1",
+      input: { limit: 10 },
+      now: NOW
+    });
+
+    expect(result).toMatchObject({
+      disposition: "invoke_loopgraph_runtime",
+      runtimeResponse: {
+        operation: "graph.read",
+        status: "succeeded",
+        result: { graphHash: "graph-hash" }
+      }
+    });
+    expect(fixture.runtime.execute).toHaveBeenCalledWith(expect.objectContaining({
+      operation: "graph.read",
+      workspaceId: "workspace-sales",
+      companyId: "company-acme",
+      routeJobId: "job-sales-read",
+      companyObject: { type: "lead", id: "lead-42" },
+      input: { limit: 10 }
+    }));
+    expect(fixture.broker.execute).not.toHaveBeenCalled();
+    expect(fixture.broker.prepareAction).not.toHaveBeenCalled();
+  });
+
   it("fails closed before the broker for stale route versions and secret-shaped input", async () => {
     const stale = await createFixture("invoke_read", { routeLoopHash: "d".repeat(16) });
     await expect(stale.service.invoke({
@@ -138,12 +179,14 @@ describe("App operation execution", () => {
 });
 
 async function createFixture(
-  disposition: "invoke_read" | "prepare_action",
+  disposition: "invoke_read" | "prepare_action" | "invoke_loopgraph_runtime",
   options: {
     logicalCapability?: string;
     brokerCapability?: "provider.data.read" | "provider.action.execute";
     operation?: string;
     routeLoopHash?: string;
+    runtimeOperation?: string;
+    omitTenant?: boolean;
   } = {}
 ) {
   const root = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-operation-"));
@@ -271,7 +314,13 @@ async function createFixture(
     capability: logicalCapability,
     state: "execute_with_approval",
     mode: "execute_with_approval",
-    binding: {
+    binding: disposition === "invoke_loopgraph_runtime" ? {
+      providerId: "loopgraph",
+      providerOperation: `loopgraph.${options.runtimeOperation ?? "graph.read"}`,
+      operation: options.runtimeOperation ?? "graph.read",
+      executor: "loopgraph_runtime",
+      minimumScopes: []
+    } : {
       providerId: "hubspot",
       providerOperation: operation,
       operation,
@@ -282,8 +331,8 @@ async function createFixture(
     },
     permission: {
       capability: logicalCapability,
-      authority: disposition === "invoke_read" ? "read" : "execute",
-      decision: disposition === "invoke_read" ? "allow" : "approval_required",
+      authority: disposition === "prepare_action" ? "execute" : "read",
+      decision: disposition === "prepare_action" ? "approval_required" : "allow",
       reason: "Pinned App permission",
       changedFromInstalled: false
     },
@@ -329,15 +378,35 @@ async function createFixture(
       receipt: auditReceipt(request)
     }))
   };
+  const runtime: AppRuntimeOperationTransport = {
+    execute: vi.fn(async (request) => {
+      const base = {
+        schemaVersion: APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION,
+        requestId: request.requestId,
+        operation: request.operation,
+        status: "succeeded" as const,
+        result: { graphHash: "graph-hash" },
+        completedAt: request.now.toISOString()
+      };
+      return {
+        ...base,
+        resultDigest: canonicalAppDigest({ ...base, resultDigest: undefined })
+      };
+    })
+  };
   return {
     appService,
     broker,
+    runtime,
     service: new AppOperationExecutionService({
       appService,
       routingStore,
       operationsStore,
       broker,
-      tenant: { organizationId: ORGANIZATION_ID, projectKey: "workspace-sales" },
+      runtime,
+      ...(options.omitTenant ? {} : {
+        tenant: { organizationId: ORGANIZATION_ID, projectKey: "workspace-sales" }
+      }),
       workspaceId: "workspace-sales",
       companyId: "company-acme",
       connections: [{

@@ -121,7 +121,12 @@ Invocation fails before the Connector Broker unless all of the following remain 
   connection identity, and healthy state used by the binding; and
 - the operation input is JSON-bounded and passes the central secret boundary.
 
-A read disposition executes the exact allowlisted Broker read. A write disposition can only call
+A provider-read disposition executes the exact allowlisted Broker read. The internal
+`invoke_loopgraph_runtime` disposition enters a fixed read-only registry with exactly three current
+operations: bounded active topology, secret-free Hermes routing history, and observed outcome/value
+evidence. Each handler has a strict input schema, enforces workspace/company filters, caps record and
+response size, and returns a content-digested result. It cannot load a module, choose a file or URL,
+run SQL, or mutate graph state. A provider-write disposition can only call
 `prepareAction`, returning the immutable fingerprint that a separate approval and commit path must
 consume. This executor has no provider-write commit method and no arbitrary HTTP fallback. The
 workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
@@ -150,5 +155,6 @@ This binding and executor prove that a routed job has a bounded implementation a
 connection. They do not prove that a new OAuth application has been registered correctly or that a
 prepared write should be approved. Those facts still require live tenant onboarding, sandbox
 verification, webhook/transformer validation, and the existing staged activation and action-commit
-gates. Governed `loopgraph_runtime` operation handlers are also a separate registry; they are not
-silently treated as provider operations.
+gates. The non-read `loopgraph.graph-change.propose` operation remains behind the existing semantic
+graph proposal, review, and transaction boundary; it is not silently treated as a read or a provider
+operation.

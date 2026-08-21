@@ -43,7 +43,8 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 ]);
 
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
-  "loopgraph_app_maturity_get"
+  "loopgraph_app_maturity_get",
+  "loopgraph_app_operation_invoke"
 ]);
 
 const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
@@ -210,12 +211,9 @@ async function trustedOperationExecution(projectRoot: string) {
     throw new Error("Hosted App operation invocation requires an organization-bound workspace");
   }
   const connectorBroker = getExternalConnectorBrokerClient();
-  if (!connectorBroker) {
-    throw new Error("Hosted App operation invocation requires the external Connector Broker URL and audience");
-  }
   const projectKey = hostedWorkspaceId();
   return {
-    connectorBroker,
+    ...(connectorBroker ? { connectorBroker } : {}),
     connectorTenant: {
       organizationId,
       projectKey

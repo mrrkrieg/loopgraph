@@ -20,6 +20,7 @@ import type { HermesOperationsStore } from "./hermes-operations-store";
 import { selectHermesAgentForExecution } from "./hermes-operations-store";
 import type { RoutingStore } from "./routing-store";
 import { assertSecretFree } from "./secret-redaction";
+import type { AppRuntimeOperationTransport } from "./app-runtime-operations";
 
 const MAX_OPERATION_INPUT_BYTES = 64 * 1024;
 const ACTIVE_ROUTE_JOB_STATUSES = new Set(["claimed", "dispatched", "running"]);
@@ -53,8 +54,9 @@ export class AppOperationExecutionService {
     appService: AppInstallationService;
     routingStore: RoutingStore;
     operationsStore: HermesOperationsStore;
-    broker: AppOperationTransport;
-    tenant: ConnectorTenant;
+    broker?: AppOperationTransport;
+    runtime?: AppRuntimeOperationTransport;
+    tenant?: ConnectorTenant;
     workspaceId: string;
     companyId: string;
     connections: readonly ConnectionInstance[];
@@ -72,11 +74,18 @@ export class AppOperationExecutionService {
     if (resolution.disposition === "blocked") {
       throw new Error(`App operation is blocked: ${resolution.blockers.join("; ")}`);
     }
-    if (resolution.disposition === "invoke_loopgraph_runtime") {
-      throw new Error("Governed Loopgraph runtime operation handlers are not registered at the Connector Broker boundary");
-    }
     const binding = resolution.binding;
-    if (!binding || binding.executor !== "connector_broker" || !binding.connectionId || !binding.brokerCapability) {
+    if (!binding) {
+      throw new Error("App operation does not resolve to an executable binding");
+    }
+    if (resolution.disposition === "invoke_loopgraph_runtime") {
+      if (binding.executor !== "loopgraph_runtime" || binding.providerId !== "loopgraph" || binding.connectionId) {
+        throw new Error("App operation does not resolve to a complete Loopgraph runtime binding");
+      }
+      if (!this.dependencies.runtime) {
+        throw new Error("Governed Loopgraph runtime operation handlers are not registered");
+      }
+    } else if (binding.executor !== "connector_broker" || !binding.connectionId || !binding.brokerCapability) {
       throw new Error("App operation does not resolve to a complete Connector Broker binding");
     }
 
@@ -108,7 +117,7 @@ export class AppOperationExecutionService {
       throw new Error(`Route job ${job.id} does not require capability ${input.capability}`);
     }
     if (!["execute_with_approval", "autonomous_low_risk"].includes(job.activationMode)) {
-      throw new Error(`Route job ${job.id} activation mode ${job.activationMode} cannot invoke provider operations`);
+      throw new Error(`Route job ${job.id} activation mode ${job.activationMode} cannot invoke App operations`);
     }
     const expectedShortHash = resolution.loopVersionHash.slice("sha256:".length, "sha256:".length + 16);
     if (job.loopSpecHash !== expectedShortHash) {
@@ -133,27 +142,30 @@ export class AppOperationExecutionService {
     if (problem.subject.type !== receipt.event.subject.type || problem.subject.id !== receipt.event.subject.id) {
       throw new Error(`Business problem ${problem.id} subject does not match event ${receipt.eventId}`);
     }
-    if (agent.organizationId && agent.organizationId !== this.dependencies.tenant.organizationId) {
+    if (agent.organizationId && this.dependencies.tenant && agent.organizationId !== this.dependencies.tenant.organizationId) {
       throw new Error(`Hermes agent ${agent.id} belongs to another organization`);
     }
-    if (this.dependencies.tenant.projectKey !== this.dependencies.workspaceId) {
+    if (this.dependencies.tenant && this.dependencies.tenant.projectKey !== this.dependencies.workspaceId) {
       throw new Error("Connector tenant project does not match the App workspace");
     }
     await requireDurableHermesAssignment({
       store: this.dependencies.operationsStore,
       workspaceId: this.dependencies.workspaceId,
       companyId: this.dependencies.companyId,
-      organizationId: this.dependencies.tenant.organizationId,
+      organizationId: this.dependencies.tenant?.organizationId,
       agentInstanceId: agent.id,
       job
     });
 
-    const connection = requireCurrentBrokerConnection({
-      connections: this.dependencies.connections,
-      binding,
-      capability: input.capability
-    });
-    if (connection.brokerEnvironment !== brokerEnvironmentForRoute(job.executionTarget.environment)) {
+    const runtimeEnvironment = brokerEnvironmentForRoute(job.executionTarget.environment);
+    const connection = binding.executor === "connector_broker"
+      ? requireCurrentBrokerConnection({
+          connections: this.dependencies.connections,
+          binding,
+          capability: input.capability
+        })
+      : undefined;
+    if (connection && connection.brokerEnvironment !== runtimeEnvironment) {
       throw new Error(`Connection ${connection.id} environment does not match route job ${job.id}`);
     }
 
@@ -173,7 +185,7 @@ export class AppOperationExecutionService {
     const expiresAt = new Date(now.getTime() + 2 * 60_000).toISOString();
     const context = {
       workspaceId: this.dependencies.workspaceId,
-      environment: connection.brokerEnvironment,
+      environment: runtimeEnvironment,
       agentInstanceId: agent.id,
       companyObject: {
         type: problem.subject.type,
@@ -184,35 +196,64 @@ export class AppOperationExecutionService {
       routeJobId: job.id,
       activationMode: "execute" as const
     };
-    const envelope = {
+    const brokerTenant = binding.executor === "connector_broker"
+      ? requireConnectorTenant(this.dependencies.tenant)
+      : undefined;
+    const envelope = binding.executor === "connector_broker" ? {
       protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
       requestId,
       idempotencyKey,
-      tenant: this.dependencies.tenant,
+      tenant: brokerTenant!,
       actor: {
         type: "workload" as const,
         subject: `hermes-agent:${agent.id}`
       },
       providerId: binding.providerId,
-      installationId: binding.connectionId,
-      capability: binding.brokerCapability,
+      installationId: binding.connectionId!,
+      capability: binding.brokerCapability!,
       operation: binding.operation,
       context,
       issuedAt,
       expiresAt,
       correlationId: boundedCorrelationId(job.correlationId, requestIdentity)
-    };
+    } : undefined;
 
-    const brokerResponse = resolution.disposition === "invoke_read"
-      ? await this.dependencies.broker.execute(connectorBrokerRequestSchema.parse({ ...envelope, input: input.input }))
-      : await this.dependencies.broker.prepareAction(connectorActionPrepareRequestSchema.parse({ ...envelope, input: input.input }));
-    assertBrokerResponseMatchesRequest({
-      response: brokerResponse,
-      requestId,
-      tenant: this.dependencies.tenant,
-      envelope,
-      disposition: resolution.disposition
-    });
+    const runtimeResponse = resolution.disposition === "invoke_loopgraph_runtime"
+      ? await this.dependencies.runtime!.execute({
+          requestId,
+          operation: binding.operation,
+          input: input.input,
+          workspaceId: this.dependencies.workspaceId,
+          companyId: this.dependencies.companyId,
+          installationId: resolution.installationId,
+          appId: resolution.appId,
+          artifactDigest: resolution.artifactDigest,
+          loopId: resolution.loopId,
+          loopVersionHash: resolution.loopVersionHash,
+          capability: resolution.capability,
+          routeJobId: job.id,
+          agentInstanceId: agent.id,
+          companyObject: context.companyObject,
+          now
+        })
+      : undefined;
+    if (runtimeResponse && (runtimeResponse.requestId !== requestId || runtimeResponse.operation !== binding.operation)) {
+      throw new Error("Loopgraph runtime response does not match the routed App operation context");
+    }
+    const brokerResponse = envelope
+      ? resolution.disposition === "invoke_read"
+        ? await requireBroker(this.dependencies.broker).execute(connectorBrokerRequestSchema.parse({ ...envelope, input: input.input }))
+        : await requireBroker(this.dependencies.broker).prepareAction(connectorActionPrepareRequestSchema.parse({ ...envelope, input: input.input }))
+      : undefined;
+    if (brokerResponse && envelope && resolution.disposition !== "invoke_loopgraph_runtime") {
+      assertBrokerResponseMatchesRequest({
+        response: brokerResponse,
+        requestId,
+        tenant: brokerTenant!,
+        envelope,
+        disposition: resolution.disposition
+      });
+    }
     const completedAt = (input.now ?? new Date()).toISOString();
     const base = {
       schemaVersion: APP_OPERATION_EXECUTION_SCHEMA_VERSION,
@@ -228,9 +269,10 @@ export class AppOperationExecutionService {
       callId: input.callId,
       disposition: resolution.disposition,
       resolutionDigest: resolution.resolutionDigest,
-      requestId: brokerResponse.requestId,
+      requestId,
       idempotencyKey,
-      brokerResponse,
+      ...(brokerResponse ? { brokerResponse } : {}),
+      ...(runtimeResponse ? { runtimeResponse } : {}),
       completedAt
     };
     return appOperationExecutionResultSchema.parse({
@@ -245,7 +287,7 @@ async function requireDurableHermesAssignment(input: {
   store: HermesOperationsStore;
   workspaceId: string;
   companyId: string;
-  organizationId: string;
+  organizationId?: string;
   agentInstanceId: string;
   job: NonNullable<Awaited<ReturnType<RoutingStore["getRouteJob"]>>>;
 }) {
@@ -391,4 +433,14 @@ function assertBoundedOperationInput(input: Record<string, unknown>) {
   if (Buffer.byteLength(serialized, "utf8") > MAX_OPERATION_INPUT_BYTES) {
     throw new Error(`App operation input exceeds ${MAX_OPERATION_INPUT_BYTES} bytes`);
   }
+}
+
+function requireBroker(broker: AppOperationTransport | undefined): AppOperationTransport {
+  if (!broker) throw new Error("Connector Broker transport is not configured for this App operation");
+  return broker;
+}
+
+function requireConnectorTenant(tenant: ConnectorTenant | undefined): ConnectorTenant {
+  if (!tenant) throw new Error("Connector Broker App operations require a trusted tenant binding");
+  return tenant;
 }

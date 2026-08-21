@@ -31,6 +31,7 @@ export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operationa
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
 export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
 export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
+export const APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION = "loopgraph-app-runtime-operation-response/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -871,6 +872,20 @@ export const appOperationResolutionSchema = z.object({
   }
 });
 
+export const appRuntimeOperationResponseSchema = z.object({
+  schemaVersion: z.literal(APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION),
+  requestId: z.string().min(8).max(128),
+  operation: z.string().min(3).max(240),
+  status: z.literal("succeeded"),
+  result: z.record(z.string(), z.unknown()),
+  completedAt: isoDateTimeSchema,
+  resultDigest: artifactDigestSchema
+}).strict().superRefine((response, ctx) => {
+  if (canonicalAppDigest({ ...response, resultDigest: undefined }) !== response.resultDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resultDigest"], message: "Runtime operation result digest does not match its content" });
+  }
+});
+
 export const appOperationExecutionResultSchema = z.object({
   schemaVersion: z.literal(APP_OPERATION_EXECUTION_SCHEMA_VERSION),
   workspaceId: appIdSchema,
@@ -883,24 +898,34 @@ export const appOperationExecutionResultSchema = z.object({
   routeJobId: z.string().min(1).max(256),
   agentInstanceId: z.string().min(1).max(256),
   callId: z.string().min(1).max(160),
-  disposition: z.enum(["invoke_read", "prepare_action"]),
+  disposition: z.enum(["invoke_read", "prepare_action", "invoke_loopgraph_runtime"]),
   resolutionDigest: artifactDigestSchema,
   requestId: z.string().min(8).max(128),
   idempotencyKey: z.string().min(8).max(192),
   brokerResponse: z.union([
     connectorBrokerResponseSchema,
     connectorActionPrepareResponseSchema
-  ]),
+  ]).optional(),
+  runtimeResponse: appRuntimeOperationResponseSchema.optional(),
   completedAt: isoDateTimeSchema,
   executionDigest: artifactDigestSchema
 }).strict().superRefine((execution, ctx) => {
-  if (execution.disposition === "invoke_read" && execution.brokerResponse.status === "prepared") {
+  if (execution.disposition === "invoke_loopgraph_runtime") {
+    if (!execution.runtimeResponse || execution.brokerResponse) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["runtimeResponse"], message: "Loopgraph runtime execution requires only a runtime response" });
+    } else if (execution.runtimeResponse.requestId !== execution.requestId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requestId"], message: "Runtime response request identity does not match the execution result" });
+    }
+  } else if (!execution.brokerResponse || execution.runtimeResponse) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Connector Broker execution requires only a broker response" });
+  }
+  if (execution.disposition === "invoke_read" && execution.brokerResponse?.status === "prepared") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Read operation execution cannot return a prepared action" });
   }
-  if (execution.disposition === "prepare_action" && execution.brokerResponse.status !== "prepared") {
+  if (execution.disposition === "prepare_action" && execution.brokerResponse?.status !== "prepared") {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Action preparation must return a prepared action" });
   }
-  if (execution.brokerResponse.requestId !== execution.requestId) {
+  if (execution.brokerResponse && execution.brokerResponse.requestId !== execution.requestId) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requestId"], message: "Broker response request identity does not match the execution result" });
   }
   if (canonicalAppDigest({ ...execution, executionDigest: undefined }) !== execution.executionDigest) {
@@ -1433,6 +1458,7 @@ export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSc
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
 export type AppConnectorOperationBinding = z.infer<typeof appConnectorOperationBindingSchema>;
 export type AppOperationResolution = z.infer<typeof appOperationResolutionSchema>;
+export type AppRuntimeOperationResponse = z.infer<typeof appRuntimeOperationResponseSchema>;
 export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionResultSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
@@ -1479,6 +1505,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     AppConnectorOperationBinding: zodToJsonSchema(appConnectorOperationBindingSchema, "AppConnectorOperationBinding") as Record<string, unknown>,
     AppOperationResolution: zodToJsonSchema(appOperationResolutionSchema, "AppOperationResolution") as Record<string, unknown>,
+    AppRuntimeOperationResponse: zodToJsonSchema(appRuntimeOperationResponseSchema, "AppRuntimeOperationResponse") as Record<string, unknown>,
     AppOperationExecutionResult: zodToJsonSchema(appOperationExecutionResultSchema, "AppOperationExecutionResult") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
