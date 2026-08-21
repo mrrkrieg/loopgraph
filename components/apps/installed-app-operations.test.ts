@@ -1,17 +1,22 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { InstalledAppOperationsView } from "@/lib/app-platform/installed-app-operations";
-import { InstalledAppActivityPanel, InstalledAppOutcomesPanel } from "./installed-app-operations";
+import { InstalledAppActivityPanel, InstalledAppOutcomesPanel, InstalledAppTopologyPanel } from "./installed-app-operations";
+
+vi.mock("@/components/loop-graph-view", () => ({ LoopGraphView: () => "Installed App graph" }));
 
 describe("Installed App operations panels", () => {
   it("renders one App-owned event path, review burden, outcome, and value record", () => {
     const operations = populatedOperations();
     const html = renderToStaticMarkup(React.createElement(React.Fragment, null,
+      React.createElement(InstalledAppTopologyPanel, { operations }),
       React.createElement(InstalledAppActivityPanel, { operations }),
       React.createElement(InstalledAppOutcomesPanel, { operations })
     ));
 
+    expect(html).toContain("App operating topology");
+    expect(html).toContain("Event source");
     expect(html).toContain("Hermes activity for this App");
     expect(html).toContain("Hermes Brain → Lead Qualification");
     expect(html).toContain("waiting review");
@@ -19,6 +24,8 @@ describe("Installed App operations panels", () => {
     expect(html).toContain("12 min");
     expect(html).toContain("qualified meeting rate");
     expect(html).toContain("90 min");
+    expect(html).toContain("Open run trace");
+    expect(html).toContain("Review decision");
   });
 
   it("explains an empty installation without inserting preview activity", () => {
@@ -26,6 +33,7 @@ describe("Installed App operations panels", () => {
       activity: [],
       outcomes: [],
       valueEntries: [],
+      topology: emptyTopology(),
       summary: {
         incomingEvents: 0,
         totalRuns: 0,
@@ -66,6 +74,7 @@ function populatedOperations(): InstalledAppOperationsView {
       executionRuntime: "hermes",
       jobStatus: "waiting_review",
       runId: "run-1",
+      traceStatus: "WAITING_FOR_REVIEW",
       taskCount: 4,
       completedTaskCount: 3,
       toolCallCount: 2,
@@ -101,6 +110,20 @@ function populatedOperations(): InstalledAppOperationsView {
       hiddenCosts: { review: 10, rework: 5, botsitting: 3, escalation: 1, governance: 1 },
       recordedAt: "2026-08-20T12:15:00.000Z"
     }],
+    topology: {
+      id: "installed-app:operations",
+      title: "Installed App operating topology",
+      selectedNodeId: "installed-app:hermes",
+      nodes: [
+        { id: "installed-app:hermes", kind: "management", label: "Hermes Brain" },
+        { id: "installed-app:loop:lead-qualification", kind: "loop", label: "Lead Qualification" },
+        { id: "installed-app:source:hubspot", kind: "data_source", label: "HubSpot" }
+      ],
+      edges: [
+        { id: "source-hermes", source: "installed-app:source:hubspot", target: "installed-app:hermes", kind: "event" },
+        { id: "hermes-loop", source: "installed-app:hermes", target: "installed-app:loop:lead-qualification", kind: "routes" }
+      ]
+    },
     summary: {
       incomingEvents: 1,
       totalRuns: 1,
@@ -119,5 +142,15 @@ function populatedOperations(): InstalledAppOperationsView {
       observedCostMinutes: 20,
       lastActivityAt: "2026-08-20T12:05:00.000Z"
     }
+  };
+}
+
+function emptyTopology(): InstalledAppOperationsView["topology"] {
+  return {
+    id: "installed-app:operations",
+    title: "Installed App operating topology",
+    selectedNodeId: "installed-app:hermes",
+    nodes: [{ id: "installed-app:hermes", kind: "management", label: "Hermes Brain" }],
+    edges: []
   };
 }

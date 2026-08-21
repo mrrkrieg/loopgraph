@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AppStatusPill } from "@/components/apps/app-status-pill";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
-import { InstalledAppActivityPanel, InstalledAppOutcomesPanel } from "@/components/apps/installed-app-operations";
+import { InstalledAppActivityPanel, InstalledAppOutcomesPanel, InstalledAppTopologyPanel } from "@/components/apps/installed-app-operations";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
@@ -55,6 +55,10 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
         <ScoreCard label="Conformance" value={latestSynthetic?.status ?? "not run"} detail={latestSynthetic ? `${latestSynthetic.metrics.passed}/${latestSynthetic.metrics.total} scenarios` : "Provider writes remain blocked"} />
         <ScoreCard label="Historical preview" value={latestReplay?.status ?? "not run"} detail={latestReplay ? `${latestReplay.metrics.eventCount} events · ${latestReplay.metrics.providerWrites} writes` : "Bounded and read-only"} />
         <ScoreCard label="Mode" value={data.installation.mode.replace(/_/g, " ")} detail={`v${data.installation.version} pinned`} />
+      </div>
+
+      <div className="mt-6">
+        <InstalledAppTopologyPanel operations={data.operations} />
       </div>
 
       <div className="mt-6">

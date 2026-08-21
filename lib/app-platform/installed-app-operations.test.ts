@@ -6,7 +6,11 @@ import { buildInstalledAppOperationsView } from "./installed-app-operations";
 describe("installed App operations view", () => {
   it("scopes activity, outcomes, value, failures, and review burden to owned loops", () => {
     const result = buildInstalledAppOperationsView({
-      loopIds: ["lead-qualification", "lead-routing"],
+      loops: [
+        { id: "lead-qualification", name: "Lead Qualification" },
+        { id: "lead-routing", name: "Lead Routing" }
+      ],
+      department: "Sales",
       activity: [
         activity({ id: "run-2", eventId: "event-1", loopId: "lead-routing", jobStatus: "waiting_review", updatedAt: "2026-08-20T12:02:00.000Z" }),
         activity({ id: "run-1", eventId: "event-1", loopId: "lead-qualification", jobStatus: "completed", updatedAt: "2026-08-20T12:01:00.000Z" }),
@@ -27,6 +31,18 @@ describe("installed App operations view", () => {
     expect(result.activity.map((row) => row.id)).toEqual(["run-2", "run-1"]);
     expect(result.outcomes.map((outcome) => outcome.id)).toEqual(["qualified-meeting-rate", "modeled-qualified-meeting-rate"]);
     expect(result.valueEntries.map((entry) => entry.id)).toEqual(["lead-value"]);
+    expect(result.topology.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Hermes Brain", kind: "management" }),
+      expect.objectContaining({ label: "Lead Qualification", kind: "loop" }),
+      expect.objectContaining({ label: "HubSpot", kind: "data_source" }),
+      expect.objectContaining({ label: "1 approval", kind: "review" }),
+      expect.objectContaining({ label: "Qualified meeting rate", kind: "metric" })
+    ]));
+    expect(result.topology.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source: "installed-app:hermes", target: "installed-app:loop:lead-qualification", kind: "routes" }),
+      expect.objectContaining({ source: "installed-app:source:hubspot", target: "installed-app:hermes", kind: "event" }),
+      expect.objectContaining({ source: "installed-app:outcome:qualified-meeting-rate", target: "installed-app:hermes", kind: "learning_return" })
+    ]));
     expect(result.summary).toMatchObject({
       incomingEvents: 1,
       totalRuns: 2,
@@ -48,7 +64,7 @@ describe("installed App operations view", () => {
 
   it("never leaks global operations into an installation with no owned loops", () => {
     const result = buildInstalledAppOperationsView({
-      loopIds: [],
+      loops: [],
       activity: [activity({ id: "global", eventId: "event-global", loopId: "global-loop", jobStatus: "completed", updatedAt: "2026-08-20T12:00:00.000Z" })],
       evaluations: [],
       outcomes: [outcome("global-outcome", "global-loop")],
@@ -58,6 +74,7 @@ describe("installed App operations view", () => {
     expect(result.activity).toEqual([]);
     expect(result.outcomes).toEqual([]);
     expect(result.valueEntries).toEqual([]);
+    expect(result.topology.nodes).toEqual([expect.objectContaining({ label: "Hermes Brain" })]);
     expect(result.summary.totalRuns).toBe(0);
     expect(result.summary.routingAccuracy).toBeUndefined();
   });
