@@ -22,6 +22,7 @@ export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1a
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
 export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
+export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -75,6 +76,38 @@ export const appMaturitySchema = z.enum([
   "production_proven",
   "loopgraph_verified"
 ]);
+
+export const appMaturityEvidenceSchema = z.object({
+  schemaVersion: z.literal(APP_MATURITY_EVIDENCE_SCHEMA_VERSION),
+  artifactDigest: artifactDigestSchema,
+  basis: z.literal("synthetic_conformance"),
+  status: z.enum(["passed", "failed"]),
+  writeBlocked: z.literal(true),
+  providerWrites: z.number().int().nonnegative(),
+  scenarioCount: z.number().int().nonnegative(),
+  passedScenarioCount: z.number().int().nonnegative(),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  evaluatedAt: isoDateTimeSchema,
+  evidenceDigest: artifactDigestSchema
+}).strict().superRefine((evidence, ctx) => {
+  if (evidence.passedScenarioCount > evidence.scenarioCount) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["passedScenarioCount"], message: "Passed scenarios cannot exceed total scenarios" });
+  }
+  if (evidence.status === "passed" && (
+    evidence.scenarioCount < 13 ||
+    evidence.passedScenarioCount !== evidence.scenarioCount ||
+    evidence.providerWrites !== 0
+  )) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["status"],
+      message: "Passing maturity evidence requires all 13 safety categories to pass with zero provider writes"
+    });
+  }
+  if (canonicalAppDigest({ ...evidence, evidenceDigest: undefined }) !== evidence.evidenceDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["evidenceDigest"], message: "Maturity evidence digest does not match the recorded content" });
+  }
+});
 export const appRolloutModeSchema = z.enum([
   "simulation",
   "shadow",
@@ -391,6 +424,7 @@ export const marketplaceAppVersionSchema = z.object({
     historicalReplay: "installed_read_only"
   }),
   maturity: appMaturitySchema,
+  maturityEvidence: appMaturityEvidenceSchema.optional(),
   deprecated: z.boolean().default(false),
   deprecationMessage: z.string().min(1).optional(),
   revokedAt: isoDateTimeSchema.optional(),
@@ -1168,6 +1202,7 @@ export type LoopPackSignature = z.infer<typeof loopPackSignatureSchema>;
 export type PublisherTrustKey = z.infer<typeof publisherTrustKeySchema>;
 export type MarketplaceApp = z.infer<typeof marketplaceAppSchema>;
 export type MarketplaceAppVersion = z.infer<typeof marketplaceAppVersionSchema>;
+export type AppMaturityEvidence = z.infer<typeof appMaturityEvidenceSchema>;
 export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSourceSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
@@ -1208,6 +1243,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     LoopPackSignature: zodToJsonSchema(loopPackSignatureSchema, "LoopPackSignature") as Record<string, unknown>,
     PublisherTrustKey: zodToJsonSchema(publisherTrustKeySchema, "PublisherTrustKey") as Record<string, unknown>,
     MarketplaceArtifactSource: zodToJsonSchema(marketplaceArtifactSourceSchema, "MarketplaceArtifactSource") as Record<string, unknown>,
+    AppMaturityEvidence: zodToJsonSchema(appMaturityEvidenceSchema, "AppMaturityEvidence") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,

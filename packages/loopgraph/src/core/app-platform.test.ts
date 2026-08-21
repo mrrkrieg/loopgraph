@@ -3,11 +3,13 @@ import {
   APP_CONFIGURATION_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
+  APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
   appInstallationLockSchema,
+  appMaturityEvidenceSchema,
   appPlatformJsonSchemas,
   assertSafeInitialRollout,
   canonicalAppDigest,
@@ -147,6 +149,29 @@ describe("Loopgraph App Platform contracts", () => {
   it("produces order-independent canonical digests", () => {
     expect(canonicalAppDigest({ a: 1, b: 2 })).toBe(canonicalAppDigest({ b: 2, a: 1 }));
     expect(canonicalAppDigest({ a: 1 })).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it("binds tested maturity to complete zero-write evidence for one exact artifact", () => {
+    const body = {
+      schemaVersion: APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+      artifactDigest: digest("app"),
+      basis: "synthetic_conformance" as const,
+      status: "passed" as const,
+      writeBlocked: true as const,
+      providerWrites: 0,
+      scenarioCount: 13,
+      passedScenarioCount: 13,
+      evidenceRefs: ["eval-suite:required-safety"],
+      evaluatedAt: now
+    };
+    const evidence = appMaturityEvidenceSchema.parse({
+      ...body,
+      evidenceDigest: canonicalAppDigest({ ...body, evidenceDigest: undefined })
+    });
+    expect(evidence.status).toBe("passed");
+    expect(() => appMaturityEvidenceSchema.parse({ ...evidence, providerWrites: 1 })).toThrow();
+    expect(() => appMaturityEvidenceSchema.parse({ ...evidence, scenarioCount: 12, passedScenarioCount: 12 })).toThrow(/13 safety categories/i);
+    expect(() => appMaturityEvidenceSchema.parse({ ...evidence, evidenceDigest: digest("tampered") })).toThrow(/digest/i);
   });
 
   it("requires signed catalogs to carry exact publisher trust material instead of a key label alone", () => {
