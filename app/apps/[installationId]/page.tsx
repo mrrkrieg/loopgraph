@@ -49,7 +49,8 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
         <AppOnboardingProgress compact journey={appOnboardingProgressForView(data.onboardingJourney)} />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <ScoreCard label="Maturity" value={data.maturity.maturity.replace(/_/g, " ")} detail="Evidence-derived ceiling" />
         <ScoreCard label="Readiness" value={`${data.readiness.score}%`} detail={data.readiness.state.replace(/_/g, " ")} />
         <ScoreCard label="Configured stack" value={data.detail.manifest.presets.find((preset) => preset.id === data.installation.presetId)?.name ?? data.installation.presetId} detail={`${Object.keys(data.installation.connectionBindings).length} capability bindings`} />
         <ScoreCard label="Conformance" value={latestSynthetic?.status ?? "not run"} detail={latestSynthetic ? `${latestSynthetic.metrics.passed}/${latestSynthetic.metrics.total} scenarios` : "Provider writes remain blocked"} />
@@ -67,6 +68,22 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="min-w-0 space-y-6">
+          <SectionCard title="Operational maturity" description="Maturity cannot skip a gate. Each level is tied to evidence from this exact installed artifact; catalog signatures and publisher claims do not count as production proof.">
+            <div className="space-y-3">
+              {data.maturity.gates.map((gate) => (
+                <div className={`rounded-md border p-4 ${gate.status === "achieved" ? "border-emerald-200 bg-emerald-50" : "border-line bg-paper/40"}`} key={gate.level}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-semibold capitalize">{gate.level.replace(/_/g, " ")}</div>
+                    <span className={`text-xs font-semibold uppercase tracking-[0.1em] ${gate.status === "achieved" ? "text-emerald-700" : "text-orange-700"}`}>{gate.status}</span>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-ink/65">{gate.summary}</p>
+                  {gate.remediation ? <p className="mt-2 text-xs leading-5 text-orange-800">Next: {gate.remediation}</p> : null}
+                  {gate.evidenceRefs.length > 0 ? <details className="mt-3 text-xs text-ink/45"><summary className="cursor-pointer font-semibold">Evidence ({gate.evidenceRefs.length})</summary><div className="mt-2 space-y-1 font-mono">{gate.evidenceRefs.map((reference) => <div className="break-all" key={reference}>{reference}</div>)}</div></details> : null}
+                </div>
+              ))}
+            </div>
+          </SectionCard>
+
           <SectionCard title="Readiness checks" description="Promotion is evidence-derived. A downloaded or installed app is never automatically eligible to receive live work.">
             <div className="space-y-3">{data.readiness.checks.map((check) => <div className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-[8rem_minmax(0,1fr)_5rem]" key={check.id}><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{check.category}</div><div className="text-sm text-ink/70">{check.summary}</div><div className={`text-right text-xs font-semibold uppercase ${check.status === "pass" ? "text-emerald-700" : check.status === "fail" ? "text-red-700" : "text-orange-700"}`}>{check.status}</div></div>)}</div>
           </SectionCard>

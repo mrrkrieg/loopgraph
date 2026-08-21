@@ -1242,12 +1242,55 @@ export class AppInstallationService {
   async readiness(installationId: string, now = new Date()): Promise<AppReadiness> {
     const registry = await this.installationStore.read();
     const installation = requireInstallation(registry, installationId);
-    const latestEval = [...registry.evaluations].reverse().find((run) => run.installationId === installationId);
+    const loaded = await this.loadInstallationArtifact(installation);
+    const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
+    const activeCapabilities = compiledCapabilityKeys(compiled);
+    const requiredCapabilities = new Set([
+      ...loaded.manifest.requiredCapabilities.filter((capability) => activeCapabilities.has(capability)),
+      ...compiled.loopSpecs.flatMap((spec) => spec.routing?.requiredConnections ?? [])
+    ]);
+    const missingCapabilities = [...requiredCapabilities].filter((capability) => !installation.connectionBindings[capability]).sort();
+    const preset = loaded.manifest.presets.find((candidate) => candidate.id === installation.presetId);
+    const presetDocument = preset ? await readPackYaml(loaded.root, preset.path) : undefined;
+    const recipeId = isRecord(presetDocument) && typeof presetDocument.recipe === "string" ? presetDocument.recipe : installation.presetId;
+    const recipe = (await loadConnectorRecipes(loaded)).find((candidate) => candidate.id === recipeId);
+    const mappingsRequired = Boolean(recipe?.fieldMappings.some((mapping) => mapping.requiredLogicalFields.length > 0));
+    const exactEvaluations = registry.evaluations.filter((run) =>
+      run.installationId === installationId && run.artifactDigest === installation.artifactDigest);
+    const latestSynthetic = [...exactEvaluations].reverse().find((run) => run.level === "synthetic");
+    const syntheticPassed = latestSynthetic?.status === "passed" &&
+      latestSynthetic.writeBlocked &&
+      latestSynthetic.metrics.providerWrites === 0;
+    const connectionsPassed = requiredCapabilities.size > 0 && missingCapabilities.length === 0;
+    const mappingsPassed = !mappingsRequired || installation.fieldMappingIds.length > 0;
     const checks: AppReadiness["checks"] = [
       { id: "artifact", category: "artifact", status: "pass", summary: "Pinned artifact version and digest are recorded.", evidenceRefs: [installation.artifactDigest] },
-      { id: "connections", category: "connection", status: Object.keys(installation.connectionBindings).length > 0 ? "pass" : "fail", summary: Object.keys(installation.connectionBindings).length > 0 ? "Required connections are bound." : "No provider connections are bound.", evidenceRefs: Object.values(installation.connectionBindings) },
+      {
+        id: "connections",
+        category: "connection",
+        status: requiredCapabilities.size === 0 ? "not_applicable" : connectionsPassed ? "pass" : "fail",
+        summary: requiredCapabilities.size === 0
+          ? "This selected composition declares no required provider capability."
+          : connectionsPassed
+            ? `All ${requiredCapabilities.size} required logical capabilities are bound.`
+            : `Missing required capability bindings: ${missingCapabilities.join(", ")}.`,
+        evidenceRefs: [...new Set(Object.values(installation.connectionBindings))],
+        ...(!connectionsPassed && requiredCapabilities.size > 0 ? { remediation: "Reconnect or re-plan the App with every required logical capability." } : {})
+      },
+      {
+        id: "mappings",
+        category: "mapping",
+        status: mappingsRequired ? mappingsPassed ? "pass" : "fail" : "not_applicable",
+        summary: mappingsRequired
+          ? mappingsPassed
+            ? `${installation.fieldMappingIds.length} confirmed field mapping record(s) are bound.`
+            : "The selected connector recipe requires confirmed field mappings."
+          : "The selected connector recipe declares no required field mappings.",
+        evidenceRefs: installation.fieldMappingIds,
+        ...(!mappingsPassed ? { remediation: "Inspect the provider schema and explicitly confirm every required logical field mapping." } : {})
+      },
       { id: "configuration", category: "configuration", status: installation.configuration.completedAt ? "pass" : "fail", summary: installation.configuration.completedAt ? "Required configuration is complete." : "Configuration is incomplete.", evidenceRefs: [] },
-      { id: "simulation", category: "simulation", status: latestEval?.status === "passed" ? "pass" : latestEval ? "fail" : "warn", summary: latestEval?.status === "passed" ? "Latest conformance run passed." : "A passing conformance run is required.", evidenceRefs: latestEval ? [latestEval.id] : [] },
+      { id: "simulation", category: "simulation", status: syntheticPassed ? "pass" : latestSynthetic ? "fail" : "warn", summary: syntheticPassed ? "Latest exact-digest synthetic conformance run passed with writes blocked." : "A passing exact-digest synthetic conformance run is required.", evidenceRefs: latestSynthetic ? [latestSynthetic.id] : [] },
       { id: "permissions", category: "permission", status: installation.permissions.some((permission) => permission.decision === "unresolved") ? "fail" : "pass", summary: "Permission decisions are explicit and provider execution was not enabled by install.", evidenceRefs: [] }
     ];
     const failureCount = checks.filter((check) => check.status === "fail").length;
@@ -1258,7 +1301,7 @@ export class AppInstallationService {
       installationId,
       state,
       score: Math.round((passCount / checks.length) * 100),
-      maturity: latestEval?.status === "passed" ? "tested" : "concept",
+      maturity: syntheticPassed && connectionsPassed && mappingsPassed ? "connected" : syntheticPassed ? "tested" : "concept",
       checks,
       evaluatedAt: now.toISOString(),
       evidenceDerived: true

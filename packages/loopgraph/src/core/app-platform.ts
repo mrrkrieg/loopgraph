@@ -23,6 +23,8 @@ export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
 export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
+export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
+export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -106,6 +108,70 @@ export const appMaturityEvidenceSchema = z.object({
   }
   if (canonicalAppDigest({ ...evidence, evidenceDigest: undefined }) !== evidence.evidenceDigest) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["evidenceDigest"], message: "Maturity evidence digest does not match the recorded content" });
+  }
+});
+
+export const appIndependentVerificationReceiptSchema = z.object({
+  schemaVersion: z.literal(APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION),
+  id: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  verifierId: z.string().min(1).max(300),
+  verifierType: z.enum(["loopgraph", "accredited_third_party"]),
+  status: z.enum(["passed", "failed"]),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).min(1).max(100),
+  verifiedAt: isoDateTimeSchema,
+  verificationDigest: artifactDigestSchema,
+  signature: z.object({
+    algorithm: z.literal("ed25519"),
+    keyId: appIdSchema,
+    value: z.string().min(32)
+  }).strict()
+}).strict().superRefine((receipt, ctx) => {
+  if (canonicalAppDigest({ ...receipt, verificationDigest: undefined, signature: undefined }) !== receipt.verificationDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["verificationDigest"], message: "Independent verification digest does not match the recorded content" });
+  }
+});
+
+export const appVerifierTrustKeySchema = z.object({
+  verifierId: z.string().min(1).max(300),
+  keyId: appIdSchema,
+  algorithm: z.literal("ed25519"),
+  publicKey: z.string().min(32),
+  revokedAt: isoDateTimeSchema.optional()
+}).strict();
+
+const appOperationalMaturityGateSchema = z.object({
+  level: appMaturitySchema.exclude(["concept"]),
+  status: z.enum(["achieved", "blocked"]),
+  summary: z.string().min(1).max(1000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  remediation: z.string().min(1).max(1000).optional()
+}).strict();
+
+export const appOperationalMaturityAssessmentSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATIONAL_MATURITY_SCHEMA_VERSION),
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  maturity: appMaturitySchema,
+  gates: z.array(appOperationalMaturityGateSchema).length(4),
+  evaluatedAt: isoDateTimeSchema,
+  evidenceDerived: z.literal(true)
+}).strict().superRefine((assessment, ctx) => {
+  const levels = ["tested", "connected", "production_proven", "loopgraph_verified"] as const;
+  if (assessment.gates.some((gate, index) => gate.level !== levels[index])) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gates"], message: "Operational maturity gates must be complete and ordered" });
+    return;
+  }
+  let expected: typeof assessment.maturity = "concept";
+  for (const gate of assessment.gates) {
+    if (gate.status !== "achieved") break;
+    expected = gate.level;
+  }
+  if (assessment.maturity !== expected) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maturity"], message: `Operational maturity must equal the highest consecutively achieved gate (${expected})` });
   }
 });
 export const appRolloutModeSchema = z.enum([
@@ -1203,6 +1269,9 @@ export type PublisherTrustKey = z.infer<typeof publisherTrustKeySchema>;
 export type MarketplaceApp = z.infer<typeof marketplaceAppSchema>;
 export type MarketplaceAppVersion = z.infer<typeof marketplaceAppVersionSchema>;
 export type AppMaturityEvidence = z.infer<typeof appMaturityEvidenceSchema>;
+export type AppIndependentVerificationReceipt = z.infer<typeof appIndependentVerificationReceiptSchema>;
+export type AppVerifierTrustKey = z.infer<typeof appVerifierTrustKeySchema>;
+export type AppOperationalMaturityAssessment = z.infer<typeof appOperationalMaturityAssessmentSchema>;
 export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSourceSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
@@ -1244,6 +1313,9 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     PublisherTrustKey: zodToJsonSchema(publisherTrustKeySchema, "PublisherTrustKey") as Record<string, unknown>,
     MarketplaceArtifactSource: zodToJsonSchema(marketplaceArtifactSourceSchema, "MarketplaceArtifactSource") as Record<string, unknown>,
     AppMaturityEvidence: zodToJsonSchema(appMaturityEvidenceSchema, "AppMaturityEvidence") as Record<string, unknown>,
+    AppIndependentVerificationReceipt: zodToJsonSchema(appIndependentVerificationReceiptSchema, "AppIndependentVerificationReceipt") as Record<string, unknown>,
+    AppVerifierTrustKey: zodToJsonSchema(appVerifierTrustKeySchema, "AppVerifierTrustKey") as Record<string, unknown>,
+    AppOperationalMaturityAssessment: zodToJsonSchema(appOperationalMaturityAssessmentSchema, "AppOperationalMaturityAssessment") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,

@@ -7,6 +7,7 @@ import type {
   AppOnboardingJourney,
   AppInstallationLock,
   AppLifecycleReceipt,
+  AppOperationalMaturityAssessment,
   AppPromotionRecommendation,
   AppReadiness,
   AppUpdatePlan,
@@ -19,6 +20,7 @@ import type {
   MarketplaceAppVersion,
   WorkspaceAppInstallation
 } from "loopgraph/core";
+import { assessAppOperationalMaturity } from "loopgraph/runtime";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import { getInstalledAppEvidenceData } from "@/lib/app-platform/installed-app-evidence-data";
 import {
@@ -390,6 +392,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   installedLoops: Array<{ id: string; name: string; path: string }>;
   onboardingJourney: AppOnboardingJourney;
   operations: InstalledAppOperationsView;
+  maturity: AppOperationalMaturityAssessment;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const installed = await callLoopgraphAppTool("loopgraph_app_install_status", {
@@ -431,6 +434,28 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
         actor: "loopgraph-browser"
       }) as AppUpdatePlan
     : undefined;
+  const operations = buildInstalledAppOperationsView({
+    app: {
+      id: detail.app.id,
+      name: detail.app.name,
+      department: detail.app.department
+    },
+    loops: installedLoops,
+    activity: agentOperations.data.activity,
+    evaluations,
+    outcomes: evidence.outcomes,
+    valueEntries: evidence.valueEntries
+  });
+  const maturity = assessAppOperationalMaturity({
+    installation,
+    readiness,
+    evaluations,
+    operatingEvidence: {
+      completedRunRefs: operations.activity.filter((row) => row.jobStatus === "completed").map((row) => `run:${row.runId}`),
+      observedOutcomeRefs: operations.outcomes.filter((outcome) => outcome.truthStatus === "observed").map((outcome) => `outcome:${outcome.id}`),
+      observedValueRefs: operations.valueEntries.filter((entry) => entry.truthStatus === "observed").map((entry) => `value:${entry.id}`)
+    }
+  });
   return {
     installation,
     readiness,
@@ -442,17 +467,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     lifecycleReceipts: installed.lifecycleReceipts.filter((receipt) => receipt.installationId === installationId),
     installedLoops,
     onboardingJourney,
-    operations: buildInstalledAppOperationsView({
-      app: {
-        id: detail.app.id,
-        name: detail.app.name,
-        department: detail.app.department
-      },
-      loops: installedLoops,
-      activity: agentOperations.data.activity,
-      evaluations,
-      outcomes: evidence.outcomes,
-      valueEntries: evidence.valueEntries
-    })
+    operations,
+    maturity
   };
 }
