@@ -37,7 +37,7 @@ Marketplace metadata cannot prove that an app is installed. An installation reco
 
 The Installed App operating view therefore performs an explicit ownership join rather than copying global operations into an application page. The installation registry supplies the exact generated runtime loop IDs; recent Hermes event/run activity, outcome evaluations, and value-ledger entries are admitted only when their `loopId` belongs to that set. Routing accuracy and review burden come from the latest human-labeled historical replay for the same installation. An empty ownership set must return an empty operating view, never all workspace activity.
 
-The application topology is a bounded projection of that same join, not a second source of truth. It always contains Hermes Brain and the installation-owned loops, then adds only the latest runtime evidence per loop: event source, executing agent, run/task state, approval gate, and durable outcome. Outcome edges return to Hermes as learning evidence. Run and review links are emitted only from persisted trace or waiting-review identities; graph interaction cannot itself execute work or change the installation.
+The application topology is a bounded projection of that same join, not a second source of truth. It always contains Hermes Brain → accountable department → Installed App → installation-owned loops, then adds only the latest runtime evidence per loop: event source, executing agent, run/task state, approval gate, and durable outcome. Outcome edges return to Hermes as learning evidence. Run and review links are emitted only from persisted trace or waiting-review identities; graph interaction cannot itself execute work or change the installation.
 
 ## Trust and safety boundary
 

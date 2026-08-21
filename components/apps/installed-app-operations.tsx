@@ -1,22 +1,23 @@
 import React from "react";
 import Link from "next/link";
-import { LoopGraphView } from "@/components/loop-graph-view";
+import { InstalledAppTopologyGraph } from "@/components/apps/installed-app-topology-graph";
 import { SectionCard } from "@/components/section-card";
 import type { InstalledAppOperationsView } from "@/lib/app-platform/installed-app-operations";
 
 export function InstalledAppTopologyPanel({ operations }: { operations: InstalledAppOperationsView }) {
   return (
-    <SectionCard title="App operating topology" description="The installed contract and its recent evidence in one bounded graph: event sources feed Hermes Brain, Hermes routes to App-owned loops, agents execute runs, approvals gate work, and durable outcomes return as learning evidence.">
+    <SectionCard title="App operating topology" description="The installed contract and its recent evidence in one bounded graph: event sources feed Hermes Brain, Hermes routes through the accountable department and Installed App into owned loops, agents execute runs, approvals gate work, and durable outcomes return as learning evidence.">
       <div className="mb-4 flex flex-wrap gap-2 text-xs text-ink/55">
         <TopologyLegend label="Event source" tone="source" />
         <TopologyLegend label="Hermes Brain" tone="brain" />
+        <TopologyLegend label="Department / App" tone="structure" />
         <TopologyLegend label="Owned loop" tone="department" />
         <TopologyLegend label="Agent / work" tone="work" />
         <TopologyLegend label="Approval" tone="approval" />
         <TopologyLegend label="Outcome" tone="outcome" />
       </div>
       <div className="overflow-hidden rounded-lg border border-line bg-white">
-        <LoopGraphView graph={operations.topology} height={460} interactive showToggles={false} variant="template" />
+        <InstalledAppTopologyGraph graph={operations.topology} />
       </div>
       <p className="mt-3 text-xs leading-5 text-ink/50">This is not a Marketplace sample or a company-wide graph. It contains the exact loops owned by this installation plus the latest App-scoped runtime evidence. Select or move nodes to inspect the relationship, then use the activity rows below to open a durable trace.</p>
     </SectionCard>
@@ -111,7 +112,7 @@ export function InstalledAppOutcomesPanel({ operations }: { operations: Installe
 }
 
 function OperationsMetric({ label, value, detail, tone = "default" }: { label: string; value: string; detail: string; tone?: "default" | "attention" | "danger" }) { return <div className={`rounded-md border p-3 ${tone === "danger" ? "border-red-200 bg-red-50" : tone === "attention" ? "border-orange-200 bg-orange-50" : "border-line bg-paper"}`}><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold">{value}</div><div className="mt-1 text-xs text-ink/50">{detail}</div></div>; }
-function TopologyLegend({ label, tone }: { label: string; tone: "source" | "brain" | "department" | "work" | "approval" | "outcome" }) { const toneClass = { source: "bg-stone-500", brain: "bg-ink", department: "bg-gradient-to-br from-orange-500 via-blue-500 to-emerald-500", work: "bg-gradient-to-br from-amber-600 to-orange-500", approval: "bg-teal-700", outcome: "bg-emerald-600" }[tone]; return <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1"><span className={`h-2 w-2 rounded-full ${toneClass}`} />{label}</span>; }
+function TopologyLegend({ label, tone }: { label: string; tone: "source" | "brain" | "structure" | "department" | "work" | "approval" | "outcome" }) { const toneClass = { source: "bg-stone-500", brain: "bg-ink", structure: "bg-stone-600", department: "bg-gradient-to-br from-orange-500 via-blue-500 to-emerald-500", work: "bg-gradient-to-br from-amber-600 to-orange-500", approval: "bg-teal-700", outcome: "bg-emerald-600" }[tone]; return <span className="inline-flex items-center gap-1.5 rounded-full border border-line px-2.5 py-1"><span className={`h-2 w-2 rounded-full ${toneClass}`} />{label}</span>; }
 function OutcomeFact({ label, value }: { label: string; value: string }) { return <div className="rounded-md bg-paper p-2"><div className="font-semibold">{value}</div><div className="mt-1 text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div></div>; }
 function formatMinutes(value: number) { const rounded = Math.round(value * 10) / 10; return `${rounded.toLocaleString()} min`; }
 function formatActivityDate(value: string) { return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }

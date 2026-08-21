@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { InstalledAppOperationsView } from "@/lib/app-platform/installed-app-operations";
 import { InstalledAppActivityPanel, InstalledAppOutcomesPanel, InstalledAppTopologyPanel } from "./installed-app-operations";
 
-vi.mock("@/components/loop-graph-view", () => ({ LoopGraphView: () => "Installed App graph" }));
+vi.mock("@/components/apps/installed-app-topology-graph", () => ({ InstalledAppTopologyGraph: () => "Installed App graph" }));
 
 describe("Installed App operations panels", () => {
   it("renders one App-owned event path, review burden, outcome, and value record", () => {

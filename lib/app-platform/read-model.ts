@@ -432,8 +432,12 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     installedLoops,
     onboardingJourney,
     operations: buildInstalledAppOperationsView({
+      app: {
+        id: detail.app.id,
+        name: detail.app.name,
+        department: detail.app.department
+      },
       loops: installedLoops,
-      department: detail.app.department,
       activity: agentOperations.data.activity,
       evaluations,
       outcomes: evidence.outcomes,

@@ -33,8 +33,8 @@ export type InstalledAppOperationsView = {
 };
 
 export function buildInstalledAppOperationsView(input: {
+  app: { id: string; name: string; department: string };
   loops: Array<{ id: string; name: string }>;
-  department?: string;
   activity: AgentOperationsActivityRow[];
   evaluations: AppEvalRun[];
   outcomes: OutcomeView[];
@@ -64,7 +64,7 @@ export function buildInstalledAppOperationsView(input: {
     activity,
     outcomes,
     valueEntries,
-    topology: buildInstalledAppOperationsTopology({ loops: input.loops, department: input.department, activity, outcomes }),
+    topology: buildInstalledAppOperationsTopology({ app: input.app, loops: input.loops, activity, outcomes }),
     summary: {
       incomingEvents: new Set(activity.map((row) => row.eventId)).size,
       totalRuns: activity.length,
@@ -87,8 +87,8 @@ export function buildInstalledAppOperationsView(input: {
 }
 
 export function buildInstalledAppOperationsTopology(input: {
+  app: { id: string; name: string; department: string };
   loops: Array<{ id: string; name: string }>;
-  department?: string;
   activity: AgentOperationsActivityRow[];
   outcomes: OutcomeView[];
 }): LoopGraphVisual {
@@ -103,6 +103,27 @@ export function buildInstalledAppOperationsTopology(input: {
     weight: 6,
     metadata: { runtimeKind: "hermes_brain" }
   });
+  const departmentNodeId = `installed-app:department:${normalizeTopologyId(input.app.department)}`;
+  const appNodeId = `installed-app:app:${normalizeTopologyId(input.app.id)}`;
+  nodes.set(departmentNodeId, {
+    id: departmentNodeId,
+    kind: "department",
+    label: humanizeTopologyLabel(input.app.department),
+    subtitle: "Accountable department",
+    weight: 5,
+    metadata: { department: input.app.department, runtimeKind: "department" }
+  });
+  nodes.set(appNodeId, {
+    id: appNodeId,
+    kind: "rollup",
+    label: "Installed App",
+    subtitle: input.app.name,
+    department: normalizeDepartment(input.app.department),
+    weight: 5,
+    metadata: { appId: input.app.id, runtimeKind: "installed_app" }
+  });
+  addTopologyEdge(edges, brainId, departmentNodeId, "routes", "routes");
+  addTopologyEdge(edges, departmentNodeId, appNodeId, "owns", "owns");
 
   for (const loop of [...input.loops].sort((left, right) => left.name.localeCompare(right.name))) {
     const loopNodeId = topologyLoopId(loop.id);
@@ -111,11 +132,11 @@ export function buildInstalledAppOperationsTopology(input: {
       kind: "loop",
       label: loop.name,
       subtitle: "Installed App loop",
-      department: normalizeDepartment(input.department),
+      department: normalizeDepartment(input.app.department),
       weight: 4,
       metadata: { loopId: loop.id, runtimeKind: "loop" }
     });
-    addTopologyEdge(edges, brainId, loopNodeId, "routes", "routes");
+    addTopologyEdge(edges, appNodeId, loopNodeId, "contains", "contains");
   }
 
   const latestActivityByLoop = new Map<string, AgentOperationsActivityRow>();
