@@ -158,7 +158,7 @@ export class AppInstallationService {
     this.loopSpecStore = dependencies.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
   }
 
-  async plan(input: PlanAppInstallationInput): Promise<AppInstallPlan> {
+  async plan(input: PlanAppInstallationInput, options: { replacingInstallationId?: string } = {}): Promise<AppInstallPlan> {
     this.assertTenant(input);
     const now = input.now ?? new Date();
     const version = await this.marketplace.resolveAppVersion(input.appId, input.versionRange ?? "latest");
@@ -216,25 +216,54 @@ export class AppInstallationService {
     const createdAt = now.toISOString();
     const expiresAt = new Date(now.getTime() + 30 * 60_000).toISOString();
     const installationId = installationIdFor(input.workspaceId, input.appId);
-    const assets = compilePlannedAssets(compiled, installationId);
+    const candidateAssets: AppInstallPlan["assets"] = [
+      ...compilePlannedAssets(compiled, installationId),
+      ...capabilityResolutions.flatMap((resolution) => resolution.connectionId ? [{
+        id: `connection-binding.${contentHash({ capability: resolution.capability, connectionId: resolution.connectionId }).slice(0, 32)}`,
+        kind: "connection_binding" as const,
+        action: "reuse" as const,
+        digest: canonicalAppDigest({ capability: resolution.capability, connectionId: resolution.connectionId, recipeId: resolution.recipeId }),
+        shared: true,
+        dependencies: []
+      }] : []),
+      ...selectedMappings.map((mapping) => ({
+        id: `field-mapping.${mapping.id}`,
+        kind: "field_mapping" as const,
+        action: "reuse" as const,
+        digest: canonicalAppDigest(mapping),
+        shared: true,
+        dependencies: []
+      }))
+    ];
     const existingRegistry = await this.installationStore.read();
     const existingAssetById = new Map(existingRegistry.assets.map((asset) => [asset.assetId, asset]));
     const conflicts: AppInstallPlan["conflicts"] = [];
-    for (const asset of assets.filter((candidate) => candidate.kind === "graph_node" && candidate.shared)) {
+    const assets = candidateAssets.map((asset): AppInstallPlan["assets"][number] => {
       const existing = existingAssetById.get(asset.id);
-      if (existing && existing.digest !== asset.digest) {
-        conflicts.push({
-          kind: "shared_company_object",
-          resourceId: asset.id,
-          reason: "The installed shared company object has a different immutable contract. Resolve the object identity or schema before installing this App.",
-          currentDigest: existing.digest,
-          proposedDigest: asset.digest,
-          blocking: true
-        });
+      if (!existing) return asset;
+      if (existing.digest === asset.digest) return { ...asset, action: "reuse", shared: true };
+      if (options.replacingInstallationId && existing.ownerInstallationIds.every((ownerId) => ownerId === options.replacingInstallationId)) {
+        return { ...asset, action: "update" };
       }
-    }
+      const kind = asset.kind === "loop_spec"
+        ? "duplicate_loop" as const
+        : asset.kind === "graph_node" && asset.shared
+          ? "shared_company_object" as const
+          : asset.kind === "graph_node" || asset.kind === "graph_edge"
+            ? "graph" as const
+            : "asset_contract" as const;
+      conflicts.push({
+        kind,
+        resourceId: asset.id,
+        reason: installAssetConflictReason(kind),
+        currentDigest: existing.digest,
+        proposedDigest: asset.digest,
+        blocking: true
+      });
+      return { ...asset, action: "update" };
+    });
     const installationScopedGraphNodes = compiled.graph.nodes.filter((node) => node.installationScoped);
-    const conflictedGraphAssetIds = new Set(conflicts.map((conflict) => conflict.resourceId));
+    const plannedAssetById = new Map(assets.map((asset) => [asset.id, asset]));
     const permissions = loaded.manifest.permissions.map((permission) => ({
       capability: permission.capability,
       authority: permission.authority,
@@ -273,13 +302,15 @@ export class AppInstallationService {
       assets,
       graphDiff: {
         nodesAdded: installationScopedGraphNodes
-          .filter((node) => !existingAssetById.has(`graph-node.${node.id}`))
+          .filter((node) => plannedAssetById.get(`graph-node.${node.id}`)?.action === "create")
           .map((node) => node.id),
         nodesReused: [
-          ...compiled.graph.nodes.filter((node) => !node.installationScoped && !conflictedGraphAssetIds.has(`graph-node.${node.id}`)),
-          ...installationScopedGraphNodes.filter((node) => existingAssetById.has(`graph-node.${node.id}`) && !conflictedGraphAssetIds.has(`graph-node.${node.id}`))
+          ...compiled.graph.nodes.filter((node) => !node.installationScoped),
+          ...installationScopedGraphNodes.filter((node) => plannedAssetById.get(`graph-node.${node.id}`)?.action === "reuse")
         ].map((node) => node.id),
-        edgesAdded: compiled.graph.edges.map((edge) => edge.id),
+        edgesAdded: compiled.graph.edges
+          .filter((edge) => plannedAssetById.get(`graph-edge.${edge.id}`)?.action === "create")
+          .map((edge) => edge.id),
         edgesRemoved: []
       },
       conflicts,
@@ -312,7 +343,7 @@ export class AppInstallationService {
       await initLoopgraphWorkspace({ projectRoot: this.projectRoot });
       const workspaceBefore = await readLoopgraphWorkspace(this.projectRoot);
       const timestamp = now.toISOString();
-      const ownedAssets = plan.assets.filter((asset) => asset.action !== "reuse").map((asset) => ({
+      const ownedAssets = plan.assets.filter((asset) => !["retain", "remove"].includes(asset.action)).map((asset) => ({
         assetId: asset.id,
         kind: asset.kind,
         ownerInstallationIds: [installationId],
@@ -503,7 +534,7 @@ export class AppInstallationService {
         artifacts,
         removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
       });
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace);
+      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
       const updated: WorkspaceAppInstallation = {
         ...installation,
         state: "ready_to_test",
@@ -575,7 +606,7 @@ export class AppInstallationService {
         committedAt: timestamp,
         artifacts
       });
-      const ownedAssets = ownershipFromCompiled(compiled, installationId, namespace);
+      const ownedAssets = ownershipFromCompiled(compiled, installationId, namespace, source.ownedAssets);
       const duplicate: WorkspaceAppInstallation = {
         ...source,
         id: installationId,
@@ -645,7 +676,7 @@ export class AppInstallationService {
       fieldMappingIds: installation.fieldMappingIds,
       actor: input.actor,
       now
-    });
+    }, { replacingInstallationId: installation.id });
     if (baseInstallPlan.artifactDigest === installation.artifactDigest) {
       throw new Error(`${installation.appId} is already pinned to the selected immutable version`);
     }
@@ -743,7 +774,17 @@ export class AppInstallationService {
         artifacts,
         removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
       });
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace);
+      const reusableOwnership = plan.baseInstallPlan.assets
+        .filter((asset) => asset.action === "reuse" && ["connection_binding", "field_mapping"].includes(asset.kind))
+        .map((asset) => ({
+          assetId: asset.id,
+          kind: asset.kind,
+          ownerInstallationIds: [installation.id],
+          refCount: 1,
+          shared: true,
+          digest: asset.digest ?? canonicalAppDigest(asset)
+        }));
+      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, reusableOwnership);
       const updated: WorkspaceAppInstallation = {
         ...installation,
         version: plan.toVersion,
@@ -1241,6 +1282,22 @@ export function installPlanBlockers(plan: AppInstallPlan): string[] {
   return blockers;
 }
 
+function installAssetConflictReason(kind: AppInstallPlan["conflicts"][number]["kind"]): string {
+  if (kind === "duplicate_loop") {
+    return "A runtime LoopSpec with this ID already has a different immutable contract. Rename or namespace the App loop before installation.";
+  }
+  if (kind === "shared_company_object") {
+    return "The installed shared company object has a different immutable contract. Resolve the object identity or schema before installation.";
+  }
+  if (kind === "graph") {
+    return "The installed graph resource has a different immutable contract. Review the competing topology before installation.";
+  }
+  if (kind === "dependency") {
+    return "The installed dependency does not satisfy the App contract.";
+  }
+  return "An installed App asset with this identity has a different immutable contract. Rename, reuse, or explicitly migrate the asset before installation.";
+}
+
 function appendHistory(
   installation: WorkspaceAppInstallation,
   actor: string,
@@ -1484,9 +1541,10 @@ function installationLoopIds(workspace: LoopgraphWorkspaceRegistry, installation
 function ownershipFromCompiled(
   compiled: Awaited<ReturnType<typeof compileLoopPack>>,
   installationId: string,
-  namespace?: string
+  namespace?: string,
+  reusableAssets: WorkspaceAppInstallation["ownedAssets"] = []
 ): WorkspaceAppInstallation["ownedAssets"] {
-  return compilePlannedAssets(compiled, installationId, namespace).filter((asset) => asset.action !== "reuse").map((asset) => ({
+  const compiledOwnership = compilePlannedAssets(compiled, installationId, namespace).filter((asset) => !["retain", "remove"].includes(asset.action)).map((asset) => ({
     assetId: asset.id,
     kind: asset.kind,
     ownerInstallationIds: [installationId],
@@ -1494,6 +1552,11 @@ function ownershipFromCompiled(
     shared: asset.shared,
     digest: asset.digest ?? canonicalAppDigest(asset)
   }));
+  const compiledIds = new Set(compiledOwnership.map((asset) => asset.assetId));
+  const retainedReusableOwnership = reusableAssets
+    .filter((asset) => ["connection_binding", "field_mapping"].includes(asset.kind) && !compiledIds.has(asset.assetId))
+    .map((asset) => ({ ...asset, ownerInstallationIds: [installationId], refCount: 1, shared: true }));
+  return [...compiledOwnership, ...retainedReusableOwnership].sort((left, right) => left.assetId.localeCompare(right.assetId));
 }
 
 function replaceOwnedAssets(
@@ -1530,9 +1593,10 @@ function releaseOwnedAssets(assets: AppInstallationRegistry["assets"], installat
 
 function compilePlannedAssets(compiled: Awaited<ReturnType<typeof compileLoopPack>>, installationId: string, namespace?: string): AppInstallPlan["assets"] {
   const assets: AppInstallPlan["assets"] = [
-    ...compiled.loopSpecs.map((spec) => ({ id: `loop.${spec.metadata.id}`, kind: "loop_spec" as const, action: "create" as const, digest: canonicalAppDigest(spec), shared: false, sourcePath: `loops/${spec.metadata.id}.yaml`, dependencies: [] })),
-    ...compiled.skills.map((skill) => ({ id: `skill.${skill.id}`, kind: "hermes_skill" as const, action: "create" as const, digest: canonicalAppDigest(skill), shared: false, dependencies: [] })),
+    ...compiled.loopSpecs.map((spec) => ({ id: `loop.${spec.metadata.id}`, kind: "loop_spec" as const, action: "create" as const, digest: canonicalAppDigest(spec), shared: false, sourcePath: compiled.loopSourcePaths[spec.metadata.id], dependencies: [] })),
+    ...compiled.skills.map((skill) => ({ id: `skill.${skill.id}`, kind: "hermes_skill" as const, action: "create" as const, digest: canonicalAppDigest(skill), shared: false, sourcePath: compiled.skillSourcePaths[skill.id], dependencies: [] })),
     ...compiled.routingCards.map((card) => ({ id: `routing.${card.loopId}`, kind: "routing_card" as const, action: "create" as const, digest: canonicalAppDigest(card), shared: false, dependencies: [`loop.${card.loopId}`] })),
+    ...compiled.installationAssets.map((asset) => ({ ...asset, action: "create" as const, shared: false })),
     ...compiled.graph.nodes.filter((node) => node.installationScoped).map((node) => ({ id: `graph-node.${node.id}`, kind: "graph_node" as const, action: "create" as const, digest: canonicalAppDigest(node), shared: node.shared ?? false, dependencies: node.parentId ? [`graph-node.${node.parentId}`] : [] })),
     ...compiled.graph.edges.map((edge) => ({ id: `graph-edge.${edge.id}`, kind: "graph_edge" as const, action: "create" as const, digest: canonicalAppDigest(edge), shared: false, dependencies: [`graph-node.${edge.source}`, `graph-node.${edge.target}`] })),
     { id: `receipt.${installationId}`, kind: "event_contract" as const, action: "create" as const, digest: canonicalAppDigest({ installationId, compiled: compiled.artifactDigest }), shared: false, dependencies: [] }

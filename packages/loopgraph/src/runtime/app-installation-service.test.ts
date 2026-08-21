@@ -160,6 +160,19 @@ describe("atomic app installation lifecycle", () => {
     expect(plan.permissions.find((permission) => permission.capability === "mail.message.send")?.decision).toBe("forbid");
     expect(plan.graphDiff.nodesAdded).toContain("app.loopgraph.sales.qualify-route-inbound-leads");
     expect(plan.graphDiff.nodesAdded).toContain("object.inbound-lead");
+    expect(plan.assets.map((asset) => asset.kind)).toEqual(expect.arrayContaining([
+      "loop_spec", "hermes_skill", "routing_card", "event_contract", "connection_binding",
+      "field_mapping", "metric", "fixture", "evaluation", "graph_node", "graph_edge", "dashboard"
+    ]));
+    expect(plan.assets).toContainEqual(expect.objectContaining({
+      id: "loop.sales-inbound-lead-intake",
+      sourcePath: "loops/lead-intake.yaml"
+    }));
+    expect(plan.assets).toContainEqual(expect.objectContaining({
+      id: "skill.sales-account-research",
+      sourcePath: "skills/account-research.yaml"
+    }));
+    expect(plan.assets.filter((asset) => ["connection_binding", "field_mapping"].includes(asset.kind)).every((asset) => asset.action === "reuse")).toBe(true);
 
     const applied = await service.apply(plan, "admin-1", new Date("2026-08-08T12:05:00.000Z"));
     expect(applied.created).toBe(true);
@@ -209,6 +222,9 @@ describe("atomic app installation lifecycle", () => {
       shared: true,
       refCount: 1
     }));
+    expect(registry.assets).toContainEqual(expect.objectContaining({ kind: "metric", ownerInstallationIds: [applied.installation.id] }));
+    expect(registry.assets).toContainEqual(expect.objectContaining({ kind: "connection_binding", ownerInstallationIds: [applied.installation.id] }));
+    expect(registry.assets).toContainEqual(expect.objectContaining({ kind: "field_mapping", ownerInstallationIds: [applied.installation.id] }));
     const browserStyleStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
       projectRoot,
       installationId: applied.installation.id
@@ -322,6 +338,15 @@ describe("atomic app installation lifecycle", () => {
       kind: "shared_company_object",
       resourceId: "graph-node.object.inbound-lead",
       blocking: true
+    }));
+    expect(plan.conflicts).toContainEqual(expect.objectContaining({
+      kind: "duplicate_loop",
+      resourceId: "loop.sales-inbound-lead-intake",
+      blocking: true
+    }));
+    expect(plan.assets).toContainEqual(expect.objectContaining({
+      id: "loop.sales-inbound-lead-intake",
+      action: "update"
     }));
     expect(plan.graphDiff.nodesReused).not.toContain("object.inbound-lead");
     expect(installPlanBlockers(plan)).toContainEqual(expect.stringContaining("shared company object conflict"));
@@ -464,6 +489,10 @@ describe("atomic app installation lifecycle", () => {
     const repaired = await input.service.repair(applied.installation.id, "sales-admin", new Date("2026-08-08T12:04:00.000Z"));
     expect(repaired.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
     expect(repaired.receipt.action).toBe("repair");
+    expect(repaired.installation?.ownedAssets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "connection_binding" }),
+      expect.objectContaining({ kind: "field_mapping" })
+    ]));
 
     const duplicated = await input.service.duplicate({
       installationId: applied.installation.id,
@@ -478,6 +507,10 @@ describe("atomic app installation lifecycle", () => {
       parentInstallationId: applied.installation.id
     });
     expect(duplicated.installation?.ownedAssets.every((asset) => asset.ownerInstallationIds.includes(duplicated.installation!.id))).toBe(true);
+    expect(duplicated.installation?.ownedAssets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "connection_binding" }),
+      expect.objectContaining({ kind: "field_mapping" })
+    ]));
 
     const detached = await input.service.detach(
       duplicated.installation!.id,
@@ -537,6 +570,10 @@ describe("atomic app installation lifecycle", () => {
     });
     expect(updated.installation).toMatchObject({ version: "1.1.0", state: "ready_to_test", mode: "simulation" });
     expect(updated.installation?.history.at(-1)).toMatchObject({ version: "1.0.0", reason: "update" });
+    expect(updated.installation?.ownedAssets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "connection_binding" }),
+      expect.objectContaining({ kind: "field_mapping" })
+    ]));
 
     const rolledBack = await input.service.rollback(
       applied.installation.id,

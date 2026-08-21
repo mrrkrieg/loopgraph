@@ -710,7 +710,7 @@ export const appInstallPlanSchema = z.object({
     edgesRemoved: z.array(appIdSchema).default([])
   }).strict(),
   conflicts: z.array(z.object({
-    kind: z.enum(["shared_company_object", "dependency", "graph"]),
+    kind: z.enum(["shared_company_object", "duplicate_loop", "asset_contract", "dependency", "graph"]),
     resourceId: appIdSchema,
     reason: z.string().min(1),
     currentDigest: artifactDigestSchema.optional(),

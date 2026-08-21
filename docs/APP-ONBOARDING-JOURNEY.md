@@ -18,7 +18,7 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 - only setup questions that are still missing or need confirmation;
 - connection, mapping, permission, test, and lifecycle blockers with remediations;
 - the current content-bound install plan and field-mapping plan when applicable;
-- an exact impact projection of additions, reuse, conflicts, permissions, metrics, and evidence/learning edges;
+- an exact impact projection of every LoopSpec, skill, route, event contract, schedule, metric, fixture, evaluation, dashboard, connector binding, field mapping, and graph asset to create or reuse, including conflicts, permissions, and evidence/learning edges;
 - persisted installation, readiness, and write-blocked evaluation state;
 - one exact next action, including a tool name when a safe tool call exists;
 - an explicit `requiresHumanConfirmation` boundary.
@@ -35,7 +35,7 @@ The journey is derived, not separately mutable. After any connection, answer, fi
 6. Use only the returned exact install plan and `nextAction.toolName`.
 7. Stop whenever `requiresHumanConfirmation` is true.
 
-Installation and shadow activation are deliberately separate approvals. Installation writes generated LoopSpecs and graph assets but cannot enable provider writes. Synthetic conformance runs with writes blocked. Shadow mode records real routing decisions while continuing to block provider writes.
+Installation and shadow activation are deliberately separate approvals. Installation writes only the immutable asset inventory approved in the content-bound plan and cannot enable provider writes. Duplicate LoopSpecs and incompatible shared contracts block before the transaction starts. Synthetic conformance runs with writes blocked. Shadow mode records real routing decisions while continuing to block provider writes.
 
 Activation is a two-step runtime protocol, not a prompt convention. After the accountable operator accepts an exact transition, `loopgraph_app_activation_approve` records a short-lived receipt bound to the workspace, installation, pinned artifact digest, current state, requested mode, approver, reason, and evidence. `loopgraph_app_activate` must consume that exact receipt. A receipt is rejected when it is missing, expired, already consumed, or no longer matches the artifact, state, installation, or requested mode.
 

@@ -17,10 +17,11 @@ describe("InstallImpactReview", () => {
       },
       impact: {
         additions: [{ id: "loop.sales.qualify", kind: "loop_spec" }],
-        reusedGraphNodes: [{ id: "object.account", label: "Account", type: "company_object" }],
-        reusedCapabilities: [{ capability: "crm.lead.read", connectionId: "hubspot.production" }],
+        reusedAssets: [
+          { id: "graph-node.object.account", kind: "graph_node" },
+          { id: "connection-binding.hubspot.production", kind: "connection_binding" }
+        ],
         reusedDependencies: [],
-        reusedFieldMappingCount: 1,
         conflicts: [{ kind: "shared_company_object", resourceId: "graph-node.object.account", reason: "Contract differs.", blocking: true }],
         permissions: [{ capability: "crm.lead.read", authority: "read", decision: "allow", reason: "Read lead evidence.", changedFromInstalled: false }],
         metrics: [{ id: "qualified-rate", loopName: "Lead Qualification", metric: "qualified lead rate", direction: "increase" }],
@@ -31,7 +32,7 @@ describe("InstallImpactReview", () => {
     expect(html).toContain("What Loopgraph will add");
     expect(html).toContain("loop.sales.qualify");
     expect(html).toContain("What it will reuse");
-    expect(html).toContain("hubspot.production");
+    expect(html).toContain("connection-binding.hubspot.production");
     expect(html).toContain("Blocking conflicts must be resolved");
     expect(html).toContain("Read lead evidence");
     expect(html).toContain("qualified lead rate");

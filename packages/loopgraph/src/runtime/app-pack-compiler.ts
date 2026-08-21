@@ -6,6 +6,7 @@ import {
   APP_SKILL_SCHEMA_VERSION,
   appLoopDefinitionSchema,
   appSkillDefinitionSchema,
+  canonicalAppDigest,
   compileRoutingCardFromLoopSpec,
   contentHash,
   validateLoopSpec,
@@ -42,8 +43,17 @@ export type CompiledLoopPack = {
   version: string;
   artifactDigest: string;
   loopSpecs: LoopSpec[];
+  loopSourcePaths: Record<string, string>;
   skills: AppSkillDefinition[];
+  skillSourcePaths: Record<string, string>;
   routingCards: RoutingCard[];
+  installationAssets: Array<{
+    id: string;
+    kind: "schedule" | "metric" | "fixture" | "evaluation" | "dashboard";
+    digest: string;
+    sourcePath?: string;
+    dependencies: string[];
+  }>;
   graph: {
     nodes: CompiledAppGraphNode[];
     edges: CompiledAppGraphEdge[];
@@ -52,22 +62,26 @@ export type CompiledLoopPack = {
 
 export async function compileLoopPack(loaded: LoopPackLoadResult): Promise<CompiledLoopPack> {
   const loopSpecs: LoopSpec[] = [];
+  const loopSourcePaths: Record<string, string> = {};
   for (const loopPath of loaded.manifest.entrypoints.loops) {
     const raw = await readPackDocument(loaded.root, loopPath);
-    if (isRecord(raw) && raw.schemaVersion === APP_LOOP_SCHEMA_VERSION) {
-      loopSpecs.push(compileAppLoopDefinition(appLoopDefinitionSchema.parse(raw), loaded));
-    } else {
-      loopSpecs.push(validateLoopSpec(raw));
-    }
+    const spec = isRecord(raw) && raw.schemaVersion === APP_LOOP_SCHEMA_VERSION
+      ? compileAppLoopDefinition(appLoopDefinitionSchema.parse(raw), loaded)
+      : validateLoopSpec(raw);
+    loopSpecs.push(spec);
+    loopSourcePaths[spec.metadata.id] = loopPath;
   }
 
   const skills: AppSkillDefinition[] = [];
+  const skillSourcePaths: Record<string, string> = {};
   for (const skillPath of loaded.manifest.entrypoints.skills) {
     const raw = await readPackDocument(loaded.root, skillPath);
     if (!isRecord(raw) || raw.schemaVersion !== APP_SKILL_SCHEMA_VERSION) {
       throw new Error(`Pack skill ${skillPath} must use ${APP_SKILL_SCHEMA_VERSION}`);
     }
-    skills.push(appSkillDefinitionSchema.parse(raw));
+    const skill = appSkillDefinitionSchema.parse(raw);
+    skills.push(skill);
+    skillSourcePaths[skill.id] = skillPath;
   }
 
   const catalogVersion = `app_${contentHash({ appId: loaded.manifest.metadata.id, digest: loaded.artifact.digest })}`;
@@ -86,15 +100,86 @@ export async function compileLoopPack(loaded: LoopPackLoadResult): Promise<Compi
   }
   validateAppTopologyLoopReferences(loaded, loopIds);
 
+  const installationAssets = compileAdditionalInstallationAssets(loaded, loopSpecs);
+  if (new Set(installationAssets.map((asset) => asset.id)).size !== installationAssets.length) {
+    throw new Error("Compiled App installation asset IDs must be unique");
+  }
   return {
     appId: loaded.manifest.metadata.id,
     version: loaded.manifest.metadata.version,
     artifactDigest: loaded.artifact.digest,
     loopSpecs,
+    loopSourcePaths,
     skills,
+    skillSourcePaths,
     routingCards,
+    installationAssets,
     graph: compileAppGraph(loaded, loopSpecs)
   };
+}
+
+function compileAdditionalInstallationAssets(loaded: LoopPackLoadResult, specs: LoopSpec[]): CompiledLoopPack["installationAssets"] {
+  const assets: CompiledLoopPack["installationAssets"] = [];
+  for (const spec of specs) {
+    if (spec.trigger.type === "schedule") {
+      assets.push({
+        id: `schedule.${spec.metadata.id}`,
+        kind: "schedule",
+        digest: canonicalAppDigest({ loopId: spec.metadata.id, trigger: spec.trigger }),
+        dependencies: [`loop.${spec.metadata.id}`]
+      });
+    }
+    const outcomes = isRecord(spec.studioExtension) && Array.isArray(spec.studioExtension.outcomes)
+      ? spec.studioExtension.outcomes
+      : [];
+    for (const [index, outcome] of outcomes.entries()) {
+      if (!isRecord(outcome) || typeof outcome.metric !== "string" || !outcome.metric.trim()) continue;
+      const metricId = normalizeAssetId(outcome.metric);
+      assets.push({
+        id: `metric.${spec.metadata.id}.${metricId || index + 1}`,
+        kind: "metric",
+        digest: canonicalAppDigest({ loopId: spec.metadata.id, outcome }),
+        dependencies: [`loop.${spec.metadata.id}`]
+      });
+    }
+  }
+  for (const sourcePath of loaded.manifest.entrypoints.fixtures) {
+    assets.push(packFileAsset(loaded, "fixture", sourcePath, specs
+      .filter((spec) => (spec.input.fixtures ?? []).some((fixture) => fixture.path === sourcePath))
+      .map((spec) => `loop.${spec.metadata.id}`)));
+  }
+  for (const sourcePath of loaded.manifest.entrypoints.evals) {
+    assets.push(packFileAsset(loaded, "evaluation", sourcePath, loaded.manifest.entrypoints.fixtures.map((fixturePath) => assetIdForPackFile(loaded, "fixture", fixturePath))));
+  }
+  for (const sourcePath of loaded.manifest.entrypoints.dashboards) {
+    assets.push(packFileAsset(loaded, "dashboard", sourcePath, assets.filter((asset) => asset.kind === "metric").map((asset) => asset.id)));
+  }
+  return assets.sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function packFileAsset(
+  loaded: LoopPackLoadResult,
+  kind: "fixture" | "evaluation" | "dashboard",
+  sourcePath: string,
+  dependencies: string[]
+): CompiledLoopPack["installationAssets"][number] {
+  const file = loaded.artifact.files.find((candidate) => candidate.path === sourcePath);
+  if (!file) throw new Error(`Compiled App asset is missing from the immutable artifact: ${sourcePath}`);
+  return {
+    id: assetIdForPackFile(loaded, kind, sourcePath),
+    kind,
+    digest: file.digest,
+    sourcePath,
+    dependencies
+  };
+}
+
+function assetIdForPackFile(loaded: LoopPackLoadResult, kind: "fixture" | "evaluation" | "dashboard", sourcePath: string): string {
+  return `${kind}.${contentHash({ appId: loaded.manifest.metadata.id, sourcePath }).slice(0, 32)}`;
+}
+
+function normalizeAssetId(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 export function compileAppLoopDefinition(definition: AppLoopDefinition, loaded: LoopPackLoadResult): LoopSpec {

@@ -13,10 +13,7 @@ export function InstallImpactReview({
   plan: AppInstallPlan;
   impact: AppInstallImpactView;
 }) {
-  const reuseCount = impact.reusedGraphNodes.length
-    + impact.reusedCapabilities.length
-    + impact.reusedDependencies.length
-    + impact.reusedFieldMappingCount;
+  const reuseCount = impact.reusedAssets.length + impact.reusedDependencies.length;
 
   return (
     <div className="mt-5 space-y-5">
@@ -25,7 +22,7 @@ export function InstallImpactReview({
           <p>Immutable App-owned assets staged in {plan.initialMode} mode.</p>
           <ImpactDetails label="Review exact assets">
             {impact.additions.map((asset) => (
-              <ImpactRow key={asset.id} primary={asset.id} secondary={humanize(asset.kind)} />
+              <ImpactRow key={asset.id} primary={asset.id} secondary={asset.sourcePath ? `${humanize(asset.kind)} · ${asset.sourcePath}` : humanize(asset.kind)} />
             ))}
           </ImpactDetails>
         </ImpactCard>
@@ -33,10 +30,8 @@ export function InstallImpactReview({
         <ImpactCard title="What it will reuse" value={reuseCount} tone="default">
           <p>Existing company objects, connections, dependencies, and confirmed field mappings stay shared.</p>
           <ImpactDetails label="Review reused resources">
-            {impact.reusedGraphNodes.map((node) => <ImpactRow key={`node:${node.id}`} primary={node.label} secondary={humanize(node.type)} />)}
-            {impact.reusedCapabilities.map((item) => <ImpactRow key={`capability:${item.capability}`} primary={item.capability} secondary={item.connectionId ? `Connection ${item.connectionId}` : "Reusable connection"} />)}
+            {impact.reusedAssets.map((asset) => <ImpactRow key={`asset:${asset.id}`} primary={asset.id} secondary={asset.sourcePath ? `${humanize(asset.kind)} · ${asset.sourcePath}` : humanize(asset.kind)} />)}
             {impact.reusedDependencies.map((item) => <ImpactRow key={`dependency:${item.appId}`} primary={item.appId} secondary={`Installed App ${item.version}`} />)}
-            {impact.reusedFieldMappingCount > 0 ? <ImpactRow primary={`${impact.reusedFieldMappingCount} confirmed field mapping${impact.reusedFieldMappingCount === 1 ? "" : "s"}`} secondary="Workspace mapping registry" /> : null}
             {reuseCount === 0 ? <EmptyImpact>Nothing will be reused by this plan.</EmptyImpact> : null}
           </ImpactDetails>
         </ImpactCard>

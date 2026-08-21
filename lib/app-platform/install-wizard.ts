@@ -14,11 +14,9 @@ export type InstallWizardState = {
 };
 
 export type AppInstallImpactView = {
-  additions: Array<{ id: string; kind: AppInstallPlan["assets"][number]["kind"] }>;
-  reusedGraphNodes: Array<{ id: string; label: string; type: string }>;
-  reusedCapabilities: Array<{ capability: string; connectionId?: string }>;
+  additions: Array<{ id: string; kind: AppInstallPlan["assets"][number]["kind"]; sourcePath?: string }>;
+  reusedAssets: Array<{ id: string; kind: AppInstallPlan["assets"][number]["kind"]; sourcePath?: string }>;
   reusedDependencies: Array<{ appId: string; version: string }>;
-  reusedFieldMappingCount: number;
   conflicts: AppInstallPlan["conflicts"];
   permissions: AppInstallPlan["permissions"];
   metrics: Array<{ id: string; loopName: string; metric?: string; description?: string; direction?: string }>;
@@ -61,21 +59,22 @@ export function appOnboardingProgressForView(journey: AppOnboardingJourney): App
 
 export function buildAppInstallImpactView(plan: AppInstallPlan, source: InstallImpactSource): AppInstallImpactView {
   const graphNodeById = new Map(source.graphPreview.nodes.map((node) => [node.id, node]));
+  const reusedAssets = plan.assets
+    .filter((asset) => asset.action === "reuse")
+    .map((asset) => ({ id: asset.id, kind: asset.kind, ...(asset.sourcePath ? { sourcePath: asset.sourcePath } : {}) }));
+  const reusedAssetIds = new Set(reusedAssets.map((asset) => asset.id));
+  for (const nodeId of plan.graphDiff.nodesReused) {
+    const assetId = `graph-node.${nodeId}`;
+    if (!reusedAssetIds.has(assetId)) reusedAssets.push({ id: assetId, kind: "graph_node" });
+  }
   return {
     additions: plan.assets
       .filter((asset) => asset.action === "create")
-      .map((asset) => ({ id: asset.id, kind: asset.kind })),
-    reusedGraphNodes: plan.graphDiff.nodesReused.map((id) => {
-      const node = graphNodeById.get(id);
-      return { id, label: node?.label ?? humanizeInstallIdentifier(id), type: node?.type ?? "graph node" };
-    }),
-    reusedCapabilities: plan.capabilityResolutions
-      .filter((resolution) => resolution.status === "reusable")
-      .map(({ capability, connectionId }) => ({ capability, connectionId })),
+      .map((asset) => ({ id: asset.id, kind: asset.kind, ...(asset.sourcePath ? { sourcePath: asset.sourcePath } : {}) })),
+    reusedAssets,
     reusedDependencies: plan.dependencyResolutions
       .filter((dependency) => dependency.reused)
       .map(({ appId, version }) => ({ appId, version })),
-    reusedFieldMappingCount: plan.fieldMappingIds.length,
     conflicts: plan.conflicts,
     permissions: plan.permissions,
     metrics: source.sampleOutputs.map(({ id, loopName, metric, description, direction }) => ({ id, loopName, metric, description, direction })),

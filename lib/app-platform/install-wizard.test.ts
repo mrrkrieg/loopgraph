@@ -69,10 +69,8 @@ describe("guided app installation", () => {
     });
 
     expect(impact.additions).toEqual([{ id: "loop.sales.qualify", kind: "loop_spec" }]);
-    expect(impact.reusedGraphNodes).toEqual([{ id: "object.account", label: "Account", type: "company_object" }]);
-    expect(impact.reusedCapabilities).toEqual([{ capability: "crm.lead.read", connectionId: "hubspot.production" }]);
+    expect(impact.reusedAssets).toEqual([{ id: "graph-node.object.account", kind: "graph_node" }]);
     expect(impact.reusedDependencies).toEqual([{ appId: "loopgraph.identity", version: "1.2.0" }]);
-    expect(impact.reusedFieldMappingCount).toBe(1);
     expect(impact.metrics[0]?.metric).toBe("qualified lead rate");
     expect(impact.evidenceEdges).toEqual([expect.objectContaining({ source: "Account", target: "Lead Qualification", type: "evidence_in" })]);
   });
