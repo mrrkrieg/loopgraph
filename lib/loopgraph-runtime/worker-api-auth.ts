@@ -39,6 +39,7 @@ export type MachineCapability =
   | "schedule.connector_detectors"
   | "schedule.hermes_design"
   | "schedule.hermes_callbacks"
+  | "schedule.app_action_reconciliation"
   | "schedule.management"
   | "schedule.measurements"
   | "schedule.marketplace_verifier";

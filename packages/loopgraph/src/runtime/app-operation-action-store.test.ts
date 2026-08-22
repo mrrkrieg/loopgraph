@@ -87,6 +87,28 @@ describe("File App operation action store", () => {
     await expect(store.recordEvent(withEventDigest({ ...event, id: "appactevt_wrongparent", actionRecordDigest: digest("wrong") })))
       .rejects.toThrow(/immutable prepared action/i);
   });
+
+  it("selects the oldest nonterminal commit for reconciliation and removes it after terminal evidence", async () => {
+    const root = await temporaryRoot();
+    const store = new FileAppOperationActionStore(root, "acme");
+    const action = preparedAction();
+    const requested = commitEvent(action, "commit_requested");
+    await store.recordPrepared(action);
+    await store.recordEvent(requested);
+
+    await expect(store.listReconciliationCandidates({
+      workspaceId: "acme",
+      requestedBefore: "2026-08-08T12:10:00.000Z",
+      limit: 25
+    })).resolves.toEqual([{ action, requestEvent: requested }]);
+
+    await store.recordEvent(commitEvent(action, "commit_failed"));
+    await expect(store.listReconciliationCandidates({
+      workspaceId: "acme",
+      requestedBefore: "2026-08-08T12:10:00.000Z",
+      limit: 25
+    })).resolves.toEqual([]);
+  });
 });
 
 function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
@@ -105,6 +127,26 @@ function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
       expiresAt: "2026-08-08T12:05:00.000Z"
     },
     occurredAt: "2026-08-08T12:01:00.000Z"
+  });
+}
+
+function commitEvent(action: AppOperationAction, eventType: "commit_requested" | "commit_failed"): AppOperationActionEvent {
+  return withEventDigest({
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: `appactevt_${eventType}`,
+    workspaceId: action.workspaceId,
+    installationId: action.installationId,
+    actionId: action.id,
+    actionRecordDigest: action.recordDigest,
+    eventType,
+    actor: { type: "workload", subject: action.agentInstanceId },
+    commit: {
+      requestId: "appcommit-request-12345678",
+      idempotencyKey: "appcommit-idempotency-12345678",
+      outcome: eventType === "commit_requested" ? "requested" : "failed",
+      ...(eventType === "commit_failed" ? { reasonCode: "provider_rejected" } : {})
+    },
+    occurredAt: eventType === "commit_requested" ? "2026-08-08T12:02:00.000Z" : "2026-08-08T12:03:00.000Z"
   });
 }
 

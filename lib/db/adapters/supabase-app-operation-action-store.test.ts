@@ -40,6 +40,21 @@ describe("Supabase App operation action store", () => {
       p_event: event
     });
     expect(await store.listEvents({ workspaceId: scope.workspaceId, actionId: action.id })).toEqual([event]);
+
+    const requested = commitEvent(action);
+    fake.candidateRows = [{ action_payload: action, request_event_payload: requested }];
+    expect(await store.listReconciliationCandidates({
+      workspaceId: scope.workspaceId,
+      requestedBefore: "2026-08-08T12:10:00.000Z",
+      limit: 25
+    })).toEqual([{ action, requestEvent: requested }]);
+    expect(fake.rpc).toHaveBeenCalledWith("list_loopgraph_app_action_reconciliation_candidates", {
+      p_organization_id: scope.organizationId,
+      p_project_key: scope.projectKey,
+      p_workspace_id: scope.workspaceId,
+      p_requested_before: "2026-08-08T12:10:00.000Z",
+      p_limit: 25
+    });
   });
 
   it("rejects invalid tenant scope and propagates a durable record failure", async () => {
@@ -56,8 +71,12 @@ describe("Supabase App operation action store", () => {
 class ActionSupabase {
   rows: Array<Record<string, unknown>> = [];
   eventRows: Array<Record<string, unknown>> = [];
+  candidateRows: Array<Record<string, unknown>> = [];
   failRecord = false;
   rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name === "list_loopgraph_app_action_reconciliation_candidates") {
+      return { data: this.candidateRows, error: null };
+    }
     if (name === "record_loopgraph_app_operation_action_event") {
       const event = args.p_event as AppOperationActionEvent;
       this.eventRows.push({
@@ -135,6 +154,26 @@ function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
       expiresAt: "2026-08-08T12:05:00.000Z"
     },
     occurredAt: "2026-08-08T12:01:00.000Z"
+  };
+  return { ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) };
+}
+
+function commitEvent(action: AppOperationAction): AppOperationActionEvent {
+  const base = {
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: "appactevt_commitrequested",
+    workspaceId: action.workspaceId,
+    installationId: action.installationId,
+    actionId: action.id,
+    actionRecordDigest: action.recordDigest,
+    eventType: "commit_requested" as const,
+    actor: { type: "workload" as const, subject: action.agentInstanceId },
+    commit: {
+      requestId: "appcommit-request-12345678",
+      idempotencyKey: "appcommit-idempotency-12345678",
+      outcome: "requested" as const
+    },
+    occurredAt: "2026-08-08T12:02:00.000Z"
   };
   return { ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) };
 }

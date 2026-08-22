@@ -177,6 +177,14 @@ copied into secret-free terminal App evidence; `pending` causes Hermes to wait, 
 requires operator investigation. Reconciliation never invokes a provider handler and never turns
 an unknown outcome into permission for replacement work.
 
+Hosted deployments also run `/api/cron/app-action-reconciliation` every five minutes under the
+dedicated `schedule.app_action_reconciliation` workload capability. The worker considers only
+`commit_requested` events older than one minute, excludes revoked or terminal actions, and sends at
+most 25 exact App action identities through the same receipt-only reconciliation boundary. Stable
+call identities and receipt-derived terminal timestamps make concurrent retries idempotent. The
+worker response contains only action/request identities, bounded status codes, and counts—never
+provider input, output, credentials, or raw errors.
+
 ## Rollout and graph state
 
 App rollout is not a display-only installation flag. Activating an App atomically rewrites the

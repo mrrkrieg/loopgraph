@@ -42,6 +42,14 @@ export type AppOperationActionEventQuery = {
   limit?: number;
 };
 
+export type AppOperationActionReconciliationCandidate = {
+  action: AppOperationAction;
+  requestEvent: AppOperationActionEvent & {
+    eventType: "commit_requested";
+    commit: NonNullable<AppOperationActionEvent["commit"]>;
+  };
+};
+
 /**
  * Secret-free ownership ledger for provider actions prepared by installed Apps.
  * Canonical provider input remains exclusively in Connector Broker storage.
@@ -53,6 +61,11 @@ export interface AppOperationActionStore {
   get(workspaceId: string, actionId: string): Promise<AppOperationAction | undefined>;
   list(query: AppOperationActionQuery): Promise<AppOperationAction[]>;
   listEvents(query: AppOperationActionEventQuery): Promise<AppOperationActionEvent[]>;
+  listReconciliationCandidates?(query: {
+    workspaceId: string;
+    requestedBefore: string;
+    limit: number;
+  }): Promise<AppOperationActionReconciliationCandidate[]>;
 }
 
 export function emptyAppOperationActionLedger(workspaceId: string): AppOperationActionLedger {
@@ -165,6 +178,37 @@ export class FileAppOperationActionStore implements AppOperationActionStore {
       .filter((event) => !query.actionId || event.actionId === query.actionId)
       .filter((event) => !query.eventType || event.eventType === query.eventType)
       .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt) || left.id.localeCompare(right.id))
+      .slice(0, limit);
+  }
+
+  async listReconciliationCandidates(query: {
+    workspaceId: string;
+    requestedBefore: string;
+    limit: number;
+  }): Promise<AppOperationActionReconciliationCandidate[]> {
+    if (query.workspaceId !== this.workspaceId) return [];
+    const limit = boundedLimit(query.limit);
+    const requestedBefore = Date.parse(query.requestedBefore);
+    if (!Number.isFinite(requestedBefore)) throw new Error("App action reconciliation cutoff is invalid");
+    const ledger = await this.readLedger();
+    const actions = new Map(ledger.actions.map((action) => [action.id, action]));
+    return ledger.events
+      .filter((event): event is AppOperationActionReconciliationCandidate["requestEvent"] =>
+        event.eventType === "commit_requested" && Boolean(event.commit) && Date.parse(event.occurredAt) <= requestedBefore
+      )
+      .filter((requestEvent) => !ledger.events.some((event) =>
+        event.actionId === requestEvent.actionId && (
+          event.eventType === "revoked" ||
+          (["commit_succeeded", "commit_failed"].includes(event.eventType) &&
+            event.commit?.requestId === requestEvent.commit.requestId)
+        )
+      ))
+      .map((requestEvent) => ({ action: actions.get(requestEvent.actionId), requestEvent }))
+      .filter((candidate): candidate is AppOperationActionReconciliationCandidate =>
+        Boolean(candidate.action) && candidate.action!.installationId === candidate.requestEvent.installationId
+      )
+      .sort((left, right) => left.requestEvent.occurredAt.localeCompare(right.requestEvent.occurredAt) ||
+        left.action.id.localeCompare(right.action.id))
       .slice(0, limit);
   }
 

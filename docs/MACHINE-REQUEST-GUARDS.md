@@ -53,6 +53,7 @@ Requests are recorded under the narrow route capability:
 - `schedule.connector_revocations`
 - `schedule.measurements`
 - `schedule.management`
+- `schedule.app_action_reconciliation`
 
 Workload issuers should mint a different short-lived subject/audience/capability set for each worker
 class. The issuer JSON is public verification policy; it does not contain private keys or tokens.
@@ -84,7 +85,8 @@ adapter must temporarily set `LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` until 
 Loopgraph through a workload-identity gateway. For those scheduled calls, Loopgraph
 derives the durable request ID from Vercel's request identity and uses the configured cron
 credential ID. The controller schedule is registered every 15 minutes, measurement reconciliation
-hourly, and the management review weekly.
+hourly, management review weekly, and App action receipt reconciliation every five minutes. Each
+schedule still needs only its own narrow `schedule.*` capability.
 
 Vercel schedules run only on production deployments. Private durable company work must still use
 the persistent runtime topology described in
