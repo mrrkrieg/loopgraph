@@ -1031,6 +1031,9 @@ export const appOperationActionEventSchema = z.object({
     outcome: z.enum(["requested", "succeeded", "failed"]),
     reasonCode: z.string().min(1).max(128).optional()
   }).strict().optional(),
+  revocation: z.object({
+    reasonDigest: artifactDigestSchema
+  }).strict().optional(),
   occurredAt: isoDateTimeSchema,
   eventDigest: artifactDigestSchema
 }).strict().superRefine((event, ctx) => {
@@ -1042,6 +1045,9 @@ export const appOperationActionEventSchema = z.object({
   }
   if (event.eventType.startsWith("commit_") !== Boolean(event.commit)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit"], message: "Commit lifecycle events require commit evidence" });
+  }
+  if ((event.eventType === "revoked") !== Boolean(event.revocation)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["revocation"], message: "Only revocation events contain revocation evidence" });
   }
   const expectedOutcome = event.eventType === "commit_requested" ? "requested"
     : event.eventType === "commit_succeeded" ? "succeeded"

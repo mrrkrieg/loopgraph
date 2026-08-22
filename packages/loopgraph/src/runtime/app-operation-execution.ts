@@ -379,6 +379,9 @@ export class AppOperationExecutionService {
     if (priorEvents.some((event) => event.eventType === "commit_succeeded")) {
       throw new Error("Prepared App action has already been committed");
     }
+    if (priorEvents.some((event) => event.eventType === "revoked")) {
+      throw new Error("Prepared App action has been revoked by an accountable operator");
+    }
     const incompleteCommit = priorEvents.find((event) =>
       event.eventType === "commit_requested" && event.commit &&
       !priorEvents.some((candidate) =>

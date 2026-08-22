@@ -239,6 +239,51 @@ describe("App operation execution", () => {
     expect(fixture.broker.commitAction).not.toHaveBeenCalled();
   });
 
+  it("refuses every commit after an accountable operator revokes the App action", async () => {
+    const fixture = await createFixture("prepare_action", {
+      logicalCapability: "crm.lead.write",
+      brokerCapability: "provider.action.execute",
+      operation: "crm.contacts.update"
+    });
+    await fixture.service.invoke({
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.write",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-prepare-revoked-action",
+      input: { leadId: "lead-42", lifecycleStage: "qualified" },
+      now: NOW
+    });
+    const action = (await fixture.actionStore.list({ workspaceId: "workspace-sales" }))[0]!;
+    const revocationBase = {
+      schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+      id: "appactevt_revoked123",
+      workspaceId: action.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      eventType: "revoked" as const,
+      actor: { type: "user" as const, subject: "reviewer-1" },
+      revocation: { reasonDigest: canonicalAppDigest("No longer authorized") },
+      occurredAt: NOW.toISOString()
+    };
+    await fixture.actionStore.recordEvent({
+      ...revocationBase,
+      eventDigest: canonicalAppDigest({ ...revocationBase, eventDigest: undefined })
+    });
+
+    await expect(fixture.service.commitAction({
+      installationId: action.installationId,
+      actionId: action.id,
+      routeJobId: action.routeJobId,
+      agentInstanceId: action.agentInstanceId,
+      callId: "commit-revoked-action",
+      now: NOW
+    })).rejects.toThrow(/revoked by an accountable operator/i);
+    expect(fixture.broker.commitAction).not.toHaveBeenCalled();
+  });
+
   it("executes an allowlisted Loopgraph runtime read through the same durable route authority", async () => {
     const fixture = await createFixture("invoke_loopgraph_runtime", {
       logicalCapability: "loopgraph.topology.read",

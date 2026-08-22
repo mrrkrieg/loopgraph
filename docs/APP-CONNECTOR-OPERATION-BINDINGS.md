@@ -149,13 +149,15 @@ The installed App operations page approves an action by its Loopgraph App action
 
 Approval requires the `integrations.manage` permission and hosted step-up authentication. Loopgraph appends a secret-free `approval_granted` lifecycle event containing the action-record digest, approval receipt identity, expiry, accountable actor, and a digest of the review reason. Review text remains in the authoritative Connector Broker control plane. An approval does not run the provider write; the later Hermes commit path must still revalidate the exact route and consume the receipt.
 
+The same operator can revoke one prepared or approved App action without disabling the provider connection. Revocation takes only the App installation/action identity and a human reason from the browser. The server re-derives the Broker connection, action, and fingerprint, atomically changes the Broker action and every unused approval to `revoked`, writes an audited reason digest, and appends a matching App lifecycle event. A commit already in progress must be reconciled instead of being guessed safe; committed actions are immutable evidence and cannot be retroactively revoked.
+
 This executor has no arbitrary HTTP fallback. Its separate
 `loopgraph_app_operation_action_commit` method and workload-authenticated
 `/api/hermes/apps/operations/commit` route accept only the App installation/action, original route
 job, assigned agent, and stable call identity. They reload the immutable action and unexpired
 approval event, re-resolve the pinned App operation, and revalidate the LoopSpec, company object,
 route, durable assignment, connection health/scopes/environment, Broker prepared-action identity,
-and fingerprint before deriving the commit request. Commit-requested and terminal Broker receipt
+fingerprint, and absence of a revocation event before deriving the commit request. Commit-requested and terminal Broker receipt
 facts are appended to the lifecycle ledger; canonical provider input remains only in Connector
 Broker storage. The workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
 operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the
