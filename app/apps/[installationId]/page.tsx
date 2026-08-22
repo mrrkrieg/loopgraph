@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { AppStatusPill } from "@/components/apps/app-status-pill";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
 import { AppLifecycleRecoveryNotice, recoveryInstruction } from "@/components/apps/app-lifecycle-recovery";
-import { InstalledAppActivityPanel, InstalledAppOutcomesPanel, InstalledAppTopologyPanel } from "@/components/apps/installed-app-operations";
+import { InstalledAppActionsPanel, InstalledAppActivityPanel, InstalledAppOutcomesPanel, InstalledAppTopologyPanel } from "@/components/apps/installed-app-operations";
 import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
@@ -69,6 +69,10 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
 
       <div className="mt-6">
         <InstalledAppActivityPanel operations={data.operations} />
+      </div>
+
+      <div className="mt-6">
+        <InstalledAppActionsPanel operations={data.operations} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">

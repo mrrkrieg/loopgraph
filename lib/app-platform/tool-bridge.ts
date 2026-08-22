@@ -15,6 +15,7 @@ import {
 } from "@/lib/connector-broker/admin";
 import {
   getActiveLoopgraphProjectRoot,
+  getAppOperationActionStore,
   getAppInstallationStore,
   getAppVerificationStore,
   getCompanyContextStore,
@@ -45,6 +46,11 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
   "loopgraph_app_operation_invoke"
+]);
+
+const APP_ACTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_actions_get"
 ]);
 
 const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
@@ -120,6 +126,9 @@ export async function callLoopgraphAppTool(
     ...(EVIDENCE_AWARE_TOOLS.has(name) ? {
       outcomeStore: getOutcomeStore({ projectRoot }),
       hermesOperationsStore: getHermesOperationsStore({ rootDir: path.join(projectRoot, ".loopgraph") })
+    } : {}),
+    ...(hostedMode && APP_ACTION_AWARE_TOOLS.has(name) ? {
+      appOperationActionStore: getAppOperationActionStore({ projectRoot, workspaceId: hostedWorkspaceId() })
     } : {}),
     ...(VERIFICATION_AWARE_TOOLS.has(name) ? {
       appVerificationStoreFactory: (workspaceId: string) => getAppVerificationStore({ projectRoot, workspaceId })

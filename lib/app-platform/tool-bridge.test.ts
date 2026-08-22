@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   hermesOperationsStore: {},
   routingStore: {},
   appInstallationStore: { persistence: "distributed" },
+  appOperationActionStore: { persistence: "distributed" },
   appVerificationStore: { persistence: "distributed" },
   companyContextStore: { persistence: "distributed" },
   loopSpecStore: { persistence: "distributed" },
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   getHermesOperationsStore: vi.fn(),
   getRoutingStore: vi.fn(),
   getAppInstallationStore: vi.fn(),
+  getAppOperationActionStore: vi.fn(),
   getCompanyContextStore: vi.fn(),
   getLoopSpecRegistryStore: vi.fn(),
   getConnectorFieldMappingStore: vi.fn(),
@@ -61,6 +63,7 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getHermesOperationsStore: mocks.getHermesOperationsStore,
   getRoutingStore: mocks.getRoutingStore,
   getAppInstallationStore: mocks.getAppInstallationStore,
+  getAppOperationActionStore: mocks.getAppOperationActionStore,
   getCompanyContextStore: mocks.getCompanyContextStore,
   getLoopSpecRegistryStore: mocks.getLoopSpecRegistryStore,
   getConnectorFieldMappingStore: mocks.getConnectorFieldMappingStore,
@@ -90,6 +93,7 @@ beforeEach(() => {
   mocks.getHermesOperationsStore.mockReturnValue(mocks.hermesOperationsStore);
   mocks.getRoutingStore.mockReturnValue(mocks.routingStore);
   mocks.getAppInstallationStore.mockReturnValue(mocks.appInstallationStore);
+  mocks.getAppOperationActionStore.mockReturnValue(mocks.appOperationActionStore);
   mocks.getCompanyContextStore.mockReturnValue(mocks.companyContextStore);
   mocks.getLoopSpecRegistryStore.mockReturnValue(mocks.loopSpecStore);
   mocks.getConnectorFieldMappingStore.mockReturnValue(mocks.connectorFieldMappingStore);
@@ -161,6 +165,7 @@ describe("hosted app tool bridge", () => {
         },
         routingStore: mocks.routingStore,
         hermesOperationsStore: mocks.hermesOperationsStore,
+        appOperationActionStore: mocks.appOperationActionStore,
         outcomeStore: mocks.outcomeStore,
         connections: []
       });
@@ -182,6 +187,24 @@ describe("hosted app tool bridge", () => {
       organizationId: "123e4567-e89b-12d3-a456-426614174000",
       hosted: true
     }));
+  });
+
+  it("serves prepared App action ownership through the same distributed store", async () => {
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    mocks.runtimeTool.mockImplementation(async (name, input, options) => {
+      expect(name).toBe("loopgraph_app_operation_actions_get");
+      expect(input).toMatchObject({ workspaceId: "main", companyId: "main", installationId: "installed-sales" });
+      expect(options.appOperationActionStore).toBe(mocks.appOperationActionStore);
+      return { actions: [] };
+    });
+
+    await callLoopgraphAppTool("loopgraph_app_operation_actions_get", {
+      installationId: "installed-sales"
+    });
+    expect(mocks.getAppOperationActionStore).toHaveBeenCalledWith({
+      projectRoot: "/srv/loopgraph/tenant/main",
+      workspaceId: "main"
+    });
   });
 
   it("allows internal Loopgraph reads without requiring an external provider Broker", async () => {

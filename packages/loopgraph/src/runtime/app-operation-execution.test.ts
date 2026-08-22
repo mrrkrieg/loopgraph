@@ -23,6 +23,7 @@ import {
   type AppOperationTransport
 } from "./app-operation-execution";
 import type { AppRuntimeOperationTransport } from "./app-runtime-operations";
+import { FileAppOperationActionStore } from "./app-operation-action-store";
 import { FileHermesOperationsStore } from "./hermes-operations-store";
 import { FileRoutingStore } from "./routing-store";
 
@@ -108,6 +109,32 @@ describe("App operation execution", () => {
     });
     expect(fixture.broker.prepareAction).toHaveBeenCalledOnce();
     expect(fixture.broker.execute).not.toHaveBeenCalled();
+    const actions = await fixture.actionStore.list({ workspaceId: "workspace-sales" });
+    expect(actions).toHaveLength(1);
+    expect(actions[0]).toMatchObject({
+      installationId: "installed-sales-app",
+      appId: "official.sales.lead-intake",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.write",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      providerBinding: {
+        providerId: "hubspot",
+        connectionId: "hubspot-production",
+        brokerCapability: "provider.action.execute",
+        operation: "crm.contacts.update"
+      },
+      companyObject: {
+        type: "lead",
+        identityDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/)
+      },
+      brokerPreparedActionId: "action-sales-lead-update",
+      approvalRequired: true,
+      riskClass: "write",
+      status: "prepared"
+    });
+    expect(JSON.stringify(actions[0])).not.toContain("lifecycleStage");
+    expect(JSON.stringify(actions[0])).not.toContain("qualified");
   });
 
   it("executes an allowlisted Loopgraph runtime read through the same durable route authority", async () => {
@@ -193,6 +220,7 @@ async function createFixture(
   temporaryDirectories.push(root);
   const routingStore = new FileRoutingStore(root);
   const operationsStore = new FileHermesOperationsStore(root);
+  const actionStore = new FileAppOperationActionStore(path.join(root, "apps"), "workspace-sales");
   const logicalCapability = options.logicalCapability ?? "crm.lead.read";
   const brokerCapability = options.brokerCapability ?? "provider.data.read";
   const operation = options.operation ?? "crm.contacts.read";
@@ -398,8 +426,10 @@ async function createFixture(
     appService,
     broker,
     runtime,
+    actionStore,
     service: new AppOperationExecutionService({
       appService,
+      actionStore,
       routingStore,
       operationsStore,
       broker,

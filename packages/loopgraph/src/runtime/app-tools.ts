@@ -31,6 +31,11 @@ import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
 import { AppOperationExecutionService, type AppOperationTransport } from "./app-operation-execution";
 import {
+  APP_OPERATION_ACTION_LEDGER_SCHEMA_VERSION,
+  FileAppOperationActionStore,
+  type AppOperationActionStore
+} from "./app-operation-action-store";
+import {
   LoopgraphAppRuntimeOperationRegistry,
   type AppRuntimeOperationTransport
 } from "./app-runtime-operations";
@@ -102,6 +107,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_install_status",
   "loopgraph_app_operation_resolve",
   "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_actions_get",
   "loopgraph_app_maturity_get",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
@@ -284,6 +290,16 @@ export const appOperationInvokeInputSchema = projectSchema.extend({
   agentInstanceId: z.string().min(1).max(256),
   callId: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/),
   input: z.record(z.string(), z.unknown()).default({})
+}).strict();
+
+export const appOperationActionsGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  installationId: appIdSchema.optional(),
+  loopId: appIdSchema.optional(),
+  routeJobId: z.string().min(1).max(256).optional(),
+  status: z.literal("prepared").optional(),
+  limit: z.number().int().min(1).max(1_000).default(100)
 }).strict();
 
 export const appMaturityGetInputSchema = projectSchema.extend({
@@ -490,6 +506,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_resolve", description: "Resolve one App-owned loop capability to its exact installation-scoped broker or Loopgraph runtime operation without accepting provider, operation, connection, URL, or credential choices from the caller.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_invoke", description: "Invoke one resolved App capability for an active durable route job through its exact trusted Connector Broker binding; reads execute and writes only create fingerprint-bound prepared actions.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_operation_actions_get", description: "List secret-free App ownership records for prepared provider actions, scoped to the trusted workspace and optional installation, loop, route, or status filters.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
@@ -558,6 +575,7 @@ export async function callLoopgraphAppTool(
     connectorTenant?: ConnectorTenant;
     routingStore?: RoutingStore;
     appRuntimeOperations?: AppRuntimeOperationTransport;
+    appOperationActionStore?: AppOperationActionStore;
   } = {}
 ): Promise<unknown> {
   const raw = isRecord(input) ? input : {};
@@ -1178,6 +1196,10 @@ export async function callLoopgraphAppTool(
     const loopSpecStore = options.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
     const execution = new AppOperationExecutionService({
       appService: service,
+      actionStore: options.appOperationActionStore ?? new FileAppOperationActionStore(
+        path.join(getLoopgraphRoot(projectRoot), "apps"),
+        identity.workspaceId
+      ),
       routingStore,
       operationsStore: options.hermesOperationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot)),
       broker: options.connectorBroker,
@@ -1202,6 +1224,25 @@ export async function callLoopgraphAppTool(
       input: parsed.input,
       now: options.now
     });
+  }
+  if (name === "loopgraph_app_operation_actions_get") {
+    const parsed = appOperationActionsGetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const actionStore = options.appOperationActionStore ?? new FileAppOperationActionStore(
+      path.join(getLoopgraphRoot(projectRoot), "apps"),
+      identity.workspaceId
+    );
+    return {
+      schemaVersion: APP_OPERATION_ACTION_LEDGER_SCHEMA_VERSION,
+      workspaceId: identity.workspaceId,
+      actions: await actionStore.list({
+        workspaceId: identity.workspaceId,
+        installationId: parsed.installationId,
+        loopId: parsed.loopId,
+        routeJobId: parsed.routeJobId,
+        status: parsed.status,
+        limit: parsed.limit
+      })
+    };
   }
   if (name === "loopgraph_app_maturity_get") {
     const parsed = appMaturityGetInputSchema.parse({ ...raw, projectRoot, ...identity });

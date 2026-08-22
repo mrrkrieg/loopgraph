@@ -3,11 +3,13 @@ import {
   APP_CONFIGURATION_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
+  APP_OPERATION_ACTION_SCHEMA_VERSION,
   APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
+  appOperationActionSchema,
   appInstallationLockSchema,
   appMaturityEvidenceSchema,
   appPlatformJsonSchemas,
@@ -149,6 +151,52 @@ describe("Loopgraph App Platform contracts", () => {
   it("produces order-independent canonical digests", () => {
     expect(canonicalAppDigest({ a: 1, b: 2 })).toBe(canonicalAppDigest({ b: 2, a: 1 }));
     expect(canonicalAppDigest({ a: 1 })).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it("binds a prepared provider action to one App route without accepting provider input", () => {
+    const base = {
+      schemaVersion: APP_OPERATION_ACTION_SCHEMA_VERSION,
+      id: "appact_12345678",
+      workspaceId: "acme",
+      companyId: "acme-company",
+      installationId: "installed-sales",
+      appId: "loopgraph.sales.inbound-leads",
+      artifactDigest: digest("artifact"),
+      loopId: "sales-inbound-lead-intake",
+      loopVersionHash: digest("loop"),
+      capability: "crm.lead.write",
+      routeJobId: "route-job-1",
+      agentInstanceId: "hermes-sales",
+      callId: "call-1",
+      requestId: "request-12345678",
+      idempotencyKey: "idempotency-12345678",
+      resolutionDigest: digest("resolution"),
+      executionDigest: digest("execution"),
+      providerBinding: {
+        providerId: "hubspot",
+        connectionId: "hubspot-production",
+        brokerCapability: "provider.action.execute" as const,
+        operation: "crm.contacts.update"
+      },
+      companyObject: { type: "lead", identityDigest: digest("lead-42") },
+      environment: "production" as const,
+      brokerPreparedActionId: "broker-action-12345678",
+      brokerPreparedActionFingerprint: "f".repeat(64),
+      brokerPrepareReceiptId: "broker-receipt-12345678",
+      approvalRequired: true,
+      riskClass: "write" as const,
+      status: "prepared" as const,
+      preparedAt: now,
+      expiresAt: later,
+      updatedAt: now
+    };
+    const action = appOperationActionSchema.parse({
+      ...base,
+      recordDigest: canonicalAppDigest({ ...base, recordDigest: undefined })
+    });
+    expect(action.companyObject).not.toHaveProperty("id");
+    expect(() => appOperationActionSchema.parse({ ...action, input: { email: "person@example.com" } })).toThrow();
+    expect(() => appOperationActionSchema.parse({ ...action, loopId: "another-loop" })).toThrow(/digest/i);
   });
 
   it("binds tested maturity to complete zero-write evidence for one exact artifact", () => {

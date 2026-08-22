@@ -1,5 +1,6 @@
 import {
   APP_OPERATION_EXECUTION_SCHEMA_VERSION,
+  APP_OPERATION_ACTION_SCHEMA_VERSION,
   CONNECTOR_BROKER_PROTOCOL_VERSION,
   appOperationExecutionResultSchema,
   canonicalAppDigest,
@@ -16,6 +17,7 @@ import {
   type ConnectorTenant
 } from "../core";
 import { AppInstallationService } from "./app-installation-service";
+import type { AppOperationActionStore } from "./app-operation-action-store";
 import type { HermesOperationsStore } from "./hermes-operations-store";
 import { selectHermesAgentForExecution } from "./hermes-operations-store";
 import type { RoutingStore } from "./routing-store";
@@ -52,6 +54,7 @@ export type InvokeAppOperationInput = {
 export class AppOperationExecutionService {
   constructor(private readonly dependencies: {
     appService: AppInstallationService;
+    actionStore: AppOperationActionStore;
     routingStore: RoutingStore;
     operationsStore: HermesOperationsStore;
     broker?: AppOperationTransport;
@@ -275,10 +278,69 @@ export class AppOperationExecutionService {
       ...(runtimeResponse ? { runtimeResponse } : {}),
       completedAt
     };
-    return appOperationExecutionResultSchema.parse({
+    const execution = appOperationExecutionResultSchema.parse({
       ...base,
       executionDigest: canonicalAppDigest({ ...base, executionDigest: undefined })
     });
+    if (execution.disposition === "prepare_action") {
+      const prepared = execution.brokerResponse?.status === "prepared"
+        ? execution.brokerResponse.preparedAction
+        : undefined;
+      const receipt = execution.brokerResponse?.receipt;
+      if (!prepared || !receipt || !connection || !binding.brokerCapability) {
+        throw new Error("Prepared App operation is missing its exact Broker ownership record");
+      }
+      const actionIdentity = contentHash({
+        workspaceId: this.dependencies.workspaceId,
+        installationId: resolution.installationId,
+        brokerPreparedActionId: prepared.actionId,
+        brokerPreparedActionFingerprint: prepared.fingerprint
+      });
+      const actionBase = {
+        schemaVersion: APP_OPERATION_ACTION_SCHEMA_VERSION,
+        id: `appact_${actionIdentity.slice(0, 48)}`,
+        workspaceId: this.dependencies.workspaceId,
+        companyId: this.dependencies.companyId,
+        installationId: resolution.installationId,
+        appId: resolution.appId,
+        artifactDigest: resolution.artifactDigest,
+        loopId: resolution.loopId,
+        loopVersionHash: resolution.loopVersionHash,
+        capability: resolution.capability,
+        routeJobId: job.id,
+        agentInstanceId: agent.id,
+        callId: input.callId,
+        requestId,
+        idempotencyKey,
+        resolutionDigest: resolution.resolutionDigest,
+        executionDigest: execution.executionDigest,
+        providerBinding: {
+          providerId: binding.providerId,
+          connectionId: connection.id,
+          brokerCapability: prepared.capability,
+          operation: prepared.operation
+        },
+        companyObject: {
+          type: context.companyObject.type,
+          identityDigest: canonicalAppDigest(context.companyObject)
+        },
+        environment: runtimeEnvironment,
+        brokerPreparedActionId: prepared.actionId,
+        brokerPreparedActionFingerprint: prepared.fingerprint,
+        brokerPrepareReceiptId: receipt.receiptId,
+        approvalRequired: prepared.approvalRequired,
+        riskClass: prepared.riskClass,
+        status: "prepared" as const,
+        preparedAt: prepared.preparedAt,
+        expiresAt: prepared.expiresAt,
+        updatedAt: prepared.preparedAt
+      };
+      await this.dependencies.actionStore.recordPrepared({
+        ...actionBase,
+        recordDigest: canonicalAppDigest({ ...actionBase, recordDigest: undefined })
+      });
+    }
+    return execution;
   }
 
 }

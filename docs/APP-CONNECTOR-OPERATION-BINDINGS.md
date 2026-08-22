@@ -128,7 +128,22 @@ evidence. Each handler has a strict input schema, enforces workspace/company fil
 response size, and returns a content-digested result. It cannot load a module, choose a file or URL,
 run SQL, or mutate graph state. A provider-write disposition can only call
 `prepareAction`, returning the immutable fingerprint that a separate approval and commit path must
-consume. This executor has no provider-write commit method and no arbitrary HTTP fallback. The
+consume. Before returning success, Loopgraph also records a separate secret-free App action
+ownership proof. That record binds the prepared Broker action and prepare receipt to the exact
+workspace, company, installed artifact, LoopSpec version, logical capability, route job, assigned
+Hermes agent, provider binding, environment, and a digest of the affected company-object identity.
+It never copies canonical provider input, provider output, credentials, headers, or vault
+references out of Connector Broker storage. A hosted deployment records it through an audited,
+service-role-only RPC in the tenant/project/workspace namespace; local mode writes an atomic
+current-user-only ledger under `.loopgraph/apps/operation-actions.json`.
+
+The read-only `loopgraph_app_operation_actions_get` tool gives Hermes, CLI, MCP, and the Installed
+App screen the same filtered ownership records. The App operating topology renders prepared actions
+and their human gates next to the exact owned loop, while expired records are derived visibly rather
+than mistaken for executable work. A record is evidence that an action was prepared; it is not an
+approval or a commit receipt.
+
+This executor has no provider-write commit method and no arbitrary HTTP fallback. The
 workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
 operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the
 caller. That route requires its own durable, tenant-scoped `hermes.app_operations` workload grant;

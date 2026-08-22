@@ -3,8 +3,10 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import { DepartmentTypeSchema } from "./department-skills";
 import { contentDigest } from "./hash";
 import {
+  brokerCapabilitySchema,
   connectorActionPrepareResponseSchema,
-  connectorBrokerResponseSchema
+  connectorBrokerResponseSchema,
+  connectorOperationSchema
 } from "./connector-broker";
 
 /**
@@ -31,6 +33,7 @@ export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operationa
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
 export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
 export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
+export const APP_OPERATION_ACTION_SCHEMA_VERSION = "loopgraph-app-operation-action/v1alpha1" as const;
 export const APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION = "loopgraph-app-runtime-operation-response/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
@@ -50,6 +53,7 @@ export const APP_PLATFORM_INVARIANTS = [
   "Workspace customization is stored as an overlay and never mutates the pinned artifact.",
   "Quality and maturity labels are derived from recorded evidence.",
   "App mode activation requires a content-bound, unexpired, single-use human approval receipt.",
+  "Prepared provider actions receive a secret-free App ownership record before they can enter a separate approval or commit lifecycle.",
   "Low-level implementation details are hidden behind an explicit Advanced surface."
 ] as const;
 
@@ -933,6 +937,66 @@ export const appOperationExecutionResultSchema = z.object({
   }
 });
 
+/**
+ * Secret-free App ownership record for a prepared provider action.
+ *
+ * Connector Broker remains the source of truth for canonical input and the
+ * provider-side prepared action. This record deliberately stores only the
+ * immutable App, route, agent, object-digest, and broker-binding identities
+ * needed to prove that a later approval or commit still belongs to the exact
+ * routed App operation that created it.
+ */
+export const appOperationActionSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  companyId: z.string().min(1).max(160),
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  loopId: appIdSchema,
+  loopVersionHash: artifactDigestSchema,
+  capability: logicalCapabilitySchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160),
+  requestId: z.string().min(8).max(128),
+  idempotencyKey: z.string().min(8).max(192),
+  resolutionDigest: artifactDigestSchema,
+  executionDigest: artifactDigestSchema,
+  providerBinding: z.object({
+    providerId: appIdSchema,
+    connectionId: appIdSchema,
+    brokerCapability: brokerCapabilitySchema,
+    operation: connectorOperationSchema
+  }).strict(),
+  companyObject: z.object({
+    type: z.string().min(1).max(96).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/),
+    identityDigest: artifactDigestSchema
+  }).strict(),
+  environment: z.enum(["development", "staging", "production"]),
+  brokerPreparedActionId: z.string().min(8).max(160),
+  brokerPreparedActionFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  brokerPrepareReceiptId: z.string().min(8).max(512),
+  approvalRequired: z.boolean(),
+  riskClass: z.enum(["read", "draft", "write", "privileged"]),
+  status: z.literal("prepared"),
+  preparedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+  recordDigest: artifactDigestSchema
+}).strict().superRefine((action, ctx) => {
+  if (Date.parse(action.expiresAt) <= Date.parse(action.preparedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Prepared App action expiry must follow preparation time" });
+  }
+  if (Date.parse(action.updatedAt) < Date.parse(action.preparedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["updatedAt"], message: "Prepared App action update time cannot precede preparation" });
+  }
+  if (canonicalAppDigest({ ...action, recordDigest: undefined }) !== action.recordDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["recordDigest"], message: "Prepared App action digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1460,6 +1524,7 @@ export type AppConnectorOperationBinding = z.infer<typeof appConnectorOperationB
 export type AppOperationResolution = z.infer<typeof appOperationResolutionSchema>;
 export type AppRuntimeOperationResponse = z.infer<typeof appRuntimeOperationResponseSchema>;
 export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionResultSchema>;
+export type AppOperationAction = z.infer<typeof appOperationActionSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1507,6 +1572,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppOperationResolution: zodToJsonSchema(appOperationResolutionSchema, "AppOperationResolution") as Record<string, unknown>,
     AppRuntimeOperationResponse: zodToJsonSchema(appRuntimeOperationResponseSchema, "AppRuntimeOperationResponse") as Record<string, unknown>,
     AppOperationExecutionResult: zodToJsonSchema(appOperationExecutionResultSchema, "AppOperationExecutionResult") as Record<string, unknown>,
+    AppOperationAction: zodToJsonSchema(appOperationActionSchema, "AppOperationAction") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,

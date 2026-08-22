@@ -44,6 +44,7 @@ describe("recovery evidence contract", () => {
       "agent_messages",
       "loopgraph_evidence_records",
       "loopgraph_app_installation_registries",
+      "loopgraph_app_operation_actions",
       "loopgraph_provider_schema_snapshots",
       "loopgraph_connector_field_mappings",
       "loopgraph_company_contexts",

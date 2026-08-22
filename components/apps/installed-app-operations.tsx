@@ -30,6 +30,7 @@ export function InstalledAppActivityPanel({ operations }: { operations: Installe
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <OperationsMetric label="Incoming events" value={String(operations.summary.incomingEvents)} detail={`${operations.summary.totalRuns} routed runs`} />
         <OperationsMetric label="Waiting approval" value={String(operations.summary.waitingApproval)} detail={`${operations.summary.activeRuns} active runs`} tone={operations.summary.waitingApproval > 0 ? "attention" : "default"} />
+        <OperationsMetric label="Prepared actions" value={String(operations.summary.preparedActions)} detail={`${operations.summary.actionsAwaitingApproval} require approval`} tone={operations.summary.actionsAwaitingApproval > 0 ? "attention" : "default"} />
         <OperationsMetric label="Failed runs" value={String(operations.summary.failedRuns)} detail={`${operations.summary.completedRuns} completed`} tone={operations.summary.failedRuns > 0 ? "danger" : "default"} />
         <OperationsMetric label="Observed outcomes" value={String(operations.summary.observedOutcomes)} detail="Durable measurement records" />
         <OperationsMetric label="Labeled accuracy" value={operations.summary.routingAccuracy === undefined ? "Not measured" : `${Math.round(operations.summary.routingAccuracy * 100)}%`} detail={`${operations.summary.reviewedDecisions} reviewed decisions`} />
@@ -69,6 +70,51 @@ export function InstalledAppActivityPanel({ operations }: { operations: Installe
         <div className="mt-5 rounded-lg border border-dashed border-line bg-paper p-5">
           <div className="font-semibold">No events have reached this App yet</div>
           <p className="mt-2 text-sm leading-6 text-ink/60">Hermes activity appears here only after an incoming company event is routed to one of this installation’s loops. Marketplace samples and activity from other Apps are never mixed into this view.</p>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+export function InstalledAppActionsPanel({ operations }: { operations: InstalledAppOperationsView }) {
+  return (
+    <SectionCard title="Governed provider actions" description="Every provider write prepared by this App is bound to one pinned artifact, loop version, Hermes route, agent assignment, logical capability, and Connector Broker receipt. This view never stores or displays canonical provider input.">
+      {operations.actions.length > 0 ? (
+        <div className="space-y-3">
+          {operations.actions.slice(0, 10).map((action) => (
+            <div className="rounded-lg border border-line p-4" key={action.id}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{action.providerBinding.providerId} · {action.riskClass} risk</div>
+                  <div className="mt-2 font-semibold">{action.providerBinding.operation}</div>
+                  <p className="mt-1 text-sm leading-6 text-ink/60">Hermes prepared this action through <span className="font-mono text-xs">{action.capability}</span>. The provider write has not run while its status is prepared.</p>
+                </div>
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold capitalize ${actionStatusTone(action.effectiveStatus)}`}>{action.effectiveStatus.replace(/_/g, " ")}</span>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-ink/50 sm:grid-cols-2 xl:grid-cols-4">
+                <span>Loop: <span className="font-mono">{action.loopId}</span></span>
+                <span>Route: <span className="font-mono">{action.routeJobId}</span></span>
+                <span>{action.approvalRequired ? "Human approval required" : "No human approval required"}</span>
+                <span>Expires {formatActivityDate(action.expiresAt)}</span>
+              </div>
+              <details className="mt-3 text-xs text-ink/45">
+                <summary className="cursor-pointer font-semibold">Ownership proof</summary>
+                <div className="mt-2 grid gap-1 font-mono">
+                  <span>Action {action.id}</span>
+                  <span>Agent {action.agentInstanceId}</span>
+                  <span>Artifact {action.artifactDigest}</span>
+                  <span>LoopSpec {action.loopVersionHash}</span>
+                  <span>Receipt {action.brokerPrepareReceiptId}</span>
+                </div>
+              </details>
+            </div>
+          ))}
+          {operations.actions.length > 10 ? <p className="text-xs text-ink/45">Showing the 10 most recent of {operations.actions.length} App-owned actions.</p> : null}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-dashed border-line bg-paper p-5">
+          <div className="font-semibold">No provider actions have been prepared</div>
+          <p className="mt-2 text-sm leading-6 text-ink/60">Read operations and Loopgraph-internal reads do not appear here. A record is created only after Connector Broker prepares a bounded provider action for this exact installation.</p>
         </div>
       )}
     </SectionCard>
@@ -117,4 +163,5 @@ function OutcomeFact({ label, value }: { label: string; value: string }) { retur
 function formatMinutes(value: number) { const rounded = Math.round(value * 10) / 10; return `${rounded.toLocaleString()} min`; }
 function formatActivityDate(value: string) { return new Date(value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); }
 function runStatusTone(status: string) { if (["failed", "dead_letter"].includes(status)) return "border-red-200 bg-red-50 text-red-800"; if (status === "waiting_review") return "border-orange-200 bg-orange-50 text-orange-800"; if (status === "completed") return "border-emerald-200 bg-emerald-50 text-emerald-800"; return "border-blue-200 bg-blue-50 text-blue-800"; }
+function actionStatusTone(status: string) { if (["failed", "denied", "revoked", "expired"].includes(status)) return "border-red-200 bg-red-50 text-red-800"; if (["prepared", "approved", "committing"].includes(status)) return "border-orange-200 bg-orange-50 text-orange-800"; if (status === "committed") return "border-emerald-200 bg-emerald-50 text-emerald-800"; return "border-line bg-paper text-ink/70"; }
 function truthStatusTone(status: string) { if (status === "observed") return "border-emerald-200 bg-emerald-50 text-emerald-800"; if (status === "modeled") return "border-blue-200 bg-blue-50 text-blue-800"; return "border-orange-200 bg-orange-50 text-orange-800"; }

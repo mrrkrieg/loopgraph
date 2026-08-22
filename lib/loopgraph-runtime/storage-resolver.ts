@@ -12,6 +12,7 @@ import {
   FileMeasurementStore,
   FileOutcomeStore,
   FileAppInstallationStore,
+  FileAppOperationActionStore,
   FileAppVerificationStore,
   FileCompanyContextStore,
   FileConnectorFieldMappingStore,
@@ -29,6 +30,7 @@ import {
   type MeasurementStore,
   type OutcomeStore,
   type AppInstallationStore,
+  type AppOperationActionStore,
   type AppVerificationStore,
   type CompanyContextStore,
   type ConnectorFieldMappingStore,
@@ -84,6 +86,10 @@ import {
   isSupabaseAppInstallationStoreEnabled
 } from "@/lib/db/adapters/supabase-app-installation-store";
 import {
+  createSupabaseAppOperationActionStore,
+  isSupabaseAppOperationActionStoreEnabled
+} from "@/lib/db/adapters/supabase-app-operation-action-store";
+import {
   createSupabaseConnectorFieldMappingStore,
   createSupabaseProviderSchemaSnapshotStore,
   isSupabaseAppConnectorMetadataStoreEnabled
@@ -106,6 +112,7 @@ const cachedMeasurementStores = new Map<string, MeasurementStore>();
 const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
 const cachedAppInstallationStores = new Map<string, AppInstallationStore>();
+const cachedAppOperationActionStores = new Map<string, AppOperationActionStore>();
 const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
 const cachedCompanyContextStores = new Map<string, CompanyContextStore>();
 const cachedConnectorFieldMappingStores = new Map<string, ConnectorFieldMappingStore>();
@@ -482,6 +489,28 @@ export function getAppInstallationStore(options: {
   return store;
 }
 
+export function getAppOperationActionStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): AppOperationActionStore {
+  const useSupabase = !options.forceFile && isSupabaseAppOperationActionStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App operation action storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-operation-actions:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-operation-actions:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedAppOperationActionStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseAppOperationActionStore(options.workspaceId)
+    : new FileAppOperationActionStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps"), options.workspaceId);
+  cachedAppOperationActionStores.set(cacheKey, store);
+  return store;
+}
+
 export function getConnectorFieldMappingStore(options: {
   workspaceId: string;
   projectRoot?: string;
@@ -575,6 +604,7 @@ export function resetStorageAdapterCache() {
   cachedOutcomeStores.clear();
   cachedEntityStores.clear();
   cachedAppInstallationStores.clear();
+  cachedAppOperationActionStores.clear();
   cachedAppVerificationStores.clear();
   cachedCompanyContextStores.clear();
   cachedConnectorFieldMappingStores.clear();

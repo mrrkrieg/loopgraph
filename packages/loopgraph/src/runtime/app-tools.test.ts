@@ -32,6 +32,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_install_status",
       "loopgraph_app_operation_resolve",
       "loopgraph_app_operation_invoke",
+      "loopgraph_app_operation_actions_get",
       "loopgraph_app_maturity_get",
       "loopgraph_app_verification_registry_get",
       "loopgraph_app_verifier_trust_add",
@@ -73,6 +74,22 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_marketplace_source_add",
       "loopgraph_marketplace_source_refresh"
     ]);
+  });
+
+  it("exposes the same secret-free prepared-action ledger to Hermes and local callers", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-action-tool-"));
+    temporaryDirectories.push(projectRoot);
+    const result = await callLoopgraphAppTool("loopgraph_app_operation_actions_get", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      installationId: "installed-sales"
+    }) as { schemaVersion: string; workspaceId: string; actions: unknown[] };
+    expect(result).toEqual({
+      schemaVersion: "loopgraph-app-operation-action-ledger/v1alpha1",
+      workspaceId: "acme",
+      actions: []
+    });
   });
 
   it("uses the same publisher service for Hermes-facing init, validation, signing, and publishing", async () => {

@@ -8,6 +8,7 @@ import type {
   AppInstallationLock,
   AppLifecycleReceipt,
   AppOperationalMaturityAssessment,
+  AppOperationAction,
   AppPromotionRecommendation,
   AppReadiness,
   AppUpdatePlan,
@@ -406,7 +407,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
   const installedLoops = installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? [];
   const evaluations = installed.evaluations.filter((evaluation) => evaluation.installationId === installationId);
-  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence, maturity] = await Promise.all([
+  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence, maturity, actions] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", {
       projectRoot,
       appId: installation.appId,
@@ -430,7 +431,12 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     callLoopgraphAppTool("loopgraph_app_maturity_get", {
       projectRoot,
       installationId
-    }) as Promise<AppOperationalMaturityAssessment>
+    }) as Promise<AppOperationalMaturityAssessment>,
+    callLoopgraphAppTool("loopgraph_app_operation_actions_get", {
+      projectRoot,
+      installationId,
+      limit: 100
+    }).then((result) => (result as { actions: AppOperationAction[] }).actions)
   ]);
   const updatePlan = diff.updateAvailable
     ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
@@ -442,12 +448,14 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     : undefined;
   const operations = buildInstalledAppOperationsView({
     app: {
+      installationId: installation.id,
       id: detail.app.id,
       name: detail.app.name,
       department: detail.app.department
     },
     loops: installedLoops,
     activity: agentOperations.data.activity,
+    actions,
     evaluations,
     outcomes: evidence.outcomes,
     valueEntries: evidence.valueEntries
