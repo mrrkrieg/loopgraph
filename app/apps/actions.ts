@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { requireHostedPermission, requireHostedStepUp } from "@/lib/auth/hosted-access";
 import { approveConnectorPreparedAction, revokeConnectorPreparedAction } from "@/lib/connector-broker/admin";
 import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
@@ -170,14 +171,19 @@ export async function duplicateInstalledAppAction(formData: FormData) {
   const installationId = requiredFormString(formData, "installationId");
   const rawOverlay = optionalFormString(formData, "overlay", 100_000);
   const overlay = rawOverlay ? parseJsonObject(rawOverlay, "Duplicate overlay") : {};
-  await callLoopgraphAppTool("loopgraph_app_duplicate", {
+  const result = await callLoopgraphAppTool("loopgraph_app_duplicate", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     derivedAppId: requiredFormString(formData, "derivedAppId"),
     overlayOperations: overlay.operations ?? [],
     actor
-  });
-  revalidateInstalledApp(installationId);
+  }) as { installation?: { id?: unknown } };
+  const derivedInstallationId = result.installation?.id;
+  if (typeof derivedInstallationId !== "string" || derivedInstallationId.length < 1 || derivedInstallationId.length > 240) {
+    throw new Error("Loopgraph did not return the new private App installation identity");
+  }
+  revalidateInstalledApp(derivedInstallationId);
+  redirect(`/apps/${encodeURIComponent(derivedInstallationId)}?created=duplicate`);
 }
 
 export async function applyInstalledAppUpdateAction(formData: FormData) {

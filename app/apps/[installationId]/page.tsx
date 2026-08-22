@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
 import { appOnboardingProgressForView } from "@/lib/app-platform/install-wizard";
+import { installedAppPresentation } from "@/lib/app-platform/private-app-handoff";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import {
   activateInstalledAppAction,
@@ -25,8 +26,11 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function InstalledAppDetailPage({ params }: { params: Promise<{ installationId: string }> }) {
-  const { installationId } = await params;
+export default async function InstalledAppDetailPage({ params, searchParams }: {
+  params: Promise<{ installationId: string }>;
+  searchParams: Promise<{ created?: string }>;
+}) {
+  const [{ installationId }, query] = await Promise.all([params, searchParams]);
   let data;
   try {
     data = await getInstalledAppViewData(decodeURIComponent(installationId));
@@ -39,21 +43,55 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
   const installedLoopByName = new Map(data.installedLoops.map((loop) => [loop.name, loop]));
   const unfinishedOperations = data.lifecycleOperations.filter((operation) => operation.status !== "completed");
   const recovery = unfinishedOperations[0];
+  const presentation = installedAppPresentation({
+    appName: data.detail.app.name,
+    installationId: data.installation.id,
+    derivation: data.installation.derivation
+  });
   return (
     <>
       <div className="mb-4 text-sm text-ink/50"><Link className="hover:text-ink" href="/apps">Installed Apps</Link> / {data.detail.app.name}</div>
       <PageHeader
-        eyebrow={`${data.detail.app.department.replace(/_/g, " ")} · Installed App`}
-        title={data.detail.app.name}
-        description={data.detail.app.summary}
+        eyebrow={`${data.detail.app.department.replace(/_/g, " ")} · ${presentation.kindLabel}`}
+        title={presentation.title}
+        description={presentation.kind === "private_derived" ? presentation.description : data.detail.app.summary}
         action={<AppStatusPill state={data.installation.state} readiness={data.readiness.state} />}
       />
+
+      {query.created === "duplicate" && presentation.kind === "private_derived" ? (
+        <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-900">
+          Private App created. This is the new independently configurable installation; the upstream App remains unchanged.
+        </div>
+      ) : null}
 
       {unfinishedOperations.length > 0 ? <div className="mb-6"><AppLifecycleRecoveryNotice operations={unfinishedOperations} /></div> : null}
 
       <div className="mb-6">
         <AppOnboardingProgress compact journey={appOnboardingProgressForView(data.onboardingJourney)} />
       </div>
+
+      {presentation.derivation && presentation.publisherPrompt ? (
+        <div className="mb-6">
+          <SectionCard
+            title="Private App workspace"
+            description="The duplicate is installed only in this workspace. It is not a Marketplace release and it cannot overwrite the upstream App."
+          >
+            <div className="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
+              <Definition label="Private App ID" value={presentation.derivation.derivedAppId} mono />
+              <Definition label="Upstream App" value={presentation.derivation.upstreamAppId} mono />
+              <Definition label="Upstream version" value={presentation.derivation.upstreamVersion} />
+              <Definition label="Upstream artifact" value={presentation.derivation.upstreamDigest} mono />
+              <Definition label="Parent installation" value={presentation.derivation.parentInstallationId ?? "Not recorded"} mono />
+              <Definition label="Created by" value={presentation.derivation.createdBy} />
+            </div>
+            <div className="mt-4 rounded-md border border-line bg-surface p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">Ask Hermes when this variant is ready to reuse</div>
+              <p className="mt-2 select-all text-sm leading-6 text-ink/70">{presentation.publisherPrompt}</p>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-ink/50">Hermes will use the governed capture → preview → validate → sign → private-publish tools. Capture copies behavior and declared key names, never company values, credentials, provider payloads, tenant IDs, or private references.</p>
+          </SectionCard>
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
         <ScoreCard label="Maturity" value={data.maturity.maturity.replace(/_/g, " ")} detail="Evidence-derived ceiling" />
