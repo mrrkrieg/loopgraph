@@ -68,6 +68,10 @@ export function recoveryInstruction(operation: AppLifecycleOperation): string {
   if (operation.action === "activate") {
     return `Retry only the recorded ${operation.activation?.targetMode.replace(/_/g, " ") ?? "activation"} transition with its exact approval receipt. Loopgraph will reconcile the owned LoopSpecs and consume that authority once; do not create a replacement approval.`;
   }
+  if (operation.action === "pause" || operation.action === "resume") {
+    const target = operation.rollout?.targetState.replace(/_/g, " ") ?? operation.action;
+    return `Retry only the recorded ${operation.action} transition to ${target}. Loopgraph will reconcile the exact owned LoopSpec inventory and complete the App state change once; competing lifecycle work remains blocked.`;
+  }
   return "Open the installed App and repeat uninstall with the same artifact digest and an accountable confirmation. Already completed removals and ownership releases will not be duplicated.";
 }
 

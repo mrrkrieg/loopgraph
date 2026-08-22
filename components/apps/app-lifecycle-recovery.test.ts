@@ -62,4 +62,32 @@ describe("AppLifecycleRecoveryNotice", () => {
     expect(html).toContain("consume that authority once");
     expect(html).not.toContain(operation.activation?.approvalReceiptId ?? "missing");
   });
+
+  it("explains an interrupted rollout without broadening the requested transition", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.pause123",
+      idempotencyKey: "pause123456789012",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "pause",
+      targetArtifactDigest: "abcdef1234567890",
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: [], companyContextKeys: [] },
+      rollout: {
+        fromState: "recommend",
+        fromMode: "recommend",
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        targetState: "paused",
+        targetMode: "recommend"
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("recorded pause transition to paused");
+    expect(html).toContain("exact owned LoopSpec inventory");
+    expect(html).not.toMatch(/token|credential|provider payload/i);
+  });
 });

@@ -8,6 +8,7 @@ import {
   appAssetOwnershipSchema,
   appEvalRunSchema,
   appInstallationStateSchema,
+  appRolloutModeSchema,
   appLifecycleReceiptSchema,
   appInstallationLockSchema,
   workspaceAppInstallationSchema,
@@ -22,7 +23,7 @@ export const appLifecycleOperationSchema = z.object({
   idempotencyKey: z.string().min(16).max(160),
   installationId: z.string().min(1).max(160),
   appId: z.string().min(1).max(160),
-  action: z.enum(["install", "uninstall", "activate"]),
+  action: z.enum(["install", "uninstall", "activate", "pause", "resume"]),
   targetArtifactDigest: z.string().min(16).max(160),
   status: z.enum(["prepared", "requires_reconciliation", "completed"]),
   desired: z.object({
@@ -34,6 +35,13 @@ export const appLifecycleOperationSchema = z.object({
     approvalReceiptId: z.string().regex(/^activation-approval\.[0-9a-f]{16}$/),
     approvalDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     fromState: appInstallationStateSchema,
+    targetMode: z.enum(["shadow", "recommend", "execute_with_approval"])
+  }).strict().optional(),
+  rollout: z.object({
+    fromState: appInstallationStateSchema,
+    fromMode: appRolloutModeSchema,
+    fromUpdatedAt: z.string().datetime(),
+    targetState: appInstallationStateSchema,
     targetMode: z.enum(["shadow", "recommend", "execute_with_approval"])
   }).strict().optional(),
   actor: z.string().min(1).max(160),
@@ -58,8 +66,27 @@ export const appLifecycleOperationSchema = z.object({
   if ((operation.action === "activate") !== Boolean(operation.activation)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["activation"], message: "Only activation operations require exact activation authority" });
   }
-  if (operation.action === "activate" && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Activation recovery may change only owned LoopSpec rollout state" });
+  const isRolloutOperation = operation.action === "pause" || operation.action === "resume";
+  if (isRolloutOperation !== Boolean(operation.rollout)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollout"], message: "Only pause and resume operations require exact rollout state" });
+  }
+  if ((operation.activation || operation.rollout) && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Rollout recovery may change only owned LoopSpec rollout state" });
+  }
+  if (operation.action === "pause" && operation.rollout && (
+    !["shadow", "recommend", "execute_with_approval"].includes(operation.rollout.fromState) ||
+    operation.rollout.fromMode !== operation.rollout.fromState ||
+    operation.rollout.targetState !== "paused" ||
+    operation.rollout.targetMode !== operation.rollout.fromMode
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollout"], message: "Pause recovery must preserve the approved mode while moving active routing to shadow" });
+  }
+  if (operation.action === "resume" && operation.rollout && (
+    operation.rollout.fromState !== "paused" ||
+    operation.rollout.fromMode !== operation.rollout.targetMode ||
+    operation.rollout.targetState !== operation.rollout.targetMode
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollout"], message: "Resume recovery must restore the exact previously approved non-live mode" });
   }
 });
 

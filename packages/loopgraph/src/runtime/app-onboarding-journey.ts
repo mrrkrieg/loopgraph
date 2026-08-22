@@ -162,6 +162,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
         ? "Retry the exact previously approved install request; do not generate or approve a different plan for this App."
         : recovery.action === "activate"
           ? "Retry activation with the exact recorded approval receipt and target mode; do not create a replacement approval."
+          : recovery.action === "pause" || recovery.action === "resume"
+            ? `Retry the exact recorded ${recovery.action} request; do not start another lifecycle action until its LoopSpec state is reconciled.`
           : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
     });
   }
@@ -279,6 +281,8 @@ function decideStage(input: {
         ? "An exact App installation was interrupted and must be resumed before another plan can be applied."
         : action === "activate"
           ? "App activation was interrupted and its exact approved transition must be reconciled before another lifecycle action can run."
+          : action === "pause" || action === "resume"
+            ? `App ${action} was interrupted and its exact rollout transition must be reconciled before another lifecycle action can run.`
           : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
       nextAction: {
         kind: "retry_exact_request",
@@ -286,6 +290,8 @@ function decideStage(input: {
           ? "Retry the exact previously approved install request. Loopgraph will replay only unfinished idempotent work."
           : action === "activate"
             ? "Retry the exact recorded activation receipt and target mode. Loopgraph will reconcile LoopSpec state and consume authority only once."
+            : action === "pause" || action === "resume"
+              ? `Retry the exact recorded ${action} request. Loopgraph will reconcile only the pinned owned LoopSpecs and complete the state transition once.`
             : "Repeat the uninstall confirmation for this exact installation and artifact digest. Loopgraph will replay only unfinished idempotent work.",
         requiresHumanConfirmation: true,
         input: {
@@ -296,6 +302,9 @@ function decideStage(input: {
           ...(input.lifecycleOperation.activation ? {
             approvalReceiptId: input.lifecycleOperation.activation.approvalReceiptId,
             mode: input.lifecycleOperation.activation.targetMode
+          } : input.lifecycleOperation.rollout ? {
+            targetState: input.lifecycleOperation.rollout.targetState,
+            mode: input.lifecycleOperation.rollout.targetMode
           } : {})
         }
       }

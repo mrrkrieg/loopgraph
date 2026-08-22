@@ -89,6 +89,8 @@ Approval creation and receipt consumption return strict audit contexts from that
 
 The LoopSpec registry and App installation registry are separate durable stores, so activation is journaled before crossing that boundary. The lifecycle operation binds the exact approval, artifact, source state, target mode, actor, and owned LoopSpec IDs. Prepared or interrupted work blocks every unrelated lifecycle mutation. Retrying the same request verifies that the recorded attempt began while its receipt was valid, asserts the owned loop inventory has not drifted, makes LoopSpec activation idempotently current, and atomically completes the operation with installation state, receipt consumption, and the action-specific audit event. Exact retries after completion return the current installation without advancing a revision or re-consuming authority.
 
+Pause and resume are also cross-store rollout transactions. Their journal binds the exact source state and revision timestamp, retained approved mode, target state and mode, pinned artifact, actor, and owned LoopSpec IDs before the runtime registry changes. Pause may only move an active installation's owned loops to shadow while retaining its approved mode; resume may only restore a paused installation to that same mode. Recovery rejects a different actor, App, artifact, topology, source revision, source state, or target mode. Once the App registry records completion, an immediate exact replay is revision-stable and cannot manufacture another lifecycle event; a later cycle derives a new identity from its newer source revision.
+
 ## Configuration precedence
 
 Configuration is resolved in this deterministic order:

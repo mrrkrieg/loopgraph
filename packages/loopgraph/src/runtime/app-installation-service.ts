@@ -215,7 +215,7 @@ export class AppInstallationService {
       const conflicting = registry.lifecycleOperations.find((operation) =>
         operation.installationId === input.installationId && operation.status !== "completed");
       if (conflicting) {
-        throw new Error(`App lifecycle operation ${conflicting.id} requires reconciliation before another operation can start`);
+        throw new Error(`App lifecycle operation ${conflicting.id} must be reconciled before another operation can start`);
       }
       const timestamp = input.now.toISOString();
       const { now: _now, ...operationInput } = input;
@@ -1596,17 +1596,12 @@ export class AppInstallationService {
     }
   }
 
-  async pause(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, actor, () => "paused");
+  async pause(installationId: string, actor: string, now = new Date()): Promise<WorkspaceAppInstallation> {
+    return this.transition(installationId, actor, "pause", now);
   }
 
-  async resume(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, actor, (installation) => {
-      if (installation.mode !== "shadow" && installation.mode !== "recommend" && installation.mode !== "execute_with_approval") {
-        throw new Error("Paused installation has no safe resumable rollout mode");
-      }
-      return installation.mode;
-    });
+  async resume(installationId: string, actor: string, now = new Date()): Promise<WorkspaceAppInstallation> {
+    return this.transition(installationId, actor, "resume", now);
   }
 
   async readiness(installationId: string, now = new Date()): Promise<AppReadiness> {
@@ -1763,31 +1758,102 @@ export class AppInstallationService {
   private async transition(
     installationId: string,
     actor: string,
-    validate: (installation: WorkspaceAppInstallation, registry: AppInstallationRegistry) => WorkspaceAppInstallation["state"]
+    action: "pause" | "resume",
+    now: Date
   ): Promise<WorkspaceAppInstallation> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      const state = validate(installation, registry);
-      assertLifecycleTransition(installation.state, state, state);
-      const timestamp = new Date().toISOString();
-      const mode = ["shadow", "recommend", "execute_with_approval", "live"].includes(state) ? state as AppRolloutMode : installation.mode;
-      const routingMode = state === "paused"
-        ? "shadow"
-        : state === "shadow" || state === "recommend" || state === "execute_with_approval"
-          ? state
-          : undefined;
-      if (!routingMode) throw new Error(`App state ${state} has no safe LoopSpec routing mode`);
-      await this.synchronizeOwnedLoopActivation(
-        installation.id,
-        routingMode,
-        timestamp
-      );
-      const updated = { ...installation, state, mode, updatedAt: timestamp, failureReason: undefined };
-      return {
-        registry: { ...registry, revision: registry.revision + 1, installations: replaceInstallation(registry.installations, updated), updatedAt: timestamp },
-        value: updated
-      };
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = requireInstallation(observedRegistry, installationId);
+    const unfinished = observedRegistry.lifecycleOperations.find((operation) =>
+      operation.installationId === installationId && operation.status !== "completed");
+    if (!unfinished && isCompletedRolloutRequest(observedInstallation, action)) return observedInstallation;
+    const intent = rolloutTransitionIntent(observedInstallation, action);
+    const idempotencyKey = canonicalAppDigest({
+      action,
+      workspaceId: observedRegistry.workspaceId,
+      installationId,
+      appId: observedInstallation.appId,
+      artifactDigest: observedInstallation.artifactDigest,
+      ...intent
     });
+    const operationId = lifecycleOperationId(action, installationId, observedInstallation.artifactDigest, idempotencyKey);
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId,
+      appId: observedInstallation.appId,
+      action,
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: {
+        loopIds: installationLoopIds(observedWorkspace.workspace, installationId),
+        fieldMappingIds: [],
+        companyContextKeys: []
+      },
+      rollout: {
+        fromState: intent.fromState,
+        fromMode: intent.fromMode,
+        fromUpdatedAt: intent.fromUpdatedAt,
+        targetState: intent.targetState,
+        targetMode: intent.targetMode
+      },
+      actor,
+      now
+    });
+    if (operation.status === "completed") {
+      return requireInstallation(await this.installationStore.read(), installationId);
+    }
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.rollout || currentOperation.status === "completed") {
+          throw new Error(`App rollout recovery record is unavailable: ${operation.id}`);
+        }
+        const rollout = currentOperation.rollout;
+        if (
+          currentOperation.action !== action ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== installation.artifactDigest ||
+          installation.state !== rollout.fromState ||
+          installation.mode !== rollout.fromMode ||
+          installation.updatedAt !== rollout.fromUpdatedAt
+        ) {
+          throw new Error("App rollout recovery record does not match the current lifecycle transition");
+        }
+        const expected = rolloutTransitionIntent(installation, action);
+        if (
+          expected.targetState !== rollout.targetState ||
+          expected.targetMode !== rollout.targetMode ||
+          expected.routingMode !== rolloutRoutingMode(action, rollout.targetMode)
+        ) {
+          throw new Error("App rollout recovery target no longer matches the governed transition");
+        }
+        const timestamp = now.toISOString();
+        await this.synchronizeOwnedLoopActivation(
+          installation.id,
+          expected.routingMode,
+          timestamp,
+          currentOperation.desired.loopIds
+        );
+        const updated: WorkspaceAppInstallation = {
+          ...installation,
+          state: rollout.targetState,
+          mode: rollout.targetMode,
+          updatedAt: timestamp,
+          failureReason: undefined
+        };
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: registry.revision + 1,
+          installations: replaceInstallation(registry.installations, updated),
+          updatedAt: timestamp
+        }, currentOperation.id, now);
+        return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: updated };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   private async synchronizeOwnedLoopActivation(
@@ -1799,7 +1865,7 @@ export class AppInstallationService {
     const snapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
     const loopIds = installationLoopIds(snapshot.workspace, installationId);
     if (expectedLoopIds && canonicalAppDigest([...loopIds].sort()) !== canonicalAppDigest([...expectedLoopIds].sort())) {
-      throw new Error(`App installation ${installationId} owned LoopSpecs changed after activation recovery was prepared`);
+      throw new Error(`App installation ${installationId} owned LoopSpecs changed after rollout recovery was prepared`);
     }
     if (loopIds.length === 0) {
       throw new Error(`App installation ${installationId} owns no active LoopSpecs`);
@@ -2470,6 +2536,78 @@ function assertActivationReady(input: {
   assertLifecycleTransition(installation.state, mode, mode);
 }
 
+type RolloutTransitionIntent = {
+  fromState: WorkspaceAppInstallation["state"];
+  fromMode: AppRolloutMode;
+  fromUpdatedAt: string;
+  targetState: WorkspaceAppInstallation["state"];
+  targetMode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  routingMode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+};
+
+function rolloutTransitionIntent(
+  installation: WorkspaceAppInstallation,
+  action: "pause" | "resume"
+): RolloutTransitionIntent {
+  if (action === "pause") {
+    if (
+      installation.state !== "shadow" &&
+      installation.state !== "recommend" &&
+      installation.state !== "execute_with_approval"
+    ) {
+      throw new Error(`Invalid app lifecycle transition: ${installation.state} -> paused`);
+    }
+    if (installation.mode !== installation.state) {
+      throw new Error("Active App state and approved rollout mode do not match");
+    }
+    return {
+      fromState: installation.state,
+      fromMode: installation.mode,
+      fromUpdatedAt: installation.updatedAt,
+      targetState: "paused",
+      targetMode: installation.mode,
+      routingMode: "shadow"
+    };
+  }
+  if (installation.state !== "paused") {
+    throw new Error(`Invalid app lifecycle transition: ${installation.state} -> resume`);
+  }
+  if (
+    installation.mode !== "shadow" &&
+    installation.mode !== "recommend" &&
+    installation.mode !== "execute_with_approval"
+  ) {
+    throw new Error("Paused installation has no safe resumable rollout mode");
+  }
+  return {
+    fromState: "paused",
+    fromMode: installation.mode,
+    fromUpdatedAt: installation.updatedAt,
+    targetState: installation.mode,
+    targetMode: installation.mode,
+    routingMode: installation.mode
+  };
+}
+
+function rolloutRoutingMode(
+  action: "pause" | "resume",
+  targetMode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">
+): Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval"> {
+  return action === "pause" ? "shadow" : targetMode;
+}
+
+function isCompletedRolloutRequest(
+  installation: WorkspaceAppInstallation,
+  action: "pause" | "resume"
+): boolean {
+  if (action === "pause") return installation.state === "paused";
+  return (
+    installation.state === "shadow" ||
+    installation.state === "recommend" ||
+    installation.state === "execute_with_approval"
+  ) && installation.mode === installation.state;
+}
+
 function requireOperableInstallation(registry: AppInstallationRegistry, id: string): WorkspaceAppInstallation {
   const installation = requireInstallation(registry, id);
   const unfinished = registry.lifecycleOperations.find((operation) =>
@@ -2501,6 +2639,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     targetArtifactDigest: existing.targetArtifactDigest,
     desired: existing.desired,
     activation: existing.activation,
+    rollout: existing.rollout,
     actor: existing.actor
   };
   if (canonicalAppDigest(existingIntent) !== canonicalAppDigest(intent)) {

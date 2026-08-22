@@ -1540,7 +1540,7 @@ export const appOnboardingJourneySchema = z.object({
   readiness: appReadinessSchema.optional(),
   recovery: z.object({
     operationId: z.string().min(1).max(160),
-    action: z.enum(["install", "uninstall", "activate"]),
+    action: z.enum(["install", "uninstall", "activate", "pause", "resume"]),
     status: z.enum(["prepared", "requires_reconciliation"]),
     targetArtifactDigest: artifactDigestSchema,
     startedAt: isoDateTimeSchema,

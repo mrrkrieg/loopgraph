@@ -313,6 +313,8 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
                   operationId={recovery.id}
                 />
               ) : <p className="mt-4 rounded-md border border-orange-300 bg-white p-3 text-xs leading-5 text-orange-900/75">This exact activation cannot be resumed from the browser. Use the Hermes or CLI retry returned by the onboarding journey; do not create a replacement approval.</p>
+            ) : recovery.action === "pause" || recovery.action === "resume" ? (
+              <div className="mt-4"><OperationForm action={recovery.action} installationId={data.installation.id} label={`Reconcile and finish ${recovery.action}`} primary /></div>
             ) : <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href={recovery.action === "uninstall" ? "#app-uninstall" : `/marketplace/${encodeURIComponent(data.detail.app.id)}/install`}>{recovery.action === "uninstall" ? "Finish recovery" : "Return to exact install"}</a> : <div className="mt-4 space-y-2">
               {data.installation.state === "ready_to_test" || data.installation.state === "broken" ? <OperationForm action="test" installationId={data.installation.id} label="Run conformance tests" primary /> : null}
               {data.installation.state === "simulation_passed" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}

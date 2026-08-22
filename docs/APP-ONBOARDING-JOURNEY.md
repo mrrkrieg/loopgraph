@@ -32,7 +32,7 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 - the current content-bound install plan and field-mapping plan when applicable;
 - an exact impact projection of every LoopSpec, skill, route, event contract, schedule, metric, fixture, evaluation, dashboard, connector binding, field mapping, and graph asset to create or reuse, including conflicts, permissions, and evidence/learning edges;
 - persisted installation, readiness, and write-blocked evaluation state;
-- an unfinished install/uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker stopped between stores;
+- an unfinished install, activation, pause, resume, or uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker stopped between stores;
 - one exact next action, including a tool name when a safe tool call exists;
 - an explicit `requiresHumanConfirmation` boundary.
 
@@ -48,7 +48,7 @@ Module selection is part of the content-bound plan. Unselected module loops and 
 4. After the user chooses a preset or answers a setup question, call `loopgraph_app_onboarding_save` with the complete current snapshot and exact draft revision. Never store credentials or raw provider data in the draft.
 5. If the user explicitly asks to start over, explain the resources that remain unchanged, obtain confirmation, and call `loopgraph_app_onboarding_reset` with the latest draft ID and revision. Re-read instead of clearing anything after an identity or revision conflict.
 6. If the user asks for another preset, preview it without draft values. When `draft.applied` is false, explain that isolation and require confirmation before saving the complete replacement snapshot with `confirmPresetChange: true`.
-7. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install or uninstall identity.
+7. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install, activation, pause, resume, or uninstall identity.
 8. Ask only returned questions and resolve only returned blockers.
 9. Re-read the journey after every state change; the App ID alone resumes saved progress.
 10. Use only the returned exact install plan and `nextAction.toolName`.
@@ -63,6 +63,8 @@ The installed-App browser follows the same boundary. It never combines approval 
 Hosted approval creation and receipt consumption are also audit-fenced registry mutations. Each accepted transition appends `app.activation.approved` or `app.activation.consumed` to the tenant/project security chain in the same database transaction as the registry revision. The bounded event contains the accountable actor, content-addressed receipt ID, hashed installation and App identities, pinned artifact and approval digests, source state, requested mode, expiry, and evidence-reference count. Approval text, evidence references, provider data, credentials, tokens, and raw App or installation identifiers remain outside the audit envelope. A failed audit validation or append rolls back the authority change.
 
 Activation also uses a durable cross-store recovery journal. Before changing any owned LoopSpec, Loopgraph records the exact receipt ID and digest, pinned artifact, source state, target mode, actor, and owned loop set. If a worker stops after LoopSpecs change but before the installation registry consumes the receipt, every competing lifecycle mutation is blocked and the journey returns one exact `retry_exact_request`. That retry may finish after the original receipt expiry only when the journal proves the approved attempt began before expiry; it revalidates the same artifact, state, authority, and loop inventory, then consumes the receipt once. A completed retry is an idempotent read of the resulting state, not a second activation.
+
+Pause and resume use the same journal boundary without creating new rollout authority. The operation records the exact source state and revision timestamp, approved mode, target state and mode, pinned artifact, actor, and owned LoopSpec IDs before changing the runtime graph. Pause reconciles those loops to shadow while retaining the last approved mode in the App registry; resume reconciles them back to that exact mode. A retry is accepted only for the same actor and unchanged source revision, artifact, and owned-loop inventory. A completed immediate retry does not advance the registry again, while a later pause/resume cycle has a new source revision and therefore a new transaction identity.
 
 ## CLI
 
@@ -103,4 +105,4 @@ The Marketplace installer and Installed App detail page render the same eight-st
 - A failed conformance run stops at `resolve_test_failures`.
 - A passing test does not imply permission to activate; shadow requires a separate human decision.
 - Revoked, deprecated, or uninstalling Apps do not receive an automatic transition.
-- An unfinished install or uninstall returns `recover_lifecycle`; test, activation, configuration, overlay, repair, update, rollback, duplicate, detach, pause, and resume mutations remain blocked until the exact operation completes.
+- An unfinished install, activation, pause, resume, or uninstall returns `recover_lifecycle`; every competing test, activation, configuration, overlay, repair, update, rollback, duplicate, detach, pause, resume, or removal mutation remains blocked until the exact operation completes.

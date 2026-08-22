@@ -15,7 +15,8 @@ import {
   type AppInstallationMutationAuditContext,
   type AppInstallationRegistry,
   type AppInstallationStore,
-  type AppInstallationUpdate
+  type AppInstallationUpdate,
+  type AppLifecycleOperation
 } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { callLoopgraphAppTool } from "./app-tools";
@@ -90,7 +91,7 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
   readonly persistence = "file" as const;
   readonly audits: AppInstallationMutationAuditContext[] = [];
   private registry: AppInstallationRegistry;
-  private interruptActivationCompletion = false;
+  private interruptedCompletionAction?: AppLifecycleOperation["action"];
 
   constructor(workspaceId: string) {
     this.registry = emptyAppInstallationRegistry(workspaceId);
@@ -105,7 +106,11 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
   }
 
   interruptNextActivationRegistryCommit(): void {
-    this.interruptActivationCompletion = true;
+    this.interruptNextLifecycleRegistryCommit("activate");
+  }
+
+  interruptNextLifecycleRegistryCommit(action: AppLifecycleOperation["action"]): void {
+    this.interruptedCompletionAction = action;
   }
 
   async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
@@ -113,14 +118,15 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
     const result = await operation(current);
     const next = appInstallationRegistrySchema.parse(result.registry);
     assertAppInstallationRegistryRevision(current, next);
-    const pendingActivation = current.lifecycleOperations.find((candidate) =>
-      candidate.action === "activate" && candidate.status !== "completed");
-    const completedActivation = pendingActivation
-      ? next.lifecycleOperations.find((candidate) => candidate.id === pendingActivation.id && candidate.status === "completed")
+    const pendingOperation = current.lifecycleOperations.find((candidate) =>
+      candidate.action === this.interruptedCompletionAction && candidate.status !== "completed");
+    const completedOperation = pendingOperation
+      ? next.lifecycleOperations.find((candidate) => candidate.id === pendingOperation.id && candidate.status === "completed")
       : undefined;
-    if (this.interruptActivationCompletion && completedActivation) {
-      this.interruptActivationCompletion = false;
-      throw new Error("simulated worker interruption after activation LoopSpec materialization");
+    if (this.interruptedCompletionAction && completedOperation) {
+      const action = this.interruptedCompletionAction;
+      this.interruptedCompletionAction = undefined;
+      throw new Error(`simulated worker interruption after ${action} LoopSpec materialization`);
     }
     this.registry = next;
     if (result.audit) this.audits.push(result.audit);
@@ -839,6 +845,117 @@ describe("atomic app installation lifecycle", () => {
     expect(resumed).toMatchObject({ state: "execute_with_approval", mode: "execute_with_approval" });
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
   });
+
+  it("recovers interrupted pause and resume without leaving App and LoopSpec state split", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "Observe the tested App in shadow mode.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    await input.service.activate(applied.installation.id, "shadow", shadowApproval.id, "admin-1", new Date("2026-08-08T12:04:00.000Z"));
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "admin-1",
+      reason: "Shadow evidence supports recommendations.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    await input.service.activate(applied.installation.id, "recommend", recommendApproval.id, "admin-1", new Date("2026-08-08T12:06:00.000Z"));
+    const routingModes = async () => (await new FileLoopSpecRegistryStore(input.projectRoot).listActiveLoopSpecs(input.projectRoot))
+      .filter((artifact) => artifact.spec.metadata.labels?.installationId === applied.installation.id)
+      .map((artifact) => artifact.spec.routing?.activationMode);
+
+    store.interruptNextLifecycleRegistryCommit("pause");
+    await expect(input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:07:00.000Z")))
+      .rejects.toThrow("simulated worker interruption after pause");
+    let registry = await store.read();
+    expect(registry.installations[0]).toMatchObject({ state: "recommend", mode: "recommend" });
+    expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    expect(registry.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "pause",
+      actor: "admin-1",
+      status: "requires_reconciliation",
+      rollout: {
+        fromState: "recommend",
+        fromMode: "recommend",
+        fromUpdatedAt: "2026-08-08T12:06:00.000Z",
+        targetState: "paused",
+        targetMode: "recommend"
+      }
+    }));
+    await expect(input.service.pause(applied.installation.id, "different-admin", new Date("2026-08-08T12:07:30.000Z")))
+      .rejects.toThrow(/idempotency conflict/i);
+    const pauseJourney = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }, { appInstallationStoreFactory: () => store }) as {
+      stage: string;
+      recovery: { action: string; status: string };
+      nextAction: { kind: string; input: Record<string, unknown> };
+    };
+    expect(pauseJourney).toMatchObject({
+      stage: "recover_lifecycle",
+      recovery: { action: "pause", status: "requires_reconciliation" },
+      nextAction: {
+        kind: "retry_exact_request",
+        input: { action: "pause", installationId: applied.installation.id, targetState: "paused", mode: "recommend" }
+      }
+    });
+
+    const paused = await input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:08:00.000Z"));
+    expect(paused).toMatchObject({ state: "paused", mode: "recommend" });
+    registry = await store.read();
+    const pausedRevision = registry.revision;
+    expect(registry.lifecycleOperations).toContainEqual(expect.objectContaining({ action: "pause", status: "completed" }));
+    expect(await input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:08:30.000Z")))
+      .toMatchObject({ state: "paused", mode: "recommend" });
+    expect((await store.read()).revision).toBe(pausedRevision);
+
+    store.interruptNextLifecycleRegistryCommit("resume");
+    await expect(input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:09:00.000Z")))
+      .rejects.toThrow("simulated worker interruption after resume");
+    registry = await store.read();
+    expect(registry.installations[0]).toMatchObject({ state: "paused", mode: "recommend" });
+    expect(new Set(await routingModes())).toEqual(new Set(["recommend"]));
+    expect(registry.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "resume",
+      actor: "admin-1",
+      status: "requires_reconciliation",
+      rollout: {
+        fromState: "paused",
+        fromMode: "recommend",
+        fromUpdatedAt: "2026-08-08T12:08:00.000Z",
+        targetState: "recommend",
+        targetMode: "recommend"
+      }
+    }));
+
+    const resumed = await input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:10:00.000Z"));
+    expect(resumed).toMatchObject({ state: "recommend", mode: "recommend" });
+    const resumedRevision = (await store.read()).revision;
+    expect(await input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:10:30.000Z")))
+      .toMatchObject({ state: "recommend", mode: "recommend" });
+    expect((await store.read()).revision).toBe(resumedRevision);
+
+    const pausedAgain = await input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:11:00.000Z"));
+    expect(pausedAgain).toMatchObject({ state: "paused", mode: "recommend" });
+    expect((await store.read()).revision).toBeGreaterThan(resumedRevision);
+    const resumedAgain = await input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:12:00.000Z"));
+    expect(resumedAgain).toMatchObject({ state: "recommend", mode: "recommend" });
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "pause" && operation.status === "completed")).toHaveLength(2);
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "resume" && operation.status === "completed")).toHaveLength(2);
+  }, 20_000);
 
   it("rejects missing, mismatched, and expired approvals while replaying only an exact completed activation", async () => {
     const input = await harness();
