@@ -127,6 +127,21 @@ describe("operational status", () => {
           error: null
         };
       }
+      if (name === "get_loopgraph_app_action_reconciliation_snapshot") {
+        return {
+          data: {
+            app_action_commits_requested_total: 40,
+            app_action_commits_succeeded_total: 36,
+            app_action_commits_failed_total: 3,
+            app_action_reconciliation_pending: 1,
+            app_action_reconciliation_stale: 0,
+            app_action_reconciliation_workspaces_affected: 1,
+            app_action_reconciliation_oldest_age_seconds: 45,
+            app_action_reconciliation_stale_after_seconds: 300
+          },
+          error: null
+        };
+      }
       return {
           data: {
             database_ready: true,
@@ -164,7 +179,8 @@ describe("operational status", () => {
         database: true,
         audit: true,
         runtimeNamespace: true,
-        appLifecycleRecovery: true
+        appLifecycleRecovery: true,
+        appActionReconciliation: true
       },
       metrics: {
         machineRequests5m: 8,
@@ -218,7 +234,15 @@ describe("operational status", () => {
         appLifecycleRecoveryStale: 0,
         appLifecycleRecoveryWorkspacesAffected: 1,
         appLifecycleRecoveryOldestAgeSeconds: 30,
-        appLifecycleRecoveryStaleAfterSeconds: 900
+        appLifecycleRecoveryStaleAfterSeconds: 900,
+        appActionCommitsRequestedTotal: 40,
+        appActionCommitsSucceededTotal: 36,
+        appActionCommitsFailedTotal: 3,
+        appActionReconciliationPending: 1,
+        appActionReconciliationStale: 0,
+        appActionReconciliationWorkspacesAffected: 1,
+        appActionReconciliationOldestAgeSeconds: 45,
+        appActionReconciliationStaleAfterSeconds: 300
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
@@ -255,11 +279,25 @@ describe("operational status", () => {
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_app_lifecycle_recovery_stale 0"
     );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_action_reconciliation_pending 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_action_reconciliation_stale 0"
+    );
     expect(rpc).toHaveBeenCalledWith("get_app_lifecycle_recovery_snapshot", {
       p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
       p_project_key: "main",
       p_stale_after_seconds: 900
     });
+    expect(rpc).toHaveBeenCalledWith(
+      "get_loopgraph_app_action_reconciliation_snapshot",
+      {
+        p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
+        p_project_key: "main",
+        p_stale_after_seconds: 300
+      }
+    );
   });
 
   it("reports stale or interrupted App lifecycle work as degraded without failing traffic readiness", async () => {
@@ -308,6 +346,53 @@ describe("operational status", () => {
     expect(readiness).toMatchObject({
       ready: false,
       checks: { configuration: false, appLifecycleRecovery: false }
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports stale App action commit receipts as degraded without failing traffic readiness", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_loopgraph_app_action_reconciliation_snapshot"
+          ? {
+              app_action_reconciliation_pending: 2,
+              app_action_reconciliation_stale: 1,
+              app_action_reconciliation_workspaces_affected: 1,
+              app_action_reconciliation_oldest_age_seconds: 480,
+              app_action_reconciliation_stale_after_seconds: 300
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { appActionReconciliation: false },
+      metrics: {
+        appActionReconciliationPending: 2,
+        appActionReconciliationStale: 1,
+        appActionReconciliationOldestAgeSeconds: 480
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_action_reconciliation_stale 1"
+    );
+  });
+
+  it("fails hosted readiness when the App action reconciliation threshold is invalid", async () => {
+    hostedEnvironment();
+    vi.stubEnv("LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS", "30");
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      checks: { configuration: false, appActionReconciliation: false }
     });
     expect(rpc).not.toHaveBeenCalled();
   });

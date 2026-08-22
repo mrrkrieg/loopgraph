@@ -66,6 +66,14 @@ export type OperationalMetrics = {
   appLifecycleRecoveryWorkspacesAffected: number;
   appLifecycleRecoveryOldestAgeSeconds: number;
   appLifecycleRecoveryStaleAfterSeconds: number;
+  appActionCommitsRequestedTotal: number;
+  appActionCommitsSucceededTotal: number;
+  appActionCommitsFailedTotal: number;
+  appActionReconciliationPending: number;
+  appActionReconciliationStale: number;
+  appActionReconciliationWorkspacesAffected: number;
+  appActionReconciliationOldestAgeSeconds: number;
+  appActionReconciliationStaleAfterSeconds: number;
   lastMachineRequestAt?: string;
 };
 
@@ -80,6 +88,7 @@ export type OperationalReadiness = {
     audit: boolean | null;
     runtimeNamespace: boolean | null;
     appLifecycleRecovery: boolean | null;
+    appActionReconciliation: boolean | null;
   };
   metrics: OperationalMetrics;
 };
@@ -177,7 +186,15 @@ const EMPTY_METRICS: OperationalMetrics = {
   appLifecycleRecoveryStale: 0,
   appLifecycleRecoveryWorkspacesAffected: 0,
   appLifecycleRecoveryOldestAgeSeconds: 0,
-  appLifecycleRecoveryStaleAfterSeconds: 0
+  appLifecycleRecoveryStaleAfterSeconds: 0,
+  appActionCommitsRequestedTotal: 0,
+  appActionCommitsSucceededTotal: 0,
+  appActionCommitsFailedTotal: 0,
+  appActionReconciliationPending: 0,
+  appActionReconciliationStale: 0,
+  appActionReconciliationWorkspacesAffected: 0,
+  appActionReconciliationOldestAgeSeconds: 0,
+  appActionReconciliationStaleAfterSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -193,7 +210,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         database: null,
         audit: null,
         runtimeNamespace: null,
-        appLifecycleRecovery: null
+        appLifecycleRecovery: null,
+        appActionReconciliation: null
       },
       metrics: EMPTY_METRICS
     };
@@ -204,6 +222,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
   const lifecycleStaleAfterSeconds = parseLifecycleStaleAfterSeconds(
     process.env.LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS
   );
+  const actionStaleAfterSeconds = parseActionStaleAfterSeconds(
+    process.env.LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS
+  );
   let runtimeNamespace = false;
   try {
     resolveHostedRuntimeProjectRoot(process.env);
@@ -212,14 +233,16 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     runtimeNamespace = false;
   }
   const configuration = Boolean(
-    organizationId && runtimeNamespace && lifecycleStaleAfterSeconds !== undefined
+    organizationId && runtimeNamespace && lifecycleStaleAfterSeconds !== undefined &&
+    actionStaleAfterSeconds !== undefined
   );
   const supabase = createSupabaseAdminClient();
   if (
     !configuration ||
     !organizationId ||
     !supabase ||
-    lifecycleStaleAfterSeconds === undefined
+    lifecycleStaleAfterSeconds === undefined ||
+    actionStaleAfterSeconds === undefined
   ) {
     emitOperationalLog({
       level: "error",
@@ -239,7 +262,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         database: Boolean(supabase),
         audit: false,
         runtimeNamespace,
-        appLifecycleRecovery: false
+        appLifecycleRecovery: false,
+        appActionReconciliation: false
       },
       metrics: EMPTY_METRICS
     };
@@ -252,7 +276,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     loopSpecRegistry,
     opportunityController,
     semanticGraph,
-    appLifecycleRecovery
+    appLifecycleRecovery,
+    appActionReconciliation
   ] =
     await Promise.all([
       supabase.rpc("get_loopgraph_operational_snapshot", {
@@ -283,6 +308,11 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         p_organization_id: organizationId,
         p_project_key: projectKey,
         p_stale_after_seconds: lifecycleStaleAfterSeconds
+      }),
+      supabase.rpc("get_loopgraph_app_action_reconciliation_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_stale_after_seconds: actionStaleAfterSeconds
       })
     ]);
   if (
@@ -293,6 +323,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     opportunityController.error ||
     semanticGraph.error ||
     appLifecycleRecovery.error ||
+    appActionReconciliation.error ||
     !isRecord(operational.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
@@ -300,6 +331,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     !isRecord(opportunityController.data) ||
     !isRecord(semanticGraph.data) ||
     !isRecord(appLifecycleRecovery.data) ||
+    !isRecord(appActionReconciliation.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -320,7 +352,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         database: false,
         audit: false,
         runtimeNamespace: true,
-        appLifecycleRecovery: false
+        appLifecycleRecovery: false,
+        appActionReconciliation: false
       },
       metrics: EMPTY_METRICS
     };
@@ -333,15 +366,17 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     ...loopSpecRegistry.data,
     ...opportunityController.data,
     ...semanticGraph.data,
-    ...appLifecycleRecovery.data
+    ...appLifecycleRecovery.data,
+    ...appActionReconciliation.data
   });
   const lifecycleRecoveryHealthy =
     metrics.appLifecycleRecoveryRequiresReconciliation === 0 &&
     metrics.appLifecycleRecoveryStale === 0;
+  const actionReconciliationHealthy = metrics.appActionReconciliationStale === 0;
 
   return {
     ready: true,
-    degraded: !lifecycleRecoveryHealthy,
+    degraded: !lifecycleRecoveryHealthy || !actionReconciliationHealthy,
     mode: "hosted",
     checkedAt,
     checks: {
@@ -349,7 +384,8 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       database: true,
       audit: true,
       runtimeNamespace: true,
-      appLifecycleRecovery: lifecycleRecoveryHealthy
+      appLifecycleRecovery: lifecycleRecoveryHealthy,
+      appActionReconciliation: actionReconciliationHealthy
     },
     metrics
   };
@@ -663,6 +699,30 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_app_lifecycle_recovery_stale_after_seconds Configured age at which unfinished App lifecycle work is stale.",
     "# TYPE loopgraph_app_lifecycle_recovery_stale_after_seconds gauge",
     `loopgraph_app_lifecycle_recovery_stale_after_seconds ${metrics.appLifecycleRecoveryStaleAfterSeconds}`,
+    "# HELP loopgraph_app_action_commits_requested_total App provider commits requested in the tenant project.",
+    "# TYPE loopgraph_app_action_commits_requested_total gauge",
+    `loopgraph_app_action_commits_requested_total ${metrics.appActionCommitsRequestedTotal}`,
+    "# HELP loopgraph_app_action_commits_succeeded_total App provider commits with a durable successful terminal receipt.",
+    "# TYPE loopgraph_app_action_commits_succeeded_total gauge",
+    `loopgraph_app_action_commits_succeeded_total ${metrics.appActionCommitsSucceededTotal}`,
+    "# HELP loopgraph_app_action_commits_failed_total App provider commits with a durable failed terminal receipt.",
+    "# TYPE loopgraph_app_action_commits_failed_total gauge",
+    `loopgraph_app_action_commits_failed_total ${metrics.appActionCommitsFailedTotal}`,
+    "# HELP loopgraph_app_action_reconciliation_pending Commit requests without a matching terminal receipt.",
+    "# TYPE loopgraph_app_action_reconciliation_pending gauge",
+    `loopgraph_app_action_reconciliation_pending ${metrics.appActionReconciliationPending}`,
+    "# HELP loopgraph_app_action_reconciliation_stale Nonterminal commit requests older than the configured recovery threshold.",
+    "# TYPE loopgraph_app_action_reconciliation_stale gauge",
+    `loopgraph_app_action_reconciliation_stale ${metrics.appActionReconciliationStale}`,
+    "# HELP loopgraph_app_action_reconciliation_workspaces_affected Workspaces with a nonterminal App commit request.",
+    "# TYPE loopgraph_app_action_reconciliation_workspaces_affected gauge",
+    `loopgraph_app_action_reconciliation_workspaces_affected ${metrics.appActionReconciliationWorkspacesAffected}`,
+    "# HELP loopgraph_app_action_reconciliation_oldest_age_seconds Age of the oldest nonterminal App commit request.",
+    "# TYPE loopgraph_app_action_reconciliation_oldest_age_seconds gauge",
+    `loopgraph_app_action_reconciliation_oldest_age_seconds ${metrics.appActionReconciliationOldestAgeSeconds}`,
+    "# HELP loopgraph_app_action_reconciliation_stale_after_seconds Configured age at which a nonterminal App commit request is stale.",
+    "# TYPE loopgraph_app_action_reconciliation_stale_after_seconds gauge",
+    `loopgraph_app_action_reconciliation_stale_after_seconds ${metrics.appActionReconciliationStaleAfterSeconds}`,
     ""
   ].join("\n");
 }
@@ -763,6 +823,30 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     appLifecycleRecoveryStaleAfterSeconds: nonnegative(
       data.app_lifecycle_recovery_stale_after_seconds
     ),
+    appActionCommitsRequestedTotal: nonnegative(
+      data.app_action_commits_requested_total
+    ),
+    appActionCommitsSucceededTotal: nonnegative(
+      data.app_action_commits_succeeded_total
+    ),
+    appActionCommitsFailedTotal: nonnegative(
+      data.app_action_commits_failed_total
+    ),
+    appActionReconciliationPending: nonnegative(
+      data.app_action_reconciliation_pending
+    ),
+    appActionReconciliationStale: nonnegative(
+      data.app_action_reconciliation_stale
+    ),
+    appActionReconciliationWorkspacesAffected: nonnegative(
+      data.app_action_reconciliation_workspaces_affected
+    ),
+    appActionReconciliationOldestAgeSeconds: nonnegative(
+      data.app_action_reconciliation_oldest_age_seconds
+    ),
+    appActionReconciliationStaleAfterSeconds: nonnegative(
+      data.app_action_reconciliation_stale_after_seconds
+    ),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})
@@ -770,7 +854,15 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
 }
 
 function parseLifecycleStaleAfterSeconds(value: string | undefined): number | undefined {
-  if (value === undefined || value.trim() === "") return 900;
+  return parseStaleAfterSeconds(value, 900);
+}
+
+function parseActionStaleAfterSeconds(value: string | undefined): number | undefined {
+  return parseStaleAfterSeconds(value, 300);
+}
+
+function parseStaleAfterSeconds(value: string | undefined, fallback: number): number | undefined {
+  if (value === undefined || value.trim() === "") return fallback;
   if (!/^[0-9]+$/.test(value.trim())) return undefined;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed >= 60 && parsed <= 86_400

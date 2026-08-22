@@ -48,6 +48,12 @@ objectives:
       interrupted_operations: 1
       stale_operations: 1
       default_stale_after_seconds: 900
+  - id: app_action_reconciliation_freshness
+    target: 100
+    indicator: app_commits_with_terminal_receipts / app_commit_requests
+    alert:
+      stale_nonterminal_commits: 1
+      default_stale_after_seconds: 300
 ownership:
   primary: platform-on-call
   security: security-owner
@@ -57,3 +63,4 @@ runbooks:
   restore: docs/PRODUCTION-OPERATIONS.md
   audit: docs/PRODUCTION-OPERATIONS.md
   app_lifecycle_recovery: docs/PRODUCTION-OPERATIONS.md
+  app_action_reconciliation: docs/PRODUCTION-OPERATIONS.md

@@ -16,6 +16,11 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   metrics without exposing App or installation identifiers. The default stale threshold is 900
   seconds; set `LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS` only to a reviewed integer from 60
   through 86400. An invalid value fails hosted configuration readiness.
+- App action receipt reconciliation is a separate operational gate. The protected snapshot exports
+  aggregate commit-request, terminal-receipt, pending, stale, affected-workspace, and oldest-age
+  metrics without exposing action, installation, provider, or request identifiers. The default
+  stale threshold is 300 seconds; set `LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS` only to a
+  reviewed integer from 60 through 86400. An invalid value fails hosted configuration readiness.
 
 ## App lifecycle recovery runbook
 
@@ -34,6 +39,27 @@ it is degraded immediately. Any unfinished operation older than the configured t
    pending/interrupted/stale metrics return to zero. Preserve the corresponding audit-chain events.
 5. If exact retry cannot complete, pause promotion and investigate the owning store or lease. Do
    not copy registry payloads into tickets or logs; record bounded operation status and timestamps.
+
+## App action reconciliation runbook
+
+A fresh nonterminal commit request can be normal while a provider call finishes. The scheduled
+worker checks old requests against the Connector Broker's durable idempotency receipt and never
+invokes the provider handler. A request older than the configured threshold is stale.
+
+1. Confirm the protected `loopgraph_app_action_reconciliation_stale` alert is scoped to the expected
+   tenant/project and compare oldest age with the exported threshold.
+2. Confirm the five-minute reconciliation schedule is running and authorized with only
+   `schedule.app_action_reconciliation`.
+3. Inspect bounded App and Broker receipt status using the original action/request identity in the
+   authorized operator surface. Do not copy provider payloads, credentials, or result bodies into
+   logs or tickets.
+4. If the Broker has a terminal receipt, run the receipt-only reconciliation operation and confirm
+   the App ledger records the same terminal result. Never call commit again.
+5. If no Broker receipt exists, leave the action unresolved, revoke it if policy requires, and
+   investigate provider-specific evidence through an approved human process. Do not infer success
+   and do not automatically repeat the mutation.
+6. Confirm pending and stale metrics return to zero and preserve the relevant audit-chain evidence
+   before resuming promotion.
 
 ## Release evidence
 

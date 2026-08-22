@@ -101,6 +101,11 @@ Wire the protected metrics into the deployment monitoring system and begin with:
   `loopgraph_app_lifecycle_recovery_oldest_age_seconds` exceeding
   `loopgraph_app_lifecycle_recovery_stale_after_seconds`: page the App platform owner and block
   production promotion until the exact retry completes;
+- any `loopgraph_app_action_reconciliation_stale > 0`, or
+  `loopgraph_app_action_reconciliation_oldest_age_seconds` exceeding
+  `loopgraph_app_action_reconciliation_stale_after_seconds`: page the connector platform owner,
+  preserve the original request identity, and inspect Broker receipt storage; never retry the
+  provider mutation;
 - increasing `loopgraph_discovery_oldest_active_seconds` while a design is expected to progress:
   inspect unresolved evidence, outbound Hermes delivery, and proposals waiting for review;
 - increasing `loopgraph_discovery_sessions_active` with no increase in
@@ -109,8 +114,9 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 
 The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
 Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, immutable
-design artifacts, and App lifecycle recovery. App recovery metrics contain aggregate counts and age
-only; App IDs, installation IDs, actors, connector fields, and company-context keys are excluded.
+design artifacts, App lifecycle recovery, and App action receipt reconciliation. App recovery
+metrics contain aggregate counts and age only; App IDs, installation IDs, action IDs, request IDs,
+actors, connector fields, and company-context keys are excluded.
 `loopgraph_operational_degraded` reports recoverable operator work without returning a public
 readiness failure that could remove healthy workers and make reconciliation harder.
 
@@ -128,3 +134,7 @@ After applying migrations to staging:
    and immutable-until deadline. See [Independent audit retention protocol](./AUDIT-RETENTION-PROTOCOL.md).
 8. Interrupt one staging-only App install after its prepared record, verify the protected metrics
    show pending recovery, retry the exact request, and verify every recovery metric returns to zero.
+9. Interrupt one staging-only App action after the Broker stores its commit receipt but before the
+   App ledger records a terminal event. Confirm the scheduled reconciliation worker resolves it,
+   then confirm pending and stale action-reconciliation metrics return to zero without a second
+   provider call.
