@@ -695,6 +695,13 @@ describe("shared Loopgraph App tools", () => {
       toolName: "loopgraph_app_activate",
       input: { approvalReceiptId: approval.receipt.id }
     });
+    const approvalStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
+      projectRoot,
+      installationId: applied.installation.id
+    }) as { activationApprovals: Array<{ id: string; consumedAt?: string }> };
+    expect(approvalStatus.activationApprovals).toHaveLength(1);
+    expect(approvalStatus.activationApprovals[0]).toMatchObject({ id: approval.receipt.id });
+    expect(approvalStatus.activationApprovals[0]?.consumedAt).toBeUndefined();
     const approvedJourney = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
@@ -715,6 +722,13 @@ describe("shared Loopgraph App tools", () => {
       approvalReceiptId: approval.receipt.id,
       actor: "sales-operations"
     });
+    const consumedStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
+      projectRoot,
+      installationId: applied.installation.id
+    }) as { activationApprovals: Array<{ id: string; consumedAt?: string; consumedBy?: string }> };
+    expect(consumedStatus.activationApprovals).toEqual([
+      expect.objectContaining({ id: approval.receipt.id, consumedBy: "sales-operations" })
+    ]);
     const operating = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,

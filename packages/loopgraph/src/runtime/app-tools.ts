@@ -1406,6 +1406,7 @@ export async function callLoopgraphAppTool(
       ? registry.installations.filter((installation) => installation.id === parsed.installationId)
       : registry.installations;
     if (parsed.installationId && installations.length === 0) throw new Error(`App installation not found: ${parsed.installationId}`);
+    const installationIds = new Set(installations.map((installation) => installation.id));
     const readiness = await Promise.all(installations.map((installation) => service.readiness(installation.id, options.now)));
     const applications = (await Promise.all(installations.map(async (installation) => ({
       installation,
@@ -1430,6 +1431,7 @@ export async function callLoopgraphAppTool(
       evaluations: registry.evaluations,
       lifecycleReceipts: registry.lifecycleReceipts,
       lifecycleOperations: registry.lifecycleOperations,
+      activationApprovals: registry.activationApprovals.filter((approval) => installationIds.has(approval.installationId)),
       lock: await installationStore.readLockfile()
     };
   }

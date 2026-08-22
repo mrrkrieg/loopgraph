@@ -83,6 +83,8 @@ Synthetic conformance evaluates the declared fixture through the compiled routin
 
 Reviewers may label each historical decision `correct`, `incomplete`, or `false_positive` and record review minutes. The promotion recommendation separates routing quality from review burden and always returns `canAutoPromote: false`; an accountable owner must still approve a lifecycle transition.
 
+Browser activation is a two-mutation protocol over the same App service used by Hermes and CLI. The status projection returns only activation approvals belonging to the requested installation set. The browser further selects a receipt only when its installation, App, artifact digest, source state, requested mode, expiry, and consumption state match the current view. Hosted approval requires step-up authentication, and activation receives the exact receipt ID; neither the browser nor a caller-supplied actor label can synthesize authority.
+
 ## Configuration precedence
 
 Configuration is resolved in this deterministic order:

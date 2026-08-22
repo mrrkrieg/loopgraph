@@ -58,6 +58,8 @@ Installation and shadow activation are deliberately separate approvals. Installa
 
 Activation is a two-step runtime protocol, not a prompt convention. After the accountable operator accepts an exact transition, `loopgraph_app_activation_approve` records a short-lived receipt bound to the workspace, installation, pinned artifact digest, current state, requested mode, approver, reason, and evidence. `loopgraph_app_activate` must consume that exact receipt. A receipt is rejected when it is missing, expired, already consumed, or no longer matches the artifact, state, installation, or requested mode.
 
+The installed-App browser follows the same boundary. It never combines approval and activation into one button: the first form requires an explicit reason and confirmation (plus step-up authentication in hosted mode), then the refreshed read model exposes only an unconsumed, unexpired receipt matching the exact current App. A second form consumes that receipt. Stale, cross-App, cross-artifact, wrong-state, wrong-mode, expired, or already-consumed approvals are not offered by the UI and are rejected again by the runtime.
+
 ## CLI
 
 ```bash

@@ -8,10 +8,16 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
 import { appOnboardingProgressForView } from "@/lib/app-platform/install-wizard";
+import {
+  activationEvidenceRefs,
+  currentActivationApproval,
+  type BrowserActivationMode
+} from "@/lib/app-platform/app-activation-handoff";
 import { installedAppPresentation } from "@/lib/app-platform/private-app-handoff";
 import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import {
   activateInstalledAppAction,
+  approveInstalledAppActivationAction,
   applyInstalledAppUpdateAction,
   configureInstalledAppAction,
   detachInstalledAppAction,
@@ -47,6 +53,17 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
     appName: data.detail.app.name,
     installationId: data.installation.id,
     derivation: data.installation.derivation
+  });
+  const evidenceRefs = activationEvidenceRefs(data.promotionRecommendation.evidenceRefs);
+  const shadowApproval = currentActivationApproval({
+    installation: data.installation,
+    approvals: data.activationApprovals,
+    mode: "shadow"
+  });
+  const recommendApproval = currentActivationApproval({
+    installation: data.installation,
+    approvals: data.activationApprovals,
+    mode: "recommend"
   });
   return (
     <>
@@ -286,8 +303,8 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
             <p className="text-sm leading-6 text-ink/65">{recovery ? recoveryInstruction(recovery) : nextAction(data.installation.state, data.readiness.state)}</p>
             {recovery ? <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href="#app-uninstall">Finish recovery</a> : <div className="mt-4 space-y-2">
               {data.installation.state === "ready_to_test" || data.installation.state === "broken" ? <OperationForm action="test" installationId={data.installation.id} label="Run conformance tests" primary /> : null}
-              {data.installation.state === "simulation_passed" ? <ActivationForm installationId={data.installation.id} mode="shadow" label="Activate in shadow" /> : null}
-              {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationForm installationId={data.installation.id} mode="recommend" label="Promote to recommend" /> : null}
+              {data.installation.state === "simulation_passed" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
+              {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
               {data.installation.state === "paused" ? <OperationForm action="resume" installationId={data.installation.id} label="Resume app" primary /> : <OperationForm action="pause" installationId={data.installation.id} label="Pause app" />}
               <OperationForm action="repair" installationId={data.installation.id} label="Repair generated assets" />
             </div>}
@@ -307,6 +324,51 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
 function ScoreCard({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="rounded-xl border border-line bg-white p-4 shadow-sm"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold capitalize">{value}</div><div className="mt-1 text-xs text-ink/45">{detail}</div></div>; }
 function Definition({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="border-b border-line py-3 last:border-0"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className={`mt-1 break-all text-xs text-ink/65 ${mono ? "font-mono" : ""}`}>{value}</div></div>; }
 function OperationForm({ action, installationId, label, primary = false }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} /><button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
-function ActivationForm({ installationId, mode, label }: { installationId: string; mode: "shadow" | "recommend"; label: string }) { return <form action={activateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="mode" type="hidden" value={mode} /><button className="w-full rounded-md bg-ink px-4 py-2.5 text-sm font-semibold text-white" type="submit">{label}</button></form>; }
+function ActivationControl({
+  installationId,
+  mode,
+  evidenceRefs,
+  receipt
+}: {
+  installationId: string;
+  mode: BrowserActivationMode;
+  evidenceRefs: string[];
+  receipt?: { id: string; approvedBy: string; approvedAt: string; expiresAt: string; reason: string };
+}) {
+  const modeLabel = mode === "shadow" ? "shadow" : "recommendation";
+  if (receipt) {
+    return (
+      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+        <div className="text-xs font-semibold uppercase tracking-[0.1em] text-emerald-800">Approval ready</div>
+        <p className="mt-1 text-xs leading-5 text-emerald-900/75">{receipt.approvedBy} approved {modeLabel} mode at {new Date(receipt.approvedAt).toLocaleString()}. The receipt expires {new Date(receipt.expiresAt).toLocaleString()} and can be consumed only once against this exact App state and artifact.</p>
+        <p className="mt-2 text-xs leading-5 text-emerald-950"><span className="font-semibold">Reason:</span> {receipt.reason}</p>
+        <form action={activateInstalledAppAction} className="mt-3">
+          <input name="installationId" type="hidden" value={installationId} />
+          <input name="mode" type="hidden" value={mode} />
+          <input name="approvalReceiptId" type="hidden" value={receipt.id} />
+          <button className="w-full rounded-md bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white" type="submit">Apply approved {modeLabel} activation</button>
+        </form>
+      </div>
+    );
+  }
+  return (
+    <details className="rounded-md border border-line bg-white p-3">
+      <summary className="cursor-pointer text-sm font-semibold">Review {modeLabel} activation</summary>
+      <form action={approveInstalledAppActivationAction} className="mt-3 space-y-3">
+        <input name="installationId" type="hidden" value={installationId} />
+        <input name="mode" type="hidden" value={mode} />
+        {evidenceRefs.map((reference) => <input key={reference} name="evidenceRef" type="hidden" value={reference} />)}
+        <p className="text-xs leading-5 text-ink/55">Approval does not activate the App. It creates a 15-minute receipt bound to this installation, artifact, current state, target mode, approver, reason, and evidence. Activation is a separate action.</p>
+        <label className="block text-xs font-semibold uppercase tracking-[0.1em] text-ink/45" htmlFor={`activation-reason-${mode}`}>Approval reason</label>
+        <textarea className="min-h-24 w-full rounded-md border border-line p-2 text-xs" id={`activation-reason-${mode}`} maxLength={2000} name="reason" placeholder={`Why is this App ready for ${modeLabel} mode?`} required />
+        <label className="flex items-start gap-2 text-xs leading-5 text-ink/65">
+          <input className="mt-1" name="confirmation" required type="checkbox" value="APPROVE" />
+          <span>I approve this exact transition and understand that the receipt expires and cannot authorize a different artifact or mode.</span>
+        </label>
+        <button className="w-full rounded-md border border-line px-4 py-2.5 text-sm font-semibold hover:border-ink" type="submit">Create activation approval</button>
+      </form>
+    </details>
+  );
+}
 function EvaluationLabelForm({ installationId, runId, scenarioId, label }: { installationId: string; runId: string; scenarioId: string; label: "correct" | "incomplete" | "false_positive" }) { return <form action={labelAppEvaluationAction} className="flex items-center rounded-md border border-line bg-white"><input name="installationId" type="hidden" value={installationId} /><input name="runId" type="hidden" value={runId} /><input name="scenarioId" type="hidden" value={scenarioId} /><input name="label" type="hidden" value={label} /><label className="sr-only" htmlFor={`${scenarioId}-${label}-minutes`}>Review minutes</label><input className="w-12 border-r border-line px-2 py-1.5 text-xs" defaultValue="1" id={`${scenarioId}-${label}-minutes`} min="0" name="reviewMinutes" step="0.5" type="number" /><button className="px-3 py-1.5 text-xs font-semibold capitalize hover:bg-surface" type="submit">{label.replace(/_/g, " ")}</button></form>; }
 function nextAction(state: string, readiness: string) { if (state === "ready_to_test" || state === "broken") return "Run the deterministic, write-blocked conformance suite and inspect every failure."; if (state === "simulation_passed") return "Activate in shadow mode to observe real routing without committing provider work."; if (readiness === "ready_for_recommend") return "Review shadow evidence, false positives, and human burden before recommendation mode."; if (state === "paused") return "Resolve the pause reason before resuming at the previous safe mode."; return "Monitor routing quality, approvals, failures, review burden, and outcomes."; }

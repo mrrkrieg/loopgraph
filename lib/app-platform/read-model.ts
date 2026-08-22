@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  AppActivationApprovalReceipt,
   AppEvalRun,
   AppFieldMappingPlan,
   AppInstallPlan,
@@ -214,6 +215,7 @@ export type InstalledAppsViewData = {
   evaluations: AppEvalRun[];
   lifecycleReceipts: AppLifecycleReceipt[];
   lifecycleOperations: AppLifecycleOperation[];
+  activationApprovals: AppActivationApprovalReceipt[];
   lock?: AppInstallationLock;
 };
 
@@ -392,6 +394,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   updatePlan?: AppUpdatePlan;
   lifecycleReceipts: AppLifecycleReceipt[];
   lifecycleOperations: AppLifecycleOperation[];
+  activationApprovals: AppActivationApprovalReceipt[];
   installedLoops: Array<{ id: string; name: string; path: string }>;
   onboardingJourney: AppOnboardingJourney;
   operations: InstalledAppOperationsView;
@@ -471,6 +474,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     updatePlan,
     lifecycleReceipts: installed.lifecycleReceipts.filter((receipt) => receipt.installationId === installationId),
     lifecycleOperations: installed.lifecycleOperations.filter((operation) => operation.installationId === installationId),
+    activationApprovals: installed.activationApprovals.filter((approval) => approval.installationId === installationId),
     installedLoops,
     onboardingJourney,
     operations,

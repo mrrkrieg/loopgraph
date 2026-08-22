@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   requirePermission: vi.fn(),
+  requireStepUp: vi.fn(),
   callTool: vi.fn(),
   revalidatePath: vi.fn(),
   redirect: vi.fn(),
@@ -10,11 +11,19 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("next/navigation", () => ({ redirect: mocks.redirect }));
-vi.mock("@/lib/auth/hosted-access", () => ({ requireHostedPermission: mocks.requirePermission }));
+vi.mock("@/lib/auth/hosted-access", () => ({
+  requireHostedPermission: mocks.requirePermission,
+  requireHostedStepUp: mocks.requireStepUp
+}));
 vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({ getActiveLoopgraphProjectRoot: mocks.projectRoot }));
 vi.mock("@/lib/app-platform/tool-bridge", () => ({ callLoopgraphAppTool: mocks.callTool }));
 
-import { duplicateInstalledAppAction, operateInstalledAppAction } from "./actions";
+import {
+  activateInstalledAppAction,
+  approveInstalledAppActivationAction,
+  duplicateInstalledAppAction,
+  operateInstalledAppAction
+} from "./actions";
 
 describe("installed App browser actions", () => {
   beforeEach(() => {
@@ -64,5 +73,47 @@ describe("installed App browser actions", () => {
 
     await expect(duplicateInstalledAppAction(formData)).rejects.toThrow(/did not return the new private App installation identity/);
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("records an explicit short-lived activation approval without activating", async () => {
+    const formData = new FormData();
+    formData.set("installationId", "install.sales");
+    formData.set("mode", "shadow");
+    formData.set("confirmation", "APPROVE");
+    formData.set("reason", "Synthetic conformance passed; shadow mode remains write-blocked.");
+    formData.append("evidenceRef", "evaluation:synthetic");
+    formData.append("evidenceRef", "evaluation:synthetic");
+
+    await approveInstalledAppActivationAction(formData);
+
+    expect(mocks.requireStepUp).toHaveBeenCalled();
+    expect(mocks.callTool).toHaveBeenCalledTimes(1);
+    expect(mocks.callTool).toHaveBeenCalledWith("loopgraph_app_activation_approve", {
+      projectRoot: "/srv/loopgraph/tenant/main",
+      installationId: "install.sales",
+      mode: "shadow",
+      approvedBy: "admin@example.com",
+      reason: "Synthetic conformance passed; shadow mode remains write-blocked.",
+      evidenceRefs: ["evaluation:synthetic"],
+      expiresInSeconds: 900
+    });
+  });
+
+  it("activates only by consuming the exact approval receipt", async () => {
+    const formData = new FormData();
+    formData.set("installationId", "install.sales");
+    formData.set("mode", "shadow");
+    formData.set("approvalReceiptId", "activation-approval.content-bound");
+
+    await activateInstalledAppAction(formData);
+
+    expect(mocks.callTool).toHaveBeenCalledWith("loopgraph_app_activate", {
+      projectRoot: "/srv/loopgraph/tenant/main",
+      installationId: "install.sales",
+      mode: "shadow",
+      approvalReceiptId: "activation-approval.content-bound",
+      actor: "admin@example.com"
+    });
+    expect(mocks.requireStepUp).not.toHaveBeenCalled();
   });
 });
