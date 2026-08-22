@@ -9,6 +9,7 @@ import {
   sha256Digest
 } from "./audit-retention-protocol";
 import { RECOVERY_TABLES } from "./recovery-contract";
+import { verifyAppActionExactlyOnceProof } from "./prove-app-action-exactly-once";
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -125,7 +126,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v1"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v2"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -150,6 +151,7 @@ export const productionEvidenceManifestSchema = z.object({
   }).strict(),
   evidence: z.object({
     staging: evidenceDescriptorSchema,
+    appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
     recovery: evidenceDescriptorSchema,
     auditRetention: evidenceDescriptorSchema
@@ -161,6 +163,7 @@ export type ProductionEvidenceManifest = z.infer<typeof productionEvidenceManife
 
 export type ProductionEvidenceReceipts = {
   staging: unknown;
+  appActionExactlyOnce: unknown;
   marketplace: unknown;
   recovery: unknown;
   auditRetention: unknown;
@@ -188,6 +191,7 @@ export function buildProductionEvidenceManifest(
 ) {
   const deploymentOrigin = trustedOrigin(config.deploymentOrigin, "Release deployment origin");
   const staging = stagingReceiptSchema.parse(receipts.staging);
+  const appActionExactlyOnce = verifyAppActionExactlyOnceProof(receipts.appActionExactlyOnce);
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
   const auditRetention = auditDrainReceiptV3Schema.parse(receipts.auditRetention);
@@ -199,6 +203,7 @@ export function buildProductionEvidenceManifest(
 
   for (const [label, timestamp] of [
     ["staging validation", staging.checkedAt],
+    ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
     ["recovery rehearsal", recovery.completedAt],
     ["audit retention", auditRetention.completedAt]
@@ -212,6 +217,9 @@ export function buildProductionEvidenceManifest(
     auditRetention.sourceOrigin !== deploymentOrigin
   ) {
     throw new Error("Release receipts do not belong to the exact promoted deployment origin");
+  }
+  if (appActionExactlyOnce.sourceCommitSha !== config.commitSha) {
+    throw new Error("App action exactly-once proof does not belong to the promoted source commit");
   }
   if (
     staging.organizationId !== config.organizationId ||
@@ -366,6 +374,19 @@ export function buildProductionEvidenceManifest(
       actionReconciliationStaleAfterSeconds:
         staging.appActionReconciliationEvidence.staleAfterSeconds
     }),
+    appActionExactlyOnce: descriptor(appActionExactlyOnce, appActionExactlyOnce.checkedAt, {
+      sourceCommitSha: appActionExactlyOnce.sourceCommitSha,
+      scenario: appActionExactlyOnce.scenario,
+      providerInvocationCount: appActionExactlyOnce.proof.providerInvocationCount,
+      reconciliationCalls: appActionExactlyOnce.proof.reconciliationCalls,
+      replayCommitCalls: appActionExactlyOnce.proof.replayCommitCalls,
+      appTerminalEventsBeforeReconciliation:
+        appActionExactlyOnce.proof.appTerminalEventsBeforeReconciliation,
+      appTerminalEventsAfterReconciliation:
+        appActionExactlyOnce.proof.appTerminalEventsAfterReconciliation,
+      originalBrokerReceiptDigest: appActionExactlyOnce.proof.originalBrokerReceiptDigest,
+      proofDigest: appActionExactlyOnce.proofDigest
+    }),
     marketplace: descriptor(marketplace, marketplace.checkedAt, {
       checks: marketplace.checks.length,
       auditedRequestId: marketplace.auditEvidence.requestId,
@@ -393,7 +414,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v1",
+    schemaVersion: "loopgraph-production-promotion-evidence/v2",
     release,
     scope,
     evidence,
@@ -417,12 +438,14 @@ export function verifyProductionEvidenceManifest(input: {
   );
   const receiptsAtPromotion = {
     staging: stagingReceiptSchema.parse(input.receipts.staging),
+    appActionExactlyOnce: verifyAppActionExactlyOnceProof(input.receipts.appActionExactlyOnce),
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
     auditRetention: auditDrainReceiptV3Schema.parse(input.receipts.auditRetention)
   };
   for (const [label, timestamp] of [
     ["staging validation", receiptsAtPromotion.staging.checkedAt],
+    ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
     ["recovery rehearsal", receiptsAtPromotion.recovery.completedAt],
     ["audit retention", receiptsAtPromotion.auditRetention.completedAt]
@@ -538,6 +561,7 @@ function positiveInteger(name: string, fallback?: number) {
 async function main() {
   const receipts = {
     staging: await readJsonReceipt("LOOPGRAPH_STAGING_RECEIPT_FILE"),
+    appActionExactlyOnce: await readJsonReceipt("LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE"),
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
     recovery: await readJsonReceipt("LOOPGRAPH_RECOVERY_RECEIPT_FILE"),
     auditRetention: await readJsonReceipt("LOOPGRAPH_AUDIT_RECEIPT_FILE")

@@ -134,9 +134,10 @@ After applying migrations to staging:
    and immutable-until deadline. See [Independent audit retention protocol](./AUDIT-RETENTION-PROTOCOL.md).
 8. Interrupt one staging-only App install after its prepared record, verify the protected metrics
    show pending recovery, retry the exact request, and verify every recovery metric returns to zero.
-9. Interrupt one staging-only App action after the Broker stores its commit receipt but before the
-   App ledger records a terminal event. Confirm the scheduled reconciliation worker resolves it,
-   then confirm pending and stale action-reconciliation metrics return to zero without a second
-   provider call. Use a staging-only fixture provider or an approved non-production provider
-   account that independently records invocation count; the aggregate `staging-validation/v5` gate
-   proves the final zero-backlog state but cannot by itself prove provider-side exactly-once work.
+9. Run `npm run prove:app-action-exactly-once` with the exact source commit. The no-network fixture
+   discards the first successful Broker response at the App terminal-ledger boundary, reconciles the
+   durable receipt, replays the original commit, and fails unless its provider handler ran exactly
+   once. For distributed-environment proof, repeat the process-loss scenario with an approved
+   non-production provider account that independently records invocation count. The aggregate
+   `staging-validation/v5` gate proves the final zero-backlog state but cannot by itself prove the
+   external provider's idempotency behavior.

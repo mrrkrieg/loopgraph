@@ -1,16 +1,19 @@
 # Production promotion evidence
 
 Loopgraph promotes an exact prebuilt deployment only when one workflow run proves four independent
-control surfaces and binds their receipts into one attested manifest. A build result, environment
-approval, or green staging URL alone is not sufficient evidence.
+environment control surfaces plus the commit-bound App action exactly-once contract, then binds all
+five receipts into one attested manifest. A build result, environment approval, or green staging
+URL alone is not sufficient evidence.
 
 ```mermaid
 flowchart LR
   V["Build and prebuilt staging deployment"] --> S["Staging readiness receipt"]
+  V --> F["App action fault-injection receipt"]
   V --> M["Marketplace isolation and artifact receipt"]
   V --> R["Snapshot-consistent recovery receipt"]
   M --> A["Independent audit-retention receipt"]
   S --> E["Promotion evidence compiler"]
+  F --> E
   M --> E
   R --> E
   A --> E
@@ -27,6 +30,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | Receipt | What it binds |
 |---|---|
 | `staging-validation/v5` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, zero pending/stale App action commits, the reviewed action-reconciliation threshold, verified audit checkpoint, unauthenticated/foreign/suspended user denial, and one complete database-owned user quota window ending in `429` |
+| `app-action-exactly-once-proof/v1` | Exact source commit, real Broker prepare/commit/idempotency/reconcile code, a simulated lost App terminal write, receipt-only recovery, one replay, one provider-fixture invocation, and an explicit no-network/no-credential boundary |
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
 | `backup-restore-rehearsal/v2` | Protected source database identity digest, distinct disposable target, matching PostgreSQL versions, exact row-count/SHA-256 fingerprints for every application table, restored audit integrity, and evidence-family counts |
 | `audit-drain/v3` | Exact staging origin and tenant, retained audit head, exact staging and marketplace sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
@@ -43,7 +47,7 @@ commit counts plus the zero-valued pending/stale backlog and reviewed stale thre
 include App IDs, action IDs, provider inputs, Broker receipts, credentials, or customer payloads.
 Any nonterminal action commit blocks manifest compilation and production promotion.
 
-The resulting `loopgraph-production-promotion-evidence/v1` manifest records the repository, commit,
+The resulting `loopgraph-production-promotion-evidence/v2` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
 marketplace release, trusted retention key ID and public-key digest, canonical SHA-256 digest of each
 receipt, essential control summaries, and one digest over the entire evidence set. The compiler
@@ -52,7 +56,7 @@ contain workload tokens, database URLs, passwords, provider payloads, or private
 
 GitHub's provenance action attests the exact manifest file with workflow OIDC. The production job
 downloads the current run's immutable v4 artifacts, rebuilds and compares the manifest from the
-four receipts, checks the upstream evidence-set digest, verifies the GitHub attestation, and only
+five receipts, checks the upstream evidence-set digest, verifies the GitHub attestation, and only
 then calls `vercel promote` for the same deployment URL.
 
 ## Protected environment setup
@@ -127,11 +131,12 @@ Repository tests validate schemas, content binding, freshness, mixed-evidence re
 user-boundary statuses, quota-window completeness, fingerprint coverage, and manifest reconstruction. A real workflow run is still required to prove
 the Vercel deployment, Supabase database, protected runner mounts, receiver key, immutable storage,
 GitHub attestation service, and environment approval all exist and are correctly configured.
-The aggregate staging gate proves there is no unresolved App action backlog at promotion time. A
-staging-only fixture provider or an approved non-production provider account is still required to
-demonstrate the deliberate interruption/reconciliation scenario and independently count that the
-provider mutation occurred exactly once.
+The aggregate staging gate proves there is no unresolved App action backlog at promotion time. The
+commit-bound fixture proof exercises the real Broker state machine without network or credential
+access and fails unless interruption, receipt-only recovery, and replay cause exactly one fixture
+mutation. An approved non-production provider account is still required to prove the external
+provider's own idempotency behavior and the deployed distributed stores under a real process loss.
 
-Retain the manifest, four receipts, GitHub attestation, workflow URL, promoted deployment URL, and
+Retain the manifest, five receipts, GitHub attestation, workflow URL, promoted deployment URL, and
 alert/configuration revisions according to enterprise policy. The external WORM receiver remains
 the authoritative audit boundary even if GitHub artifacts expire.

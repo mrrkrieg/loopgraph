@@ -7,6 +7,7 @@ import {
   type RetentionAcknowledgement
 } from "./audit-retention-protocol";
 import { RECOVERY_TABLES } from "./recovery-contract";
+import { canonicalAppDigest } from "../packages/loopgraph/src/core";
 import {
   buildProductionEvidenceManifest,
   verifyProductionEvidenceManifest,
@@ -52,7 +53,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v1",
+      schemaVersion: "loopgraph-production-promotion-evidence/v2",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -71,6 +72,19 @@ describe("production promotion evidence manifest", () => {
             actionReconciliationPending: 0,
             actionReconciliationStale: 0,
             actionReconciliationStaleAfterSeconds: 300
+          }
+        },
+        appActionExactlyOnce: {
+          summary: {
+            sourceCommitSha: config.commitSha,
+            scenario: "broker_receipt_persisted_before_app_terminal_event",
+            providerInvocationCount: 1,
+            reconciliationCalls: 1,
+            replayCommitCalls: 1,
+            appTerminalEventsBeforeReconciliation: 0,
+            appTerminalEventsAfterReconciliation: 1,
+            originalBrokerReceiptDigest: `sha256:${"8".repeat(64)}`,
+            proofDigest: exactlyOnceReceipt("2026-08-17T01:30:00.000Z").proofDigest
           }
         },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
@@ -97,6 +111,16 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(receipts, config))
       .toThrow(/exact promoted deployment origin/i);
+  });
+
+  it("rejects an exactly-once proof built from another source commit", () => {
+    const receipts = releaseReceipts();
+    receipts.appActionExactlyOnce = exactlyOnceReceipt(
+      "2026-08-17T01:30:00.000Z",
+      "c".repeat(40)
+    );
+    expect(() => buildProductionEvidenceManifest(receipts, config))
+      .toThrow(/does not belong to the promoted source commit/i);
   });
 
   it("rejects stale receipts and altered evidence after manifest creation", () => {
@@ -326,6 +350,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         staleAfterSeconds: 300
       }
     },
+    appActionExactlyOnce: exactlyOnceReceipt(checkedAt),
     marketplace: {
       schemaVersion: "hosted-marketplace-staging-validation/v2",
       targetOrigin: deploymentOrigin,
@@ -406,4 +431,35 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       ]
     }
   };
+}
+
+function exactlyOnceReceipt(checkedAt: string, sourceCommitSha = config.commitSha) {
+  const base = {
+    schemaVersion: "app-action-exactly-once-proof/v1" as const,
+    sourceCommitSha,
+    checkedAt,
+    scenario: "broker_receipt_persisted_before_app_terminal_event" as const,
+    fixture: {
+      providerId: "slack" as const,
+      operation: "message.send.execute" as const,
+      environment: "staging" as const,
+      networkAccess: false as const,
+      credentialAccess: false as const
+    },
+    proof: {
+      providerInvocationCount: 1 as const,
+      originalCommitCalls: 1 as const,
+      reconciliationCalls: 1 as const,
+      replayCommitCalls: 1 as const,
+      appCommitRequestedEvents: 1 as const,
+      appTerminalEventsBeforeReconciliation: 0 as const,
+      appTerminalEventsAfterReconciliation: 1 as const,
+      reconciliationStatus: "resolved" as const,
+      preparedActionStatus: "committed" as const,
+      replayReturnedOriginalReceipt: true as const,
+      originalBrokerReceiptDigest: `sha256:${"8".repeat(64)}`
+    },
+    outcome: "passed" as const
+  };
+  return { ...base, proofDigest: canonicalAppDigest(base) };
 }

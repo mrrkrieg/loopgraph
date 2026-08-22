@@ -17,7 +17,7 @@ type WorkflowJob = {
 };
 
 describe("staging release workflow contract", () => {
-  it("requires all four protected receipts before an attested manifest can be promoted", async () => {
+  it("requires every protected and commit-bound receipt before an attested manifest can be promoted", async () => {
     const source = await readFile(".github/workflows/staging-release.yml", "utf8");
     const workflow = parse(source) as { jobs: Record<string, WorkflowJob> };
     const jobs = workflow.jobs;
@@ -58,6 +58,7 @@ describe("staging release workflow contract", () => {
       expect(jobSource).not.toContain("secrets.LOOPGRAPH_");
     }
     expect(source).toContain("npm run --silent validate:staging > staging-validation-receipt.json");
+    expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
     expect(source).toContain("npm run --silent rehearse:restore > recovery-rehearsal-receipt.json");
     expect(source).toContain("npm run --silent audit:drain > audit-retention-receipt.json");
     const auditDrainStep = (jobs["audit-retention"].steps ?? []).find(
@@ -88,6 +89,7 @@ describe("staging release workflow contract", () => {
         "${{ vars.LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS }}"
     });
     expect(source.match(/LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE/g)).toHaveLength(2);
   });
 });
 

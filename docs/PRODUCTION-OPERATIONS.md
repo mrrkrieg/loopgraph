@@ -10,7 +10,7 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's four receipts to one deployment, tenant/project, database identity, and exact marketplace artifact. `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any substituted, stale, or mixed receipt.
+- `npm run release:evidence:build` binds the current run's five receipts to one source commit, deployment, tenant/project, database identity, and exact marketplace artifact. `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any substituted, stale, or mixed receipt.
 - App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
   snapshot exports aggregate pending, interrupted, stale, affected-workspace, and oldest-age
   metrics without exposing App or installation identifiers. The default stale threshold is 900
@@ -64,7 +64,7 @@ invokes the provider handler. A request older than the configured threshold is s
 ## Release evidence
 
 The protected workflow stores the staging, marketplace, recovery, and audit-retention receipts as
-separate artifacts, compiles `loopgraph-production-promotion-evidence/v1`, and creates a GitHub OIDC
+separate artifacts, compiles `loopgraph-production-promotion-evidence/v2`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured
