@@ -14,7 +14,7 @@ vi.mock("@/lib/auth/hosted-access", () => ({ requireHostedPermission: mocks.requ
 vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({ getActiveLoopgraphProjectRoot: mocks.projectRoot }));
 vi.mock("@/lib/app-platform/tool-bridge", () => ({ callLoopgraphAppTool: mocks.callTool }));
 
-import { confirmAppFieldMappingsAction, planMarketplaceAppInstallAction } from "./actions";
+import { confirmAppFieldMappingsAction, planMarketplaceAppInstallAction, resetMarketplaceAppOnboardingAction } from "./actions";
 
 describe("marketplace App installation actions", () => {
   beforeEach(() => {
@@ -98,5 +98,25 @@ describe("marketplace App installation actions", () => {
     expect(result.error).toBeUndefined();
     expect(result.journey.draft).toMatchObject({ revision: 2 });
     expect(result.notice).toMatch(/progress was saved/i);
+  });
+
+  it("clears only the exact confirmed browser onboarding draft", async () => {
+    const formData = new FormData();
+    formData.set("appId", "loopgraph.sales.qualify-route-inbound-leads");
+    formData.set("presetId", "hubspot-gmail-slack");
+    formData.set("expectedDraftId", "draft.12345678");
+    formData.set("expectedDraftRevision", "3");
+    formData.set("confirmReset", "on");
+
+    await resetMarketplaceAppOnboardingAction(formData);
+
+    expect(mocks.callTool).toHaveBeenCalledWith("loopgraph_app_onboarding_reset", expect.objectContaining({
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      expectedDraftId: "draft.12345678",
+      expectedDraftRevision: 3,
+      confirmReset: true,
+      actor: "installer@example.com"
+    }));
+    expect(mocks.redirect).toHaveBeenCalledWith("/marketplace/loopgraph.sales.qualify-route-inbound-leads/install?preset=hubspot-gmail-slack");
   });
 });

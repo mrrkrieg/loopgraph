@@ -50,6 +50,7 @@ When the user wants to start an entire department, asks what a company function 
 - Present its declared stack presets when the stage is `choose_preset`.
 - Ask only the returned `questions`; do not repeat answers or invent missing company context.
 - After a preset or answer changes, call `loopgraph_app_onboarding_save` with the complete current non-secret snapshot and the exact draft revision from the latest journey. A later `loopgraph_app_onboarding_get` call with only the App ID must resume it. Never put credentials, tokens, raw provider records, permission grants, or activation authority in a draft.
+- Only when the operator explicitly asks to start over, explain that shared connections, mappings, approved company context, installed Apps, and runtime state will stay intact. After confirmation, call `loopgraph_app_onboarding_reset` with the exact current draft ID and revision plus `confirmReset: true`; re-read instead of clearing anything when identity or revision changed.
 - Resolve only the returned connector, mapping, and permission blockers.
 - After every connection, answer, mapping, install, test, or lifecycle change, call `loopgraph_app_onboarding_get` again instead of guessing the next step.
 - Use only the exact `nextAction.toolName` and content-bound plan returned by the journey.

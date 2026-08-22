@@ -29,6 +29,7 @@ export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1a
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
 export const APP_ONBOARDING_DRAFT_SCHEMA_VERSION = "loopgraph-app-onboarding-draft/v1alpha1" as const;
+export const APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION = "loopgraph-app-onboarding-reset-result/v1alpha1" as const;
 export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
 export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
@@ -1464,6 +1465,18 @@ export const appOnboardingDraftSchema = z.object({
   }
 });
 
+export const appOnboardingResetResultSchema = z.object({
+  schemaVersion: z.literal(APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  companyId: appIdSchema,
+  appId: appIdSchema,
+  draftId: appIdSchema,
+  draftRevision: z.number().int().positive(),
+  result: z.enum(["cleared", "already_cleared"]),
+  processedAt: isoDateTimeSchema,
+  actor: z.string().min(1).max(300)
+}).strict();
+
 export const appOnboardingJourneySchema = z.object({
   schemaVersion: z.literal(APP_ONBOARDING_SCHEMA_VERSION),
   workspaceId: appIdSchema,
@@ -1716,6 +1729,7 @@ export type AppPromotionRecommendation = z.infer<typeof appPromotionRecommendati
 export type AppReadiness = z.infer<typeof appReadinessSchema>;
 export type AppOnboardingStage = z.infer<typeof appOnboardingStageSchema>;
 export type AppOnboardingDraft = z.infer<typeof appOnboardingDraftSchema>;
+export type AppOnboardingResetResult = z.infer<typeof appOnboardingResetResultSchema>;
 export type AppOnboardingJourney = z.infer<typeof appOnboardingJourneySchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
@@ -1763,6 +1777,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
     AppOnboardingDraft: zodToJsonSchema(appOnboardingDraftSchema, "AppOnboardingDraft") as Record<string, unknown>,
+    AppOnboardingResetResult: zodToJsonSchema(appOnboardingResetResultSchema, "AppOnboardingResetResult") as Record<string, unknown>,
     AppOnboardingJourney: zodToJsonSchema(appOnboardingJourneySchema, "AppOnboardingJourney") as Record<string, unknown>,
     AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>,
     AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>,

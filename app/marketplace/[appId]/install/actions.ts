@@ -87,6 +87,30 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   redirect(`/apps/${encodeURIComponent(result.installation.id)}`);
 }
 
+export async function resetMarketplaceAppOnboardingAction(formData: FormData): Promise<void> {
+  const actor = await authorizedInstallActor();
+  if (formData.get("confirmReset") !== "on") throw new Error("Confirm that you want to clear this onboarding draft");
+  const appId = requiredFormString(formData, "appId");
+  const presetId = requiredFormString(formData, "presetId");
+  const expectedDraftId = requiredFormString(formData, "expectedDraftId");
+  const expectedDraftRevision = Number(requiredFormString(formData, "expectedDraftRevision"));
+  if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision <= 0) {
+    throw new Error("The onboarding draft revision is invalid; reload before starting over");
+  }
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+    projectRoot,
+    appId,
+    expectedDraftId,
+    expectedDraftRevision,
+    confirmReset: true,
+    actor
+  });
+  const target = `/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`;
+  revalidatePath(target);
+  redirect(target);
+}
+
 export async function confirmAppFieldMappingsAction(formData: FormData): Promise<void> {
   const actor = await authorizedInstallActor();
   if (formData.get("confirmMappings") !== "on") throw new Error("Confirm the reviewed field mappings before saving them");

@@ -528,7 +528,7 @@ apps
   .argument("<app-id>", "Marketplace app ID")
   .option("--preset <preset>", "Provider preset ID")
   .option("--project <root>", "Explicit project root", process.cwd())
-  .option("--version <range>", "Semantic version or range", "latest")
+  .option("--version <range>", "Semantic version or range; omitted calls resume the saved draft")
   .option("--config <path>", "JSON object with confirmed installation answers")
   .option("--mapping <ids...>", "Confirmed field mapping IDs")
   .option("--module <ids...>", "Selected optional module IDs")
@@ -536,7 +536,7 @@ apps
   .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
   .option("--company <id>", "Company ID; defaults to workspace ID")
   .option("--actor <id>", "Accountable planner identity", "cli")
-  .action(async (appId: string, options: { project: string; preset?: string; version: string; config?: string; mapping?: string[]; module?: string[]; installation?: string; workspace?: string; company?: string; actor: string }) => {
+  .action(async (appId: string, options: { project: string; preset?: string; version?: string; config?: string; mapping?: string[]; module?: string[]; installation?: string; workspace?: string; company?: string; actor: string }) => {
     await printAppTool("loopgraph_app_onboarding_get", {
       projectRoot: options.project,
       workspaceId: options.workspace,
@@ -545,9 +545,38 @@ apps
       versionRange: options.version,
       presetId: options.preset,
       selectedModules: options.module,
-      configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : {},
+      configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : undefined,
       fieldMappingIds: options.mapping,
       installationId: options.installation,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("onboard-reset")
+  .description("Explicitly clear one exact pre-install onboarding draft without changing shared connections, mappings, context, or installed assets")
+  .argument("<app-id>", "Marketplace app ID")
+  .requiredOption("--draft <draft-id>", "Draft ID returned by the latest apps onboard call")
+  .requiredOption("--expected-revision <revision>", "Exact positive draft revision returned by the latest apps onboard call")
+  .requiredOption("--confirm <value>", "Type RESET to confirm clearing this draft")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .option("--actor <id>", "Accountable reset actor", "cli")
+  .action(async (appId: string, options: { draft: string; expectedRevision: string; confirm: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    if (options.confirm !== "RESET") throw new Error("Type RESET exactly to clear the onboarding draft.");
+    const expectedDraftRevision = Number(options.expectedRevision);
+    if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision <= 0) {
+      throw new Error("Expected onboarding draft revision must be a positive integer.");
+    }
+    await printAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      expectedDraftId: options.draft,
+      expectedDraftRevision,
+      confirmReset: true,
       actor: options.actor
     });
   });

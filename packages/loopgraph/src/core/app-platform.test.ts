@@ -481,6 +481,7 @@ describe("Loopgraph App Platform contracts", () => {
       "AppEvalJudgment",
       "AppPromotionRecommendation",
       "AppOnboardingDraft",
+      "AppOnboardingResetResult",
       "AppOperationAction",
       "AppOperationActionEvent",
       "AppOperationActionCommitResult"

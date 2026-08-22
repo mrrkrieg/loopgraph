@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import { open, readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import {
   APP_ONBOARDING_DRAFT_SCHEMA_VERSION,
+  APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   appOverlayOperationSchema,
   appEvalSuiteSchema,
@@ -12,6 +14,7 @@ import {
   appInstallPlanSchema,
   appIndependentVerificationReceiptSchema,
   appOnboardingDraftSchema,
+  appOnboardingResetResultSchema,
   appIdSchema,
   appFieldMappingPlanSchema,
   appRolloutModeSchema,
@@ -110,6 +113,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_get",
   "loopgraph_app_onboarding_get",
   "loopgraph_app_onboarding_save",
+  "loopgraph_app_onboarding_reset",
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
@@ -267,6 +271,16 @@ export const appOnboardingSaveInputSchema = projectSchema.extend({
   configuration: z.record(z.unknown()).default({}),
   fieldMappingIds: z.array(z.string().min(1)).max(200).optional(),
   expectedDraftRevision: z.number().int().nonnegative(),
+  actor: z.string().min(1).max(300).default("hermes")
+}).strict();
+
+export const appOnboardingResetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  appId: z.string().min(1),
+  expectedDraftId: z.string().min(1),
+  expectedDraftRevision: z.number().int().positive(),
+  confirmReset: z.literal(true),
   actor: z.string().min(1).max(300).default("hermes")
 }).strict();
 
@@ -537,6 +551,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_get", description: "Inspect one app, immutable versions, modules, presets, permissions, capabilities, provenance, and graph intent.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_onboarding_get", description: "Return one state-derived, resumable App journey with only the unresolved questions, blockers, evidence, and exact safe next action for Hermes, CLI, or browser.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_onboarding_save", description: "Persist one complete, secret-free pre-install onboarding snapshot with optimistic concurrency, then return the same resumed journey used by Hermes, CLI, and browser.", readOnly: false, idempotent: true, destructive: false },
+  { name: "loopgraph_app_onboarding_reset", description: "Clear one exact pre-install onboarding draft after explicit confirmation without changing connections, mappings, company context, installed assets, permissions, or runtime state.", readOnly: false, idempotent: true, destructive: true },
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
@@ -1239,7 +1254,7 @@ export async function callLoopgraphAppTool(
       const timestamp = now.toISOString();
       const draft = appOnboardingDraftSchema.parse({
         schemaVersion: APP_ONBOARDING_DRAFT_SCHEMA_VERSION,
-        id: existing?.id ?? `draft.${contentHash({ workspaceId: parsed.workspaceId, companyId: parsed.companyId, appId: parsed.appId })}`,
+        id: existing?.id ?? `draft.${randomUUID()}`,
         workspaceId: parsed.workspaceId,
         companyId: parsed.companyId,
         appId: parsed.appId,
@@ -1271,6 +1286,56 @@ export async function callLoopgraphAppTool(
       appId: parsed.appId,
       actor: parsed.actor
     }, options);
+  }
+  if (name === "loopgraph_app_onboarding_reset") {
+    const parsed = appOnboardingResetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const now = options.now ?? new Date();
+    return installationStore.withExclusiveUpdate(async (registry) => {
+      const existing = registry.onboardingDrafts.find((candidate) =>
+        candidate.appId === parsed.appId && candidate.companyId === parsed.companyId);
+      if (!existing) {
+        return {
+          registry,
+          value: appOnboardingResetResultSchema.parse({
+            schemaVersion: APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION,
+            workspaceId: parsed.workspaceId,
+            companyId: parsed.companyId,
+            appId: parsed.appId,
+            draftId: parsed.expectedDraftId,
+            draftRevision: parsed.expectedDraftRevision,
+            result: "already_cleared",
+            processedAt: now.toISOString(),
+            actor: parsed.actor
+          })
+        };
+      }
+      if (existing.id !== parsed.expectedDraftId) {
+        throw new Error(`App onboarding draft identity conflict: expected ${parsed.expectedDraftId}, observed ${existing.id}`);
+      }
+      if (existing.revision !== parsed.expectedDraftRevision) {
+        throw new Error(`App onboarding draft revision conflict: expected ${parsed.expectedDraftRevision}, observed ${existing.revision}`);
+      }
+      const timestamp = now.toISOString();
+      return {
+        registry: {
+          ...registry,
+          revision: registry.revision + 1,
+          onboardingDrafts: registry.onboardingDrafts.filter((candidate) => candidate.id !== existing.id),
+          updatedAt: timestamp
+        },
+        value: appOnboardingResetResultSchema.parse({
+          schemaVersion: APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION,
+          workspaceId: parsed.workspaceId,
+          companyId: parsed.companyId,
+          appId: parsed.appId,
+          draftId: existing.id,
+          draftRevision: existing.revision,
+          result: "cleared",
+          processedAt: timestamp,
+          actor: parsed.actor
+        })
+      };
+    });
   }
   if (name === "loopgraph_app_install_plan") {
     const parsed = appInstallPlanInputSchema.parse({ ...raw, projectRoot, ...identity });

@@ -28,6 +28,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_get",
       "loopgraph_app_onboarding_get",
       "loopgraph_app_onboarding_save",
+      "loopgraph_app_onboarding_reset",
       "loopgraph_app_install_plan",
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
@@ -719,7 +720,7 @@ describe("shared Loopgraph App tools", () => {
     expect(operating.draft).toBeUndefined();
   }, 15_000);
 
-  it("rejects secret-bearing, stale, and undeclared pre-install draft updates", async () => {
+  it("rejects unsafe draft writes and resets only the exact confirmed draft", async () => {
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-draft-security-"));
     temporaryDirectories.push(projectRoot);
     const appId = "loopgraph.sales.qualify-route-inbound-leads";
@@ -760,5 +761,63 @@ describe("shared Loopgraph App tools", () => {
     }) as AppOnboardingJourney;
     expect(resumed.plan?.configuration.values.exclusions).toEqual(["employee"]);
     expect(resumed.draft).toMatchObject({ revision: 1, resumed: true });
+
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      appId,
+      expectedDraftId: "draft.wrong",
+      expectedDraftRevision: 1,
+      confirmReset: true,
+      actor: "sales-operations"
+    })).rejects.toThrow(/identity conflict/i);
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      appId,
+      expectedDraftId: resumed.draft!.id,
+      expectedDraftRevision: 1,
+      actor: "sales-operations"
+    })).rejects.toThrow();
+
+    const reset = await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      appId,
+      expectedDraftId: resumed.draft!.id,
+      expectedDraftRevision: 1,
+      confirmReset: true,
+      actor: "sales-operations"
+    }) as { result: string; draftId: string; draftRevision: number; actor: string };
+    expect(reset).toMatchObject({
+      result: "cleared",
+      draftId: resumed.draft!.id,
+      draftRevision: 1,
+      actor: "sales-operations"
+    });
+    const retry = await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      appId,
+      expectedDraftId: resumed.draft!.id,
+      expectedDraftRevision: 1,
+      confirmReset: true,
+      actor: "sales-operations"
+    }) as { result: string };
+    expect(retry.result).toBe("already_cleared");
+
+    const restarted = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
+    }) as AppOnboardingJourney;
+    expect(restarted).toMatchObject({ stage: "choose_preset" });
+    expect(restarted.draft).toBeUndefined();
+
+    const replacement = await callLoopgraphAppTool("loopgraph_app_onboarding_save", base) as AppOnboardingJourney;
+    expect(replacement.draft?.id).not.toBe(resumed.draft!.id);
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      appId,
+      expectedDraftId: resumed.draft!.id,
+      expectedDraftRevision: 1,
+      confirmReset: true,
+      actor: "sales-operations"
+    })).rejects.toThrow(/identity conflict/i);
   });
 });

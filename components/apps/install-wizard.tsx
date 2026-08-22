@@ -15,7 +15,8 @@ import {
 import {
   applyReviewedAppInstallAction,
   confirmAppFieldMappingsAction,
-  planMarketplaceAppInstallAction
+  planMarketplaceAppInstallAction,
+  resetMarketplaceAppOnboardingAction
 } from "@/app/marketplace/[appId]/install/actions";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
 import { InstallImpactReview } from "@/components/apps/install-impact-review";
@@ -36,7 +37,18 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
       <AppOnboardingProgress journey={state.journey} />
       {state.journey.draft ? (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          Saved onboarding progress · revision {state.journey.draft.revision} · {new Date(state.journey.draft.savedAt).toLocaleString()}. You can leave this page and resume without re-answering completed questions.
+          <div>Saved onboarding progress · revision {state.journey.draft.revision} · {new Date(state.journey.draft.savedAt).toLocaleString()}. You can leave this page and resume without re-answering completed questions.</div>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs font-semibold">Start this App setup over</summary>
+            <form action={resetMarketplaceAppOnboardingAction} className="mt-3 rounded-md border border-blue-200 bg-white/70 p-3">
+              <input name="appId" type="hidden" value={app.id} />
+              <input name="presetId" type="hidden" value={app.preset.id} />
+              <input name="expectedDraftId" type="hidden" value={state.journey.draft.id} />
+              <input name="expectedDraftRevision" type="hidden" value={state.journey.draft.revision} />
+              <label className="flex items-start gap-2 text-xs leading-5"><input className="mt-1" name="confirmReset" required type="checkbox" /><span>Clear only these saved setup choices. Connected systems, confirmed reusable mappings, approved company context, and installed Apps will not change.</span></label>
+              <button className="mt-3 rounded-md border border-blue-300 bg-white px-3 py-2 text-xs font-semibold hover:border-blue-600" type="submit">Clear saved setup choices</button>
+            </form>
+          </details>
         </div>
       ) : null}
       <section className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-6">

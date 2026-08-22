@@ -97,6 +97,8 @@ pack default
 
 Every resolved value retains its winning layer and provenance. Hermes should infer values from trusted context first, explain the evidence, ask only for missing or uncertain values, and request confirmation for high-impact values before saving them to shared company context.
 
+Pre-install progress is a bounded, secret-free draft rather than conversational memory. The same tenant-scoped registry serves Hermes, CLI, browser, and hosted replicas. Saves replace the complete snapshot under optimistic revision control. An explicit reset is bound to both draft identity and revision; recreating a draft receives a new identity so a delayed retry cannot erase newer setup. Reset removes no shared connection, confirmed mapping, approved company context, installed asset, permission, or runtime state.
+
 Hermes reads shared context through `loopgraph_company_context_get`; inference remains a proposal until an accountable operator calls `loopgraph_company_context_approve` against the exact current revision. The shared schema requires the JSON value to match its declared type, and the persistence boundary rejects secret-like material. Hosted context uses an organization/project/workspace/company-scoped, service-role-only Supabase record with optimistic revision checks and audit-chain receipts. Installation apply revalidates every company-context-derived configuration value against the current approved record and attaches consumer ownership. Changed context invalidates the stale plan instead of silently installing the old value.
 
 ## Connector recipes and field mappings
