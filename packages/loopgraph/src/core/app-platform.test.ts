@@ -441,7 +441,9 @@ describe("Loopgraph App Platform contracts", () => {
     expect(Object.keys(schemas)).toEqual(expect.arrayContaining([
       "AppHistoricalReplayRequest",
       "AppEvalJudgment",
-      "AppPromotionRecommendation"
+      "AppPromotionRecommendation",
+      "AppOperationAction",
+      "AppOperationActionEvent"
     ]));
     expect(JSON.stringify(schemas.LoopPackManifest)).toContain("loopgraph-pack/v1alpha1");
   });

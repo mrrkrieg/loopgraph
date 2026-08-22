@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionCard } from "@/components/section-card";
 import { getInstalledAppViewData } from "@/lib/app-platform/read-model";
 import { appOnboardingProgressForView } from "@/lib/app-platform/install-wizard";
+import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import {
   activateInstalledAppAction,
   applyInstalledAppUpdateAction,
@@ -72,7 +73,7 @@ export default async function InstalledAppDetailPage({ params }: { params: Promi
       </div>
 
       <div className="mt-6">
-        <InstalledAppActionsPanel operations={data.operations} />
+        <InstalledAppActionsPanel canApproveActions={isHostedAuthRequired()} operations={data.operations} />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">

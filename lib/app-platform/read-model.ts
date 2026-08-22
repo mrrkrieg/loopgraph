@@ -9,6 +9,7 @@ import type {
   AppLifecycleReceipt,
   AppOperationalMaturityAssessment,
   AppOperationAction,
+  AppOperationActionEvent,
   AppPromotionRecommendation,
   AppReadiness,
   AppUpdatePlan,
@@ -436,7 +437,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
       projectRoot,
       installationId,
       limit: 100
-    }).then((result) => (result as { actions: AppOperationAction[] }).actions)
+    }) as Promise<{ actions: AppOperationAction[]; events: AppOperationActionEvent[] }>
   ]);
   const updatePlan = diff.updateAvailable
     ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
@@ -455,7 +456,8 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     },
     loops: installedLoops,
     activity: agentOperations.data.activity,
-    actions,
+    actions: actions.actions,
+    actionEvents: actions.events,
     evaluations,
     outcomes: evidence.outcomes,
     valueEntries: evidence.valueEntries

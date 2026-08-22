@@ -1,8 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireHostedPermission } from "@/lib/auth/hosted-access";
-import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import { requireHostedPermission, requireHostedStepUp } from "@/lib/auth/hosted-access";
+import { approveConnectorPreparedAction } from "@/lib/connector-broker/admin";
+import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
+import { approveAppOperationAction } from "@/lib/app-platform/app-operation-action-approval";
+import {
+  getActiveLoopgraphProjectRoot,
+  getAppInstallationStore,
+  getAppOperationActionStore
+} from "@/lib/loopgraph-runtime/storage-resolver";
 import { callLoopgraphAppTool, type LoopgraphAppToolName } from "@/lib/app-platform/tool-bridge";
 
 const actionTools = {
@@ -21,6 +28,30 @@ export async function operateInstalledAppAction(formData: FormData) {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     actor
+  });
+  revalidateInstalledApp(installationId);
+}
+
+export async function approveInstalledAppOperationAction(formData: FormData) {
+  const identity = await requireHostedPermission("integrations.manage");
+  await requireHostedStepUp();
+  const database = await getWorkspaceDatabase("integrations.manage");
+  if (!database.organizationId || !database.userId || !identity) {
+    throw new Error("Hosted App action approval requires an authenticated organization administrator");
+  }
+  const installationId = requiredFormString(formData, "installationId");
+  const actionId = requiredFormString(formData, "actionId");
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  await approveAppOperationAction({
+    workspaceId,
+    installationId,
+    actionId,
+    reason: requiredFormString(formData, "reason", 1_000),
+    actorSubject: database.userId,
+    actionStore: getAppOperationActionStore({ projectRoot, workspaceId }),
+    installationStore: getAppInstallationStore({ projectRoot, workspaceId }),
+    approveConnectorAction: (approval) => approveConnectorPreparedAction({ database, ...approval })
   });
   revalidateInstalledApp(installationId);
 }

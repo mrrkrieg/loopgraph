@@ -3,6 +3,7 @@ import Link from "next/link";
 import { InstalledAppTopologyGraph } from "@/components/apps/installed-app-topology-graph";
 import { SectionCard } from "@/components/section-card";
 import type { InstalledAppOperationsView } from "@/lib/app-platform/installed-app-operations";
+import { approveInstalledAppOperationAction } from "@/app/apps/actions";
 
 export function InstalledAppTopologyPanel({ operations }: { operations: InstalledAppOperationsView }) {
   return (
@@ -76,7 +77,7 @@ export function InstalledAppActivityPanel({ operations }: { operations: Installe
   );
 }
 
-export function InstalledAppActionsPanel({ operations }: { operations: InstalledAppOperationsView }) {
+export function InstalledAppActionsPanel({ operations, canApproveActions = false }: { operations: InstalledAppOperationsView; canApproveActions?: boolean }) {
   return (
     <SectionCard title="Governed provider actions" description="Every provider write prepared by this App is bound to one pinned artifact, loop version, Hermes route, agent assignment, logical capability, and Connector Broker receipt. This view never stores or displays canonical provider input.">
       {operations.actions.length > 0 ? (
@@ -107,6 +108,23 @@ export function InstalledAppActionsPanel({ operations }: { operations: Installed
                   <span>Receipt {action.brokerPrepareReceiptId}</span>
                 </div>
               </details>
+              {action.effectiveStatus === "prepared" && action.approvalRequired && canApproveActions ? (
+                <form action={approveInstalledAppOperationAction} className="mt-4 rounded-md border border-orange-200 bg-orange-50 p-3">
+                  <input name="installationId" type="hidden" value={action.installationId} />
+                  <input name="actionId" type="hidden" value={action.id} />
+                  <label className="block text-xs font-semibold text-orange-950" htmlFor={`approval-reason-${action.id}`}>Approval reason</label>
+                  <textarea className="mt-2 min-h-20 w-full rounded-md border border-orange-200 bg-white px-3 py-2 text-sm" id={`approval-reason-${action.id}`} maxLength={1000} minLength={3} name="reason" placeholder="Why is this exact provider action safe and necessary?" required />
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-xs leading-5 text-orange-900">Requires step-up authentication. The provider write is still not executed by this approval.</p>
+                    <button className="rounded-md bg-ink px-3 py-2 text-xs font-semibold text-white hover:bg-ink/85" type="submit">Approve exact action</button>
+                  </div>
+                </form>
+              ) : null}
+              {action.effectiveStatus === "approved" ? (
+                <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
+                  Approval is bound to this exact action fingerprint and expires {formatActivityDate(action.lifecycleEvents.find((event) => event.eventType === "approval_granted")?.approval?.expiresAt ?? action.expiresAt)}. Only the assigned Hermes route may request the later commit.
+                </div>
+              ) : null}
             </div>
           ))}
           {operations.actions.length > 10 ? <p className="text-xs text-ink/45">Showing the 10 most recent of {operations.actions.length} App-owned actions.</p> : null}

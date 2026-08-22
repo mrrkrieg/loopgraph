@@ -1,8 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
   canonicalAppDigest,
-  type AppOperationAction
+  type AppOperationAction,
+  type AppOperationActionEvent
 } from "loopgraph/core";
 import { describe, expect, it, vi } from "vitest";
 import { SupabaseAppOperationActionStore } from "./supabase-app-operation-action-store";
@@ -29,6 +31,15 @@ describe("Supabase App operation action store", () => {
     expect(await store.get(scope.workspaceId, action.id)).toEqual(action);
     expect(await store.get("other", action.id)).toBeUndefined();
     expect(await store.list({ workspaceId: scope.workspaceId, installationId: action.installationId })).toEqual([action]);
+    const event = approvalEvent(action);
+    expect(await store.recordEvent(event)).toEqual(event);
+    expect(fake.rpc).toHaveBeenCalledWith("record_loopgraph_app_operation_action_event", {
+      p_organization_id: scope.organizationId,
+      p_project_key: scope.projectKey,
+      p_workspace_id: scope.workspaceId,
+      p_event: event
+    });
+    expect(await store.listEvents({ workspaceId: scope.workspaceId, actionId: action.id })).toEqual([event]);
   });
 
   it("rejects invalid tenant scope and propagates a durable record failure", async () => {
@@ -44,8 +55,24 @@ describe("Supabase App operation action store", () => {
 
 class ActionSupabase {
   rows: Array<Record<string, unknown>> = [];
+  eventRows: Array<Record<string, unknown>> = [];
   failRecord = false;
   rpc = vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name === "record_loopgraph_app_operation_action_event") {
+      const event = args.p_event as AppOperationActionEvent;
+      this.eventRows.push({
+        organization_id: args.p_organization_id,
+        project_key: args.p_project_key,
+        workspace_id: args.p_workspace_id,
+        event_id: event.id,
+        installation_id: event.installationId,
+        action_id: event.actionId,
+        event_type: event.eventType,
+        occurred_at: event.occurredAt,
+        event_payload: event
+      });
+      return { data: event, error: null };
+    }
     if (name !== "record_loopgraph_app_operation_action") return { data: null, error: { message: "unknown RPC" } };
     if (this.failRecord) return { data: null, error: { message: "durable record failure" } };
     const action = args.p_action as AppOperationAction;
@@ -72,7 +99,7 @@ class ActionSupabase {
 
   client = {
     rpc: this.rpc,
-    from: () => new FakeQuery(this.rows)
+    from: (table: string) => new FakeQuery(table === "loopgraph_app_operation_action_events" ? this.eventRows : this.rows)
   } as unknown as SupabaseClient;
 }
 
@@ -89,7 +116,27 @@ class FakeQuery {
 }
 
 function project(row: Record<string, unknown>) {
-  return { action_payload: row.action_payload };
+  return row.event_payload ? { event_payload: row.event_payload } : { action_payload: row.action_payload };
+}
+
+function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
+  const base = {
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: "appactevt_12345678",
+    workspaceId: action.workspaceId,
+    installationId: action.installationId,
+    actionId: action.id,
+    actionRecordDigest: action.recordDigest,
+    eventType: "approval_granted" as const,
+    actor: { type: "user" as const, subject: "reviewer-1" },
+    approval: {
+      connectorApprovalReceiptId: "connector-approval-12345678",
+      reasonDigest: digest("reviewed"),
+      expiresAt: "2026-08-08T12:05:00.000Z"
+    },
+    occurredAt: "2026-08-08T12:01:00.000Z"
+  };
+  return { ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) };
 }
 
 function preparedAction(): AppOperationAction {

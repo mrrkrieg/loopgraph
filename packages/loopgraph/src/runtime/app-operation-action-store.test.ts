@@ -3,9 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
   canonicalAppDigest,
-  type AppOperationAction
+  type AppOperationAction,
+  type AppOperationActionEvent
 } from "../core";
 import { FileAppOperationActionStore } from "./app-operation-action-store";
 
@@ -70,7 +72,46 @@ describe("File App operation action store", () => {
     expect(await store.list({ workspaceId: "other" })).toEqual([]);
     await expect(store.list({ workspaceId: "acme", limit: 1_001 })).rejects.toThrow(/limit/i);
   });
+
+  it("appends receipt-bound lifecycle evidence without mutating the prepared action", async () => {
+    const root = await temporaryRoot();
+    const store = new FileAppOperationActionStore(root, "acme");
+    const action = preparedAction();
+    await store.recordPrepared(action);
+    const event = approvalEvent(action);
+
+    expect(await store.recordEvent(event)).toEqual(event);
+    expect(await store.recordEvent(event)).toEqual(event);
+    expect(await store.listEvents({ workspaceId: "acme", actionId: action.id })).toEqual([event]);
+    expect(await store.get("acme", action.id)).toEqual(action);
+    await expect(store.recordEvent(withEventDigest({ ...event, id: "appactevt_wrongparent", actionRecordDigest: digest("wrong") })))
+      .rejects.toThrow(/immutable prepared action/i);
+  });
 });
+
+function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
+  return withEventDigest({
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: "appactevt_12345678",
+    workspaceId: action.workspaceId,
+    installationId: action.installationId,
+    actionId: action.id,
+    actionRecordDigest: action.recordDigest,
+    eventType: "approval_granted",
+    actor: { type: "user", subject: "reviewer-1" },
+    approval: {
+      connectorApprovalReceiptId: "connector-approval-12345678",
+      reasonDigest: digest("approved for customer follow-up"),
+      expiresAt: "2026-08-08T12:05:00.000Z"
+    },
+    occurredAt: "2026-08-08T12:01:00.000Z"
+  });
+}
+
+function withEventDigest(input: Omit<AppOperationActionEvent, "eventDigest"> | AppOperationActionEvent): AppOperationActionEvent {
+  const base = { ...input, eventDigest: undefined };
+  return { ...input, eventDigest: canonicalAppDigest(base) } as AppOperationActionEvent;
+}
 
 function preparedAction(): AppOperationAction {
   return withDigest({

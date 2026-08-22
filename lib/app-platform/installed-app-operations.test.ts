@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { APP_OPERATION_ACTION_SCHEMA_VERSION, canonicalAppDigest, type AppEvalRun, type AppOperationAction } from "loopgraph/core";
+import { APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION, APP_OPERATION_ACTION_SCHEMA_VERSION, canonicalAppDigest, type AppEvalRun, type AppOperationAction, type AppOperationActionEvent } from "loopgraph/core";
 import type { AgentOperationsActivityRow } from "loopgraph/runtime";
 import { buildInstalledAppOperationsView } from "./installed-app-operations";
 
@@ -100,7 +100,48 @@ describe("installed App operations view", () => {
     expect(result.summary.totalRuns).toBe(0);
     expect(result.summary.routingAccuracy).toBeUndefined();
   });
+
+  it("derives an approved action from an unexpired append-only receipt event", () => {
+    const action = preparedAction();
+    const result = buildInstalledAppOperationsView({
+      app: { installationId: action.installationId, id: action.appId, name: "Sales App", department: "Sales" },
+      loops: [{ id: action.loopId, name: "Lead Qualification" }],
+      activity: [],
+      evaluations: [],
+      actions: [action],
+      actionEvents: [approvalEvent(action)],
+      outcomes: [],
+      valueEntries: [],
+      now: new Date("2026-08-20T12:07:00.000Z")
+    });
+
+    expect(result.actions[0]).toMatchObject({ effectiveStatus: "approved" });
+    expect(result.summary.actionsAwaitingApproval).toBe(0);
+    expect(result.topology.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Approved", kind: "review" })
+    ]));
+  });
 });
+
+function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
+  const base = {
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: "appactevt_12345678",
+    workspaceId: action.workspaceId,
+    installationId: action.installationId,
+    actionId: action.id,
+    actionRecordDigest: action.recordDigest,
+    eventType: "approval_granted" as const,
+    actor: { type: "user" as const, subject: "reviewer-1" },
+    approval: {
+      connectorApprovalReceiptId: "connector-approval-12345678",
+      reasonDigest: canonicalAppDigest("reviewed"),
+      expiresAt: "2026-08-20T12:10:00.000Z"
+    },
+    occurredAt: "2026-08-20T12:06:00.000Z"
+  };
+  return { ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) };
+}
 
 function activity(input: Pick<AgentOperationsActivityRow, "id" | "eventId" | "loopId" | "jobStatus" | "updatedAt">): AgentOperationsActivityRow {
   return {
@@ -212,7 +253,7 @@ function preparedAction(): AppOperationAction {
     riskClass: "write" as const,
     status: "prepared" as const,
     preparedAt: "2026-08-20T12:05:00.000Z",
-    expiresAt: "2026-08-20T12:07:00.000Z",
+    expiresAt: "2026-08-20T12:14:00.000Z",
     updatedAt: "2026-08-20T12:05:00.000Z"
   };
   return { ...base, recordDigest: canonicalAppDigest({ ...base, recordDigest: undefined }) };

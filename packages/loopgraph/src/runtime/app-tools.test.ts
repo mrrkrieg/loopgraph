@@ -88,7 +88,8 @@ describe("shared Loopgraph App tools", () => {
     expect(result).toEqual({
       schemaVersion: "loopgraph-app-operation-action-ledger/v1alpha1",
       workspaceId: "acme",
-      actions: []
+      actions: [],
+      events: []
     });
   });
 

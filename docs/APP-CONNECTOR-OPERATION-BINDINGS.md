@@ -143,6 +143,12 @@ and their human gates next to the exact owned loop, while expired records are de
 than mistaken for executable work. A record is evidence that an action was prepared; it is not an
 approval or a commit receipt.
 
+### App-owned approval boundary
+
+The installed App operations page approves an action by its Loopgraph App action ID. The browser never submits the provider, connection, provider operation, Broker action ID, or fingerprint. The server reloads the immutable action record, verifies the current pinned App artifact, loop ownership, rollout mode, and capability binding, and only then creates the Connector Broker approval for the stored fingerprint.
+
+Approval requires the `integrations.manage` permission and hosted step-up authentication. Loopgraph appends a secret-free `approval_granted` lifecycle event containing the action-record digest, approval receipt identity, expiry, accountable actor, and a digest of the review reason. Review text remains in the authoritative Connector Broker control plane. An approval does not run the provider write; the later Hermes commit path must still revalidate the exact route and consume the receipt.
+
 This executor has no provider-write commit method and no arbitrary HTTP fallback. The
 workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
 operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the

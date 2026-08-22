@@ -34,6 +34,7 @@ export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-indepe
 export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
 export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
 export const APP_OPERATION_ACTION_SCHEMA_VERSION = "loopgraph-app-operation-action/v1alpha1" as const;
+export const APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION = "loopgraph-app-operation-action-event/v1alpha1" as const;
 export const APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION = "loopgraph-app-runtime-operation-response/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
@@ -997,6 +998,67 @@ export const appOperationActionSchema = z.object({
   }
 });
 
+/**
+ * Append-only lifecycle evidence for an immutable App operation action.
+ *
+ * Human review text and provider payloads stay in their authoritative
+ * systems. Loopgraph records only content digests and receipt identities so
+ * an approval or commit can be proven without copying sensitive business
+ * data into the App action ledger.
+ */
+export const appOperationActionEventSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  actionId: appIdSchema,
+  actionRecordDigest: artifactDigestSchema,
+  eventType: z.enum(["approval_granted", "commit_requested", "commit_succeeded", "commit_failed", "revoked"]),
+  actor: z.object({
+    type: z.enum(["user", "workload", "system"]),
+    subject: z.string().min(1).max(512)
+  }).strict(),
+  approval: z.object({
+    connectorApprovalReceiptId: z.string().min(8).max(512),
+    reasonDigest: artifactDigestSchema,
+    expiresAt: isoDateTimeSchema
+  }).strict().optional(),
+  commit: z.object({
+    requestId: z.string().min(8).max(128),
+    idempotencyKey: z.string().min(8).max(192),
+    connectorReceiptId: z.string().min(8).max(512).optional(),
+    outcome: z.enum(["requested", "succeeded", "failed"]),
+    reasonCode: z.string().min(1).max(128).optional()
+  }).strict().optional(),
+  occurredAt: isoDateTimeSchema,
+  eventDigest: artifactDigestSchema
+}).strict().superRefine((event, ctx) => {
+  if ((event.eventType === "approval_granted") !== Boolean(event.approval)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approval"], message: "Only approval events contain an approval receipt" });
+  }
+  if (event.approval && Date.parse(event.approval.expiresAt) <= Date.parse(event.occurredAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approval", "expiresAt"], message: "Approval receipt must expire after the lifecycle event" });
+  }
+  if (event.eventType.startsWith("commit_") !== Boolean(event.commit)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit"], message: "Commit lifecycle events require commit evidence" });
+  }
+  const expectedOutcome = event.eventType === "commit_requested" ? "requested"
+    : event.eventType === "commit_succeeded" ? "succeeded"
+      : event.eventType === "commit_failed" ? "failed" : undefined;
+  if (expectedOutcome && event.commit?.outcome !== expectedOutcome) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit", "outcome"], message: "Commit outcome does not match the lifecycle event" });
+  }
+  if (event.eventType === "commit_succeeded" && !event.commit?.connectorReceiptId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit", "connectorReceiptId"], message: "A successful commit requires its Connector Broker receipt" });
+  }
+  if (event.eventType === "commit_failed" && !event.commit?.reasonCode) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit", "reasonCode"], message: "A failed commit requires a bounded reason code" });
+  }
+  if (canonicalAppDigest({ ...event, eventDigest: undefined }) !== event.eventDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["eventDigest"], message: "App action event digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1525,6 +1587,7 @@ export type AppOperationResolution = z.infer<typeof appOperationResolutionSchema
 export type AppRuntimeOperationResponse = z.infer<typeof appRuntimeOperationResponseSchema>;
 export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionResultSchema>;
 export type AppOperationAction = z.infer<typeof appOperationActionSchema>;
+export type AppOperationActionEvent = z.infer<typeof appOperationActionEventSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1573,6 +1636,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppRuntimeOperationResponse: zodToJsonSchema(appRuntimeOperationResponseSchema, "AppRuntimeOperationResponse") as Record<string, unknown>,
     AppOperationExecutionResult: zodToJsonSchema(appOperationExecutionResultSchema, "AppOperationExecutionResult") as Record<string, unknown>,
     AppOperationAction: zodToJsonSchema(appOperationActionSchema, "AppOperationAction") as Record<string, unknown>,
+    AppOperationActionEvent: zodToJsonSchema(appOperationActionEventSchema, "AppOperationActionEvent") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,

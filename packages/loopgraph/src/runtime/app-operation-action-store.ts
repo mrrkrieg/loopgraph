@@ -2,9 +2,12 @@ import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import {
+  APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
+  appOperationActionEventSchema,
   appOperationActionSchema,
-  type AppOperationAction
+  type AppOperationAction,
+  type AppOperationActionEvent
 } from "../core";
 import { assertSecretFree } from "./secret-redaction";
 
@@ -16,6 +19,7 @@ export const appOperationActionLedgerSchema = z.object({
   workspaceId: z.string().min(1).max(160),
   revision: z.number().int().nonnegative(),
   actions: z.array(appOperationActionSchema).max(MAX_LOCAL_APP_OPERATION_ACTIONS),
+  events: z.array(appOperationActionEventSchema).max(MAX_LOCAL_APP_OPERATION_ACTIONS * 5).default([]),
   updatedAt: z.string().datetime()
 }).strict();
 
@@ -30,6 +34,14 @@ export type AppOperationActionQuery = {
   limit?: number;
 };
 
+export type AppOperationActionEventQuery = {
+  workspaceId: string;
+  installationId?: string;
+  actionId?: string;
+  eventType?: AppOperationActionEvent["eventType"];
+  limit?: number;
+};
+
 /**
  * Secret-free ownership ledger for provider actions prepared by installed Apps.
  * Canonical provider input remains exclusively in Connector Broker storage.
@@ -37,8 +49,10 @@ export type AppOperationActionQuery = {
 export interface AppOperationActionStore {
   readonly persistence: "file" | "distributed";
   recordPrepared(action: AppOperationAction): Promise<AppOperationAction>;
+  recordEvent(event: AppOperationActionEvent): Promise<AppOperationActionEvent>;
   get(workspaceId: string, actionId: string): Promise<AppOperationAction | undefined>;
   list(query: AppOperationActionQuery): Promise<AppOperationAction[]>;
+  listEvents(query: AppOperationActionEventQuery): Promise<AppOperationActionEvent[]>;
 }
 
 export function emptyAppOperationActionLedger(workspaceId: string): AppOperationActionLedger {
@@ -47,6 +61,7 @@ export function emptyAppOperationActionLedger(workspaceId: string): AppOperation
     workspaceId,
     revision: 0,
     actions: [],
+    events: [],
     updatedAt: new Date(0).toISOString()
   };
 }
@@ -97,6 +112,39 @@ export class FileAppOperationActionStore implements AppOperationActionStore {
     return (await this.readLedger()).actions.find((action) => action.id === actionId);
   }
 
+  async recordEvent(input: AppOperationActionEvent): Promise<AppOperationActionEvent> {
+    const event = appOperationActionEventSchema.parse(input);
+    assertActionEventBoundary(event, this.workspaceId);
+    await mkdir(this.appsRoot, { recursive: true, mode: 0o700 });
+    const handle = await acquireLock(this.mutexPath);
+    try {
+      const ledger = await this.readLedger();
+      const action = ledger.actions.find((candidate) => candidate.id === event.actionId);
+      if (!action || action.installationId !== event.installationId || action.recordDigest !== event.actionRecordDigest) {
+        throw new Error("App operation action event does not match an immutable prepared action");
+      }
+      const existing = ledger.events.find((candidate) => candidate.id === event.id);
+      if (existing) {
+        if (existing.eventDigest !== event.eventDigest) throw new Error(`App operation action event identity conflict: ${event.id}`);
+        return existing;
+      }
+      if (ledger.events.length >= MAX_LOCAL_APP_OPERATION_ACTIONS * 5) {
+        throw new Error("Local App operation action event ledger is full; archive it before recording more lifecycle evidence");
+      }
+      const next = appOperationActionLedgerSchema.parse({
+        ...ledger,
+        revision: ledger.revision + 1,
+        events: [...ledger.events, event],
+        updatedAt: event.occurredAt
+      });
+      await atomicWriteJson(this.ledgerPath, next);
+      return event;
+    } finally {
+      await handle.close();
+      await rm(this.mutexPath, { force: true });
+    }
+  }
+
   async list(query: AppOperationActionQuery): Promise<AppOperationAction[]> {
     if (query.workspaceId !== this.workspaceId) return [];
     const limit = boundedLimit(query.limit);
@@ -106,6 +154,17 @@ export class FileAppOperationActionStore implements AppOperationActionStore {
       .filter((action) => !query.routeJobId || action.routeJobId === query.routeJobId)
       .filter((action) => !query.status || action.status === query.status)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+      .slice(0, limit);
+  }
+
+  async listEvents(query: AppOperationActionEventQuery): Promise<AppOperationActionEvent[]> {
+    if (query.workspaceId !== this.workspaceId) return [];
+    const limit = boundedLimit(query.limit);
+    return (await this.readLedger()).events
+      .filter((event) => !query.installationId || event.installationId === query.installationId)
+      .filter((event) => !query.actionId || event.actionId === query.actionId)
+      .filter((event) => !query.eventType || event.eventType === query.eventType)
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt) || left.id.localeCompare(right.id))
       .slice(0, limit);
   }
 
@@ -119,6 +178,13 @@ export class FileAppOperationActionStore implements AppOperationActionStore {
       throw error;
     }
   }
+}
+
+export function assertActionEventBoundary(event: AppOperationActionEvent, workspaceId: string): void {
+  if (event.schemaVersion !== APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION || event.workspaceId !== workspaceId) {
+    throw new Error("App operation action event belongs to another workspace or schema");
+  }
+  assertSecretFree(event, "app_operation_action_event_ledger");
 }
 
 export function assertPreparedActionBoundary(action: AppOperationAction, workspaceId: string): void {

@@ -1,9 +1,16 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { appOperationActionSchema, type AppOperationAction } from "loopgraph/core";
 import {
+  appOperationActionEventSchema,
+  appOperationActionSchema,
+  type AppOperationAction,
+  type AppOperationActionEvent
+} from "loopgraph/core";
+import {
+  assertActionEventBoundary,
   assertPreparedActionBoundary,
+  type AppOperationActionEventQuery,
   type AppOperationActionQuery,
   type AppOperationActionStore
 } from "loopgraph/runtime";
@@ -45,6 +52,19 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
     return data ? parseActionRow(data, this.scope.workspaceId) : undefined;
   }
 
+  async recordEvent(input: AppOperationActionEvent): Promise<AppOperationActionEvent> {
+    const event = appOperationActionEventSchema.parse(input);
+    assertActionEventBoundary(event, this.scope.workspaceId);
+    const { data, error } = await this.supabase.rpc("record_loopgraph_app_operation_action_event", {
+      p_organization_id: this.scope.organizationId,
+      p_project_key: this.scope.projectKey,
+      p_workspace_id: this.scope.workspaceId,
+      p_event: event
+    });
+    if (!error) return appOperationActionEventSchema.parse(data);
+    throw new Error(`Failed to record App action lifecycle event: ${error.message}`);
+  }
+
   async list(queryInput: AppOperationActionQuery): Promise<AppOperationAction[]> {
     if (queryInput.workspaceId !== this.scope.workspaceId) return [];
     const limit = boundedLimit(queryInput.limit);
@@ -58,6 +78,23 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
     return (data ?? []).map((row) => parseActionRow(row, this.scope.workspaceId));
   }
 
+  async listEvents(queryInput: AppOperationActionEventQuery): Promise<AppOperationActionEvent[]> {
+    if (queryInput.workspaceId !== this.scope.workspaceId) return [];
+    const limit = boundedLimit(queryInput.limit);
+    let query = this.supabase
+      .from("loopgraph_app_operation_action_events")
+      .select("event_payload")
+      .eq("organization_id", this.scope.organizationId)
+      .eq("project_key", this.scope.projectKey)
+      .eq("workspace_id", this.scope.workspaceId);
+    if (queryInput.installationId) query = query.eq("installation_id", queryInput.installationId);
+    if (queryInput.actionId) query = query.eq("action_id", queryInput.actionId);
+    if (queryInput.eventType) query = query.eq("event_type", queryInput.eventType);
+    const { data, error } = await query.order("occurred_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(`Failed to list App action lifecycle events: ${error.message}`);
+    return (data ?? []).map((row) => parseEventRow(row, this.scope.workspaceId));
+  }
+
   private scopedQuery() {
     return this.supabase
       .from("loopgraph_app_operation_actions")
@@ -66,6 +103,15 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
       .eq("project_key", this.scope.projectKey)
       .eq("workspace_id", this.scope.workspaceId);
   }
+}
+
+function parseEventRow(row: unknown, workspaceId: string): AppOperationActionEvent {
+  if (!row || typeof row !== "object" || !("event_payload" in row)) {
+    throw new Error("Hosted App operation action store returned an invalid lifecycle event row");
+  }
+  const event = appOperationActionEventSchema.parse((row as { event_payload: unknown }).event_payload);
+  if (event.workspaceId !== workspaceId) throw new Error("App operation action event belongs to another workspace");
+  return event;
 }
 
 function parseActionRow(row: unknown, workspaceId: string): AppOperationAction {

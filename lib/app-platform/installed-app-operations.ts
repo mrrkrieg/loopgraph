@@ -1,4 +1,4 @@
-import type { AppEvalRun, AppOperationAction } from "loopgraph/core";
+import type { AppEvalRun, AppOperationAction, AppOperationActionEvent } from "loopgraph/core";
 import type { AgentOperationsActivityRow } from "loopgraph/runtime";
 import type {
   LoopGraphVisual,
@@ -9,7 +9,10 @@ import type { OutcomeView, ValueEntryView } from "@/lib/loopgraph-runtime/operat
 
 export type InstalledAppOperationsView = {
   activity: AgentOperationsActivityRow[];
-  actions: Array<AppOperationAction & { effectiveStatus: "prepared" | "expired" }>;
+  actions: Array<AppOperationAction & {
+    effectiveStatus: "prepared" | "approved" | "committing" | "committed" | "failed" | "revoked" | "expired";
+    lifecycleEvents: AppOperationActionEvent[];
+  }>;
   outcomes: OutcomeView[];
   valueEntries: ValueEntryView[];
   topology: LoopGraphVisual;
@@ -44,6 +47,7 @@ export function buildInstalledAppOperationsView(input: {
   outcomes: OutcomeView[];
   valueEntries: ValueEntryView[];
   actions?: AppOperationAction[];
+  actionEvents?: AppOperationActionEvent[];
   now?: Date;
 }): InstalledAppOperationsView {
   const loopIds = new Set(input.loops.map((loop) => loop.id));
@@ -66,14 +70,23 @@ export function buildInstalledAppOperationsView(input: {
   const observedOutcomes = outcomes.filter((outcome) => outcome.truthStatus === "observed");
   const observedValue = valueEntries.filter((entry) => entry.truthStatus === "observed");
   const now = input.now ?? new Date();
+  const eventsByAction = new Map<string, AppOperationActionEvent[]>();
+  for (const event of input.actionEvents ?? []) {
+    const events = eventsByAction.get(event.actionId) ?? [];
+    events.push(event);
+    eventsByAction.set(event.actionId, events);
+  }
   const actions = (input.actions ?? [])
     .filter((action) => action.installationId === input.app.installationId && loopIds.has(action.loopId))
-    .map((action) => ({
-      ...action,
-      effectiveStatus: action.status === "prepared" && Date.parse(action.expiresAt) <= now.getTime()
-        ? "expired" as const
-        : action.status
-    }))
+    .map((action) => {
+      const lifecycleEvents = (eventsByAction.get(action.id) ?? [])
+        .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+      return {
+        ...action,
+        lifecycleEvents,
+        effectiveStatus: effectiveActionStatus(action, lifecycleEvents, now)
+      };
+    })
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
 
   return {
@@ -110,7 +123,9 @@ export function buildInstalledAppOperationsTopology(input: {
   app: { id: string; name: string; department: string };
   loops: Array<{ id: string; name: string }>;
   activity: AgentOperationsActivityRow[];
-  actions?: Array<AppOperationAction & { effectiveStatus?: "prepared" | "expired" }>;
+  actions?: Array<AppOperationAction & {
+    effectiveStatus?: "prepared" | "approved" | "committing" | "committed" | "failed" | "revoked" | "expired";
+  }>;
   outcomes: OutcomeView[];
 }): LoopGraphVisual {
   const nodes = new Map<string, LoopGraphVisualNode>();
@@ -241,13 +256,13 @@ export function buildInstalledAppOperationsTopology(input: {
       }
     });
     addTopologyEdge(edges, loopNodeId, actionNodeId, "prepares", "prepares");
-    if (action.approvalRequired && (action.effectiveStatus ?? action.status) === "prepared") {
+    if (action.approvalRequired && ["prepared", "approved"].includes(action.effectiveStatus ?? action.status)) {
       const reviewNodeId = `installed-app:action-review:${normalizeTopologyId(action.id)}`;
       nodes.set(reviewNodeId, {
         id: reviewNodeId,
         kind: "review",
-        label: "Approval required",
-        subtitle: humanizeTopologyLabel(action.riskClass),
+        label: (action.effectiveStatus ?? action.status) === "approved" ? "Approved" : "Approval required",
+        subtitle: (action.effectiveStatus ?? action.status) === "approved" ? "Receipt bound" : humanizeTopologyLabel(action.riskClass),
         weight: 2,
         metadata: { actionId: action.id, runtimeKind: "action_approval" }
       });
@@ -283,6 +298,23 @@ export function buildInstalledAppOperationsTopology(input: {
     nodes: [...nodes.values()],
     edges: [...edges.values()]
   };
+}
+
+function effectiveActionStatus(
+  action: AppOperationAction,
+  events: AppOperationActionEvent[],
+  now: Date
+): InstalledAppOperationsView["actions"][number]["effectiveStatus"] {
+  if (Date.parse(action.expiresAt) <= now.getTime()) return "expired";
+  if (events.some((event) => event.eventType === "commit_succeeded")) return "committed";
+  if (events.some((event) => event.eventType === "revoked")) return "revoked";
+  if (events.some((event) => event.eventType === "commit_requested")) {
+    return events.some((event) => event.eventType === "commit_failed") ? "failed" : "committing";
+  }
+  if (events.some((event) => event.eventType === "approval_granted" && event.approval && Date.parse(event.approval.expiresAt) > now.getTime())) {
+    return "approved";
+  }
+  return "prepared";
 }
 
 function topologyLoopId(loopId: string): string {

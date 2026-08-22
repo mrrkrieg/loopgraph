@@ -506,7 +506,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_resolve", description: "Resolve one App-owned loop capability to its exact installation-scoped broker or Loopgraph runtime operation without accepting provider, operation, connection, URL, or credential choices from the caller.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_invoke", description: "Invoke one resolved App capability for an active durable route job through its exact trusted Connector Broker binding; reads execute and writes only create fingerprint-bound prepared actions.", readOnly: false, idempotent: true, destructive: false },
-  { name: "loopgraph_app_operation_actions_get", description: "List secret-free App ownership records for prepared provider actions, scoped to the trusted workspace and optional installation, loop, route, or status filters.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_operation_actions_get", description: "List secret-free App ownership records and append-only approval/commit evidence for provider actions, scoped to the trusted workspace and optional installation, loop, route, or status filters.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
@@ -1231,17 +1231,25 @@ export async function callLoopgraphAppTool(
       path.join(getLoopgraphRoot(projectRoot), "apps"),
       identity.workspaceId
     );
+    const actions = await actionStore.list({
+      workspaceId: identity.workspaceId,
+      installationId: parsed.installationId,
+      loopId: parsed.loopId,
+      routeJobId: parsed.routeJobId,
+      status: parsed.status,
+      limit: parsed.limit
+    });
+    const actionIds = new Set(actions.map((action) => action.id));
+    const events = (await actionStore.listEvents({
+      workspaceId: identity.workspaceId,
+      installationId: parsed.installationId,
+      limit: Math.min(1_000, parsed.limit * 5)
+    })).filter((event) => actionIds.has(event.actionId));
     return {
       schemaVersion: APP_OPERATION_ACTION_LEDGER_SCHEMA_VERSION,
       workspaceId: identity.workspaceId,
-      actions: await actionStore.list({
-        workspaceId: identity.workspaceId,
-        installationId: parsed.installationId,
-        loopId: parsed.loopId,
-        routeJobId: parsed.routeJobId,
-        status: parsed.status,
-        limit: parsed.limit
-      })
+      actions,
+      events
     };
   }
   if (name === "loopgraph_app_maturity_get") {
