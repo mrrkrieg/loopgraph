@@ -289,6 +289,8 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_app_onboarding_save");
     expect(designSkill).toContain("loopgraph_app_onboarding_reset");
     expect(designSkill).toContain("confirmReset: true");
+    expect(designSkill).toContain("draft.applied");
+    expect(designSkill).toContain("confirmPresetChange: true");
     expect(designSkill).toContain("complete current non-secret snapshot");
     expect(designSkill).toContain("loopgraph_app_install_plan");
     expect(designSkill).toContain("loopgraph_app_historical_replay");

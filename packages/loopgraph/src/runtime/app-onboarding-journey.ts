@@ -31,6 +31,7 @@ type JourneyInput = {
   activationApprovals?: AppActivationApprovalReceipt[];
   lifecycleOperation?: AppLifecycleOperation;
   onboardingDraft?: AppOnboardingDraft;
+  draftApplied?: boolean;
   resumedFromDraft?: boolean;
   now?: Date;
 };
@@ -203,9 +204,11 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
       draft: {
         id: input.onboardingDraft.id,
         revision: input.onboardingDraft.revision,
+        presetId: input.onboardingDraft.presetId,
         savedAt: input.onboardingDraft.updatedAt,
         savedBy: input.onboardingDraft.updatedBy,
         answerKeys: Object.keys(input.onboardingDraft.configuration).sort(),
+        applied: input.draftApplied ?? true,
         resumed: input.resumedFromDraft ?? false
       }
     } : {}),

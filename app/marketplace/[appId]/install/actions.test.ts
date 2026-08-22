@@ -61,7 +61,7 @@ describe("marketplace App installation actions", () => {
       progress: { completed: 4, total: 8 },
       steps: [],
       nextAction: { kind: "call_tool", toolName: "loopgraph_app_install_apply", summary: "Install", requiresHumanConfirmation: true },
-      draft: { id: "draft.sales", revision: 2, savedAt: "2026-08-21T20:00:00.000Z", savedBy: "installer@example.com", answerKeys: ["exclusions"], resumed: true },
+      draft: { id: "draft.sales", revision: 2, presetId: "hubspot-gmail-slack", savedAt: "2026-08-21T20:00:00.000Z", savedBy: "installer@example.com", answerKeys: ["exclusions"], applied: true, resumed: true },
       plan,
       mappingPlan: { requirements: [] },
       questions: []
@@ -92,6 +92,7 @@ describe("marketplace App installation actions", () => {
 
     expect(mocks.callTool).toHaveBeenNthCalledWith(2, "loopgraph_app_onboarding_save", expect.objectContaining({
       expectedDraftRevision: 1,
+      confirmPresetChange: false,
       actor: "installer@example.com",
       configuration: { exclusions: ["employee", "existing_customer"] }
     }));

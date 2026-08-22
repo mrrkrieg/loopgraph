@@ -354,11 +354,11 @@ export async function getInstalledAppsViewData(
   return callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as Promise<InstalledAppsViewData>;
 }
 
-export async function getAppInstallPlanViewData(appId: string, presetId: string): Promise<{
+export async function getAppInstallPlanViewData(appId: string, presetId?: string): Promise<{
   detail: MarketplaceAppDetail;
-  plan: AppInstallPlan;
-  impact: AppInstallImpactView;
-  mappingPlan: AppFieldMappingPlan;
+  plan?: AppInstallPlan;
+  impact?: AppInstallImpactView;
+  mappingPlan?: AppFieldMappingPlan;
   journey: AppOnboardingJourney;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
@@ -367,17 +367,17 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
     callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
-      versionRange: "latest",
       presetId,
       actor: "loopgraph-browser"
     }) as Promise<AppOnboardingJourney>
   ]);
-  if (!journey.plan || !journey.mappingPlan) throw new Error("App onboarding journey did not return its exact plan and mapping requirements");
   return {
     detail,
-    plan: journey.plan,
-    impact: buildAppInstallImpactView(journey.plan, detail),
-    mappingPlan: journey.mappingPlan,
+    ...(journey.plan ? {
+      plan: journey.plan,
+      impact: buildAppInstallImpactView(journey.plan, detail)
+    } : {}),
+    ...(journey.mappingPlan ? { mappingPlan: journey.mappingPlan } : {}),
     journey
   };
 }

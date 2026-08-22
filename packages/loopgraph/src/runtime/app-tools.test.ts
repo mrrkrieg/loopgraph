@@ -820,4 +820,61 @@ describe("shared Loopgraph App tools", () => {
       actor: "sales-operations"
     })).rejects.toThrow(/identity conflict/i);
   });
+
+  it("keeps an explicit preset preview isolated until the saved draft transition is confirmed", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-preset-transition-"));
+    temporaryDirectories.push(projectRoot);
+    const appId = "loopgraph.sales.qualify-route-inbound-leads";
+    const saved = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      projectRoot,
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration: { exclusions: ["employee"] },
+      expectedDraftRevision: 0,
+      actor: "sales-operations"
+    }) as AppOnboardingJourney;
+
+    const preview = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      presetId: "salesforce-outlook-teams"
+    }) as AppOnboardingJourney;
+    expect(preview.app.presetId).toBe("salesforce-outlook-teams");
+    expect(preview.draft).toMatchObject({
+      id: saved.draft!.id,
+      presetId: "hubspot-gmail-slack",
+      revision: 1,
+      applied: false,
+      resumed: false
+    });
+    expect(preview.plan?.configuration.values.exclusions).toBeUndefined();
+
+    const replacement = {
+      projectRoot,
+      appId,
+      presetId: "salesforce-outlook-teams",
+      configuration: { exclusions: ["contractor"] },
+      expectedDraftRevision: 1,
+      actor: "sales-operations"
+    };
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_save", replacement))
+      .rejects.toThrow(/requires explicit confirmation/i);
+
+    const confirmed = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      ...replacement,
+      confirmPresetChange: true
+    }) as AppOnboardingJourney;
+    expect(confirmed.draft).toMatchObject({
+      id: saved.draft!.id,
+      presetId: "salesforce-outlook-teams",
+      revision: 2,
+      applied: true
+    });
+    const resumed = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
+    }) as AppOnboardingJourney;
+    expect(resumed.app.presetId).toBe("salesforce-outlook-teams");
+    expect(resumed.plan?.configuration.values.exclusions).toEqual(["contractor"]);
+  });
 });

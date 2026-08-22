@@ -262,6 +262,14 @@ npm run loopgraph -- apps search "qualify inbound leads"
 npm run loopgraph -- apps get loopgraph.sales.qualify-route-inbound-leads
 npm run loopgraph -- apps onboard loopgraph.sales.qualify-route-inbound-leads
 
+# Previewing a different stack excludes the prior stack's saved answers.
+# Replacing the saved preset requires this separate explicit flag.
+npm run loopgraph -- apps onboard-save loopgraph.sales.qualify-route-inbound-leads \
+  --preset salesforce-outlook-teams \
+  --expected-revision <revision> \
+  --config confirmed-salesforce-answers.json \
+  --confirm-preset-change
+
 # If you explicitly abandon this setup, clear only its exact saved draft
 npm run loopgraph -- apps onboard-reset loopgraph.sales.qualify-route-inbound-leads \
   --draft <draft-id> --expected-revision <revision> --confirm RESET
@@ -291,7 +299,7 @@ npm run loopgraph -- apps activate <installation-id> --mode shadow \
   --approval-receipt <receipt-id>
 ```
 
-`apps onboard` is read-only and omits unset fields so an App-ID-only call really resumes the saved draft. `apps onboard-save` persists a complete, declared, secret-free setup snapshot with optimistic concurrency; it cannot install assets, grant permissions, or enable provider writes. `apps onboard-reset` requires explicit `RESET` confirmation plus the exact draft ID and revision, and clears only that saved setup snapshot. Re-run `apps onboard` after each connection, saved answer, mapping, install, test, or activation to resume with only the unresolved blockers and exact safe next action. See the [Hermes-guided App onboarding journey](docs/APP-ONBOARDING-JOURNEY.md).
+`apps onboard` is read-only and omits unset fields so an App-ID-only call really resumes the saved draft. The browser behaves the same way: `/marketplace/<app-id>/install` resumes a Hermes- or CLI-created draft, presents stack selection only when no preset has been saved, and opens an installed App in its operating view. `apps onboard-save` persists a complete, declared, secret-free setup snapshot with optimistic concurrency; it cannot install assets, grant permissions, or enable provider writes. Previewing a different preset excludes prior preset answers and draft mapping IDs, and replacing the saved preset requires explicit `--confirm-preset-change`. `apps onboard-reset` requires explicit `RESET` confirmation plus the exact draft ID and revision, and clears only that saved setup snapshot. Re-run `apps onboard` after each connection, saved answer, mapping, install, test, or activation to resume with only the unresolved blockers and exact safe next action. See the [Hermes-guided App onboarding journey](docs/APP-ONBOARDING-JOURNEY.md).
 
 The Marketplace and Installed Apps screens call the same governed service as Hermes and the CLI. A downloaded pack is never active automatically, installation never enables provider writes, and company-specific changes never mutate the signed upstream artifact. Each Installed App also joins only the recent Hermes events, problems, routed runs, task/tool/approval counts, failures, durable outcomes, review burden, and value-ledger entries belonging to the runtime loops owned by that exact installation. Its bounded operating topology shows sources → Hermes Brain → department → Installed App → owned loops → agents/runs/approvals → outcomes, with links into durable run and review records. It never mixes Marketplace samples or another App’s activity into the operating record.
 

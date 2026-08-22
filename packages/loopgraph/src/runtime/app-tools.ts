@@ -271,6 +271,7 @@ export const appOnboardingSaveInputSchema = projectSchema.extend({
   configuration: z.record(z.unknown()).default({}),
   fieldMappingIds: z.array(z.string().min(1)).max(200).optional(),
   expectedDraftRevision: z.number().int().nonnegative(),
+  confirmPresetChange: z.boolean().default(false),
   actor: z.string().min(1).max(300).default("hermes")
 }).strict();
 
@@ -1098,14 +1099,18 @@ export async function callLoopgraphAppTool(
     const registry = await installationStore.read();
     const onboardingDraft = registry.onboardingDrafts.find((candidate) =>
       candidate.appId === parsed.appId && candidate.companyId === parsed.companyId);
-    const versionRange = parsed.versionRange ?? onboardingDraft?.versionRange ?? "latest";
+    const draftApplied = Boolean(onboardingDraft && (
+      parsed.presetId === undefined || parsed.presetId === onboardingDraft.presetId
+    ));
+    const activeDraft = draftApplied ? onboardingDraft : undefined;
+    const versionRange = parsed.versionRange ?? activeDraft?.versionRange ?? "latest";
     const presetId = parsed.presetId ?? onboardingDraft?.presetId;
-    const selectedModules = parsed.selectedModules ?? onboardingDraft?.selectedModules;
-    const configuration = parsed.configuration ?? onboardingDraft?.configuration ?? {};
+    const selectedModules = parsed.selectedModules ?? activeDraft?.selectedModules;
+    const configuration = parsed.configuration ?? activeDraft?.configuration ?? {};
     const fieldMappingIds = parsed.fieldMappingIds ?? (
-      onboardingDraft && onboardingDraft.fieldMappingIds.length > 0 ? onboardingDraft.fieldMappingIds : undefined
+      activeDraft && activeDraft.fieldMappingIds.length > 0 ? activeDraft.fieldMappingIds : undefined
     );
-    const resumedFromDraft = Boolean(onboardingDraft && (
+    const resumedFromDraft = Boolean(activeDraft && (
       parsed.versionRange === undefined ||
       parsed.presetId === undefined ||
       parsed.selectedModules === undefined ||
@@ -1149,6 +1154,7 @@ export async function callLoopgraphAppTool(
         activationApprovals: registry.activationApprovals,
         lifecycleOperation,
         onboardingDraft,
+        draftApplied,
         resumedFromDraft,
         now: options.now
       });
@@ -1194,6 +1200,7 @@ export async function callLoopgraphAppTool(
       mappingPlan,
       lifecycleOperation,
       onboardingDraft,
+      draftApplied,
       resumedFromDraft,
       now: options.now
     });
@@ -1226,6 +1233,9 @@ export async function callLoopgraphAppTool(
       const existing = registry.onboardingDrafts.find((candidate) =>
         candidate.appId === parsed.appId && candidate.companyId === parsed.companyId);
       const observedRevision = existing?.revision ?? 0;
+      if (existing && existing.presetId !== parsed.presetId && !parsed.confirmPresetChange) {
+        throw new Error(`Changing App preset from ${existing.presetId} to ${parsed.presetId} requires explicit confirmation`);
+      }
       const snapshot = {
         versionRange: parsed.versionRange,
         presetId: parsed.presetId,

@@ -1496,9 +1496,11 @@ export const appOnboardingJourneySchema = z.object({
   draft: z.object({
     id: appIdSchema,
     revision: z.number().int().positive(),
+    presetId: appIdSchema,
     savedAt: isoDateTimeSchema,
     savedBy: z.string().min(1).max(300),
     answerKeys: z.array(z.string().min(1).max(160)).max(20),
+    applied: z.boolean(),
     resumed: z.boolean()
   }).strict().optional(),
   stage: appOnboardingStageSchema,

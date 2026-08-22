@@ -592,10 +592,11 @@ apps
   .option("--config <path>", "JSON object with the complete confirmed answer snapshot")
   .option("--mapping <ids...>", "Confirmed field mapping IDs")
   .option("--module <ids...>", "Selected optional module IDs")
+  .option("--confirm-preset-change", "Explicitly replace an existing draft that uses another preset", false)
   .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
   .option("--company <id>", "Company ID; defaults to workspace ID")
   .option("--actor <id>", "Accountable saver identity", "cli")
-  .action(async (appId: string, options: { project: string; preset: string; expectedRevision: string; version: string; config?: string; mapping?: string[]; module?: string[]; workspace?: string; company?: string; actor: string }) => {
+  .action(async (appId: string, options: { project: string; preset: string; expectedRevision: string; version: string; config?: string; mapping?: string[]; module?: string[]; confirmPresetChange: boolean; workspace?: string; company?: string; actor: string }) => {
     const expectedDraftRevision = Number(options.expectedRevision);
     if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
       throw new Error("Expected onboarding draft revision must be a non-negative integer.");
@@ -611,6 +612,7 @@ apps
       configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : {},
       fieldMappingIds: options.mapping,
       expectedDraftRevision,
+      confirmPresetChange: options.confirmPresetChange,
       actor: options.actor
     });
   });
