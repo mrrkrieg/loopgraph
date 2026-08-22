@@ -1451,7 +1451,7 @@ export class AppInstallationService {
           await this.loopSpecStore.commitMaterializationAtomically({
             commitId: operation.id,
             idempotencyKey: operation.idempotencyKey,
-            expectedRevision: recovery.sourceWorkspaceRevision,
+            expectedRevision: workspaceSnapshot.revision,
             projectRoot: this.projectRoot,
             committedAt: currentOperation.startedAt,
             artifacts,
@@ -1649,7 +1649,7 @@ export class AppInstallationService {
           await this.loopSpecStore.commitMaterializationAtomically({
             commitId: operation.id,
             idempotencyKey: operation.idempotencyKey,
-            expectedRevision: recovery.sourceWorkspaceRevision,
+            expectedRevision: workspaceSnapshot.revision,
             projectRoot: this.projectRoot,
             committedAt: currentOperation.startedAt,
             artifacts,
@@ -1851,7 +1851,7 @@ export class AppInstallationService {
           await this.loopSpecStore.commitMaterializationAtomically({
             commitId: operation.id,
             idempotencyKey: operation.idempotencyKey,
-            expectedRevision: removal.sourceWorkspaceRevision,
+            expectedRevision: workspaceSnapshot.revision,
             projectRoot: this.projectRoot,
             committedAt: timestamp,
             artifacts: [],

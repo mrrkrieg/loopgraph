@@ -20,7 +20,11 @@ import {
 } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { callLoopgraphAppTool } from "./app-tools";
-import { FileLoopSpecRegistryStore } from "./loop-spec-store";
+import {
+  FileLoopSpecRegistryStore,
+  type LoopSpecMaterializationCommitInput,
+  type LoopSpecRegistryStore
+} from "./loop-spec-store";
 import { readLoopgraphWorkspace } from "./workspace";
 
 const temporaryDirectories: string[] = [];
@@ -30,7 +34,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function harness(options: { installationStore?: AppInstallationStore } = {}) {
+async function harness(options: { installationStore?: AppInstallationStore; loopSpecStore?: LoopSpecRegistryStore } = {}) {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-install-"));
   temporaryDirectories.push(projectRoot);
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "marketplace"), packsRoot);
@@ -61,7 +65,8 @@ async function harness(options: { installationStore?: AppInstallationStore } = {
   const service = new AppInstallationService(marketplace, projectRoot, "acme", "acme-company", {
     contextStore,
     mappingStore,
-    installationStore: options.installationStore
+    installationStore: options.installationStore,
+    loopSpecStore: options.loopSpecStore
   });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
@@ -131,6 +136,50 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
     this.registry = next;
     if (result.audit) this.audits.push(result.audit);
     return result.value;
+  }
+}
+
+class InterruptBeforeMaterializationStore implements LoopSpecRegistryStore {
+  readonly persistence = "file" as const;
+  private interruptNextCommit = false;
+
+  constructor(private readonly delegate: LoopSpecRegistryStore) {}
+
+  interruptNextMaterialization(): void {
+    this.interruptNextCommit = true;
+  }
+
+  getWorkspace(projectRoot: string) {
+    return this.delegate.getWorkspace(projectRoot);
+  }
+
+  listActiveLoopSpecs(projectRoot: string) {
+    return this.delegate.listActiveLoopSpecs(projectRoot);
+  }
+
+  getActiveLoopSpec(projectRoot: string, loopId: string) {
+    return this.delegate.getActiveLoopSpec(projectRoot, loopId);
+  }
+
+  async commitMaterializationAtomically(input: LoopSpecMaterializationCommitInput) {
+    if (this.interruptNextCommit) {
+      this.interruptNextCommit = false;
+      throw new Error("simulated interruption before LoopSpec materialization");
+    }
+    return this.delegate.commitMaterializationAtomically(input);
+  }
+
+  async advanceUnrelatedWorkspaceRevision(projectRoot: string, now: Date): Promise<void> {
+    const snapshot = await this.delegate.getWorkspace(projectRoot);
+    const artifacts = await this.delegate.listActiveLoopSpecs(projectRoot);
+    await this.delegate.commitMaterializationAtomically({
+      commitId: `unrelated-workspace-${snapshot.revision}`,
+      idempotencyKey: canonicalAppDigest({ action: "unrelated-workspace", revision: snapshot.revision }),
+      expectedRevision: snapshot.revision,
+      projectRoot,
+      committedAt: now.toISOString(),
+      artifacts
+    });
   }
 }
 
@@ -1743,6 +1792,85 @@ describe("atomic app installation lifecycle", () => {
     expect(secondUpdate.receipt.id).not.toBe(recovered.receipt.id);
     expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "update" && operation.status === "completed"))
       .toHaveLength(2);
+  });
+
+  it("recovers update and rollback after an unrelated workspace revision when owned inventory is unchanged", async () => {
+    const installationStore = new AuditCapturingInstallationStore("acme");
+    const loopSpecStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    const input = await harness({ installationStore, loopSpecStore });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:50:00.000Z"));
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:51:00.000Z")
+    });
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:52:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const updateRecovery = (await installationStore.read()).lifecycleOperations.find((operation) => operation.action === "update");
+    expect(updateRecovery).toMatchObject({ status: "requires_reconciliation" });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:52:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(updateRecovery!.update!.sourceWorkspaceRevision);
+
+    const updated = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:53:00.000Z")
+    });
+    expect(updated.installation).toMatchObject({ version: "1.1.0", state: "ready_to_test" });
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:54:00.000Z")
+    )).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const rollbackRecovery = (await installationStore.read()).lifecycleOperations.find((operation) => operation.action === "rollback");
+    expect(rollbackRecovery).toMatchObject({ status: "requires_reconciliation" });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:54:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(rollbackRecovery!.rollback!.sourceWorkspaceRevision);
+
+    const rolledBack = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:55:00.000Z")
+    );
+    expect(rolledBack.installation).toMatchObject({ version: "1.0.0", state: "rolled_back" });
+
+    const uninstallRequest = {
+      installationId: applied.installation.id,
+      expectedArtifactDigest: rolledBack.installation!.artifactDigest,
+      actor: "sales-admin",
+      reason: "Retire the exact recovered installation.",
+      confirmed: true
+    };
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.uninstall({
+      ...uninstallRequest,
+      now: new Date("2026-08-08T12:56:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const uninstallRecovery = (await installationStore.read()).lifecycleOperations.find((operation) => operation.action === "uninstall");
+    expect(uninstallRecovery).toMatchObject({ status: "requires_reconciliation" });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:56:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(uninstallRecovery!.uninstall!.sourceWorkspaceRevision);
+
+    const uninstalled = await input.service.uninstall({
+      ...uninstallRequest,
+      now: new Date("2026-08-08T12:57:00.000Z")
+    });
+    expect(uninstalled.installation).toBeUndefined();
+    expect(uninstalled.receipt).toMatchObject({ action: "uninstall" });
   });
 
   it("resumes an interrupted rollback only for the exact actor, installation, and LoopSpec target", async () => {
