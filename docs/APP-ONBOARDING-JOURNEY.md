@@ -62,6 +62,8 @@ The installed-App browser follows the same boundary. It never combines approval 
 
 Hosted approval creation and receipt consumption are also audit-fenced registry mutations. Each accepted transition appends `app.activation.approved` or `app.activation.consumed` to the tenant/project security chain in the same database transaction as the registry revision. The bounded event contains the accountable actor, content-addressed receipt ID, hashed installation and App identities, pinned artifact and approval digests, source state, requested mode, expiry, and evidence-reference count. Approval text, evidence references, provider data, credentials, tokens, and raw App or installation identifiers remain outside the audit envelope. A failed audit validation or append rolls back the authority change.
 
+Activation also uses a durable cross-store recovery journal. Before changing any owned LoopSpec, Loopgraph records the exact receipt ID and digest, pinned artifact, source state, target mode, actor, and owned loop set. If a worker stops after LoopSpecs change but before the installation registry consumes the receipt, every competing lifecycle mutation is blocked and the journey returns one exact `retry_exact_request`. That retry may finish after the original receipt expiry only when the journal proves the approved attempt began before expiry; it revalidates the same artifact, state, authority, and loop inventory, then consumes the receipt once. A completed retry is an idempotent read of the resulting state, not a second activation.
+
 ## CLI
 
 ```bash

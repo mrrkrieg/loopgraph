@@ -90,6 +90,7 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
   readonly persistence = "file" as const;
   readonly audits: AppInstallationMutationAuditContext[] = [];
   private registry: AppInstallationRegistry;
+  private interruptActivationCompletion = false;
 
   constructor(workspaceId: string) {
     this.registry = emptyAppInstallationRegistry(workspaceId);
@@ -103,11 +104,24 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
     return undefined;
   }
 
+  interruptNextActivationRegistryCommit(): void {
+    this.interruptActivationCompletion = true;
+  }
+
   async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
     const current = this.registry;
     const result = await operation(current);
     const next = appInstallationRegistrySchema.parse(result.registry);
     assertAppInstallationRegistryRevision(current, next);
+    const pendingActivation = current.lifecycleOperations.find((candidate) =>
+      candidate.action === "activate" && candidate.status !== "completed");
+    const completedActivation = pendingActivation
+      ? next.lifecycleOperations.find((candidate) => candidate.id === pendingActivation.id && candidate.status === "completed")
+      : undefined;
+    if (this.interruptActivationCompletion && completedActivation) {
+      this.interruptActivationCompletion = false;
+      throw new Error("simulated worker interruption after activation LoopSpec materialization");
+    }
     this.registry = next;
     if (result.audit) this.audits.push(result.audit);
     return result.value;
@@ -642,6 +656,139 @@ describe("atomic app installation lifecycle", () => {
     expect(serialized).not.toContain(applied.installation.appId);
   }, 20_000);
 
+  it("resumes an interrupted activation without replaying authority or losing LoopSpec state", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "security-approver",
+      reason: "Observe the exact tested artifact in shadow mode.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      shadowApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "Shadow evidence supports governed recommendations.",
+      evidenceRefs: [evaluation.id],
+      expiresInSeconds: 60,
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+
+    store.interruptNextActivationRegistryCommit();
+    await expect(input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:05:30.000Z")
+    )).rejects.toThrow("simulated worker interruption");
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toMatchObject({ state: "shadow", mode: "shadow" });
+    expect(interrupted.activationApprovals.find((approval) => approval.id === recommendApproval.id)?.consumedAt).toBeUndefined();
+    expect(interrupted.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "activate",
+      status: "requires_reconciliation",
+      failureCode: "operation_interrupted",
+      activation: {
+        approvalReceiptId: recommendApproval.id,
+        approvalDigest: recommendApproval.approvalDigest,
+        fromState: "shadow",
+        targetMode: "recommend"
+      }
+    }));
+    const materializedModes = (await new FileLoopSpecRegistryStore(input.projectRoot).listActiveLoopSpecs(input.projectRoot))
+      .filter((artifact) => artifact.spec.metadata.labels?.installationId === applied.installation.id)
+      .map((artifact) => artifact.spec.routing?.activationMode);
+    expect(new Set(materializedModes)).toEqual(new Set(["recommend"]));
+    await expect(input.service.pause(applied.installation.id, "operations-activator"))
+      .rejects.toThrow(/must be reconciled/i);
+    await expect(input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "different-activator",
+      new Date("2026-08-08T12:06:30.000Z")
+    )).rejects.toThrow(/idempotency conflict/i);
+    expect((await store.read()).lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "activate",
+      actor: "operations-activator",
+      status: "requires_reconciliation"
+    }));
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }, { appInstallationStoreFactory: () => store }) as {
+      stage: string;
+      recovery: { action: string; status: string };
+      nextAction: { kind: string; input: Record<string, unknown> };
+    };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      recovery: { action: "activate", status: "requires_reconciliation" },
+      nextAction: {
+        kind: "retry_exact_request",
+        input: {
+          action: "activate",
+          installationId: applied.installation.id,
+          approvalReceiptId: recommendApproval.id,
+          mode: "recommend"
+        }
+      }
+    });
+
+    const recovered = await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:07:00.000Z")
+    );
+    expect(recovered).toMatchObject({ state: "recommend", mode: "recommend" });
+    const completed = await store.read();
+    expect(completed.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "activate",
+      status: "completed",
+      completedAt: "2026-08-08T12:07:00.000Z"
+    }));
+    expect(completed.activationApprovals.find((approval) => approval.id === recommendApproval.id)).toMatchObject({
+      consumedAt: "2026-08-08T12:07:00.000Z",
+      consumedBy: "operations-activator"
+    });
+    expect(store.audits.filter((audit) =>
+      audit.action === "app.activation.consumed" && audit.targetId === recommendApproval.id)).toHaveLength(1);
+
+    const completedRevision = completed.revision;
+    const replayed = await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:08:00.000Z")
+    );
+    expect(replayed).toMatchObject({ state: "recommend", mode: "recommend" });
+    expect((await store.read()).revision).toBe(completedRevision);
+  }, 20_000);
+
   it("keeps installed LoopSpec routing synchronized with App rollout, pause, and resume", async () => {
     const input = await harness();
     const applied = await installSalesApp(input);
@@ -693,7 +840,7 @@ describe("atomic app installation lifecycle", () => {
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
   });
 
-  it("rejects missing, mismatched, expired, and replayed App activation approvals", async () => {
+  it("rejects missing, mismatched, and expired approvals while replaying only an exact completed activation", async () => {
     const input = await harness();
     const applied = await installSalesApp(input);
     const evaluation = await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
@@ -739,20 +886,23 @@ describe("atomic app installation lifecycle", () => {
       evidenceRefs: [evaluation.id],
       now: new Date("2026-08-08T12:05:00.000Z")
     });
-    await input.service.activate(
+    const activated = await input.service.activate(
       applied.installation.id,
       "shadow",
       freshApproval.id,
       "admin-1",
       new Date("2026-08-08T12:06:00.000Z")
     );
-    await expect(input.service.activate(
+    const completedRevision = (await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision;
+    const replayed = await input.service.activate(
       applied.installation.id,
       "shadow",
       freshApproval.id,
       "admin-1",
       new Date("2026-08-08T12:06:30.000Z")
-    )).rejects.toThrow("already been consumed");
+    );
+    expect(replayed).toEqual(activated);
+    expect((await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision).toBe(completedRevision);
   });
 
   it("plans, materializes, and tests only the modules selected by the operator", async () => {

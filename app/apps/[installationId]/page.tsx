@@ -49,6 +49,9 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
   const installedLoopByName = new Map(data.installedLoops.map((loop) => [loop.name, loop]));
   const unfinishedOperations = data.lifecycleOperations.filter((operation) => operation.status !== "completed");
   const recovery = unfinishedOperations[0];
+  const activationRecoveryApproval = recovery?.action === "activate" && recovery.activation
+    ? data.activationApprovals.find((approval) => approval.id === recovery.activation?.approvalReceiptId)
+    : undefined;
   const presentation = installedAppPresentation({
     appName: data.detail.app.name,
     installationId: data.installation.id,
@@ -301,7 +304,16 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
         <aside className="min-w-0 space-y-4 lg:sticky lg:top-6 lg:self-start">
           <SectionCard title="Recommended next action">
             <p className="text-sm leading-6 text-ink/65">{recovery ? recoveryInstruction(recovery) : nextAction(data.installation.state, data.readiness.state)}</p>
-            {recovery ? <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href="#app-uninstall">Finish recovery</a> : <div className="mt-4 space-y-2">
+            {recovery ? recovery.action === "activate" ? (
+              recovery.activation && activationRecoveryApproval && recovery.activation.targetMode !== "execute_with_approval" ? (
+                <ActivationRecoveryControl
+                  approvalReceiptId={activationRecoveryApproval.id}
+                  installationId={data.installation.id}
+                  mode={recovery.activation.targetMode}
+                  operationId={recovery.id}
+                />
+              ) : <p className="mt-4 rounded-md border border-orange-300 bg-white p-3 text-xs leading-5 text-orange-900/75">This exact activation cannot be resumed from the browser. Use the Hermes or CLI retry returned by the onboarding journey; do not create a replacement approval.</p>
+            ) : <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href={recovery.action === "uninstall" ? "#app-uninstall" : `/marketplace/${encodeURIComponent(data.detail.app.id)}/install`}>{recovery.action === "uninstall" ? "Finish recovery" : "Return to exact install"}</a> : <div className="mt-4 space-y-2">
               {data.installation.state === "ready_to_test" || data.installation.state === "broken" ? <OperationForm action="test" installationId={data.installation.id} label="Run conformance tests" primary /> : null}
               {data.installation.state === "simulation_passed" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
               {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
@@ -324,6 +336,27 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
 function ScoreCard({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="rounded-xl border border-line bg-white p-4 shadow-sm"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold capitalize">{value}</div><div className="mt-1 text-xs text-ink/45">{detail}</div></div>; }
 function Definition({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="border-b border-line py-3 last:border-0"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className={`mt-1 break-all text-xs text-ink/65 ${mono ? "font-mono" : ""}`}>{value}</div></div>; }
 function OperationForm({ action, installationId, label, primary = false }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} /><button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
+function ActivationRecoveryControl({
+  installationId,
+  operationId,
+  mode,
+  approvalReceiptId
+}: {
+  installationId: string;
+  operationId: string;
+  mode: BrowserActivationMode;
+  approvalReceiptId: string;
+}) {
+  return (
+    <form action={activateInstalledAppAction} className="mt-4 rounded-md border border-orange-300 bg-white p-3">
+      <input name="installationId" type="hidden" value={installationId} />
+      <input name="mode" type="hidden" value={mode} />
+      <input name="approvalReceiptId" type="hidden" value={approvalReceiptId} />
+      <p className="text-xs leading-5 text-orange-900/75">This resumes operation <span className="font-mono">{operationId}</span> with its original content-bound authority. It does not create or extend an approval.</p>
+      <button className="mt-3 w-full rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" type="submit">Reconcile and finish {mode.replace(/_/g, " ")} activation</button>
+    </form>
+  );
+}
 function ActivationControl({
   installationId,
   mode,

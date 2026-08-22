@@ -7,6 +7,7 @@ import {
   appActivationApprovalReceiptSchema,
   appAssetOwnershipSchema,
   appEvalRunSchema,
+  appInstallationStateSchema,
   appLifecycleReceiptSchema,
   appInstallationLockSchema,
   workspaceAppInstallationSchema,
@@ -21,7 +22,7 @@ export const appLifecycleOperationSchema = z.object({
   idempotencyKey: z.string().min(16).max(160),
   installationId: z.string().min(1).max(160),
   appId: z.string().min(1).max(160),
-  action: z.enum(["install", "uninstall"]),
+  action: z.enum(["install", "uninstall", "activate"]),
   targetArtifactDigest: z.string().min(16).max(160),
   status: z.enum(["prepared", "requires_reconciliation", "completed"]),
   desired: z.object({
@@ -29,6 +30,12 @@ export const appLifecycleOperationSchema = z.object({
     fieldMappingIds: z.array(z.string().min(1).max(160)).max(200),
     companyContextKeys: z.array(z.string().min(1).max(160)).max(100)
   }).strict(),
+  activation: z.object({
+    approvalReceiptId: z.string().regex(/^activation-approval\.[0-9a-f]{16}$/),
+    approvalDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    fromState: appInstallationStateSchema,
+    targetMode: z.enum(["shadow", "recommend", "execute_with_approval"])
+  }).strict().optional(),
   actor: z.string().min(1).max(160),
   startedAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -47,6 +54,12 @@ export const appLifecycleOperationSchema = z.object({
   }
   if (operation.resultReceiptId && operation.action !== "uninstall") {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Only completed uninstall operations may reference a lifecycle receipt" });
+  }
+  if ((operation.action === "activate") !== Boolean(operation.activation)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["activation"], message: "Only activation operations require exact activation authority" });
+  }
+  if (operation.action === "activate" && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Activation recovery may change only owned LoopSpec rollout state" });
   }
 });
 

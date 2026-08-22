@@ -1481,57 +1481,119 @@ export class AppInstallationService {
     actor: string,
     now = new Date()
   ): Promise<WorkspaceAppInstallation> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      const approval = registry.activationApprovals.find((candidate) => candidate.id === approvalReceiptId);
-      if (!approval) throw new Error(`App activation approval receipt not found: ${approvalReceiptId}`);
-      if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
-      if (Date.parse(approval.expiresAt) <= now.getTime()) throw new Error("App activation approval receipt has expired");
-      if (approval.workspaceId !== registry.workspaceId || approval.installationId !== installation.id || approval.appId !== installation.appId) {
-        throw new Error("App activation approval receipt belongs to another workspace, installation, or app");
-      }
-      if (approval.artifactDigest !== installation.artifactDigest || approval.fromState !== installation.state || approval.requestedMode !== mode) {
-        throw new Error("App activation approval receipt does not match the current artifact, state, and requested mode");
-      }
-      const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installationId && run.status === "passed");
-      if (!latestPassed) throw new Error("App must pass conformance before activation");
-      if (mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
-        throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
-      }
-      assertLifecycleTransition(installation.state, mode, mode);
-      const timestamp = now.toISOString();
-      await this.synchronizeOwnedLoopActivation(installation.id, mode, timestamp);
-      const updated: WorkspaceAppInstallation = { ...installation, state: mode, mode, updatedAt: timestamp, failureReason: undefined };
-      const consumedApproval = appActivationApprovalReceiptSchema.parse({ ...approval, consumedAt: timestamp, consumedBy: actor });
-      const nextRegistry: AppInstallationRegistry = {
-        ...registry,
-        revision: registry.revision + 1,
-        installations: replaceInstallation(registry.installations, updated),
-        activationApprovals: registry.activationApprovals.map((candidate) => candidate.id === approval.id ? consumedApproval : candidate),
-        updatedAt: timestamp
-      };
-      return {
-        registry: nextRegistry,
-        lock: createInstallationLock(nextRegistry),
-        audit: {
-          actor,
-          action: "app.activation.consumed" as const,
-          targetType: "app_activation_approval" as const,
-          targetId: approval.id,
-          metadata: {
-            installationIdDigest: canonicalAppDigest(installation.id),
-            appIdDigest: canonicalAppDigest(installation.appId),
-            artifactDigest: approval.artifactDigest,
-            approvalDigest: approval.approvalDigest,
-            fromState: approval.fromState,
-            requestedMode: approval.requestedMode,
-            evidenceRefCount: approval.evidenceRefs.length,
-            expiresAt: approval.expiresAt
-          }
-        },
-        value: updated
-      };
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = requireInstallation(observedRegistry, installationId);
+    const observedApproval = observedRegistry.activationApprovals.find((candidate) => candidate.id === approvalReceiptId);
+    if (!observedApproval) throw new Error(`App activation approval receipt not found: ${approvalReceiptId}`);
+    const idempotencyKey = canonicalAppDigest({
+      action: "activate",
+      workspaceId: observedRegistry.workspaceId,
+      installationId,
+      appId: observedInstallation.appId,
+      artifactDigest: observedInstallation.artifactDigest,
+      approvalReceiptId,
+      approvalDigest: observedApproval.approvalDigest,
+      fromState: observedApproval.fromState,
+      targetMode: mode
     });
+    const operationId = lifecycleOperationId("activate", installationId, observedInstallation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    if (existingOperation?.status === "completed") {
+      if (observedInstallation.state !== mode || observedInstallation.mode !== mode || !observedApproval.consumedAt) {
+        throw new Error("Completed App activation recovery record does not match the installed state");
+      }
+      return observedInstallation;
+    }
+    assertActivationReady({
+      registry: observedRegistry,
+      installation: observedInstallation,
+      approval: observedApproval,
+      mode,
+      now,
+      allowExpired: Boolean(existingOperation)
+    });
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const loopIds = installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: observedInstallation.id,
+      appId: observedInstallation.appId,
+      action: "activate",
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: {
+        loopIds,
+        fieldMappingIds: [],
+        companyContextKeys: []
+      },
+      activation: {
+        approvalReceiptId: observedApproval.id,
+        approvalDigest: observedApproval.approvalDigest,
+        fromState: observedApproval.fromState,
+        targetMode: mode
+      },
+      actor,
+      now
+    });
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      return requireInstallation(registry, installationId);
+    }
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.activation || currentOperation.status === "completed") {
+          throw new Error(`App activation recovery record is unavailable: ${operation.id}`);
+        }
+        const approval = registry.activationApprovals.find((candidate) => candidate.id === currentOperation.activation!.approvalReceiptId);
+        if (!approval || approval.approvalDigest !== currentOperation.activation.approvalDigest) {
+          throw new Error("App activation recovery approval no longer matches its durable authority record");
+        }
+        if (Date.parse(currentOperation.startedAt) >= Date.parse(approval.expiresAt)) {
+          throw new Error("App activation recovery began after its approval expired");
+        }
+        assertActivationReady({ registry, installation, approval, mode, now, allowExpired: true });
+        if (currentOperation.activation.fromState !== installation.state || currentOperation.activation.targetMode !== mode) {
+          throw new Error("App activation recovery record does not match the current lifecycle transition");
+        }
+        const timestamp = now.toISOString();
+        await this.synchronizeOwnedLoopActivation(installation.id, mode, timestamp, currentOperation.desired.loopIds);
+        const updated: WorkspaceAppInstallation = { ...installation, state: mode, mode, updatedAt: timestamp, failureReason: undefined };
+        const consumedApproval = appActivationApprovalReceiptSchema.parse({ ...approval, consumedAt: timestamp, consumedBy: actor });
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: registry.revision + 1,
+          installations: replaceInstallation(registry.installations, updated),
+          activationApprovals: registry.activationApprovals.map((candidate) => candidate.id === approval.id ? consumedApproval : candidate),
+          updatedAt: timestamp
+        }, currentOperation.id, now);
+        return {
+          registry: nextRegistry,
+          lock: createInstallationLock(nextRegistry),
+          audit: {
+            actor,
+            action: "app.activation.consumed" as const,
+            targetType: "app_activation_approval" as const,
+            targetId: approval.id,
+            metadata: {
+              installationIdDigest: canonicalAppDigest(installation.id),
+              appIdDigest: canonicalAppDigest(installation.appId),
+              artifactDigest: approval.artifactDigest,
+              approvalDigest: approval.approvalDigest,
+              fromState: approval.fromState,
+              requestedMode: approval.requestedMode,
+              evidenceRefCount: approval.evidenceRefs.length,
+              expiresAt: approval.expiresAt
+            }
+          },
+          value: updated
+        };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async pause(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
@@ -1731,10 +1793,14 @@ export class AppInstallationService {
   private async synchronizeOwnedLoopActivation(
     installationId: string,
     activationMode: "shadow" | "recommend" | "execute_with_approval",
-    timestamp: string
+    timestamp: string,
+    expectedLoopIds?: string[]
   ): Promise<void> {
     const snapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
     const loopIds = installationLoopIds(snapshot.workspace, installationId);
+    if (expectedLoopIds && canonicalAppDigest([...loopIds].sort()) !== canonicalAppDigest([...expectedLoopIds].sort())) {
+      throw new Error(`App installation ${installationId} owned LoopSpecs changed after activation recovery was prepared`);
+    }
     if (loopIds.length === 0) {
       throw new Error(`App installation ${installationId} owns no active LoopSpecs`);
     }
@@ -2377,6 +2443,33 @@ function requireInstallation(registry: AppInstallationRegistry, id: string): Wor
   return installation;
 }
 
+function assertActivationReady(input: {
+  registry: AppInstallationRegistry;
+  installation: WorkspaceAppInstallation;
+  approval: AppActivationApprovalReceipt;
+  mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  now: Date;
+  allowExpired: boolean;
+}): void {
+  const { registry, installation, approval, mode, now, allowExpired } = input;
+  if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
+  if (!allowExpired && Date.parse(approval.expiresAt) <= now.getTime()) {
+    throw new Error("App activation approval receipt has expired");
+  }
+  if (approval.workspaceId !== registry.workspaceId || approval.installationId !== installation.id || approval.appId !== installation.appId) {
+    throw new Error("App activation approval receipt belongs to another workspace, installation, or app");
+  }
+  if (approval.artifactDigest !== installation.artifactDigest || approval.fromState !== installation.state || approval.requestedMode !== mode) {
+    throw new Error("App activation approval receipt does not match the current artifact, state, and requested mode");
+  }
+  const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installation.id && run.status === "passed");
+  if (!latestPassed) throw new Error("App must pass conformance before activation");
+  if (mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
+    throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
+  }
+  assertLifecycleTransition(installation.state, mode, mode);
+}
+
 function requireOperableInstallation(registry: AppInstallationRegistry, id: string): WorkspaceAppInstallation {
   const installation = requireInstallation(registry, id);
   const unfinished = registry.lifecycleOperations.find((operation) =>
@@ -2407,6 +2500,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     action: existing.action,
     targetArtifactDigest: existing.targetArtifactDigest,
     desired: existing.desired,
+    activation: existing.activation,
     actor: existing.actor
   };
   if (canonicalAppDigest(existingIntent) !== canonicalAppDigest(intent)) {

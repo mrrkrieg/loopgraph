@@ -65,6 +65,9 @@ export function recoveryInstruction(operation: AppLifecycleOperation): string {
   if (operation.action === "install") {
     return "Return to the Hermes, CLI, or browser session that submitted the approved plan and retry that exact plan. Its immutable digest may resume even if the original approval window has since expired.";
   }
+  if (operation.action === "activate") {
+    return `Retry only the recorded ${operation.activation?.targetMode.replace(/_/g, " ") ?? "activation"} transition with its exact approval receipt. Loopgraph will reconcile the owned LoopSpecs and consume that authority once; do not create a replacement approval.`;
+  }
   return "Open the installed App and repeat uninstall with the same artifact digest and an accountable confirmation. Already completed removals and ownership releases will not be duplicated.";
 }
 

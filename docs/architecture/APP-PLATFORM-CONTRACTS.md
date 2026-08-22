@@ -87,6 +87,8 @@ Browser activation is a two-mutation protocol over the same App service used by 
 
 Approval creation and receipt consumption return strict audit contexts from that shared service. In hosted mode the Supabase installation-store adapter commits the registry revision and appends `app.activation.approved` or `app.activation.consumed` through one service-role-only database function. The 4 KiB allowlist accepts only the actor, content-addressed receipt ID, hashed App/installation identities, exact artifact and approval digests, source state, requested mode, expiry, and evidence count. Review reasons and evidence references remain in the authoritative receipt; they are not duplicated into the security chain. Invalid audit metadata, an unavailable audit append, or a registry revision that does not advance aborts the transaction.
 
+The LoopSpec registry and App installation registry are separate durable stores, so activation is journaled before crossing that boundary. The lifecycle operation binds the exact approval, artifact, source state, target mode, actor, and owned LoopSpec IDs. Prepared or interrupted work blocks every unrelated lifecycle mutation. Retrying the same request verifies that the recorded attempt began while its receipt was valid, asserts the owned loop inventory has not drifted, makes LoopSpec activation idempotently current, and atomically completes the operation with installation state, receipt consumption, and the action-specific audit event. Exact retries after completion return the current installation without advancing a revision or re-consuming authority.
+
 ## Configuration precedence
 
 Configuration is resolved in this deterministic order:

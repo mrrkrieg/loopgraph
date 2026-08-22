@@ -35,4 +35,31 @@ describe("AppLifecycleRecoveryNotice", () => {
     expect(html).not.toContain("lifecycle.completed123");
     expect(html).not.toMatch(/token|credential|provider payload/i);
   });
+
+  it("directs an interrupted activation to its exact existing authority", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.activate123",
+      idempotencyKey: "activate123456789",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "activate",
+      targetArtifactDigest: "abcdef1234567890",
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: [], companyContextKeys: [] },
+      activation: {
+        approvalReceiptId: "activation-approval.1234567890abcdef",
+        approvalDigest: `sha256:${"a".repeat(64)}`,
+        fromState: "shadow",
+        targetMode: "recommend"
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("recorded recommend transition");
+    expect(html).toContain("consume that authority once");
+    expect(html).not.toContain(operation.activation?.approvalReceiptId ?? "missing");
+  });
 });

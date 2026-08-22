@@ -160,7 +160,9 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
       summary: `${recovery.action} is ${recovery.status.replace(/_/g, " ")}.`,
       remediation: recovery.action === "install"
         ? "Retry the exact previously approved install request; do not generate or approve a different plan for this App."
-        : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
+        : recovery.action === "activate"
+          ? "Retry activation with the exact recorded approval receipt and target mode; do not create a replacement approval."
+          : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
     });
   }
   if (decision.stage === "resolve_test_failures") {
@@ -275,18 +277,26 @@ function decideStage(input: {
       currentStep: action === "install" ? "review" : "operate",
       headline: action === "install"
         ? "An exact App installation was interrupted and must be resumed before another plan can be applied."
-        : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
+        : action === "activate"
+          ? "App activation was interrupted and its exact approved transition must be reconciled before another lifecycle action can run."
+          : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
       nextAction: {
         kind: "retry_exact_request",
         summary: action === "install"
           ? "Retry the exact previously approved install request. Loopgraph will replay only unfinished idempotent work."
-          : "Repeat the uninstall confirmation for this exact installation and artifact digest. Loopgraph will replay only unfinished idempotent work.",
+          : action === "activate"
+            ? "Retry the exact recorded activation receipt and target mode. Loopgraph will reconcile LoopSpec state and consume authority only once."
+            : "Repeat the uninstall confirmation for this exact installation and artifact digest. Loopgraph will replay only unfinished idempotent work.",
         requiresHumanConfirmation: true,
         input: {
           operationId: input.lifecycleOperation.id,
           action,
           installationId: input.lifecycleOperation.installationId,
-          targetArtifactDigest: input.lifecycleOperation.targetArtifactDigest
+          targetArtifactDigest: input.lifecycleOperation.targetArtifactDigest,
+          ...(input.lifecycleOperation.activation ? {
+            approvalReceiptId: input.lifecycleOperation.activation.approvalReceiptId,
+            mode: input.lifecycleOperation.activation.targetMode
+          } : {})
         }
       }
     };
