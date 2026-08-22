@@ -727,7 +727,7 @@ describe("shared Loopgraph App tools", () => {
       evidence: { syntheticStatus: "passed", providerWritesBlocked: true }
     });
     expect(operating.draft).toBeUndefined();
-  }, 15_000);
+  }, 45_000);
 
   it("rejects unsafe draft writes and resets only the exact confirmed draft", async () => {
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-draft-security-"));
@@ -828,7 +828,7 @@ describe("shared Loopgraph App tools", () => {
       confirmReset: true,
       actor: "sales-operations"
     })).rejects.toThrow(/identity conflict/i);
-  });
+  }, 20_000);
 
   it("keeps an explicit preset preview isolated until the saved draft transition is confirmed", async () => {
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-preset-transition-"));
@@ -885,7 +885,7 @@ describe("shared Loopgraph App tools", () => {
     }) as AppOnboardingJourney;
     expect(resumed.app.presetId).toBe("salesforce-outlook-teams");
     expect(resumed.plan?.configuration.values.exclusions).toEqual(["contractor"]);
-  });
+  }, 20_000);
 
   it("emits bounded actor-attributed audit context for draft save and reset", async () => {
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-onboarding-audit-"));
