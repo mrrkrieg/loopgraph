@@ -92,14 +92,34 @@ describe("Supabase App installation store", () => {
         }],
         updatedAt: now
       },
+      audit: {
+        actor: "sales-operations",
+        action: "app.onboarding_draft.saved",
+        targetType: "app_onboarding_draft",
+        targetId: "draft.sales",
+        metadata: {
+          appIdDigest: `sha256:${"a".repeat(64)}`,
+          presetIdDigest: `sha256:${"b".repeat(64)}`,
+          draftRevision: 1,
+          presetChanged: false,
+          selectedModuleCount: 1,
+          answerCount: 1,
+          fieldMappingCount: 0
+        }
+      },
       value: undefined
     }));
 
     expect((await store.read()).onboardingDrafts).toEqual([
       expect.objectContaining({ appId: "loopgraph.sales.qualify-route-inbound-leads", revision: 1 })
     ]);
-    expect(fake.rpc).toHaveBeenCalledWith("commit_loopgraph_app_installation_registry", expect.objectContaining({
-      p_registry: expect.objectContaining({ onboardingDrafts: [expect.objectContaining({ updatedBy: "sales-operations" })] })
+    expect(fake.rpc).toHaveBeenCalledWith("commit_loopgraph_app_installation_registry_with_audit", expect.objectContaining({
+      p_registry: expect.objectContaining({ onboardingDrafts: [expect.objectContaining({ updatedBy: "sales-operations" })] }),
+      p_audit_context: expect.objectContaining({
+        actor: "sales-operations",
+        action: "app.onboarding_draft.saved",
+        targetId: "draft.sales"
+      })
     }));
   });
 });
@@ -116,7 +136,7 @@ class InstallationSupabase {
       this.leaseToken = String(args.p_lease_token);
       return { data: this.row, error: null };
     }
-    if (name === "commit_loopgraph_app_installation_registry") {
+    if (name === "commit_loopgraph_app_installation_registry" || name === "commit_loopgraph_app_installation_registry_with_audit") {
       if (this.leaseToken !== args.p_lease_token) return { data: null, error: { message: "lease conflict" } };
       this.row = {
         registry_payload: args.p_registry as AppInstallationRegistry,

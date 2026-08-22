@@ -4,6 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectorInstallationViewSchema, type AppOnboardingJourney } from "../core";
+import {
+  appInstallationRegistrySchema,
+  assertAppInstallationRegistryRevision,
+  emptyAppInstallationRegistry,
+  type AppInstallationMutationAuditContext,
+  type AppInstallationRegistry,
+  type AppInstallationStore,
+  type AppInstallationUpdate
+} from "./app-installation-store";
 import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
 import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
@@ -877,4 +886,85 @@ describe("shared Loopgraph App tools", () => {
     expect(resumed.app.presetId).toBe("salesforce-outlook-teams");
     expect(resumed.plan?.configuration.values.exclusions).toEqual(["contractor"]);
   });
+
+  it("emits bounded actor-attributed audit context for draft save and reset", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-onboarding-audit-"));
+    temporaryDirectories.push(projectRoot);
+    const appId = "loopgraph.sales.qualify-route-inbound-leads";
+    const store = new AuditCapturingInstallationStore("acme");
+    const options = { appInstallationStoreFactory: () => store };
+    const saved = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme",
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration: { exclusions: ["employee"] },
+      expectedDraftRevision: 0,
+      actor: "sales-operations"
+    }, options) as AppOnboardingJourney;
+
+    expect(store.audits[0]).toMatchObject({
+      actor: "sales-operations",
+      action: "app.onboarding_draft.saved",
+      targetType: "app_onboarding_draft",
+      targetId: saved.draft!.id,
+      metadata: {
+        draftRevision: 1,
+        presetChanged: false,
+        answerCount: 1,
+        fieldMappingCount: 0
+      }
+    });
+    expect(store.audits[0]?.metadata.appIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(store.audits[0]?.metadata.presetIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme",
+      appId,
+      expectedDraftId: saved.draft!.id,
+      expectedDraftRevision: 1,
+      confirmReset: true,
+      actor: "sales-admin"
+    }, options);
+    expect(store.audits[1]).toMatchObject({
+      actor: "sales-admin",
+      action: "app.onboarding_draft.reset",
+      targetId: saved.draft!.id,
+      metadata: { draftRevision: 1, answerCount: 1 }
+    });
+    expect(JSON.stringify(store.audits)).not.toContain("employee");
+    expect(JSON.stringify(store.audits)).not.toContain("hubspot-gmail-slack");
+    expect(JSON.stringify(store.audits)).not.toContain(appId);
+  });
 });
+
+class AuditCapturingInstallationStore implements AppInstallationStore {
+  readonly persistence = "file" as const;
+  readonly audits: AppInstallationMutationAuditContext[] = [];
+  private registry: AppInstallationRegistry;
+
+  constructor(workspaceId: string) {
+    this.registry = emptyAppInstallationRegistry(workspaceId);
+  }
+
+  async read() {
+    return this.registry;
+  }
+
+  async readLockfile() {
+    return undefined;
+  }
+
+  async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
+    const current = this.registry;
+    const result = await operation(current);
+    const next = appInstallationRegistrySchema.parse(result.registry);
+    assertAppInstallationRegistryRevision(current, next);
+    this.registry = next;
+    if (result.audit) this.audits.push(result.audit);
+    return result.value;
+  }
+}

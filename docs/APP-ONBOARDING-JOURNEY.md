@@ -11,6 +11,8 @@ The source of truth is the read-only `loopgraph_app_onboarding_get` tool. It der
 
 Before installation, `loopgraph_app_onboarding_save` persists one complete snapshot of the selected preset, modules, declared setup answers, and optional confirmed mapping IDs. It requires the revision returned by the last journey read, rejects stale writers, undeclared keys, invalid value types, oversized data, and secret-shaped material, and returns the newly derived journey. The draft is stored through the same tenant-scoped, revision-leased registry used by Hermes, CLI, and browser; installation removes it in the same atomic registry transaction that pins the App.
 
+In hosted mode, an accepted save or reset also appends one action-specific event to the tenant/project tamper-evident audit chain in the same database transaction as the registry revision. The audit envelope is deliberately metadata-only: authenticated actor, draft identity, registry and draft revisions, SHA-256 App/preset identity digests, preset-change status, and bounded module/answer/mapping counts. It contains no answer values, provider fields, mapping contents, credentials, tokens, raw provider payloads, or raw App/preset identifiers. If audit validation or append fails, the registry mutation rolls back. An identical save retry or already-cleared reset changes no revision and creates no new mutation event.
+
 If the operator abandons those choices, `loopgraph_app_onboarding_reset` clears only the exact draft named by its current identity and revision after explicit confirmation. The draft identity changes if setup starts again, preventing a delayed reset from erasing a newer journey. Resetting does not disconnect providers, remove confirmed reusable mappings, change approved company context, touch an installed App, grant or revoke permissions, or mutate the runtime graph.
 
 An explicit request for another preset is a preview, not an implicit migration. The returned journey retains the saved draft identity and revision but marks `draft.applied: false`; its plan excludes the previous preset's saved answers, selected modules, and draft mapping IDs. Replacing the draft requires a complete new snapshot, the current revision, and `confirmPresetChange: true`. App-only reads and browser URLs omit the preset entirely, so they resume the saved stack instead of triggering this transition.
@@ -85,6 +87,8 @@ The Marketplace installer and Installed App detail page render the same eight-st
 - The journey never contains provider credentials or unrestricted provider payloads.
 - A draft accepts only declared App setup keys and bounded JSON values; secret-shaped keys or values fail before persistence.
 - Draft updates use optimistic revision checks and cannot grant connector, permission, installation, activation, or provider-write authority.
+- Hosted draft saves and resets commit their bounded action-specific audit event atomically with the registry revision; audit metadata cannot contain setup answers, provider fields, tokens, credentials, mapping contents, or raw App/preset identifiers.
+- Idempotent save retries and already-cleared resets do not append misleading mutation events.
 - Draft reset requires explicit confirmation plus the exact identity and revision; a delayed reset cannot clear a replacement draft.
 - A different preset never inherits the prior preset's draft values; replacing it requires explicit confirmation against the current revision.
 - It cannot confirm inferred field mappings or permissions.

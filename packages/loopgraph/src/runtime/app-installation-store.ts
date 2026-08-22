@@ -52,6 +52,27 @@ export const appLifecycleOperationSchema = z.object({
 
 export type AppLifecycleOperation = z.infer<typeof appLifecycleOperationSchema>;
 
+export const appInstallationMutationAuditContextSchema = z.object({
+  actor: z.string().min(1).max(300),
+  action: z.enum([
+    "app.onboarding_draft.saved",
+    "app.onboarding_draft.reset"
+  ]),
+  targetType: z.literal("app_onboarding_draft"),
+  targetId: z.string().min(1).max(160),
+  metadata: z.object({
+    appIdDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    presetIdDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    draftRevision: z.number().int().positive(),
+    presetChanged: z.boolean(),
+    selectedModuleCount: z.number().int().nonnegative().max(100),
+    answerCount: z.number().int().nonnegative().max(20),
+    fieldMappingCount: z.number().int().nonnegative().max(200)
+  }).strict()
+}).strict();
+
+export type AppInstallationMutationAuditContext = z.infer<typeof appInstallationMutationAuditContextSchema>;
+
 export const appInstallationRegistrySchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   workspaceId: z.string().min(1),
@@ -72,6 +93,7 @@ export type AppInstallationUpdate<T> = {
   registry: AppInstallationRegistry;
   value: T;
   lock?: AppInstallationLock;
+  audit?: AppInstallationMutationAuditContext;
 };
 
 export interface AppInstallationStore {

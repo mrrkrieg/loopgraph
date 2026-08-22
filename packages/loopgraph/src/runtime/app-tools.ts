@@ -28,6 +28,7 @@ import {
   logicalCapabilitySchema,
   providerSchemaFieldSchema,
   contentHash,
+  contentDigest,
   type AppFieldMappingPlan,
   type ConnectionInstance,
   type ConnectorTenant,
@@ -1286,6 +1287,21 @@ export async function callLoopgraphAppTool(
           onboardingDrafts,
           updatedAt: timestamp
         },
+        audit: {
+          actor: parsed.actor,
+          action: "app.onboarding_draft.saved" as const,
+          targetType: "app_onboarding_draft" as const,
+          targetId: draft.id,
+          metadata: {
+            appIdDigest: `sha256:${contentDigest(parsed.appId)}`,
+            presetIdDigest: `sha256:${contentDigest(parsed.presetId)}`,
+            draftRevision: draft.revision,
+            presetChanged: Boolean(existing && existing.presetId !== parsed.presetId),
+            selectedModuleCount: draft.selectedModules.length,
+            answerCount: Object.keys(draft.configuration).length,
+            fieldMappingCount: draft.fieldMappingIds.length
+          }
+        },
         value: draft
       };
     });
@@ -1332,6 +1348,21 @@ export async function callLoopgraphAppTool(
           revision: registry.revision + 1,
           onboardingDrafts: registry.onboardingDrafts.filter((candidate) => candidate.id !== existing.id),
           updatedAt: timestamp
+        },
+        audit: {
+          actor: parsed.actor,
+          action: "app.onboarding_draft.reset" as const,
+          targetType: "app_onboarding_draft" as const,
+          targetId: existing.id,
+          metadata: {
+            appIdDigest: `sha256:${contentDigest(existing.appId)}`,
+            presetIdDigest: `sha256:${contentDigest(existing.presetId)}`,
+            draftRevision: existing.revision,
+            presetChanged: false,
+            selectedModuleCount: existing.selectedModules.length,
+            answerCount: Object.keys(existing.configuration).length,
+            fieldMappingCount: existing.fieldMappingIds.length
+          }
         },
         value: appOnboardingResetResultSchema.parse({
           schemaVersion: APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION,
