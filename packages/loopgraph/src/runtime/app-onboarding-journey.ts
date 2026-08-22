@@ -287,6 +287,8 @@ function decideStage(input: {
           ? "App activation was interrupted and its exact approved transition must be reconciled before another lifecycle action can run."
             : action === "pause" || action === "resume"
               ? `App ${action} was interrupted and its exact rollout transition must be reconciled before another lifecycle action can run.`
+              : action === "configure"
+                ? "App configuration was interrupted and its exact confirmed-value request must be reconciled before another lifecycle action can run."
               : action === "update"
                 ? "An App update was interrupted and its exact reviewed plan, permission approvals, and source or target topology must be reconciled before another lifecycle action can run."
               : action === "rollback"
@@ -300,6 +302,8 @@ function decideStage(input: {
             ? "Retry the exact recorded activation receipt and target mode. Loopgraph will reconcile LoopSpec state and consume authority only once."
             : action === "pause" || action === "resume"
               ? `Retry the exact recorded ${action} request. Loopgraph will reconcile only the pinned owned LoopSpecs and complete the state transition once.`
+              : action === "configure"
+                ? "Retry the exact confirmed configuration request as the same actor. Loopgraph will compare only bounded digests in the recovery journal and return the original receipt after completion."
               : action === "update"
                 ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
               : action === "rollback"
@@ -317,6 +321,11 @@ function decideStage(input: {
           } : input.lifecycleOperation.rollout ? {
             targetState: input.lifecycleOperation.rollout.targetState,
             mode: input.lifecycleOperation.rollout.targetMode
+          } : input.lifecycleOperation.configure ? {
+            fromUpdatedAt: input.lifecycleOperation.configure.fromUpdatedAt,
+            sourceConfigurationDigest: input.lifecycleOperation.configure.sourceConfigurationDigest,
+            valuesDigest: input.lifecycleOperation.configure.valuesDigest,
+            targetConfigurationDigest: input.lifecycleOperation.configure.targetConfigurationDigest
           } : input.lifecycleOperation.uninstall ? {
             reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
             fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,

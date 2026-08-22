@@ -1395,6 +1395,88 @@ describe("atomic app installation lifecycle", () => {
     expect(await input.mappingStore.list()).toHaveLength(input.mappingIds.length);
   });
 
+  it("recovers and replays only the exact actor-bound configuration request", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const sourceConfigurationDigest = canonicalAppDigest(applied.installation.configuration);
+    const request = {
+      installationId: applied.installation.id,
+      values: { followUpSlaMinutes: 45 },
+      expectedConfigurationDigest: sourceConfigurationDigest,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("configure");
+    await expect(input.service.configure({
+      ...request,
+      now: new Date("2026-08-08T12:02:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption/i);
+
+    const interrupted = await store.read();
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "configure");
+    expect(recovery).toMatchObject({
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      configure: {
+        sourceConfigurationDigest,
+        fromUpdatedAt: applied.installation.updatedAt
+      }
+    });
+    expect(Object.keys(recovery?.configure ?? {}).sort()).toEqual([
+      "fromUpdatedAt",
+      "sourceConfigurationDigest",
+      "sourceInstallationDigest",
+      "targetConfigurationDigest",
+      "targetInstallationDigest",
+      "valuesDigest"
+    ]);
+    expect(JSON.stringify(recovery)).not.toContain("followUpSlaMinutes");
+
+    await expect(input.service.configure({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/must be reconciled/i);
+    await expect(input.service.configure({
+      ...request,
+      values: { followUpSlaMinutes: 60 },
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/must be reconciled/i);
+
+    const recovered = await input.service.configure({
+      ...request,
+      now: new Date("2026-08-08T12:04:00.000Z")
+    });
+    expect(recovered.installation?.configuration.values.followUpSlaMinutes).toBe(45);
+    expect(recovered.receipt).toMatchObject({ action: "configure", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.configure({
+      ...request,
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.configure({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:05:00.000Z")
+    })).rejects.toThrow(/configuration changed/i);
+
+    const later = await input.service.configure({
+      installationId: applied.installation.id,
+      values: { followUpSlaMinutes: 60 },
+      expectedConfigurationDigest: canonicalAppDigest(recovered.installation?.configuration),
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    expect(later.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) =>
+      operation.action === "configure" && operation.status === "completed"
+    )).toHaveLength(2);
+  });
+
   it("plans permission-aware updates, requires review, and restores the exact prior revision", async () => {
     const input = await harness();
     const applied = await installSalesApp(input);

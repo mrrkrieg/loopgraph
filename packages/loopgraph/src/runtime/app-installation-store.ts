@@ -23,7 +23,7 @@ export const appLifecycleOperationSchema = z.object({
   idempotencyKey: z.string().min(16).max(160),
   installationId: z.string().min(1).max(160),
   appId: z.string().min(1).max(160),
-  action: z.enum(["install", "uninstall", "activate", "pause", "resume", "update", "rollback"]),
+  action: z.enum(["install", "uninstall", "activate", "pause", "resume", "configure", "update", "rollback"]),
   targetArtifactDigest: z.string().min(16).max(160),
   status: z.enum(["prepared", "requires_reconciliation", "completed"]),
   desired: z.object({
@@ -43,6 +43,14 @@ export const appLifecycleOperationSchema = z.object({
     fromUpdatedAt: z.string().datetime(),
     targetState: appInstallationStateSchema,
     targetMode: z.enum(["shadow", "recommend", "execute_with_approval"])
+  }).strict().optional(),
+  configure: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceConfigurationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    valuesDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetConfigurationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/)
   }).strict().optional(),
   uninstall: z.object({
     fromUpdatedAt: z.string().datetime(),
@@ -98,7 +106,7 @@ export const appLifecycleOperationSchema = z.object({
   if ((operation.status === "requires_reconciliation") !== Boolean(operation.failureCode)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["failureCode"], message: "Only interrupted lifecycle operations may contain a failure code" });
   }
-  if (operation.resultReceiptId && !["uninstall", "update", "rollback"].includes(operation.action)) {
+  if (operation.resultReceiptId && !["configure", "uninstall", "update", "rollback"].includes(operation.action)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Only completed receipt-producing lifecycle operations may reference a lifecycle receipt" });
   }
   if (operation.action === "rollback" && operation.status === "completed" && !operation.resultReceiptId) {
@@ -107,12 +115,18 @@ export const appLifecycleOperationSchema = z.object({
   if (operation.action === "update" && operation.status === "completed" && !operation.resultReceiptId) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed update operations require their exact lifecycle receipt" });
   }
+  if (operation.action === "configure" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed configure operations require their exact lifecycle receipt" });
+  }
   if ((operation.action === "activate") !== Boolean(operation.activation)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["activation"], message: "Only activation operations require exact activation authority" });
   }
   const isRolloutOperation = operation.action === "pause" || operation.action === "resume";
   if (isRolloutOperation !== Boolean(operation.rollout)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollout"], message: "Only pause and resume operations require exact rollout state" });
+  }
+  if ((operation.action === "configure") !== Boolean(operation.configure)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["configure"], message: "Only configure operations require an exact configuration contract" });
   }
   if (operation.action !== "uninstall" && operation.uninstall) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall"], message: "Only uninstall operations may contain exact removal intent" });
@@ -125,6 +139,9 @@ export const appLifecycleOperationSchema = z.object({
   }
   if (operation.update && Date.parse(operation.update.fromUpdatedAt) > Date.parse(operation.startedAt)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["update", "fromUpdatedAt"], message: "Update source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.configure && Date.parse(operation.configure.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["configure", "fromUpdatedAt"], message: "Configure source revision cannot be newer than the prepared operation" });
   }
   if (operation.rollback && Date.parse(operation.rollback.fromUpdatedAt) > Date.parse(operation.startedAt)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback", "fromUpdatedAt"], message: "Rollback source revision cannot be newer than the prepared operation" });
@@ -159,6 +176,13 @@ export const appLifecycleOperationSchema = z.object({
   }
   if ((operation.activation || operation.rollout) && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Rollout recovery may change only owned LoopSpec rollout state" });
+  }
+  if (operation.configure && (
+    operation.desired.loopIds.length > 0 ||
+    operation.desired.fieldMappingIds.length > 0 ||
+    operation.desired.companyContextKeys.length > 0
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Configure recovery may change only the installation configuration" });
   }
   if (operation.action === "pause" && operation.rollout && (
     !["shadow", "recommend", "execute_with_approval"].includes(operation.rollout.fromState) ||

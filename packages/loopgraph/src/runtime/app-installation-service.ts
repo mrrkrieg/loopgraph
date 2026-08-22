@@ -618,44 +618,154 @@ export class AppInstallationService {
 
   async configure(input: ConfigureAppInstallationInput): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, input.installationId);
-      if (canonicalAppDigest(installation.configuration) !== input.expectedConfigurationDigest) {
-        throw new Error("Installed app configuration changed; create a fresh configure request");
-      }
-      const resolution = resolveAppConfiguration({
-        appId: installation.appId,
-        version: installation.version,
-        fields: installation.configuration.fields,
-        installValues: { ...installation.configuration.values, ...input.values },
-        overlay: installation.overlay,
-        now
-      });
-      if (resolution.missing.length > 0 || resolution.needsConfirmation.length > 0) {
-        throw new Error(`Configuration remains incomplete: ${[
-          ...resolution.missing.map((field) => field.key),
-          ...resolution.needsConfirmation.map(({ field }) => `confirmation:${field.key}`)
-        ].join(", ")}`);
-      }
-      const timestamp = now.toISOString();
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        configuration: resolution.configuration,
-        state: "ready_to_test",
-        mode: "simulation",
-        history: appendHistory(installation, input.actor, "configure", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "configure",
-        actor: input.actor,
-        reason: "Applied confirmed company configuration and reset the app to write-blocked testing.",
-        evidenceRetained: true,
-        reversible: true,
-        createdAt: timestamp
-      });
+    const valuesDigest = canonicalAppDigest(input.values);
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "configure" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.actor === input.actor &&
+      candidate.configure?.sourceConfigurationDigest === input.expectedConfigurationDigest &&
+      candidate.configure.valuesDigest === valuesDigest &&
+      observedInstallation !== undefined &&
+      canonicalAppDigest(observedInstallation) === candidate.configure.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!receipt || !observedInstallation) throw new Error("Completed configure operation is missing its durable result");
+      assertConfigureReplayAuthority(completed, receipt, observedInstallation, input.actor, input.expectedConfigurationDigest, valuesDigest);
+      return { installation: observedInstallation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const installation = requireInstallation(observedRegistry, input.installationId);
+    const sourceConfigurationDigest = canonicalAppDigest(installation.configuration);
+    if (sourceConfigurationDigest !== input.expectedConfigurationDigest) {
+      throw new Error("Installed app configuration changed; create a fresh configure request");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(installation);
+    const idempotencyKey = canonicalAppDigest({
+      action: "configure",
+      installationId: installation.id,
+      actor: input.actor,
+      sourceInstallationDigest,
+      sourceConfigurationDigest,
+      valuesDigest
     });
+    const operationId = lifecycleOperationId("configure", installation.id, installation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const conflictingOperation = observedRegistry.lifecycleOperations.find((candidate) =>
+      candidate.installationId === installation.id && candidate.status !== "completed" && candidate.id !== operationId);
+    if (conflictingOperation) {
+      throw new Error(`App lifecycle operation ${conflictingOperation.id} must be reconciled before another operation can run`);
+    }
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const operationTime = new Date(timestamp);
+    const resolution = resolveAppConfiguration({
+      appId: installation.appId,
+      version: installation.version,
+      fields: installation.configuration.fields,
+      installValues: { ...installation.configuration.values, ...input.values },
+      overlay: installation.overlay,
+      now: operationTime
+    });
+    if (resolution.missing.length > 0 || resolution.needsConfirmation.length > 0) {
+      throw new Error(`Configuration remains incomplete: ${[
+        ...resolution.missing.map((field) => field.key),
+        ...resolution.needsConfirmation.map(({ field }) => `confirmation:${field.key}`)
+      ].join(", ")}`);
+    }
+    const updated: WorkspaceAppInstallation = {
+      ...installation,
+      configuration: resolution.configuration,
+      state: "ready_to_test",
+      mode: "simulation",
+      history: appendHistory(installation, input.actor, "configure", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: installation.id,
+      appId: installation.appId,
+      action: "configure",
+      targetArtifactDigest: installation.artifactDigest,
+      desired: { loopIds: [], fieldMappingIds: [], companyContextKeys: [] },
+      configure: existingOperation?.configure ?? {
+        fromUpdatedAt: installation.updatedAt,
+        sourceConfigurationDigest,
+        sourceInstallationDigest,
+        valuesDigest,
+        targetConfigurationDigest: canonicalAppDigest(updated.configuration),
+        targetInstallationDigest: canonicalAppDigest(updated)
+      },
+      actor: input.actor,
+      now
+    });
+    if (!operation.configure) throw new Error(`App configure recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const currentInstallation = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.configure || currentOperation.status === "completed") {
+          throw new Error(`App configure recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.configure;
+        const currentResolution = resolveAppConfiguration({
+          appId: currentInstallation.appId,
+          version: currentInstallation.version,
+          fields: currentInstallation.configuration.fields,
+          installValues: { ...currentInstallation.configuration.values, ...input.values },
+          overlay: currentInstallation.overlay,
+          now: new Date(currentOperation.startedAt)
+        });
+        if (currentResolution.missing.length > 0 || currentResolution.needsConfirmation.length > 0) {
+          throw new Error("Configuration recovery no longer resolves to a complete confirmed configuration");
+        }
+        const currentUpdated: WorkspaceAppInstallation = {
+          ...currentInstallation,
+          configuration: currentResolution.configuration,
+          state: "ready_to_test",
+          mode: "simulation",
+          history: appendHistory(currentInstallation, input.actor, "configure", currentOperation.startedAt),
+          updatedAt: currentOperation.startedAt,
+          failureReason: undefined
+        };
+        if (
+          currentOperation.action !== "configure" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== currentInstallation.appId ||
+          currentOperation.targetArtifactDigest !== currentInstallation.artifactDigest ||
+          currentInstallation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(currentInstallation.configuration) !== recovery.sourceConfigurationDigest ||
+          canonicalAppDigest(currentInstallation) !== recovery.sourceInstallationDigest ||
+          recovery.sourceConfigurationDigest !== input.expectedConfigurationDigest ||
+          recovery.valuesDigest !== valuesDigest ||
+          canonicalAppDigest(currentUpdated.configuration) !== recovery.targetConfigurationDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest
+        ) {
+          throw new Error("App configure recovery record does not match the current installation or exact confirmed values");
+        }
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "configure",
+          actor: input.actor,
+          reason: "Applied confirmed company configuration and reset the app to write-blocked testing.",
+          evidenceRetained: true,
+          reversible: true,
+          createdAt: currentOperation.startedAt
+        });
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async applyOverlay(input: ApplyAppOverlayInput): Promise<AppLifecycleMutationResult> {
@@ -3090,6 +3200,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     desired: existing.desired,
     activation: existing.activation,
     rollout: existing.rollout,
+    configure: existing.configure,
     uninstall: existing.uninstall,
     update: existing.update,
     rollback: existing.rollback,
@@ -3104,17 +3215,44 @@ function assertLifecyclePreparationSource(
   registry: AppInstallationRegistry,
   input: PrepareLifecycleOperationInput
 ): void {
-  const source = input.update ?? input.rollback ?? input.uninstall;
+  const source = input.configure ?? input.update ?? input.rollback ?? input.uninstall;
   if (!source) return;
   const sourceArtifactDigest = input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
   const installation = requireInstallation(registry, input.installationId);
   if (
     installation.updatedAt !== source.fromUpdatedAt ||
     canonicalAppDigest(installation) !== source.sourceInstallationDigest ||
-    installationOwnershipDigest(registry, installation.id) !== source.sourceOwnershipDigest ||
+    ("sourceOwnershipDigest" in source && installationOwnershipDigest(registry, installation.id) !== source.sourceOwnershipDigest) ||
+    (input.configure && canonicalAppDigest(installation.configuration) !== input.configure.sourceConfigurationDigest) ||
     (sourceArtifactDigest !== undefined && installation.artifactDigest !== sourceArtifactDigest)
   ) {
     throw new Error(`App ${input.action} source changed before its recovery record could be prepared`);
+  }
+}
+
+function assertConfigureReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedConfigurationDigest: string,
+  valuesDigest: string
+): void {
+  if (
+    operation.action !== "configure" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.configure ||
+    operation.configure.sourceConfigurationDigest !== expectedConfigurationDigest ||
+    operation.configure.valuesDigest !== valuesDigest ||
+    operation.configure.targetConfigurationDigest !== canonicalAppDigest(installation.configuration) ||
+    operation.configure.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "configure" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed configure operation does not authorize this exact replay");
   }
 }
 

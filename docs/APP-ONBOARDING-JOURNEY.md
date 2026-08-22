@@ -32,7 +32,7 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 - the current content-bound install plan and field-mapping plan when applicable;
 - an exact impact projection of every LoopSpec, skill, route, event contract, schedule, metric, fixture, evaluation, dashboard, connector binding, field mapping, and graph asset to create or reuse, including conflicts, permissions, and evidence/learning edges;
 - persisted installation, readiness, and write-blocked evaluation state;
-- an unfinished install, activation, pause, resume, update, rollback, or uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker stopped between stores;
+- an unfinished install, activation, pause, resume, configure, update, rollback, or uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker or response failed;
 - one exact next action, including a tool name when a safe tool call exists;
 - an explicit `requiresHumanConfirmation` boundary.
 
@@ -48,7 +48,7 @@ Module selection is part of the content-bound plan. Unselected module loops and 
 4. After the user chooses a preset or answers a setup question, call `loopgraph_app_onboarding_save` with the complete current snapshot and exact draft revision. Never store credentials or raw provider data in the draft.
 5. If the user explicitly asks to start over, explain the resources that remain unchanged, obtain confirmation, and call `loopgraph_app_onboarding_reset` with the latest draft ID and revision. Re-read instead of clearing anything after an identity or revision conflict.
 6. If the user asks for another preset, preview it without draft values. When `draft.applied` is false, explain that isolation and require confirmation before saving the complete replacement snapshot with `confirmPresetChange: true`.
-7. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install, activation, pause, resume, or uninstall identity.
+7. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install, activation, pause, resume, configure, update, rollback, or uninstall identity.
 8. Ask only returned questions and resolve only returned blockers.
 9. Re-read the journey after every state change; the App ID alone resumes saved progress.
 10. Use only the returned exact install plan and `nextAction.toolName`.
@@ -69,6 +69,8 @@ Pause and resume use the same journal boundary without creating new rollout auth
 Rollback also crosses the App registry and LoopSpec registry, so it is prepared before rematerialization. Its journal binds the exact source installation and ownership digests, source workspace revision, prior installation snapshot, accountable actor, and both source and target LoopSpec inventories. A retry may observe only the exact source graph or the exact already-materialized target graph. Any third topology, changed ownership, changed installation revision, different actor, or replacement rollback target fails closed. Completion records one lifecycle receipt and returns the App to write-blocked conformance.
 
 Uninstall recovery is bound to the exact destructive intent rather than only the installation ID. Before any LoopSpec, mapping, context, or generated-file side effect, Loopgraph records digests of the complete source installation and its ownership graph, the source workspace revision, exact pre-removal loop inventory, exact shared-loop inventory allowed to remain, accountable actor, and normalized reason. Only the reason digest enters recovery metadata. A retry must provide the same actor and exact original reason, and the current graph must match either the recorded pre-removal state or the exact post-removal shared state. Any third topology, ownership change, source-installation change, or legacy unfinished record without this binding requires administrator reconciliation instead of automatic continuation.
+
+Configure recovery is bound to the accountable actor, exact source installation and configuration digests, a digest of the submitted confirmed values, and deterministic target installation and configuration digests. The journal never copies configuration values. A lost response or interrupted registry completion can be retried only from the session that still holds the original values; exact completion returns the original receipt, while replacement values, another actor, or source drift remain blocked.
 
 ## CLI
 
@@ -111,4 +113,4 @@ Update apply follows the same resumable rule. Before changing an owned LoopSpec,
 - A failed conformance run stops at `resolve_test_failures`.
 - A passing test does not imply permission to activate; shadow requires a separate human decision.
 - Revoked, deprecated, or uninstalling Apps do not receive an automatic transition.
-- An unfinished install, activation, pause, resume, rollback, or uninstall returns `recover_lifecycle`; every competing test, activation, configuration, overlay, repair, update, rollback, duplicate, detach, pause, resume, or removal mutation remains blocked until the exact operation completes.
+- An unfinished install, activation, pause, resume, configure, update, rollback, or uninstall returns `recover_lifecycle`; every competing test, activation, configuration, overlay, repair, update, rollback, duplicate, detach, pause, resume, or removal mutation remains blocked until the exact operation completes.

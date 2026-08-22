@@ -220,4 +220,45 @@ describe("AppLifecycleRecoveryNotice", () => {
       completedAt: "2026-08-21T10:02:00.000Z"
     })).toThrow(/require their exact lifecycle receipt/);
   });
+
+  it("explains exact configure recovery without rendering confirmed values", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.configure123",
+      idempotencyKey: "configure12345678",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "configure",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: [], fieldMappingIds: [], companyContextKeys: [] },
+      configure: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceConfigurationDigest: `sha256:${"b".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"c".repeat(64)}`,
+        valuesDigest: `sha256:${"d".repeat(64)}`,
+        targetConfigurationDigest: `sha256:${"e".repeat(64)}`,
+        targetInstallationDigest: `sha256:${"f".repeat(64)}`
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("stores only their digest");
+    expect(html).toContain(operation.configure?.valuesDigest ?? "missing");
+    expect(html).toContain(operation.configure?.sourceConfigurationDigest ?? "missing");
+    expect(html).not.toContain("followUpSlaMinutes");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: [], companyContextKeys: [] }
+    })).toThrow(/may change only the installation configuration/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
 });
