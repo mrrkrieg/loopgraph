@@ -770,83 +770,236 @@ export class AppInstallationService {
 
   async applyOverlay(input: ApplyAppOverlayInput): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, input.installationId);
-      if (installation.artifactDigest !== input.expectedArtifactDigest) {
-        throw new Error("Installed artifact changed; create a fresh overlay request");
-      }
-      if ((installation.overlay?.revision ?? 0) !== (input.expectedOverlayRevision ?? 0)) {
-        throw new Error("Installed app overlay revision changed; reload before editing");
-      }
-      const loaded = await this.loadInstallationArtifact(installation);
-      validateOverlayOperations(input.operations, loaded, installation.configuration.fields.map((field) => field.key));
-      const timestamp = now.toISOString();
-      const overlay = appOverlaySchema.parse({
-        schemaVersion: "loopgraph-app-configuration/v1alpha1",
-        id: `overlay.${contentHash({ installationId: installation.id, revision: (installation.overlay?.revision ?? 0) + 1, operations: input.operations })}`,
-        installationId: installation.id,
-        basedOnVersion: installation.version,
-        basedOnDigest: installation.artifactDigest,
-        revision: (installation.overlay?.revision ?? 0) + 1,
-        operations: input.operations,
-        createdAt: timestamp,
-        createdBy: input.actor
-      });
-      const selectedModules = applyModuleOverlay(loaded.manifest.modules, installation.selectedModules, overlay.operations);
-      const compiled = await compileLoopPack(loaded, { selectedModules });
-      const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
-      const configuration = resolveAppConfiguration({
-        appId: installation.appId,
-        version: installation.version,
-        fields: installation.configuration.fields,
-        installValues: installation.configuration.values,
-        overlay,
-        now
-      }).configuration;
-      const namespace = installationNamespace(installation);
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
-      for (const asset of ownedAssets) {
-        const existing = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
-        if (existing && existing.digest !== asset.digest && existing.ownerInstallationIds.some((ownerId) => ownerId !== installation.id)) {
-          throw new Error(`Module composition conflicts with shared asset ${asset.assetId}; create a fresh install plan`);
-        }
-      }
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-overlay-${overlay.id}`,
-        idempotencyKey: canonicalAppDigest({ action: "overlay", installationId: installation.id, overlay }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        overlay,
-        selectedModules,
-        configuration,
-        permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
-        ownedAssets,
-        state: "ready_to_test",
-        mode: "simulation",
-        history: appendHistory(installation, input.actor, "overlay", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "overlay",
-        actor: input.actor,
-        reason: "Applied the version-bound overlay and atomically rematerialized the selected module composition without mutating the pinned LoopPack.",
-        evidenceRetained: true,
-        reversible: true,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, ownedAssets));
+    const expectedOverlayRevision = input.expectedOverlayRevision ?? 0;
+    const operationsDigest = canonicalAppDigest(input.operations);
+    const observedRegistry = await this.installationStore.read();
+    const observedCurrentInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "overlay" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.actor === input.actor &&
+      candidate.overlay?.sourceArtifactDigest === input.expectedArtifactDigest &&
+      candidate.overlay.expectedOverlayRevision === expectedOverlayRevision &&
+      candidate.overlay.operationsDigest === operationsDigest &&
+      observedCurrentInstallation !== undefined &&
+      canonicalAppDigest(observedCurrentInstallation) === candidate.overlay.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!receipt || !observedCurrentInstallation) throw new Error("Completed overlay operation is missing its durable result");
+      assertOverlayReplayAuthority(
+        completed,
+        receipt,
+        observedCurrentInstallation,
+        input.actor,
+        input.expectedArtifactDigest,
+        expectedOverlayRevision,
+        operationsDigest
+      );
+      return { installation: observedCurrentInstallation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const installation = requireInstallation(observedRegistry, input.installationId);
+    if (installation.artifactDigest !== input.expectedArtifactDigest) {
+      throw new Error("Installed artifact changed; create a fresh overlay request");
+    }
+    if ((installation.overlay?.revision ?? 0) !== expectedOverlayRevision) {
+      throw new Error("Installed app overlay revision changed; reload before editing");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(installation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, installation.id);
+    const idempotencyKey = canonicalAppDigest({
+      action: "overlay",
+      workspaceId: this.workspaceId,
+      installationId: installation.id,
+      actor: input.actor,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      expectedOverlayRevision,
+      operationsDigest
     });
+    const operationId = lifecycleOperationId("overlay", installation.id, installation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const conflictingOperation = observedRegistry.lifecycleOperations.find((candidate) =>
+      candidate.installationId === installation.id && candidate.status !== "completed" && candidate.id !== operationId);
+    if (conflictingOperation) {
+      throw new Error(`App lifecycle operation ${conflictingOperation.id} must be reconciled before another operation can run`);
+    }
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const operationTime = new Date(timestamp);
+    const loaded = await this.loadInstallationArtifact(installation);
+    validateOverlayOperations(input.operations, loaded, installation.configuration.fields.map((field) => field.key));
+    const overlay = appOverlaySchema.parse({
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      id: `overlay.${contentHash({ installationId: installation.id, revision: expectedOverlayRevision + 1, operations: input.operations })}`,
+      installationId: installation.id,
+      basedOnVersion: installation.version,
+      basedOnDigest: installation.artifactDigest,
+      revision: expectedOverlayRevision + 1,
+      operations: input.operations,
+      createdAt: timestamp,
+      createdBy: input.actor
+    });
+    const selectedModules = applyModuleOverlay(loaded.manifest.modules, installation.selectedModules, overlay.operations);
+    const compiled = await compileLoopPack(loaded, { selectedModules });
+    const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
+    const configuration = resolveAppConfiguration({
+      appId: installation.appId,
+      version: installation.version,
+      fields: installation.configuration.fields,
+      installValues: installation.configuration.values,
+      overlay,
+      now: operationTime
+    }).configuration;
+    const namespace = installationNamespace(installation);
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      installation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
+    for (const asset of ownedAssets) {
+      const existing = observedRegistry.assets.find((candidate) => candidate.assetId === asset.assetId);
+      if (existing && existing.digest !== asset.digest && existing.ownerInstallationIds.some((ownerId) => ownerId !== installation.id)) {
+        throw new Error(`Module composition conflicts with shared asset ${asset.assetId}; create a fresh install plan`);
+      }
+    }
+    const updated: WorkspaceAppInstallation = {
+      ...installation,
+      overlay,
+      selectedModules,
+      configuration,
+      permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+      ownedAssets,
+      state: "ready_to_test",
+      mode: "simulation",
+      history: appendHistory(installation, input.actor, "overlay", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, installation.id, ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopIds = existingOperation?.overlay?.sourceLoopIds ?? installationLoopIds(observedWorkspace.workspace, installation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: installation.id,
+      appId: installation.appId,
+      action: "overlay",
+      targetArtifactDigest: installation.artifactDigest,
+      desired: existingOperation?.desired ?? { loopIds: targetLoopIds, fieldMappingIds: [], companyContextKeys: [] },
+      overlay: existingOperation?.overlay ?? {
+        fromUpdatedAt: installation.updatedAt,
+        sourceArtifactDigest: installation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        expectedOverlayRevision,
+        operationsDigest,
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, installation.id),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now
+    });
+    if (!operation.overlay) throw new Error(`App overlay recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const currentInstallation = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.overlay || currentOperation.status === "completed") {
+          throw new Error(`App overlay recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.overlay;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, currentInstallation.id, ownedAssets);
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "overlay" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== currentInstallation.appId ||
+          currentOperation.targetArtifactDigest !== input.expectedArtifactDigest ||
+          recovery.sourceArtifactDigest !== input.expectedArtifactDigest ||
+          recovery.expectedOverlayRevision !== expectedOverlayRevision ||
+          recovery.operationsDigest !== operationsDigest ||
+          currentInstallation.artifactDigest !== recovery.sourceArtifactDigest ||
+          (currentInstallation.overlay?.revision ?? 0) !== recovery.expectedOverlayRevision ||
+          currentInstallation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(currentInstallation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, currentInstallation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, currentInstallation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds)
+        ) {
+          throw new Error("App overlay recovery record does not match the current installation or exact overlay operations");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, currentInstallation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after overlay recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, currentInstallation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Overlay LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "overlay",
+          actor: input.actor,
+          reason: "Applied the version-bound overlay and atomically rematerialized the selected module composition without mutating the pinned LoopPack.",
+          evidenceRetained: true,
+          reversible: true,
+          removedAssetIds: currentInstallation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async repair(installationId: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
@@ -3201,6 +3354,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     activation: existing.activation,
     rollout: existing.rollout,
     configure: existing.configure,
+    overlay: existing.overlay,
     uninstall: existing.uninstall,
     update: existing.update,
     rollback: existing.rollback,
@@ -3215,9 +3369,9 @@ function assertLifecyclePreparationSource(
   registry: AppInstallationRegistry,
   input: PrepareLifecycleOperationInput
 ): void {
-  const source = input.configure ?? input.update ?? input.rollback ?? input.uninstall;
+  const source = input.configure ?? input.overlay ?? input.update ?? input.rollback ?? input.uninstall;
   if (!source) return;
-  const sourceArtifactDigest = input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
+  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
   const installation = requireInstallation(registry, input.installationId);
   if (
     installation.updatedAt !== source.fromUpdatedAt ||
@@ -3253,6 +3407,33 @@ function assertConfigureReplayAuthority(
     receipt.installationId !== installation.id
   ) {
     throw new Error("Completed configure operation does not authorize this exact replay");
+  }
+}
+
+function assertOverlayReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedArtifactDigest: string,
+  expectedOverlayRevision: number,
+  operationsDigest: string
+): void {
+  if (
+    operation.action !== "overlay" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.overlay ||
+    operation.overlay.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.overlay.expectedOverlayRevision !== expectedOverlayRevision ||
+    operation.overlay.operationsDigest !== operationsDigest ||
+    operation.overlay.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "overlay" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed overlay operation does not authorize this exact replay");
   }
 }
 

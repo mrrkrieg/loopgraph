@@ -321,6 +321,8 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
               <div className="mt-4"><OperationForm action={recovery.action} installationId={data.installation.id} label={`Reconcile and finish ${recovery.action}`} primary /></div>
             ) : recovery.action === "configure" ? (
               <p className="mt-4 rounded-md border border-orange-300 bg-white p-3 text-xs leading-5 text-orange-900/75">Return to the Hermes, CLI, or browser submission that still holds the original confirmed values and retry it as the same actor. Loopgraph intentionally retains only the values digest, so this page cannot reconstruct or reveal them.</p>
+            ) : recovery.action === "overlay" ? (
+              <p className="mt-4 rounded-md border border-orange-300 bg-white p-3 text-xs leading-5 text-orange-900/75">Return to the Hermes, CLI, or browser submission that still holds the original overlay operations and retry it as the same actor. Loopgraph intentionally retains only the operations digest and exact source/target topology, so this page cannot reconstruct or substitute the requested customization.</p>
             ) : recovery.action === "update" ? (
               data.updatePlan && recovery.update?.planDigest === data.updatePlan.planDigest ? (
                 <form action={applyInstalledAppUpdateAction} className="mt-4 space-y-3">

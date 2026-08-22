@@ -53,6 +53,8 @@ export function AppLifecycleRecoveryNotice({
                   {operation.uninstall ? <div><dt className="inline font-sans font-semibold">Reason digest: </dt><dd className="inline break-all">{operation.uninstall.reasonDigest}</dd></div> : null}
                   {operation.configure ? <div><dt className="inline font-sans font-semibold">Values digest: </dt><dd className="inline break-all">{operation.configure.valuesDigest}</dd></div> : null}
                   {operation.configure ? <div><dt className="inline font-sans font-semibold">Source configuration: </dt><dd className="inline break-all">{operation.configure.sourceConfigurationDigest}</dd></div> : null}
+                  {operation.overlay ? <div><dt className="inline font-sans font-semibold">Operations digest: </dt><dd className="inline break-all">{operation.overlay.operationsDigest}</dd></div> : null}
+                  {operation.overlay ? <div><dt className="inline font-sans font-semibold">Source overlay revision: </dt><dd className="inline">{operation.overlay.expectedOverlayRevision}</dd></div> : null}
                   {operation.update ? <div><dt className="inline font-sans font-semibold">Plan digest: </dt><dd className="inline break-all">{operation.update.planDigest}</dd></div> : null}
                   {operation.update ? <div><dt className="inline font-sans font-semibold">Source artifact: </dt><dd className="inline break-all">{operation.update.sourceArtifactDigest}</dd></div> : null}
                   {operation.rollback ? <div><dt className="inline font-sans font-semibold">Source artifact: </dt><dd className="inline break-all">{operation.rollback.sourceArtifactDigest}</dd></div> : null}
@@ -80,6 +82,9 @@ export function recoveryInstruction(operation: AppLifecycleOperation): string {
   }
   if (operation.action === "configure") {
     return "Return to the Hermes, CLI, or browser session that submitted the confirmed values and retry the exact request as the same actor. Loopgraph stores only their digest in the recovery journal, blocks replacement values, and returns the original receipt after completion.";
+  }
+  if (operation.action === "overlay") {
+    return "Return to the Hermes, CLI, or browser session that submitted the overlay and retry the exact operations as the same actor. Loopgraph stores only their digest and reconciles only the recorded source or target owned LoopSpec topology before returning the original receipt.";
   }
   if (operation.action === "update") {
     return "Return to the Hermes, CLI, or browser session that submitted the reviewed update and retry that exact plan as the same actor. Loopgraph accepts only the recorded permission approvals and exact source or target LoopSpec topology; the journaled plan may finish after its original approval window expires.";

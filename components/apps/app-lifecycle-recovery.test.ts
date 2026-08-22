@@ -261,4 +261,52 @@ describe("AppLifecycleRecoveryNotice", () => {
       completedAt: "2026-08-21T10:02:00.000Z"
     })).toThrow(/require their exact lifecycle receipt/);
   });
+
+  it("explains exact overlay recovery without rendering the customization body", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.overlay123",
+      idempotencyKey: "overlay1234567890",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "overlay",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: [], companyContextKeys: [] },
+      overlay: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"a".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"b".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"c".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"d".repeat(64)}`,
+        sourceLoopIds: ["sales.qualify", "sales.follow-up"],
+        expectedOverlayRevision: 0,
+        operationsDigest: `sha256:${"e".repeat(64)}`,
+        targetInstallationDigest: `sha256:${"f".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"1".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"2".repeat(64)}`,
+        targetLoopIds: ["sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("source or target owned LoopSpec topology");
+    expect(html).toContain(operation.overlay?.operationsDigest ?? "missing");
+    expect(html).toContain("Source overlay revision");
+    expect(html).not.toContain("qualificationThreshold");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      desired: { loopIds: ["different-loop"], fieldMappingIds: [], companyContextKeys: [] }
+    })).toThrow(/must be unique and match the desired inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
 });

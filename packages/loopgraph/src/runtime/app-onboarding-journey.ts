@@ -304,6 +304,8 @@ function decideStage(input: {
               ? `Retry the exact recorded ${action} request. Loopgraph will reconcile only the pinned owned LoopSpecs and complete the state transition once.`
               : action === "configure"
                 ? "Retry the exact confirmed configuration request as the same actor. Loopgraph will compare only bounded digests in the recovery journal and return the original receipt after completion."
+              : action === "overlay"
+                ? "Retry the exact overlay operations as the same actor. Loopgraph will compare only bounded digests, reconcile the recorded source or target owned LoopSpec topology, and return the original receipt after completion."
               : action === "update"
                 ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
               : action === "rollback"
@@ -326,6 +328,13 @@ function decideStage(input: {
             sourceConfigurationDigest: input.lifecycleOperation.configure.sourceConfigurationDigest,
             valuesDigest: input.lifecycleOperation.configure.valuesDigest,
             targetConfigurationDigest: input.lifecycleOperation.configure.targetConfigurationDigest
+          } : input.lifecycleOperation.overlay ? {
+            fromUpdatedAt: input.lifecycleOperation.overlay.fromUpdatedAt,
+            sourceArtifactDigest: input.lifecycleOperation.overlay.sourceArtifactDigest,
+            expectedOverlayRevision: input.lifecycleOperation.overlay.expectedOverlayRevision,
+            operationsDigest: input.lifecycleOperation.overlay.operationsDigest,
+            sourceLoopIds: input.lifecycleOperation.overlay.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.overlay.targetLoopIds
           } : input.lifecycleOperation.uninstall ? {
             reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
             fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,

@@ -1477,6 +1477,103 @@ describe("atomic app installation lifecycle", () => {
     )).toHaveLength(2);
   });
 
+  it("recovers owned LoopSpec rematerialization only for the exact actor-bound overlay", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const operations = [
+      { op: "set" as const, path: "/values/qualificationThreshold", value: { qualified: 90, reviewMin: 70 } },
+      { op: "disable_module" as const, moduleId: "governed-follow-up" }
+    ];
+    const request = {
+      installationId: applied.installation.id,
+      operations,
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedOverlayRevision: 0,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("overlay");
+    await expect(input.service.applyOverlay({
+      ...request,
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after overlay LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0].overlay).toBeUndefined();
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "overlay");
+    expect(recovery).toMatchObject({
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      overlay: {
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        expectedOverlayRevision: 0,
+        operationsDigest: canonicalAppDigest(operations),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.overlay ?? {}).sort()).toEqual([
+      "expectedOverlayRevision",
+      "fromUpdatedAt",
+      "operationsDigest",
+      "sourceArtifactDigest",
+      "sourceInstallationDigest",
+      "sourceLoopIds",
+      "sourceLoopInventoryDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    expect(JSON.stringify(recovery)).not.toContain("qualificationThreshold");
+    expect((await readLoopgraphWorkspace(input.projectRoot)).registeredSpecs.map((entry) => entry.id)).not.toContain("sales-inbound-follow-up");
+
+    await expect(input.service.applyOverlay({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:03:30.000Z")
+    })).rejects.toThrow(/must be reconciled|idempotency conflict/i);
+    await expect(input.service.applyOverlay({
+      ...request,
+      operations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 45 }],
+      now: new Date("2026-08-08T12:03:40.000Z")
+    })).rejects.toThrow(/must be reconciled/i);
+
+    const recovered = await input.service.applyOverlay({
+      ...request,
+      now: new Date("2026-08-08T12:04:00.000Z")
+    });
+    expect(recovered.installation?.overlay?.revision).toBe(1);
+    expect(recovered.installation?.selectedModules).toEqual(["account-research"]);
+    expect(recovered.receipt).toMatchObject({ action: "overlay", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.applyOverlay({
+      ...request,
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+
+    const later = await input.service.applyOverlay({
+      installationId: applied.installation.id,
+      operations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 45 }],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedOverlayRevision: 1,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    expect(later.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) =>
+      operation.action === "overlay" && operation.status === "completed"
+    )).toHaveLength(2);
+  });
+
   it("plans permission-aware updates, requires review, and restores the exact prior revision", async () => {
     const input = await harness();
     const applied = await installSalesApp(input);
