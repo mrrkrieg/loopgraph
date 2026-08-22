@@ -9,6 +9,7 @@ import {
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
+  appOnboardingDraftSchema,
   appOperationActionSchema,
   appInstallationLockSchema,
   appMaturityEvidenceSchema,
@@ -84,6 +85,43 @@ function manifestInput() {
 }
 
 describe("Loopgraph App Platform contracts", () => {
+  it("bounds resumable onboarding drafts and rejects ambiguous snapshots", () => {
+    const draft = {
+      schemaVersion: "loopgraph-app-onboarding-draft/v1alpha1",
+      id: "draft.sales-inbound",
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      selectedModules: ["qualification"],
+      configuration: { exclusions: ["employee"] },
+      fieldMappingIds: ["mapping.hubspot.lead-email"],
+      revision: 1,
+      createdAt: now,
+      createdBy: "sales-operations",
+      updatedAt: later,
+      updatedBy: "sales-operations"
+    };
+    expect(appOnboardingDraftSchema.parse(draft).revision).toBe(1);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      selectedModules: ["qualification", "qualification"]
+    })).toThrow(/unique/i);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      fieldMappingIds: ["mapping.hubspot.lead-email", "mapping.hubspot.lead-email"]
+    })).toThrow(/unique/i);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      configuration: Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`answer_${index}`, index]))
+    })).toThrow(/20 declared answers/i);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      updatedAt: "2026-08-08T11:00:00.000Z"
+    })).toThrow(/cannot precede creation/i);
+  });
+
   it("accepts a valid strict LoopPack manifest and rejects unknown fields", () => {
     const parsed = loopPackManifestSchema.parse(manifestInput());
     expect(parsed.metadata.id).toBe("loopgraph.sales.inbound-leads");
@@ -442,6 +480,7 @@ describe("Loopgraph App Platform contracts", () => {
       "AppHistoricalReplayRequest",
       "AppEvalJudgment",
       "AppPromotionRecommendation",
+      "AppOnboardingDraft",
       "AppOperationAction",
       "AppOperationActionEvent",
       "AppOperationActionCommitResult"

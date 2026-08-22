@@ -512,6 +512,7 @@ export class AppInstallationService {
           const completedRegistry = completeLifecycleOperation({
             ...registry,
             revision: registry.revision + 1,
+            onboardingDrafts: registry.onboardingDrafts.filter((draft) => draft.appId !== plan.appId),
             updatedAt: now.toISOString()
           }, operation.id, now);
           const lock = createInstallationLock(completedRegistry);
@@ -559,6 +560,7 @@ export class AppInstallationService {
           installations: [...registry.installations, installation].sort((left, right) => left.id.localeCompare(right.id)),
           assets: mergeAssetOwnership(registry.assets, ownedAssets),
           evaluations: registry.evaluations,
+          onboardingDrafts: registry.onboardingDrafts.filter((draft) => draft.appId !== plan.appId),
           updatedAt: timestamp
         };
         const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);

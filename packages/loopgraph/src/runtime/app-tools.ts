@@ -3,6 +3,7 @@ import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import {
+  APP_ONBOARDING_DRAFT_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   appOverlayOperationSchema,
   appEvalSuiteSchema,
@@ -10,6 +11,7 @@ import {
   historicalReplayEventSchema,
   appInstallPlanSchema,
   appIndependentVerificationReceiptSchema,
+  appOnboardingDraftSchema,
   appIdSchema,
   appFieldMappingPlanSchema,
   appRolloutModeSchema,
@@ -22,9 +24,12 @@ import {
   marketplaceAppSchema,
   logicalCapabilitySchema,
   providerSchemaFieldSchema,
+  contentHash,
   type AppFieldMappingPlan,
   type ConnectionInstance,
   type ConnectorTenant,
+  type AppSetupDefinition,
+  type LoopPackManifest,
   type MarketplaceApp
 } from "../core";
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
@@ -81,10 +86,12 @@ import {
   getOfficialCompanyBlueprint,
   searchOfficialCompanyBlueprints
 } from "./company-blueprint-catalog";
+import { assertSecretFree } from "./secret-redaction";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
   "loopgraph_app_onboarding_get",
+  "loopgraph_app_onboarding_save",
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_field_mappings_get"
@@ -102,6 +109,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_marketplace_search",
   "loopgraph_app_get",
   "loopgraph_app_onboarding_get",
+  "loopgraph_app_onboarding_save",
   "loopgraph_app_install_plan",
   "loopgraph_app_install_apply",
   "loopgraph_app_install_status",
@@ -240,13 +248,26 @@ export const appOnboardingGetInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
   appId: z.string().min(1),
-  versionRange: z.string().min(1).default("latest"),
+  versionRange: z.string().min(1).optional(),
   presetId: z.string().min(1).optional(),
   selectedModules: z.array(z.string().min(1)).optional(),
-  configuration: z.record(z.unknown()).default({}),
+  configuration: z.record(z.unknown()).optional(),
   fieldMappingIds: z.array(z.string().min(1)).optional(),
   installationId: z.string().min(1).optional(),
   actor: z.string().min(1).default("hermes")
+}).strict();
+
+export const appOnboardingSaveInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  appId: z.string().min(1),
+  versionRange: z.string().min(1).default("latest"),
+  presetId: z.string().min(1),
+  selectedModules: z.array(z.string().min(1)).max(50).optional(),
+  configuration: z.record(z.unknown()).default({}),
+  fieldMappingIds: z.array(z.string().min(1)).max(200).optional(),
+  expectedDraftRevision: z.number().int().nonnegative(),
+  actor: z.string().min(1).max(300).default("hermes")
 }).strict();
 
 export const appInstallPlanInputSchema = projectSchema.extend({
@@ -515,6 +536,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_marketplace_search", description: "Search available Loopgraph Apps by business outcome, department, capability, or maturity.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_get", description: "Inspect one app, immutable versions, modules, presets, permissions, capabilities, provenance, and graph intent.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_onboarding_get", description: "Return one state-derived, resumable App journey with only the unresolved questions, blockers, evidence, and exact safe next action for Hermes, CLI, or browser.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_app_onboarding_save", description: "Persist one complete, secret-free pre-install onboarding snapshot with optimistic concurrency, then return the same resumed journey used by Hermes, CLI, and browser.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_plan", description: "Create a read-only content-bound installation plan using current connections, mappings, company context, and supplied answers.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_apply", description: "Atomically apply an unexpired exact installation plan without enabling provider writes.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_install_status", description: "Read installed app state, configuration provenance, bindings, permissions, owned assets, recoverable lifecycle operations, evaluations, lockfile, and readiness.", readOnly: true, idempotent: true, destructive: false },
@@ -1059,6 +1081,22 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_onboarding_get") {
     const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
     const registry = await installationStore.read();
+    const onboardingDraft = registry.onboardingDrafts.find((candidate) =>
+      candidate.appId === parsed.appId && candidate.companyId === parsed.companyId);
+    const versionRange = parsed.versionRange ?? onboardingDraft?.versionRange ?? "latest";
+    const presetId = parsed.presetId ?? onboardingDraft?.presetId;
+    const selectedModules = parsed.selectedModules ?? onboardingDraft?.selectedModules;
+    const configuration = parsed.configuration ?? onboardingDraft?.configuration ?? {};
+    const fieldMappingIds = parsed.fieldMappingIds ?? (
+      onboardingDraft && onboardingDraft.fieldMappingIds.length > 0 ? onboardingDraft.fieldMappingIds : undefined
+    );
+    const resumedFromDraft = Boolean(onboardingDraft && (
+      parsed.versionRange === undefined ||
+      parsed.presetId === undefined ||
+      parsed.selectedModules === undefined ||
+      parsed.configuration === undefined ||
+      parsed.fieldMappingIds === undefined
+    ));
     const installation = parsed.installationId
       ? registry.installations.find((candidate) => candidate.id === parsed.installationId)
       : registry.installations.find((candidate) => candidate.appId === parsed.appId);
@@ -1076,7 +1114,7 @@ export async function callLoopgraphAppTool(
       : undefined;
     const version = await marketplace.resolveAppVersion(
       parsed.appId,
-      installation?.version ?? recoveryVersion?.version ?? parsed.versionRange
+      installation?.version ?? recoveryVersion?.version ?? versionRange
     );
     const loaded = await marketplace.getAppArtifact(parsed.appId, version.version, version.digest);
     const setup = await Promise.all(loaded.manifest.entrypoints.setup.map(async (entry) =>
@@ -1095,33 +1133,35 @@ export async function callLoopgraphAppTool(
         evaluations: registry.evaluations,
         activationApprovals: registry.activationApprovals,
         lifecycleOperation,
+        onboardingDraft,
+        resumedFromDraft,
         now: options.now
       });
     }
-    const plan = parsed.presetId
+    const plan = presetId
       ? await service.plan({
           projectRoot,
           workspaceId: parsed.workspaceId!,
           companyId: parsed.companyId!,
           appId: parsed.appId,
-          versionRange: parsed.versionRange,
-          presetId: parsed.presetId,
-          selectedModules: parsed.selectedModules,
+          versionRange,
+          presetId,
+          selectedModules,
           connections: await appConnections(projectRoot, options.connections),
-          installValues: parsed.configuration,
-          fieldMappingIds: parsed.fieldMappingIds,
+          installValues: configuration,
+          fieldMappingIds,
           actor: parsed.actor,
           now: options.now
         })
       : undefined;
-    const mappingPlan = parsed.presetId
+    const mappingPlan = presetId
       ? await buildAppFieldMappingPlan({
           marketplace,
           projectRoot,
           workspaceId: parsed.workspaceId!,
           appId: parsed.appId,
           version: version.version,
-          presetId: parsed.presetId,
+          presetId,
           mappingStore,
           snapshotStore,
           connections: await appConnections(projectRoot, options.connections),
@@ -1134,12 +1174,103 @@ export async function callLoopgraphAppTool(
       selectedVersion: version,
       manifest: loaded.manifest,
       setupQuestions: setup.flatMap((definition) => definition.questions),
-      presetId: parsed.presetId,
+      presetId,
       plan,
       mappingPlan,
       lifecycleOperation,
+      onboardingDraft,
+      resumedFromDraft,
       now: options.now
     });
+  }
+  if (name === "loopgraph_app_onboarding_save") {
+    const parsed = appOnboardingSaveInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const app = await marketplace.getApp(parsed.appId);
+    if (!app) throw new Error(`Marketplace app not found: ${parsed.appId}`);
+    const version = await marketplace.resolveAppVersion(parsed.appId, parsed.versionRange);
+    const loaded = await marketplace.getAppArtifact(parsed.appId, version.version, version.digest);
+    const setup = await Promise.all(loaded.manifest.entrypoints.setup.map(async (entry) =>
+      appSetupDefinitionSchema.parse(await readPackDocument(loaded.root, entry))
+    ));
+    const selectedModules = parsed.selectedModules ?? loaded.manifest.modules
+      .filter((moduleDefinition) => moduleDefinition.defaultEnabled)
+      .map((moduleDefinition) => moduleDefinition.id);
+    validateOnboardingDraftInput({
+      manifest: loaded.manifest,
+      questions: setup.flatMap((definition) => definition.questions),
+      presetId: parsed.presetId,
+      selectedModules,
+      configuration: parsed.configuration,
+      fieldMappingIds: parsed.fieldMappingIds
+    });
+    const now = options.now ?? new Date();
+    await installationStore.withExclusiveUpdate(async (registry) => {
+      if (registry.installations.some((candidate) => candidate.appId === parsed.appId)) {
+        throw new Error("Installed Apps no longer use a pre-install onboarding draft; configure the pinned installation instead");
+      }
+      const existing = registry.onboardingDrafts.find((candidate) =>
+        candidate.appId === parsed.appId && candidate.companyId === parsed.companyId);
+      const observedRevision = existing?.revision ?? 0;
+      const snapshot = {
+        versionRange: parsed.versionRange,
+        presetId: parsed.presetId,
+        selectedModules: [...selectedModules].sort(),
+        configuration: parsed.configuration,
+        fieldMappingIds: [...(parsed.fieldMappingIds ?? [])].sort()
+      };
+      // A caller may retry after the first response was lost. Returning the
+      // existing identical snapshot is safe even when its original expected
+      // revision is now stale because no state is changed.
+      if (existing && contentHash(snapshot) === contentHash({
+        versionRange: existing.versionRange,
+        presetId: existing.presetId,
+        selectedModules: existing.selectedModules,
+        configuration: existing.configuration,
+        fieldMappingIds: existing.fieldMappingIds
+      })) {
+        return { registry, value: existing };
+      }
+      if (observedRevision !== parsed.expectedDraftRevision) {
+        throw new Error(`App onboarding draft revision conflict: expected ${parsed.expectedDraftRevision}, observed ${observedRevision}`);
+      }
+      if (!existing && registry.onboardingDrafts.length >= 50) {
+        throw new Error("App onboarding draft limit reached; complete an existing draft before starting another");
+      }
+      const timestamp = now.toISOString();
+      const draft = appOnboardingDraftSchema.parse({
+        schemaVersion: APP_ONBOARDING_DRAFT_SCHEMA_VERSION,
+        id: existing?.id ?? `draft.${contentHash({ workspaceId: parsed.workspaceId, companyId: parsed.companyId, appId: parsed.appId })}`,
+        workspaceId: parsed.workspaceId,
+        companyId: parsed.companyId,
+        appId: parsed.appId,
+        ...snapshot,
+        revision: observedRevision + 1,
+        createdAt: existing?.createdAt ?? timestamp,
+        createdBy: existing?.createdBy ?? parsed.actor,
+        updatedAt: timestamp,
+        updatedBy: parsed.actor
+      });
+      const onboardingDrafts = [
+        ...registry.onboardingDrafts.filter((candidate) => candidate.id !== draft.id),
+        draft
+      ].sort((left, right) => left.appId.localeCompare(right.appId));
+      return {
+        registry: {
+          ...registry,
+          revision: registry.revision + 1,
+          onboardingDrafts,
+          updatedAt: timestamp
+        },
+        value: draft
+      };
+    });
+    return callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      workspaceId: parsed.workspaceId,
+      companyId: parsed.companyId,
+      appId: parsed.appId,
+      actor: parsed.actor
+    }, options);
   }
   if (name === "loopgraph_app_install_plan") {
     const parsed = appInstallPlanInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -1683,6 +1814,57 @@ function mergeMarketplaceSearchResults(
 
 function stringValue(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function validateOnboardingDraftInput(input: {
+  manifest: LoopPackManifest;
+  questions: AppSetupDefinition["questions"];
+  presetId: string;
+  selectedModules: string[];
+  configuration: Record<string, unknown>;
+  fieldMappingIds?: string[];
+}): void {
+  assertSecretFree({
+    configuration: input.configuration,
+    fieldMappingIds: input.fieldMappingIds ?? []
+  }, "app_onboarding_draft");
+  if (Buffer.byteLength(JSON.stringify(input.configuration), "utf8") > 64 * 1024) {
+    throw new Error("App onboarding draft configuration exceeds the 64 KiB limit");
+  }
+  if (!input.manifest.presets.some((preset) => preset.id === input.presetId)) {
+    throw new Error(`Unknown App preset: ${input.presetId}`);
+  }
+  const modules = new Map(input.manifest.modules.map((moduleDefinition) => [moduleDefinition.id, moduleDefinition]));
+  const selected = new Set(input.selectedModules);
+  for (const moduleId of selected) {
+    if (!modules.has(moduleId)) throw new Error(`Unknown app module: ${moduleId}`);
+  }
+  for (const moduleDefinition of input.manifest.modules.filter((candidate) => selected.has(candidate.id))) {
+    for (const dependency of moduleDefinition.dependsOn) {
+      if (!selected.has(dependency)) throw new Error(`Module ${moduleDefinition.id} requires ${dependency}`);
+    }
+  }
+  const questions = new Map(input.questions.map((question) => [question.key, question]));
+  if (Object.keys(input.configuration).length > 20) {
+    throw new Error("App onboarding draft contains too many configuration answers");
+  }
+  for (const [key, value] of Object.entries(input.configuration)) {
+    const question = questions.get(key);
+    if (!question) throw new Error(`App onboarding draft contains undeclared configuration key: ${key}`);
+    if (!isOnboardingAnswerType(value, question.valueType)) {
+      throw new Error(`App onboarding answer ${key} must be ${question.valueType}`);
+    }
+  }
+}
+
+function isOnboardingAnswerType(value: unknown, type: AppSetupDefinition["questions"][number]["valueType"]): boolean {
+  if (type === "string") return typeof value === "string" && value.length <= 16_000;
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "boolean") return typeof value === "boolean";
+  if (type === "string_list") {
+    return Array.isArray(value) && value.length <= 100 && value.every((item) => typeof item === "string" && item.length <= 2_000);
+  }
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function compareSemanticVersions(left: string, right: string) {

@@ -262,6 +262,13 @@ npm run loopgraph -- apps search "qualify inbound leads"
 npm run loopgraph -- apps get loopgraph.sales.qualify-route-inbound-leads
 npm run loopgraph -- apps onboard loopgraph.sales.qualify-route-inbound-leads
 
+# Save confirmed pre-install choices, then resume later with only the App ID
+npm run loopgraph -- apps onboard-save loopgraph.sales.qualify-route-inbound-leads \
+  --preset hubspot-gmail-slack \
+  --expected-revision 0 \
+  --config confirmed-company-answers.json
+npm run loopgraph -- apps onboard loopgraph.sales.qualify-route-inbound-leads
+
 # After Hermes connects the stack, inspect and confirm provider fields
 npm run loopgraph -- apps mappings loopgraph.sales.qualify-route-inbound-leads \
   --preset hubspot-gmail-slack
@@ -274,10 +281,13 @@ npm run --silent loopgraph -- apps plan loopgraph.sales.qualify-route-inbound-le
 # After connections, mappings, and required answers are ready
 npm run loopgraph -- apps install --plan install-plan.json
 npm run loopgraph -- apps test <installation-id>
-npm run loopgraph -- apps activate <installation-id> --mode shadow
+npm run loopgraph -- apps activation-approve <installation-id> --mode shadow \
+  --approved-by <operator-id> --reason "Write-blocked rehearsal passed"
+npm run loopgraph -- apps activate <installation-id> --mode shadow \
+  --approval-receipt <receipt-id>
 ```
 
-`apps onboard` is read-only. Re-run it after each connection, answer, mapping, install, test, or activation to receive only the unresolved blockers and the exact safe next action. See the [Hermes-guided App onboarding journey](docs/APP-ONBOARDING-JOURNEY.md).
+`apps onboard` is read-only. `apps onboard-save` persists a complete, declared, secret-free setup snapshot with optimistic concurrency; it cannot install assets, grant permissions, or enable provider writes. Re-run `apps onboard` with only the App ID after each connection, saved answer, mapping, install, test, or activation to resume with only the unresolved blockers and exact safe next action. See the [Hermes-guided App onboarding journey](docs/APP-ONBOARDING-JOURNEY.md).
 
 The Marketplace and Installed Apps screens call the same governed service as Hermes and the CLI. A downloaded pack is never active automatically, installation never enables provider writes, and company-specific changes never mutate the signed upstream artifact. Each Installed App also joins only the recent Hermes events, problems, routed runs, task/tool/approval counts, failures, durable outcomes, review burden, and value-ledger entries belonging to the runtime loops owned by that exact installation. Its bounded operating topology shows sources → Hermes Brain → department → Installed App → owned loops → agents/runs/approvals → outcomes, with links into durable run and review records. It never mixes Marketplace samples or another App’s activity into the operating record.
 

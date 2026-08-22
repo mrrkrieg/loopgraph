@@ -65,6 +65,43 @@ describe("Supabase App installation store", () => {
     expect(value).toBe("already-current");
     expect((await store.read()).revision).toBe(0);
   });
+
+  it("persists a tenant-scoped onboarding draft through the same revision lease", async () => {
+    const fake = new InstallationSupabase();
+    const store = new SupabaseAppInstallationStore(fake.client, scope);
+    await store.withExclusiveUpdate(async (registry) => ({
+      registry: {
+        ...registry,
+        revision: registry.revision + 1,
+        onboardingDrafts: [{
+          schemaVersion: "loopgraph-app-onboarding-draft/v1alpha1",
+          id: "draft.sales",
+          workspaceId: scope.workspaceId,
+          companyId: scope.workspaceId,
+          appId: "loopgraph.sales.qualify-route-inbound-leads",
+          versionRange: "latest",
+          presetId: "hubspot-gmail-slack",
+          selectedModules: ["lead-qualification"],
+          configuration: { exclusions: ["employee"] },
+          fieldMappingIds: [],
+          revision: 1,
+          createdAt: now,
+          createdBy: "sales-operations",
+          updatedAt: now,
+          updatedBy: "sales-operations"
+        }],
+        updatedAt: now
+      },
+      value: undefined
+    }));
+
+    expect((await store.read()).onboardingDrafts).toEqual([
+      expect.objectContaining({ appId: "loopgraph.sales.qualify-route-inbound-leads", revision: 1 })
+    ]);
+    expect(fake.rpc).toHaveBeenCalledWith("commit_loopgraph_app_installation_registry", expect.objectContaining({
+      p_registry: expect.objectContaining({ onboardingDrafts: [expect.objectContaining({ updatedBy: "sales-operations" })] })
+    }));
+  });
 });
 
 class InstallationSupabase {

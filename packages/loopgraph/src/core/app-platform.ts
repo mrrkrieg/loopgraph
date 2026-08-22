@@ -28,6 +28,7 @@ export const FIELD_MAPPING_PLAN_SCHEMA_VERSION = "loopgraph-field-mapping-plan/v
 export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1alpha1" as const;
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
+export const APP_ONBOARDING_DRAFT_SCHEMA_VERSION = "loopgraph-app-onboarding-draft/v1alpha1" as const;
 export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
 export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
@@ -1427,6 +1428,42 @@ export const appOnboardingStageSchema = z.enum([
   "unavailable"
 ]);
 
+/**
+ * A pre-install, workspace-scoped snapshot of the choices a human has already
+ * confirmed. Drafts intentionally contain no provider credentials, raw
+ * provider payloads, permission grants, or activation authority.
+ */
+export const appOnboardingDraftSchema = z.object({
+  schemaVersion: z.literal(APP_ONBOARDING_DRAFT_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  companyId: appIdSchema,
+  appId: appIdSchema,
+  versionRange: appVersionRangeSchema,
+  presetId: appIdSchema,
+  selectedModules: z.array(appIdSchema).max(50).default([]),
+  configuration: z.record(jsonValueSchema)
+    .refine((value) => Object.keys(value).length <= 20, "Onboarding drafts support at most 20 declared answers")
+    .refine((value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 64 * 1024, "Onboarding draft answers exceed 64 KiB")
+    .default({}),
+  fieldMappingIds: z.array(appIdSchema).max(200).default([]),
+  revision: z.number().int().positive(),
+  createdAt: isoDateTimeSchema,
+  createdBy: z.string().min(1).max(300),
+  updatedAt: isoDateTimeSchema,
+  updatedBy: z.string().min(1).max(300)
+}).strict().superRefine((draft, ctx) => {
+  if (new Set(draft.selectedModules).size !== draft.selectedModules.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["selectedModules"], message: "Selected onboarding modules must be unique" });
+  }
+  if (new Set(draft.fieldMappingIds).size !== draft.fieldMappingIds.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fieldMappingIds"], message: "Onboarding field mappings must be unique" });
+  }
+  if (Date.parse(draft.updatedAt) < Date.parse(draft.createdAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["updatedAt"], message: "Onboarding draft update time cannot precede creation" });
+  }
+});
+
 export const appOnboardingJourneySchema = z.object({
   schemaVersion: z.literal(APP_ONBOARDING_SCHEMA_VERSION),
   workspaceId: appIdSchema,
@@ -1443,6 +1480,14 @@ export const appOnboardingJourneySchema = z.object({
     presetId: appIdSchema.optional()
   }).strict(),
   installationId: appIdSchema.optional(),
+  draft: z.object({
+    id: appIdSchema,
+    revision: z.number().int().positive(),
+    savedAt: isoDateTimeSchema,
+    savedBy: z.string().min(1).max(300),
+    answerKeys: z.array(z.string().min(1).max(160)).max(20),
+    resumed: z.boolean()
+  }).strict().optional(),
   stage: appOnboardingStageSchema,
   headline: z.string().min(1).max(500),
   progress: z.object({
@@ -1670,6 +1715,7 @@ export type AppEvalJudgment = z.infer<typeof appEvalJudgmentSchema>;
 export type AppPromotionRecommendation = z.infer<typeof appPromotionRecommendationSchema>;
 export type AppReadiness = z.infer<typeof appReadinessSchema>;
 export type AppOnboardingStage = z.infer<typeof appOnboardingStageSchema>;
+export type AppOnboardingDraft = z.infer<typeof appOnboardingDraftSchema>;
 export type AppOnboardingJourney = z.infer<typeof appOnboardingJourneySchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
@@ -1716,6 +1762,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppEvalJudgment: zodToJsonSchema(appEvalJudgmentSchema, "AppEvalJudgment") as Record<string, unknown>,
     AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
+    AppOnboardingDraft: zodToJsonSchema(appOnboardingDraftSchema, "AppOnboardingDraft") as Record<string, unknown>,
     AppOnboardingJourney: zodToJsonSchema(appOnboardingJourneySchema, "AppOnboardingJourney") as Record<string, unknown>,
     AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>,
     AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>,

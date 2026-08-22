@@ -6,6 +6,7 @@ import {
   type AppFieldMappingPlan,
   type AppInstallPlan,
   type AppOnboardingJourney,
+  type AppOnboardingDraft,
   type AppReadiness,
   type AppSetupDefinition,
   type LoopPackManifest,
@@ -29,6 +30,8 @@ type JourneyInput = {
   evaluations?: AppEvalRun[];
   activationApprovals?: AppActivationApprovalReceipt[];
   lifecycleOperation?: AppLifecycleOperation;
+  onboardingDraft?: AppOnboardingDraft;
+  resumedFromDraft?: boolean;
   now?: Date;
 };
 
@@ -196,6 +199,16 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
       ...(input.presetId ? { presetId: input.presetId } : {})
     },
     ...(input.installation ? { installationId: input.installation.id } : {}),
+    ...(input.onboardingDraft ? {
+      draft: {
+        id: input.onboardingDraft.id,
+        revision: input.onboardingDraft.revision,
+        savedAt: input.onboardingDraft.updatedAt,
+        savedBy: input.onboardingDraft.updatedBy,
+        answerKeys: Object.keys(input.onboardingDraft.configuration).sort(),
+        resumed: input.resumedFromDraft ?? false
+      }
+    } : {}),
     stage: decision.stage,
     headline: decision.headline,
     progress: {

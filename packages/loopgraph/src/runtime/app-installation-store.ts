@@ -3,6 +3,7 @@ import path from "node:path";
 import { z } from "zod";
 import {
   APP_INSTALL_SCHEMA_VERSION,
+  appOnboardingDraftSchema,
   appActivationApprovalReceiptSchema,
   appAssetOwnershipSchema,
   appEvalRunSchema,
@@ -61,6 +62,7 @@ export const appInstallationRegistrySchema = z.object({
   lifecycleReceipts: z.array(appLifecycleReceiptSchema).default([]),
   lifecycleOperations: z.array(appLifecycleOperationSchema).max(APP_LIFECYCLE_OPERATION_LIMIT).default([]),
   activationApprovals: z.array(appActivationApprovalReceiptSchema).default([]),
+  onboardingDrafts: z.array(appOnboardingDraftSchema).max(50).default([]),
   updatedAt: z.string().datetime()
 }).strict();
 
@@ -90,6 +92,7 @@ export function emptyAppInstallationRegistry(workspaceId: string): AppInstallati
     lifecycleReceipts: [],
     lifecycleOperations: [],
     activationApprovals: [],
+    onboardingDrafts: [],
     updatedAt: new Date(0).toISOString()
   };
 }

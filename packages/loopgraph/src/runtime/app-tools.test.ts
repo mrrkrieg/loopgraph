@@ -27,6 +27,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_marketplace_search",
       "loopgraph_app_get",
       "loopgraph_app_onboarding_get",
+      "loopgraph_app_onboarding_save",
       "loopgraph_app_install_plan",
       "loopgraph_app_install_apply",
       "loopgraph_app_install_status",
@@ -491,12 +492,29 @@ describe("shared Loopgraph App tools", () => {
       "salesforce-outlook-teams"
     ]);
 
-    const disconnected = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+    const configuration = {
+      icpDefinition: { industries: ["software"], minimumEmployees: 50 },
+      exclusions: ["existing_customer", "employee"],
+      territories: { north_america: "sales-na" },
+      qualificationThreshold: { qualified: 80, review: 60 },
+      lifecycleStages: { new: "lead", qualified: "mql", accepted: "sal", disqualified: "other" }
+    };
+    const saved = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
       projectRoot,
       appId,
-      presetId: "hubspot-gmail-slack"
+      presetId: "hubspot-gmail-slack",
+      configuration: { icpDefinition: configuration.icpDefinition },
+      expectedDraftRevision: 0,
+      actor: "sales-operations"
+    }) as AppOnboardingJourney;
+    expect(saved.draft).toMatchObject({ revision: 1, resumed: true, savedBy: "sales-operations" });
+
+    const disconnected = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
     }) as AppOnboardingJourney;
     expect(disconnected.stage).toBe("connect_systems");
+    expect(disconnected.draft).toMatchObject({ revision: 1, resumed: true });
     expect(disconnected.questions.length).toBeGreaterThan(0);
     expect(disconnected.blockers.some((blocker) => blocker.kind === "connection")).toBe(true);
 
@@ -511,18 +529,18 @@ describe("shared Loopgraph App tools", () => {
       readPolicy: "read_only",
       writePolicy: "approved_only"
     });
-    const configuration = {
-      icpDefinition: { industries: ["software"], minimumEmployees: 50 },
-      exclusions: ["existing_customer", "employee"],
-      territories: { north_america: "sales-na" },
-      qualificationThreshold: { qualified: 80, review: 60 },
-      lifecycleStages: { new: "lead", qualified: "mql", accepted: "sal", disqualified: "other" }
-    };
-    const needsMappings = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+    const completedAnswers = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
       projectRoot,
       appId,
       presetId: "hubspot-gmail-slack",
-      configuration
+      configuration,
+      expectedDraftRevision: 1,
+      actor: "sales-operations"
+    }) as AppOnboardingJourney;
+    expect(completedAnswers.draft).toMatchObject({ revision: 2 });
+    const needsMappings = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
     }) as AppOnboardingJourney;
     expect(needsMappings.stage).toBe("confirm_mappings");
     expect(needsMappings.mappingPlan?.requirements.length).toBeGreaterThan(0);
@@ -543,9 +561,7 @@ describe("shared Loopgraph App tools", () => {
 
     const review = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
-      appId,
-      presetId: "hubspot-gmail-slack",
-      configuration
+      appId
     }) as AppOnboardingJourney;
     expect(review).toMatchObject({
       stage: "review_install",
@@ -700,5 +716,49 @@ describe("shared Loopgraph App tools", () => {
       nextAction: { kind: "monitor", requiresHumanConfirmation: false },
       evidence: { syntheticStatus: "passed", providerWritesBlocked: true }
     });
+    expect(operating.draft).toBeUndefined();
   }, 15_000);
+
+  it("rejects secret-bearing, stale, and undeclared pre-install draft updates", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-draft-security-"));
+    temporaryDirectories.push(projectRoot);
+    const appId = "loopgraph.sales.qualify-route-inbound-leads";
+    const base = {
+      projectRoot,
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration: { exclusions: ["employee"] },
+      expectedDraftRevision: 0,
+      actor: "sales-operations"
+    };
+    const saved = await callLoopgraphAppTool("loopgraph_app_onboarding_save", base) as AppOnboardingJourney;
+    expect(saved.draft).toMatchObject({ revision: 1 });
+    const replayed = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      ...base,
+      expectedDraftRevision: 0
+    }) as AppOnboardingJourney;
+    expect(replayed.draft).toMatchObject({ revision: 1, savedBy: "sales-operations" });
+
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      ...base,
+      configuration: { exclusions: ["contractor"] }
+    })).rejects.toThrow(/revision conflict/i);
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      ...base,
+      expectedDraftRevision: 1,
+      configuration: { access_token: "secret-value-that-must-never-persist" }
+    })).rejects.toThrow(/secret/i);
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      ...base,
+      expectedDraftRevision: 1,
+      configuration: { undeclaredBusinessRule: "never" }
+    })).rejects.toThrow(/undeclared configuration key/i);
+
+    const resumed = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
+    }) as AppOnboardingJourney;
+    expect(resumed.plan?.configuration.values.exclusions).toEqual(["employee"]);
+    expect(resumed.draft).toMatchObject({ revision: 1, resumed: true });
+  });
 });

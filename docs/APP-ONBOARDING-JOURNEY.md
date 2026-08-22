@@ -7,7 +7,9 @@ Choose stack → Connect systems → Answer gaps → Confirm fields
 → Review install → Rehearse → Activate shadow → Operate and learn
 ```
 
-The source of truth is the read-only `loopgraph_app_onboarding_get` tool. It derives progress from the immutable Marketplace artifact, current connector and mapping registries, company configuration, installation lock, conformance evidence, and installed lifecycle state. There is no separate conversational checklist to become stale.
+The source of truth is the read-only `loopgraph_app_onboarding_get` tool. It derives progress from the immutable Marketplace artifact, current connector and mapping registries, a durable pre-install onboarding draft, company configuration, installation lock, conformance evidence, and installed lifecycle state. There is no conversational checklist to become stale. Calling it with only the App ID resumes the last saved draft.
+
+Before installation, `loopgraph_app_onboarding_save` persists one complete snapshot of the selected preset, modules, declared setup answers, and optional confirmed mapping IDs. It requires the revision returned by the last journey read, rejects stale writers, undeclared keys, invalid value types, oversized data, and secret-shaped material, and returns the newly derived journey. The draft is stored through the same tenant-scoped, revision-leased registry used by Hermes, CLI, and browser; installation removes it in the same atomic registry transaction that pins the App.
 
 Before asking a reusable business question, Hermes reads `loopgraph_company_context_get`. A proposed shared answer remains untrusted until an accountable operator approves its value, provenance, confidence, owner, visibility, and current revision through `loopgraph_company_context_approve`. Secret-like material and declared-type mismatches are rejected. A stale revision or changed value requires a fresh read and plan; Hermes cannot silently preserve an earlier inference.
 
@@ -16,6 +18,7 @@ Before asking a reusable business question, Hermes reads `loopgraph_company_cont
 The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 
 - the exact App version and declared stack presets;
+- the saved draft revision, accountable actor, and timestamp when pre-install progress exists;
 - eight stable journey steps with one and only one current step;
 - only setup questions that are still missing or need confirmation;
 - connection, mapping, permission, test, and lifecycle blockers with remediations;
@@ -26,7 +29,7 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 - one exact next action, including a tool name when a safe tool call exists;
 - an explicit `requiresHumanConfirmation` boundary.
 
-The journey is derived, not separately mutable. After any connection, answer, field confirmation, install, test, activation, pause, or repair, the caller reads it again. That makes retries and handoff between Hermes, CLI, and browser resumable without trusting chat history.
+The journey remains a derived read model. The only pre-install mutation is replacement of the complete bounded draft snapshot through `loopgraph_app_onboarding_save`; it grants no permission and creates no runtime asset. After any connection, draft save, field confirmation, install, test, activation, pause, or repair, the caller reads the journey again. That makes refreshes, agent restarts, retries, and handoff between Hermes, CLI, and browser resumable without trusting chat history.
 
 Module selection is part of the content-bound plan. Unselected module loops and their exclusive assets do not reach the workspace registry or Hermes candidate library. Dependencies and shared skills are closed automatically, while invalid or empty compositions are rejected. Changing modules after installation is a reviewed overlay transaction that rematerializes the backend in write-blocked simulation; an enablement that would add authority or require another connector must return to planning.
 
@@ -35,11 +38,12 @@ Module selection is part of the content-bound plan. Unselected module loops and 
 1. Search by business outcome and inspect the chosen App.
 2. Call `loopgraph_app_onboarding_get` with the App ID.
 3. If the stage is `choose_preset`, present only the declared presets.
-4. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install or uninstall identity.
-5. Ask only returned questions and resolve only returned blockers.
-6. Re-read the journey after every state change.
-7. Use only the returned exact install plan and `nextAction.toolName`.
-8. Stop whenever `requiresHumanConfirmation` is true.
+4. After the user chooses a preset or answers a setup question, call `loopgraph_app_onboarding_save` with the complete current snapshot and exact draft revision. Never store credentials or raw provider data in the draft.
+5. If the stage is `recover_lifecycle`, stop all competing App mutations and ask the operator to retry the returned exact install or uninstall identity.
+6. Ask only returned questions and resolve only returned blockers.
+7. Re-read the journey after every state change; the App ID alone resumes saved progress.
+8. Use only the returned exact install plan and `nextAction.toolName`.
+9. Stop whenever `requiresHumanConfirmation` is true.
 
 Installation and shadow activation are deliberately separate approvals. Installation writes only the immutable asset inventory approved in the content-bound plan and cannot enable provider writes. Duplicate LoopSpecs and incompatible shared contracts block before the transaction starts. Synthetic conformance runs with writes blocked. Shadow mode records real routing decisions while continuing to block provider writes.
 
@@ -49,20 +53,24 @@ Activation is a two-step runtime protocol, not a prompt convention. After the ac
 
 ```bash
 loopgraph apps onboard loopgraph.sales.qualify-route-inbound-leads
-loopgraph apps onboard loopgraph.sales.qualify-route-inbound-leads \
+loopgraph apps onboard-save loopgraph.sales.qualify-route-inbound-leads \
   --preset hubspot-gmail-slack \
+  --expected-revision 0 \
   --config confirmed-company-answers.json
+loopgraph apps onboard loopgraph.sales.qualify-route-inbound-leads
 ```
 
-The command prints the same versioned journey Hermes and the browser use. It does not mutate the workspace.
+`apps onboard` is read-only. `apps onboard-save` persists only the bounded pre-install draft, then prints the same versioned journey Hermes and the browser use; it does not install assets or enable provider writes.
 
 ## Browser
 
-The Marketplace installer and Installed App detail page render the same eight-step contract. Before approval, the installer expands the content-bound plan into an exact impact review: every created asset, reused company resource, blocking shared-object conflict, provider-authority decision, declared outcome metric, and signed evidence edge is visible. The current step and human approval boundary remain visible before and after installation, so the user is not dropped into a generic status dashboard and asked to infer what comes next. The Installed Apps list and detail page also render unfinished lifecycle recovery above normal controls, show the affected LoopSpec/mapping/context counts, and replace competing actions with the exact reconciliation path.
+The Marketplace installer and Installed App detail page render the same eight-step contract. Validated answers save through the shared draft tool, and a reload resumes the saved stack, modules, answers, and current blockers. Before approval, the installer expands the content-bound plan into an exact impact review: every created asset, reused company resource, blocking shared-object conflict, provider-authority decision, declared outcome metric, and signed evidence edge is visible. The current step and human approval boundary remain visible before and after installation, so the user is not dropped into a generic status dashboard and asked to infer what comes next. The Installed Apps list and detail page also render unfinished lifecycle recovery above normal controls, show the affected LoopSpec/mapping/context counts, and replace competing actions with the exact reconciliation path.
 
 ## Safety invariants
 
 - The journey never contains provider credentials or unrestricted provider payloads.
+- A draft accepts only declared App setup keys and bounded JSON values; secret-shaped keys or values fail before persistence.
+- Draft updates use optimistic revision checks and cannot grant connector, permission, installation, activation, or provider-write authority.
 - It cannot confirm inferred field mappings or permissions.
 - It cannot apply an installation or activate a mode by reading state.
 - A blocking conflict is returned for review but the installation service rejects apply until it is resolved.

@@ -553,6 +553,40 @@ apps
   });
 
 apps
+  .command("onboard-save")
+  .description("Save a complete secret-free onboarding snapshot and return the exact resumed next step")
+  .argument("<app-id>", "Marketplace app ID")
+  .requiredOption("--preset <preset>", "Provider preset ID")
+  .requiredOption("--expected-revision <revision>", "Draft revision returned by the latest apps onboard call; use 0 for a new draft")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--version <range>", "Semantic version or range", "latest")
+  .option("--config <path>", "JSON object with the complete confirmed answer snapshot")
+  .option("--mapping <ids...>", "Confirmed field mapping IDs")
+  .option("--module <ids...>", "Selected optional module IDs")
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .option("--actor <id>", "Accountable saver identity", "cli")
+  .action(async (appId: string, options: { project: string; preset: string; expectedRevision: string; version: string; config?: string; mapping?: string[]; module?: string[]; workspace?: string; company?: string; actor: string }) => {
+    const expectedDraftRevision = Number(options.expectedRevision);
+    if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
+      throw new Error("Expected onboarding draft revision must be a non-negative integer.");
+    }
+    await printAppTool("loopgraph_app_onboarding_save", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      versionRange: options.version,
+      presetId: options.preset,
+      selectedModules: options.module,
+      configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : {},
+      fieldMappingIds: options.mapping,
+      expectedDraftRevision,
+      actor: options.actor
+    });
+  });
+
+apps
   .command("plan")
   .description("Create a read-only exact install plan; missing connections, mappings, and answers are returned as blockers")
   .argument("<app-id>", "Marketplace app ID")

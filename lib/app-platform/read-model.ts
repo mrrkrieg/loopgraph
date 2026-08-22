@@ -369,7 +369,6 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
       appId,
       versionRange: "latest",
       presetId,
-      configuration: {},
       actor: "loopgraph-browser"
     }) as Promise<AppOnboardingJourney>
   ]);

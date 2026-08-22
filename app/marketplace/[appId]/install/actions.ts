@@ -29,7 +29,7 @@ export async function planMarketplaceAppInstallAction(
     }) as MarketplaceAppDetail;
     const selectedModules = formData.getAll("selectedModule").filter((value): value is string => typeof value === "string");
     const configuration = configurationFromInstallForm(formData, detail.setupQuestions);
-    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
       projectRoot,
       appId,
       versionRange: detail.selectedVersion.version,
@@ -37,6 +37,7 @@ export async function planMarketplaceAppInstallAction(
       selectedModules,
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
+      expectedDraftRevision: previousState.journey.draft?.revision ?? 0,
       actor
     }) as AppOnboardingJourney;
     if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");
@@ -49,8 +50,8 @@ export async function planMarketplaceAppInstallAction(
       journey: appOnboardingProgressForView(journey),
       unresolvedQuestionKeys: journey.questions.map((question) => question.key),
       notice: plan.missingConfigurationKeys.length === 0
-        ? "Configuration was validated. Review the exact graph and permission transaction below."
-        : "Your answers were saved into a new read-only plan. Complete the remaining items before installation."
+        ? "Your onboarding progress was saved. Review the exact graph and permission transaction below."
+        : "Your onboarding progress was saved. Complete only the remaining items before installation."
     };
   } catch (error) {
     return {

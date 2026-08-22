@@ -27,10 +27,18 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
   const ready = blockers.length === 0;
   const activeMappingPlan = state.mappingPlan;
   const unresolvedQuestions = app.questions.filter((question) => state.unresolvedQuestionKeys.includes(question.key));
+  const savedAnswerKeys = new Set(state.journey.draft?.answerKeys ?? []);
+  const savedQuestions = app.questions.filter((question) =>
+    savedAnswerKeys.has(question.key) && !state.unresolvedQuestionKeys.includes(question.key));
 
   return (
     <div className="space-y-6">
       <AppOnboardingProgress journey={state.journey} />
+      {state.journey.draft ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          Saved onboarding progress · revision {state.journey.draft.revision} · {new Date(state.journey.draft.savedAt).toLocaleString()}. You can leave this page and resume without re-answering completed questions.
+        </div>
+      ) : null}
       <section className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -72,6 +80,17 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
                 ))}
               </div>
             ) : <div className="mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-900">No company-specific questions are unresolved.</div>}
+            {savedQuestions.length > 0 ? (
+              <details className="mt-4 rounded-lg border border-line bg-paper p-4">
+                <summary className="cursor-pointer text-sm font-semibold">Review or change {savedQuestions.length} saved {savedQuestions.length === 1 ? "answer" : "answers"}</summary>
+                <p className="mt-2 text-xs leading-5 text-ink/50">These values came from this onboarding draft, not provider credentials or unapproved inference. Clearing a field removes it from the next saved snapshot.</p>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {savedQuestions.map((question) => (
+                    <QuestionField key={question.key} plan={state.plan} question={question} />
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </fieldset>
 
           {state.error ? <div className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{state.error}</div> : null}
