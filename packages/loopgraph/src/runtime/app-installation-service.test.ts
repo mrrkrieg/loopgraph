@@ -553,6 +553,25 @@ describe("atomic app installation lifecycle", () => {
     const applied = await input.service.apply(freshPlan, "admin-1", new Date("2026-08-08T11:06:00.000Z"));
     const context = await input.contextStore.get("acme", "acme-company");
     expect(context.values.find((value) => value.key === "sales.icp")?.consumerInstallationIds).toEqual([applied.installation.id]);
+
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.context-aware",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "admin-1",
+      now: new Date("2026-08-08T11:07:00.000Z")
+    });
+    expect(duplicated.installation?.configuration.provenance.icpDefinition).toMatchObject({
+      layer: "company_context",
+      sourceRef: "sales.icp"
+    });
+    const contextAfterDuplicate = await input.contextStore.get("acme", "acme-company");
+    expect(contextAfterDuplicate.values.find((value) => value.key === "sales.icp")?.consumerInstallationIds).toEqual([
+      applied.installation.id,
+      duplicated.installation!.id
+    ].sort());
   });
 
   it("plans, installs, tests, and activates the Sales app without enabling writes", async () => {
@@ -1406,6 +1425,8 @@ describe("atomic app installation lifecycle", () => {
       installationId: applied.installation.id,
       derivedAppId: "private.sales.acme-lead-qualification",
       overlayOperations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 15 }],
+      expectedArtifactDigest: repaired.installation!.artifactDigest,
+      expectedUpdatedAt: repaired.installation!.updatedAt,
       actor: "sales-admin",
       now: new Date("2026-08-08T12:05:00.000Z")
     });
@@ -1781,6 +1802,141 @@ describe("atomic app installation lifecycle", () => {
     await expect(input.service.repair({
       ...laterRequest,
       now: new Date("2026-08-08T12:14:00.000Z")
+    })).rejects.toThrow(/topology changed/i);
+  });
+
+  it("recovers and exactly replays a private duplicate after cross-store materialization", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:15:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.recovery-safe",
+      overlayOperations: [{ op: "set" as const, path: "/values/followUpSlaMinutes", value: 20 }],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("duplicate");
+    await expect(input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:16:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after duplicate LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations).toHaveLength(1);
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "duplicate");
+    expect(recovery).toMatchObject({
+      installationId: applied.installation.id,
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      duplicate: {
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        derivedAppId: "private.sales.recovery-safe",
+        targetInstallationId: expect.stringMatching(/^install\./),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.duplicate ?? {}).sort()).toEqual([
+      "derivedAppId",
+      "fromUpdatedAt",
+      "operationsDigest",
+      "sourceArtifactDigest",
+      "sourceFieldMappingsDigest",
+      "sourceInstallationDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetInstallationId",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    const concurrentLoopStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    await concurrentLoopStore.advanceUnrelatedWorkspaceRevision(
+      input.projectRoot,
+      new Date("2026-08-08T12:16:15.000Z")
+    );
+    expect((await concurrentLoopStore.getWorkspace(input.projectRoot)).revision)
+      .toBeGreaterThan(recovery!.duplicate!.sourceWorkspaceRevision);
+    await expect(input.service.duplicate({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:16:30.000Z")
+    })).rejects.toThrow(/idempotency conflict|must be reconciled/i);
+
+    const recovered = await input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:17:00.000Z")
+    });
+    expect(recovered.installation).toMatchObject({
+      id: recovery?.duplicate?.targetInstallationId,
+      state: "ready_to_test",
+      mode: "simulation",
+      derivation: { derivedAppId: "private.sales.recovery-safe", parentInstallationId: applied.installation.id }
+    });
+    expect(recovered.receipt).toMatchObject({ action: "duplicate", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:18:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.duplicate({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:18:30.000Z")
+    })).rejects.toThrow(/exact replay/i);
+  });
+
+  it("refuses a third derived topology while duplicate recovery is pending", async () => {
+    const loopSpecStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    const input = await harness({ loopSpecStore });
+    const store = new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme");
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:19:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.drift-refusal",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin"
+    };
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:20:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const recovery = (await store.read()).lifecycleOperations.find((operation) => operation.action === "duplicate");
+    expect(recovery).toMatchObject({ status: "requires_reconciliation" });
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as { registeredSpecs: Array<Record<string, unknown>> };
+    workspace.registeredSpecs.push({
+      id: "unexpected-derived-loop",
+      name: "Unexpected derived loop",
+      path: path.join(
+        ".loopgraph",
+        "apps",
+        "installations",
+        recovery!.duplicate!.targetInstallationId,
+        "generated",
+        "loops",
+        "unexpected-derived-loop.yaml"
+      ),
+      department: "sales",
+      addedAt: "2026-08-08T12:20:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2), "utf8");
+    await expect(input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:21:00.000Z")
     })).rejects.toThrow(/topology changed/i);
   });
 

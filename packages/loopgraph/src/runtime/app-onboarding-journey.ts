@@ -170,6 +170,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
             ? "Retry the exact recorded overlay operations with the same actor; do not substitute a different graph customization."
           : recovery.action === "repair"
             ? "Retry repair against the exact recorded artifact and source revision with the same actor; do not start another lifecycle action until its generated topology is reconciled."
+          : recovery.action === "duplicate"
+            ? "Retry the exact private App ID and overlay against the recorded source artifact and revision with the same actor; do not start another lifecycle action until every derived asset is reconciled."
           : recovery.action === "update"
             ? "Retry the exact recorded update plan with the same actor and permission approvals; do not create a replacement plan or start another lifecycle action."
           : recovery.action === "rollback"
@@ -299,6 +301,8 @@ function decideStage(input: {
                 ? "An App overlay was interrupted and its exact customization and source or target topology must be reconciled before another lifecycle action can run."
               : action === "repair"
                 ? "App repair was interrupted and its exact pinned artifact, source revision, and regenerated topology must be reconciled before another lifecycle action can run."
+              : action === "duplicate"
+                ? "App duplication was interrupted and its exact source, private App ID, overlay, shared dependencies, and derived topology must be reconciled before another lifecycle action can run."
               : action === "update"
                 ? "An App update was interrupted and its exact reviewed plan, permission approvals, and source or target topology must be reconciled before another lifecycle action can run."
               : action === "rollback"
@@ -318,6 +322,8 @@ function decideStage(input: {
                 ? "Retry the exact overlay operations as the same actor. Loopgraph will compare only bounded digests, reconcile the recorded source or target owned LoopSpec topology, and return the original receipt after completion."
               : action === "repair"
                 ? "Retry repair against the exact source artifact and revision as the same actor. Loopgraph will reconcile only the recorded source or regenerated target topology and return the original receipt after completion."
+              : action === "duplicate"
+                ? "Retry the exact private App ID and overlay as the same actor. Loopgraph will reconcile namespaced LoopSpecs, field mappings, company context, ownership, and the derived installation without duplicating completed work."
               : action === "update"
                 ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
               : action === "rollback"
@@ -352,6 +358,13 @@ function decideStage(input: {
             expectedArtifactDigest: input.lifecycleOperation.repair.sourceArtifactDigest,
             sourceLoopIds: input.lifecycleOperation.repair.sourceLoopIds,
             targetLoopIds: input.lifecycleOperation.repair.targetLoopIds
+          } : input.lifecycleOperation.duplicate ? {
+            expectedUpdatedAt: input.lifecycleOperation.duplicate.fromUpdatedAt,
+            expectedArtifactDigest: input.lifecycleOperation.duplicate.sourceArtifactDigest,
+            derivedAppId: input.lifecycleOperation.duplicate.derivedAppId,
+            operationsDigest: input.lifecycleOperation.duplicate.operationsDigest,
+            targetInstallationId: input.lifecycleOperation.duplicate.targetInstallationId,
+            targetLoopIds: input.lifecycleOperation.duplicate.targetLoopIds
           } : input.lifecycleOperation.uninstall ? {
             reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
             fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,

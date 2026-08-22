@@ -466,7 +466,9 @@ export const appRepairInputSchema = appInstallationActionInputSchema.extend({
 }).strict();
 export const appDuplicateInputSchema = appInstallationActionInputSchema.extend({
   derivedAppId: z.string().min(3).max(160),
-  overlayOperations: z.array(appOverlayOperationSchema).max(100).default([])
+  overlayOperations: z.array(appOverlayOperationSchema).max(100).default([]),
+  expectedArtifactDigest: artifactDigestSchema,
+  expectedUpdatedAt: z.string().datetime()
 }).strict();
 export const appDiffInputSchema = appInstallationActionInputSchema.omit({ actor: true }).strict();
 export const appUpdatePlanInputSchema = appInstallationActionInputSchema.extend({
@@ -580,7 +582,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_configure", description: "Apply or exactly replay confirmed company configuration against a prior configuration digest, returning the App to write-blocked testing without storing values in the recovery journal.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_overlay_apply", description: "Apply or exactly replay version-bound workspace customization and owned LoopSpec rematerialization without mutating the immutable base artifact or retaining operations in the recovery journal.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_repair", description: "Recompile the exact pinned artifact, restore owned generated assets, and require fresh conformance. Pass the source artifact digest and revision time for an exact replay-safe request.", readOnly: false, idempotent: true, destructive: false },
-  { name: "loopgraph_app_duplicate", description: "Create a private derived installation with namespaced loops and an independent workspace overlay.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_duplicate", description: "Create or exactly replay a private derived installation with namespaced loops and an independent workspace overlay. Bind the request to the source artifact digest and installation revision.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_diff", description: "Inspect immutable base, effective configuration, overlay, derivation, history, and update availability.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_update_plan", description: "Create a content-bound three-way update plan with graph, overlay-conflict, and permission diffs.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_update_apply", description: "Apply an exact reviewed update plan, or safely resume its journaled cross-store recovery, while preserving overlays and requiring fresh evidence.", readOnly: false, idempotent: true, destructive: false },
@@ -1721,6 +1723,8 @@ export async function callLoopgraphAppTool(
       installationId: parsed.installationId,
       derivedAppId: parsed.derivedAppId,
       overlayOperations: parsed.overlayOperations,
+      expectedArtifactDigest: parsed.expectedArtifactDigest,
+      expectedUpdatedAt: parsed.expectedUpdatedAt,
       actor: parsed.actor,
       now: options.now
     });

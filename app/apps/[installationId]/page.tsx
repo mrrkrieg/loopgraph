@@ -261,6 +261,8 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
                 <summary className="cursor-pointer text-sm font-semibold">Duplicate as a private app</summary>
                 <form action={duplicateInstalledAppAction} className="mt-4 space-y-3">
                   <input name="installationId" type="hidden" value={data.installation.id} />
+                  <input name="expectedArtifactDigest" type="hidden" value={data.installation.artifactDigest} />
+                  <input name="expectedUpdatedAt" type="hidden" value={data.installation.updatedAt} />
                   <label className="block text-xs font-semibold uppercase tracking-[0.1em] text-ink/45" htmlFor="derivedAppId">Private app ID</label>
                   <input className="w-full rounded-md border border-line px-3 py-2 font-mono text-sm" id="derivedAppId" name="derivedAppId" placeholder="private.sales.my-lead-qualification" required />
                   <label className="block text-xs font-semibold uppercase tracking-[0.1em] text-ink/45" htmlFor="duplicateOverlay">Optional initial overlay</label>

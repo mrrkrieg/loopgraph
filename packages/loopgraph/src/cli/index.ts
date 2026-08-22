@@ -998,16 +998,20 @@ apps
   .description("Create a namespaced private derived app with an optional initial overlay")
   .argument("<installation-id>", "Installed app ID")
   .requiredOption("--id <private-app-id>", "Stable private derived app ID")
+  .requiredOption("--expected <digest>", "Exact source artifact digest from apps status")
+  .requiredOption("--updated-at <timestamp>", "Exact source installation revision time from apps status")
   .option("--overlay <path>", "JSON object containing an operations array")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--actor <id>", "Accountable duplicator identity", "cli")
-  .action(async (installationId: string, options: { id: string; overlay?: string; project: string; actor: string }) => {
+  .action(async (installationId: string, options: { id: string; expected: string; updatedAt: string; overlay?: string; project: string; actor: string }) => {
     const overlay = options.overlay ? await readJsonRecord(path.resolve(options.overlay)) : {};
     await printAppTool("loopgraph_app_duplicate", {
       projectRoot: options.project,
       installationId,
       derivedAppId: options.id,
       overlayOperations: overlay.operations ?? [],
+      expectedArtifactDigest: options.expected,
+      expectedUpdatedAt: options.updatedAt,
       actor: options.actor
     });
   });

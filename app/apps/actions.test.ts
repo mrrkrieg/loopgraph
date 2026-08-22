@@ -69,6 +69,8 @@ describe("installed App browser actions", () => {
     formData.set("installationId", "install.sales");
     formData.set("derivedAppId", "acme.sales.qualify-leads");
     formData.set("overlay", JSON.stringify({ operations: [] }));
+    formData.set("expectedArtifactDigest", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    formData.set("expectedUpdatedAt", "2026-08-22T21:00:00.000Z");
 
     await duplicateInstalledAppAction(formData);
 
@@ -77,6 +79,8 @@ describe("installed App browser actions", () => {
       installationId: "install.sales",
       derivedAppId: "acme.sales.qualify-leads",
       overlayOperations: [],
+      expectedArtifactDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      expectedUpdatedAt: "2026-08-22T21:00:00.000Z",
       actor: "admin@example.com"
     });
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/apps/install.private-sales");
@@ -88,6 +92,8 @@ describe("installed App browser actions", () => {
     const formData = new FormData();
     formData.set("installationId", "install.sales");
     formData.set("derivedAppId", "acme.sales.qualify-leads");
+    formData.set("expectedArtifactDigest", "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    formData.set("expectedUpdatedAt", "2026-08-22T21:00:00.000Z");
 
     await expect(duplicateInstalledAppAction(formData)).rejects.toThrow(/did not return the new private App installation identity/);
     expect(mocks.redirect).not.toHaveBeenCalled();

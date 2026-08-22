@@ -7,6 +7,7 @@ import {
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
   appActivationApprovalReceiptSchema,
+  appConfigurationSchema,
   appIdSchema,
   appEvalJudgmentSchema,
   appEvalRunSchema,
@@ -1209,122 +1210,306 @@ export class AppInstallationService {
     derivedAppId: string;
     overlayOperations?: AppOverlay["operations"];
     actor: string;
+    expectedArtifactDigest: string;
+    expectedUpdatedAt: string;
     now?: Date;
   }): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
     const derivedAppId = appIdSchema.parse(input.derivedAppId);
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const source = requireOperableInstallation(registry, input.installationId);
-      if (registry.installations.some((installation) => installation.derivation?.derivedAppId === derivedAppId)) {
-        throw new Error(`Private derived app already exists: ${derivedAppId}`);
-      }
-      const timestamp = now.toISOString();
-      const installationId = installationIdFor(this.workspaceId, `${source.appId}:${derivedAppId}`);
-      const loaded = await this.loadInstallationArtifact(source);
-      const namespace = contentHash({ installationId }).slice(0, 10);
-      const overlay = appOverlaySchema.parse({
-        schemaVersion: "loopgraph-app-configuration/v1alpha1",
-        id: `overlay.${contentHash({ installationId, operations: input.overlayOperations ?? [] })}`,
-        installationId,
-        basedOnVersion: source.version,
-        basedOnDigest: source.artifactDigest,
-        revision: 1,
-        operations: input.overlayOperations ?? [],
+    const overlayOperations = input.overlayOperations ?? [];
+    const operationsDigest = canonicalAppDigest(overlayOperations);
+    const observedRegistry = await this.installationStore.read();
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "duplicate" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.duplicate?.derivedAppId === derivedAppId &&
+      candidate.duplicate.operationsDigest === operationsDigest &&
+      candidate.duplicate.fromUpdatedAt === input.expectedUpdatedAt &&
+      candidate.duplicate.sourceArtifactDigest === input.expectedArtifactDigest
+    );
+    if (completed?.duplicate) {
+      const target = observedRegistry.installations.find((candidate) => candidate.id === completed.duplicate?.targetInstallationId);
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!target || !receipt) throw new Error("Completed duplicate operation is missing its durable result");
+      assertDuplicateReplayAuthority(completed, receipt, target, input.actor, derivedAppId, operationsDigest, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      return { installation: target, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const source = requireInstallation(observedRegistry, input.installationId);
+    if (source.artifactDigest !== input.expectedArtifactDigest) throw new Error("Source App changed; create a fresh duplicate request");
+    if (source.updatedAt !== input.expectedUpdatedAt) throw new Error("Source App revision changed; create a fresh duplicate request");
+    const targetInstallationId = installationIdFor(this.workspaceId, `${source.appId}:${derivedAppId}`);
+    const conflictingTarget = observedRegistry.installations.find((installation) =>
+      installation.id === targetInstallationId || installation.derivation?.derivedAppId === derivedAppId);
+    if (conflictingTarget) throw new Error(`Private derived app already exists: ${derivedAppId}`);
+
+    const sourceInstallationDigest = canonicalAppDigest(source);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, source.id);
+    const sourceMappings = await this.mappingStore.list();
+    const sourceFieldMappingsDigest = fieldMappingInventoryDigest(sourceMappings, source.fieldMappingIds);
+    const idempotencyKey = canonicalAppDigest({
+      action: "duplicate",
+      workspaceId: this.workspaceId,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      sourceFieldMappingsDigest,
+      derivedAppId,
+      operationsDigest
+    });
+    const operationId = lifecycleOperationId("duplicate", source.id, source.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? new Date(
+      Math.max(now.getTime(), Date.parse(source.updatedAt) + 1)
+    ).toISOString();
+    const operationTime = new Date(timestamp);
+    const loaded = await this.loadInstallationArtifact(source);
+    const namespace = contentHash({ installationId: targetInstallationId }).slice(0, 10);
+    const overlay = appOverlaySchema.parse({
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      id: `overlay.${contentHash({ installationId: targetInstallationId, operations: overlayOperations })}`,
+      installationId: targetInstallationId,
+      basedOnVersion: source.version,
+      basedOnDigest: source.artifactDigest,
+      revision: 1,
+      operations: overlayOperations,
+      createdAt: timestamp,
+      createdBy: input.actor
+    });
+    validateOverlayOperations(overlay.operations, loaded, source.configuration.fields.map((field) => field.key));
+    const selectedModules = applyModuleOverlay(loaded.manifest.modules, source.selectedModules, overlay.operations);
+    const compiled = await compileLoopPack(loaded, { selectedModules });
+    const activeCapabilities = assertInstalledCompositionAuthority(compiled, source);
+    const resolvedConfiguration = resolveAppConfiguration({
+      appId: source.appId,
+      version: source.version,
+      fields: source.configuration.fields,
+      installValues: source.configuration.values,
+      overlay,
+      now: operationTime
+    }).configuration;
+    const overlaidValueKeys = new Set(overlay.operations.flatMap((operation) =>
+      "path" in operation && operation.path.startsWith("/values/")
+        ? [decodePointerToken(operation.path.slice("/values/".length))]
+        : []));
+    const configuration = appConfigurationSchema.parse({
+      ...resolvedConfiguration,
+      provenance: Object.fromEntries(Object.keys(resolvedConfiguration.values).map((key) => [
+        key,
+        overlaidValueKeys.has(key)
+          ? resolvedConfiguration.provenance[key]
+          : source.configuration.provenance[key] ?? resolvedConfiguration.provenance[key]
+      ]))
+    });
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      targetInstallationId,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const contextKeys = companyContextKeys(configuration);
+    if (contextKeys.length > 0) {
+      const context = await this.contextStore.get(this.workspaceId, this.companyId);
+      assertCompanyContextStillMatches(configuration, context);
+    }
+    const ownedAssets = ownershipFromCompiled(compiled, targetInstallationId, namespace, source.ownedAssets);
+    const duplicate: WorkspaceAppInstallation = {
+      ...source,
+      id: targetInstallationId,
+      state: "ready_to_test",
+      mode: "simulation",
+      selectedModules,
+      configuration,
+      permissions: source.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+      overlay,
+      ownedAssets,
+      derivation: {
+        derivedAppId,
+        upstreamAppId: source.appId,
+        upstreamVersion: source.version,
+        upstreamDigest: source.artifactDigest,
+        parentInstallationId: source.id,
         createdAt: timestamp,
         createdBy: input.actor
-      });
-      validateOverlayOperations(overlay.operations, loaded, source.configuration.fields.map((field) => field.key));
-      const selectedModules = applyModuleOverlay(loaded.manifest.modules, source.selectedModules, overlay.operations);
-      const compiled = await compileLoopPack(loaded, { selectedModules });
-      const activeCapabilities = assertInstalledCompositionAuthority(compiled, source);
-      const configuration = resolveAppConfiguration({
-        appId: source.appId,
-        version: source.version,
-        fields: source.configuration.fields,
-        installValues: source.configuration.values,
-        overlay,
-        now
-      }).configuration;
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installationId, loaded.manifest.metadata.department, timestamp, namespace);
-      const contextKeys = companyContextKeys(source.configuration);
-      const context = contextKeys.length > 0
-        ? await this.contextStore.get(this.workspaceId, this.companyId)
-        : undefined;
-      if (context) assertCompanyContextStillMatches(source.configuration, context);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-duplicate-${contentHash({ installationId, timestamp })}`,
-        idempotencyKey: canonicalAppDigest({ action: "duplicate", installationId, digest: source.artifactDigest, timestamp }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts
-      });
-      const ownedAssets = ownershipFromCompiled(compiled, installationId, namespace, source.ownedAssets);
-      const duplicate: WorkspaceAppInstallation = {
-        ...source,
-        id: installationId,
-        state: "ready_to_test",
-        mode: "simulation",
-        selectedModules,
-        configuration,
-        permissions: source.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
-        overlay,
-        ownedAssets,
-        derivation: {
-          derivedAppId,
-          upstreamAppId: source.appId,
-          upstreamVersion: source.version,
-          upstreamDigest: source.artifactDigest,
-          parentInstallationId: source.id,
-          createdAt: timestamp,
-          createdBy: input.actor
-        },
-        history: [],
-        installedAt: timestamp,
-        updatedAt: timestamp,
-        installedBy: input.actor,
-        lastHealthyAt: undefined,
-        failureReason: undefined
-      };
-      const nextRevision = registry.revision + 1;
-      const receipt = createLifecycleReceipt(registry, {
-        installationId,
-        action: "duplicate",
-        actor: input.actor,
-        reason: "Created an independently configurable private derived installation with namespaced LoopSpecs.",
-        previousArtifactDigest: source.artifactDigest,
-        resultingArtifactDigest: duplicate.artifactDigest,
-        evidenceRetained: true,
-        reversible: true,
-        createdAt: timestamp,
-        resultingRevision: nextRevision
-      });
-      const nextRegistry: AppInstallationRegistry = {
-        ...registry,
-        revision: nextRevision,
-        installations: [...registry.installations, duplicate].sort((left, right) => left.id.localeCompare(right.id)),
-        assets: mergeAssetOwnership(registry.assets, ownedAssets),
-        lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
-        updatedAt: timestamp
-      };
-      if (duplicate.fieldMappingIds.length > 0) {
-        await this.mappingStore.attachInstallation(duplicate.fieldMappingIds, installationId);
-      }
-      if (context && contextKeys.length > 0) {
-        await this.contextStore.attachConsumer({
-          workspaceId: this.workspaceId,
-          companyId: this.companyId,
-          contextKeys,
-          installationId,
-          expectedRevision: context.revision,
-          actor: input.actor,
-          now
-        });
-      }
-      const lock = createInstallationLock(nextRegistry);
-      return { registry: nextRegistry, lock, value: { installation: duplicate, receipt, lock } };
+      },
+      history: [],
+      installedAt: timestamp,
+      updatedAt: timestamp,
+      installedBy: input.actor,
+      lastHealthyAt: undefined,
+      failureReason: undefined
+    };
+    const targetRegistry = {
+      ...observedRegistry,
+      assets: mergeAssetOwnership(observedRegistry.assets, ownedAssets)
+    };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    if (!existingOperation && installationLoopIds(observedWorkspace.workspace, targetInstallationId).length > 0) {
+      throw new Error("Private derived App target namespace already contains LoopSpecs");
+    }
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: source.id,
+      appId: source.appId,
+      action: "duplicate",
+      targetArtifactDigest: source.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...source.fieldMappingIds].sort(),
+        companyContextKeys: contextKeys
+      },
+      duplicate: existingOperation?.duplicate ?? {
+        fromUpdatedAt: source.updatedAt,
+        sourceArtifactDigest: source.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceFieldMappingsDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        derivedAppId,
+        operationsDigest,
+        targetInstallationId,
+        targetInstallationDigest: canonicalAppDigest(duplicate),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, targetInstallationId),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now: operationTime
     });
+    if (!operation.duplicate) throw new Error(`App duplicate recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const currentSource = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.duplicate || currentOperation.status === "completed") {
+          throw new Error(`App duplicate recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.duplicate;
+        if (
+          currentOperation.action !== "duplicate" ||
+          currentOperation.actor !== input.actor ||
+          currentSource.updatedAt !== recovery.fromUpdatedAt ||
+          currentSource.artifactDigest !== recovery.sourceArtifactDigest ||
+          canonicalAppDigest(currentSource) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, currentSource.id) !== recovery.sourceOwnershipDigest ||
+          recovery.derivedAppId !== derivedAppId ||
+          recovery.operationsDigest !== operationsDigest ||
+          recovery.targetInstallationId !== targetInstallationId ||
+          canonicalAppDigest(duplicate) !== recovery.targetInstallationDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...currentSource.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(configuration)) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App duplicate recovery record does not match the exact source or derived target");
+        }
+        if (registry.installations.some((candidate) =>
+          candidate.id === targetInstallationId || candidate.derivation?.derivedAppId === derivedAppId)) {
+          throw new Error(`Private derived app already exists outside this recovery: ${derivedAppId}`);
+        }
+        const currentMappings = await this.mappingStore.list();
+        if (fieldMappingInventoryDigest(currentMappings, currentSource.fieldMappingIds) !== recovery.sourceFieldMappingsDigest) {
+          throw new Error("Source App field mappings changed after duplicate recovery was prepared");
+        }
+        const context = currentOperation.desired.companyContextKeys.length > 0
+          ? await this.contextStore.get(this.workspaceId, this.companyId)
+          : undefined;
+        if (context) assertCompanyContextStillMatches(configuration, context);
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentTargetLoopIds = installationLoopIds(workspaceSnapshot.workspace, targetInstallationId);
+        const currentArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const targetAbsent = currentTargetLoopIds.length === 0;
+        const targetMaterialized =
+          canonicalAppDigest(currentTargetLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          installationLoopObservedInventoryDigest(currentArtifacts, currentTargetLoopIds) === recovery.targetLoopInventoryDigest;
+        if (!targetAbsent && !targetMaterialized) {
+          throw new Error("Private derived App LoopSpec topology changed after duplicate recovery was prepared");
+        }
+        if (targetAbsent) {
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts
+          });
+        }
+        const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, targetInstallationId);
+        const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        if (
+          canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+        ) {
+          throw new Error("Duplicate LoopSpec materialization did not produce the exact recorded target topology");
+        }
+
+        if (currentOperation.desired.fieldMappingIds.length > 0) {
+          await this.mappingStore.attachInstallation(currentOperation.desired.fieldMappingIds, targetInstallationId);
+          const attachedMappings = await this.mappingStore.list();
+          if (currentOperation.desired.fieldMappingIds.some((mappingId) =>
+            !attachedMappings.find((mapping) => mapping.id === mappingId)?.dependentInstallationIds.includes(targetInstallationId))) {
+            throw new Error("Duplicate field mappings were not attached to the exact derived installation");
+          }
+        }
+        if (context && currentOperation.desired.companyContextKeys.length > 0) {
+          await this.contextStore.attachConsumer({
+            workspaceId: this.workspaceId,
+            companyId: this.companyId,
+            contextKeys: currentOperation.desired.companyContextKeys,
+            installationId: targetInstallationId,
+            expectedRevision: context.revision,
+            actor: input.actor,
+            now: operationTime
+          });
+          const attachedContext = await this.contextStore.get(this.workspaceId, this.companyId);
+          if (currentOperation.desired.companyContextKeys.some((key) =>
+            !attachedContext.values.find((value) => value.key === key)?.consumerInstallationIds.includes(targetInstallationId))) {
+            throw new Error("Duplicate company context was not attached to the exact derived installation");
+          }
+        }
+
+        const targetAssets = mergeAssetOwnership(registry.assets, ownedAssets);
+        if (installationOwnershipDigest({ ...registry, assets: targetAssets }, targetInstallationId) !== recovery.targetOwnershipDigest) {
+          throw new Error("Duplicate ownership materialization does not match the recorded target");
+        }
+        const nextRevision = registry.revision + 1;
+        const receipt = createLifecycleReceipt(registry, {
+          installationId: targetInstallationId,
+          action: "duplicate",
+          actor: input.actor,
+          reason: "Created an independently configurable private derived installation with namespaced LoopSpecs.",
+          previousArtifactDigest: currentSource.artifactDigest,
+          resultingArtifactDigest: duplicate.artifactDigest,
+          evidenceRetained: true,
+          reversible: true,
+          createdAt: currentOperation.startedAt,
+          resultingRevision: nextRevision
+        });
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: nextRevision,
+          installations: [...registry.installations, duplicate].sort((left, right) => left.id.localeCompare(right.id)),
+          assets: targetAssets,
+          lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
+          updatedAt: currentOperation.startedAt
+        }, currentOperation.id, operationTime, receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: duplicate, receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, operationTime);
+      throw error;
+    }
   }
 
   async planUpdate(input: PlanAppUpdateInput): Promise<AppUpdatePlan> {
@@ -3333,6 +3518,15 @@ function fieldMappingAssetDigest(mapping: ConnectorFieldMapping): string {
   });
 }
 
+function fieldMappingInventoryDigest(mappings: ConnectorFieldMapping[], mappingIds: string[]): string {
+  const byId = new Map(mappings.map((mapping) => [mapping.id, mapping]));
+  return canonicalAppDigest([...mappingIds].sort().map((mappingId) => {
+    const mapping = byId.get(mappingId);
+    if (!mapping) throw new Error(`Field mapping inventory is missing ${mappingId}`);
+    return { mappingId, digest: fieldMappingAssetDigest(mapping) };
+  }));
+}
+
 function companyContextKeys(configuration: AppConfiguration): string[] {
   return [...new Set(Object.values(configuration.provenance).flatMap((provenance) =>
     provenance.layer === "company_context" && provenance.sourceRef ? [provenance.sourceRef] : []
@@ -3522,6 +3716,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     configure: existing.configure,
     overlay: existing.overlay,
     repair: existing.repair,
+    duplicate: existing.duplicate,
     uninstall: existing.uninstall,
     update: existing.update,
     rollback: existing.rollback,
@@ -3536,9 +3731,9 @@ function assertLifecyclePreparationSource(
   registry: AppInstallationRegistry,
   input: PrepareLifecycleOperationInput
 ): void {
-  const source = input.configure ?? input.overlay ?? input.repair ?? input.update ?? input.rollback ?? input.uninstall;
+  const source = input.configure ?? input.overlay ?? input.repair ?? input.duplicate ?? input.update ?? input.rollback ?? input.uninstall;
   if (!source) return;
-  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.repair?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
+  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.repair?.sourceArtifactDigest ?? input.duplicate?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
   const installation = requireInstallation(registry, input.installationId);
   if (
     installation.updatedAt !== source.fromUpdatedAt ||
@@ -3626,6 +3821,36 @@ function assertRepairReplayAuthority(
     receipt.installationId !== installation.id
   ) {
     throw new Error("Completed repair operation does not authorize this exact replay");
+  }
+}
+
+function assertDuplicateReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  derivedAppId: string,
+  operationsDigest: string,
+  expectedArtifactDigest: string,
+  expectedUpdatedAt: string
+): void {
+  if (
+    operation.action !== "duplicate" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.duplicate ||
+    operation.duplicate.derivedAppId !== derivedAppId ||
+    operation.duplicate.operationsDigest !== operationsDigest ||
+    operation.duplicate.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.duplicate.fromUpdatedAt !== expectedUpdatedAt ||
+    operation.duplicate.targetInstallationId !== installation.id ||
+    operation.duplicate.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "duplicate" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed duplicate operation does not authorize this exact replay");
   }
 }
 
