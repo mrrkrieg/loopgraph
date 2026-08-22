@@ -51,12 +51,17 @@ export async function approveAppOperationAction(input: {
   }
   if (!action.approvalRequired) throw new Error("Prepared App action does not require human approval");
   if (Date.parse(action.expiresAt) <= now.getTime()) throw new Error("Prepared App action has expired");
-  const priorApproval = (await input.actionStore.listEvents({
+  const lifecycleEvents = await input.actionStore.listEvents({
     workspaceId: input.workspaceId,
     actionId: action.id,
-    eventType: "approval_granted",
-    limit: 1
-  })).find((event) => event.approval && Date.parse(event.approval.expiresAt) > now.getTime());
+    limit: 100
+  });
+  const priorApproval = lifecycleEvents.find((event) =>
+    event.eventType === "approval_granted" &&
+    event.approval &&
+    Date.parse(event.approval.expiresAt) > now.getTime() &&
+    !lifecycleEvents.some((candidate) => candidate.eventType === "commit_failed" && candidate.occurredAt >= event.occurredAt)
+  );
   if (priorApproval) throw new Error("Prepared App action already has an approval receipt");
 
   const registry = await input.installationStore.read();

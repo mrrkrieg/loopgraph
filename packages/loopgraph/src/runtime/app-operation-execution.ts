@@ -1,15 +1,23 @@
 import {
   APP_OPERATION_EXECUTION_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
+  APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+  APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION,
   CONNECTOR_BROKER_PROTOCOL_VERSION,
+  appOperationActionCommitResultSchema,
+  appOperationActionEventSchema,
   appOperationExecutionResultSchema,
   canonicalAppDigest,
+  connectorActionCommitRequestSchema,
   connectorActionPrepareRequestSchema,
   connectorBrokerRequestSchema,
   contentHash,
   type AppConnectorOperationBinding,
+  type AppOperationAction,
   type AppOperationExecutionResult,
+  type AppOperationActionCommitResult,
   type ConnectionInstance,
+  type ConnectorActionCommitRequest,
   type ConnectorActionPrepareRequest,
   type ConnectorActionPrepareResponse,
   type ConnectorBrokerRequest,
@@ -30,6 +38,7 @@ const ACTIVE_ROUTE_JOB_STATUSES = new Set(["claimed", "dispatched", "running"]);
 export type AppOperationTransport = {
   execute(request: ConnectorBrokerRequest): Promise<ConnectorBrokerResponse>;
   prepareAction(request: ConnectorActionPrepareRequest): Promise<ConnectorActionPrepareResponse>;
+  commitAction(request: ConnectorActionCommitRequest): Promise<ConnectorBrokerResponse>;
 };
 
 export type InvokeAppOperationInput = {
@@ -40,6 +49,15 @@ export type InvokeAppOperationInput = {
   agentInstanceId: string;
   callId: string;
   input: Record<string, unknown>;
+  now?: Date;
+};
+
+export type CommitAppOperationActionInput = {
+  installationId: string;
+  actionId: string;
+  routeJobId: string;
+  agentInstanceId: string;
+  callId: string;
   now?: Date;
 };
 
@@ -343,6 +361,266 @@ export class AppOperationExecutionService {
     return execution;
   }
 
+  async commitAction(input: CommitAppOperationActionInput): Promise<AppOperationActionCommitResult> {
+    const now = input.now ?? new Date();
+    const action = await this.dependencies.actionStore.get(this.dependencies.workspaceId, input.actionId);
+    if (!action || action.installationId !== input.installationId) {
+      throw new Error("Prepared App action is unavailable for this installation");
+    }
+    if (action.routeJobId !== input.routeJobId || action.agentInstanceId !== input.agentInstanceId) {
+      throw new Error("App action commit does not match the routed Hermes assignment");
+    }
+    if (Date.parse(action.expiresAt) <= now.getTime()) throw new Error("Prepared App action has expired");
+    const priorEvents = await this.dependencies.actionStore.listEvents({
+      workspaceId: this.dependencies.workspaceId,
+      actionId: action.id,
+      limit: 100
+    });
+    if (priorEvents.some((event) => event.eventType === "commit_succeeded")) {
+      throw new Error("Prepared App action has already been committed");
+    }
+    const incompleteCommit = priorEvents.find((event) =>
+      event.eventType === "commit_requested" && event.commit &&
+      !priorEvents.some((candidate) =>
+        ["commit_succeeded", "commit_failed"].includes(candidate.eventType) &&
+        candidate.commit?.requestId === event.commit?.requestId
+      )
+    );
+    if (incompleteCommit) throw new Error("Prepared App action commit is already in progress or requires reconciliation");
+    const approval = priorEvents.find((event) =>
+      event.eventType === "approval_granted" &&
+      event.approval &&
+      Date.parse(event.approval.expiresAt) > now.getTime() &&
+      !priorEvents.some((candidate) => candidate.eventType === "commit_failed" && candidate.occurredAt >= event.occurredAt)
+    )?.approval;
+    if (action.approvalRequired && !approval) {
+      throw new Error("Prepared App action requires an unexpired App-owned approval receipt");
+    }
+
+    const resolution = await this.dependencies.appService.resolveOperation({
+      installationId: action.installationId,
+      loopId: action.loopId,
+      capability: action.capability,
+      now
+    });
+    const binding = resolution.binding;
+    if (resolution.disposition !== "prepare_action" || !binding || binding.executor !== "connector_broker" ||
+      !binding.connectionId || !binding.brokerCapability) {
+      throw new Error("App action no longer resolves to an approval-gated Connector Broker write");
+    }
+    if (resolution.appId !== action.appId || resolution.artifactDigest !== action.artifactDigest ||
+      resolution.loopVersionHash !== action.loopVersionHash || resolution.resolutionDigest !== action.resolutionDigest ||
+      binding.providerId !== action.providerBinding.providerId ||
+      binding.connectionId !== action.providerBinding.connectionId ||
+      binding.brokerCapability !== action.providerBinding.brokerCapability ||
+      binding.operation !== action.providerBinding.operation) {
+      throw new Error("App action no longer matches the pinned artifact, LoopSpec, or provider binding");
+    }
+
+    const job = await this.dependencies.routingStore.getRouteJob(action.routeJobId);
+    if (!job || job.id !== input.routeJobId || job.loopId !== action.loopId ||
+      job.executionTarget.runtime !== "hermes" || !ACTIVE_ROUTE_JOB_STATUSES.has(job.status) ||
+      !job.executionTarget.requiredCapabilities.includes(action.capability) ||
+      !["execute_with_approval", "autonomous_low_risk"].includes(job.activationMode)) {
+      throw new Error("App action route job is unavailable or no longer executable");
+    }
+    const expectedShortHash = action.loopVersionHash.slice("sha256:".length, "sha256:".length + 16);
+    if (job.loopSpecHash !== expectedShortHash) throw new Error("App action route job is bound to a stale LoopSpec version");
+    const agent = await selectHermesAgentForExecution({
+      store: this.dependencies.operationsStore,
+      workspaceId: this.dependencies.workspaceId,
+      environment: job.executionTarget.environment,
+      requiredCapabilities: [action.capability],
+      loopId: action.loopId,
+      preferredAgentInstanceId: input.agentInstanceId,
+      now
+    });
+    if (!agent || agent.id !== action.agentInstanceId ||
+      (job.executionTarget.preferredAgentInstanceId && job.executionTarget.preferredAgentInstanceId !== agent.id)) {
+      throw new Error("Assigned Hermes agent is unavailable, stale, or no longer eligible for this App action");
+    }
+    const [problem, receipt] = await Promise.all([
+      this.dependencies.routingStore.getBusinessProblem(job.problemId),
+      this.dependencies.routingStore.getEventReceipt(job.eventId)
+    ]);
+    if (!problem || !receipt ||
+      problem.workspaceId !== this.dependencies.workspaceId || problem.companyId !== this.dependencies.companyId ||
+      receipt.event.workspaceId !== this.dependencies.workspaceId || receipt.event.companyId !== this.dependencies.companyId ||
+      problem.subject.type !== receipt.event.subject.type || problem.subject.id !== receipt.event.subject.id ||
+      receipt.event.source === "loopgraph" || receipt.event.normalizedPayload.notificationOnly === true) {
+      throw new Error("App action company problem or source event is unavailable or out of scope");
+    }
+    if (action.companyId !== this.dependencies.companyId || action.companyObject.type !== problem.subject.type ||
+      action.companyObject.identityDigest !== canonicalAppDigest({ type: problem.subject.type, id: problem.subject.id })) {
+      throw new Error("App action company object no longer matches the routed business problem");
+    }
+    if (agent.organizationId && this.dependencies.tenant && agent.organizationId !== this.dependencies.tenant.organizationId) {
+      throw new Error("Assigned Hermes agent belongs to another organization");
+    }
+    if (this.dependencies.tenant && this.dependencies.tenant.projectKey !== this.dependencies.workspaceId) {
+      throw new Error("Connector tenant project does not match the App workspace");
+    }
+    await requireDurableHermesAssignment({
+      store: this.dependencies.operationsStore,
+      workspaceId: this.dependencies.workspaceId,
+      companyId: this.dependencies.companyId,
+      organizationId: this.dependencies.tenant?.organizationId,
+      agentInstanceId: agent.id,
+      job
+    });
+
+    const connection = requireCurrentBrokerConnection({
+      connections: this.dependencies.connections,
+      binding,
+      capability: action.capability
+    });
+    const environment = brokerEnvironmentForRoute(job.executionTarget.environment);
+    if (connection.brokerEnvironment !== environment || environment !== action.environment) {
+      throw new Error("App action connection environment no longer matches the routed job");
+    }
+    const tenant = requireConnectorTenant(this.dependencies.tenant);
+    const requestIdentity = contentHash({
+      workspaceId: this.dependencies.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      routeJobId: job.id,
+      agentInstanceId: agent.id,
+      callId: input.callId
+    });
+    const requestId = `appcommit_${requestIdentity}`;
+    const idempotencyKey = `appcommit_call_${requestIdentity}`;
+    if (priorEvents.some((event) => event.eventType === "commit_failed" && event.commit?.requestId === requestId)) {
+      throw new Error("This App action commit call already failed; obtain any required new approval and use a new call identity");
+    }
+    const issuedAt = now.toISOString();
+    const context = {
+      workspaceId: this.dependencies.workspaceId,
+      environment,
+      agentInstanceId: agent.id,
+      companyObject: { type: problem.subject.type, id: problem.subject.id },
+      loopId: action.loopId,
+      loopSpecHash: action.loopVersionHash.slice("sha256:".length),
+      routeJobId: job.id,
+      activationMode: "execute" as const
+    };
+    const envelope = {
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId,
+      idempotencyKey,
+      tenant,
+      actor: { type: "workload" as const, subject: `hermes-agent:${agent.id}` },
+      providerId: action.providerBinding.providerId,
+      installationId: action.providerBinding.connectionId,
+      capability: action.providerBinding.brokerCapability,
+      operation: action.providerBinding.operation,
+      context,
+      issuedAt,
+      expiresAt: new Date(now.getTime() + 2 * 60_000).toISOString(),
+      correlationId: boundedCorrelationId(job.correlationId, requestIdentity),
+      preparedActionId: action.brokerPreparedActionId,
+      preparedActionFingerprint: action.brokerPreparedActionFingerprint,
+      ...(approval ? { approvalReceiptId: approval.connectorApprovalReceiptId } : {})
+    };
+    const commitRequest = connectorActionCommitRequestSchema.parse(envelope);
+    await this.dependencies.actionStore.recordEvent(commitLifecycleEvent({
+      action,
+      eventType: "commit_requested",
+      actorSubject: agent.id,
+      requestId,
+      idempotencyKey,
+      occurredAt: issuedAt
+    }));
+
+    let brokerResponse: ConnectorBrokerResponse;
+    try {
+      brokerResponse = await requireBroker(this.dependencies.broker).commitAction(commitRequest);
+      assertBrokerResponseMatchesRequest({
+        response: brokerResponse,
+        requestId,
+        tenant,
+        envelope,
+        disposition: "commit_action"
+      });
+    } catch (error) {
+      await this.dependencies.actionStore.recordEvent(commitLifecycleEvent({
+        action,
+        eventType: "commit_failed",
+        actorSubject: agent.id,
+        requestId,
+        idempotencyKey,
+        reasonCode: "broker_transport_error",
+        occurredAt: (input.now ?? new Date()).toISOString()
+      }));
+      throw error;
+    }
+    const completedAt = (input.now ?? new Date()).toISOString();
+    await this.dependencies.actionStore.recordEvent(commitLifecycleEvent({
+      action,
+      eventType: brokerResponse.status === "succeeded" ? "commit_succeeded" : "commit_failed",
+      actorSubject: agent.id,
+      requestId,
+      idempotencyKey,
+      connectorReceiptId: brokerResponse.receipt.receiptId,
+      reasonCode: brokerResponse.status === "succeeded" ? undefined : brokerResponse.error?.code ?? "broker_commit_failed",
+      occurredAt: completedAt
+    }));
+    const base = {
+      schemaVersion: APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION,
+      workspaceId: this.dependencies.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      loopId: action.loopId,
+      routeJobId: job.id,
+      agentInstanceId: agent.id,
+      callId: input.callId,
+      requestId,
+      idempotencyKey,
+      status: brokerResponse.status,
+      brokerResponse,
+      completedAt
+    };
+    return appOperationActionCommitResultSchema.parse({
+      ...base,
+      commitDigest: canonicalAppDigest({ ...base, commitDigest: undefined })
+    });
+  }
+
+}
+
+function commitLifecycleEvent(input: {
+  action: AppOperationAction;
+  eventType: "commit_requested" | "commit_succeeded" | "commit_failed";
+  actorSubject: string;
+  requestId: string;
+  idempotencyKey: string;
+  connectorReceiptId?: string;
+  reasonCode?: string;
+  occurredAt: string;
+}) {
+  const eventBase = {
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: `appactevt_${contentHash({ actionId: input.action.id, requestId: input.requestId, eventType: input.eventType }).slice(0, 48)}`,
+    workspaceId: input.action.workspaceId,
+    installationId: input.action.installationId,
+    actionId: input.action.id,
+    actionRecordDigest: input.action.recordDigest,
+    eventType: input.eventType,
+    actor: { type: "workload" as const, subject: input.actorSubject },
+    commit: {
+      requestId: input.requestId,
+      idempotencyKey: input.idempotencyKey,
+      ...(input.connectorReceiptId ? { connectorReceiptId: input.connectorReceiptId } : {}),
+      outcome: input.eventType === "commit_requested" ? "requested" as const
+        : input.eventType === "commit_succeeded" ? "succeeded" as const : "failed" as const,
+      ...(input.reasonCode ? { reasonCode: input.reasonCode } : {})
+    },
+    occurredAt: input.occurredAt
+  };
+  return appOperationActionEventSchema.parse({
+    ...eventBase,
+    eventDigest: canonicalAppDigest({ ...eventBase, eventDigest: undefined })
+  });
 }
 
 async function requireDurableHermesAssignment(input: {
@@ -399,7 +677,7 @@ function assertBrokerResponseMatchesRequest(input: {
       activationMode: "execute";
     };
   };
-  disposition: "invoke_read" | "prepare_action";
+  disposition: "invoke_read" | "prepare_action" | "commit_action";
 }) {
   const { response, envelope } = input;
   const receipt = response.receipt;

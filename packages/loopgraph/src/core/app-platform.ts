@@ -35,6 +35,7 @@ export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-
 export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
 export const APP_OPERATION_ACTION_SCHEMA_VERSION = "loopgraph-app-operation-action/v1alpha1" as const;
 export const APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION = "loopgraph-app-operation-action-event/v1alpha1" as const;
+export const APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION = "loopgraph-app-operation-action-commit/v1alpha1" as const;
 export const APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION = "loopgraph-app-runtime-operation-response/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
@@ -1059,6 +1060,30 @@ export const appOperationActionEventSchema = z.object({
   }
 });
 
+export const appOperationActionCommitResultSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  actionId: appIdSchema,
+  loopId: appIdSchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160),
+  requestId: z.string().min(8).max(128),
+  idempotencyKey: z.string().min(8).max(192),
+  status: z.enum(["succeeded", "denied", "failed"]),
+  brokerResponse: connectorBrokerResponseSchema,
+  completedAt: isoDateTimeSchema,
+  commitDigest: artifactDigestSchema
+}).strict().superRefine((commit, ctx) => {
+  if (commit.status !== commit.brokerResponse.status || commit.requestId !== commit.brokerResponse.requestId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Broker response does not match the App action commit result" });
+  }
+  if (canonicalAppDigest({ ...commit, commitDigest: undefined }) !== commit.commitDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commitDigest"], message: "App action commit digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1588,6 +1613,7 @@ export type AppRuntimeOperationResponse = z.infer<typeof appRuntimeOperationResp
 export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionResultSchema>;
 export type AppOperationAction = z.infer<typeof appOperationActionSchema>;
 export type AppOperationActionEvent = z.infer<typeof appOperationActionEventSchema>;
+export type AppOperationActionCommitResult = z.infer<typeof appOperationActionCommitResultSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1637,6 +1663,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppOperationExecutionResult: zodToJsonSchema(appOperationExecutionResultSchema, "AppOperationExecutionResult") as Record<string, unknown>,
     AppOperationAction: zodToJsonSchema(appOperationActionSchema, "AppOperationAction") as Record<string, unknown>,
     AppOperationActionEvent: zodToJsonSchema(appOperationActionEventSchema, "AppOperationActionEvent") as Record<string, unknown>,
+    AppOperationActionCommitResult: zodToJsonSchema(appOperationActionCommitResultSchema, "AppOperationActionCommitResult") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,

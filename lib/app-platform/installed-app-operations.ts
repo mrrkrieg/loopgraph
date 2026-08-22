@@ -308,11 +308,17 @@ function effectiveActionStatus(
   if (Date.parse(action.expiresAt) <= now.getTime()) return "expired";
   if (events.some((event) => event.eventType === "commit_succeeded")) return "committed";
   if (events.some((event) => event.eventType === "revoked")) return "revoked";
+  const latestFailureAt = events
+    .filter((event) => event.eventType === "commit_failed")
+    .map((event) => event.occurredAt)
+    .sort()
+    .at(-1);
+  const latestApproval = events
+    .filter((event) => event.eventType === "approval_granted" && event.approval && Date.parse(event.approval.expiresAt) > now.getTime())
+    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))[0];
+  if (latestApproval && (!latestFailureAt || latestApproval.occurredAt > latestFailureAt)) return "approved";
   if (events.some((event) => event.eventType === "commit_requested")) {
-    return events.some((event) => event.eventType === "commit_failed") ? "failed" : "committing";
-  }
-  if (events.some((event) => event.eventType === "approval_granted" && event.approval && Date.parse(event.approval.expiresAt) > now.getTime())) {
-    return "approved";
+    return latestFailureAt ? "failed" : "committing";
   }
   return "prepared";
 }

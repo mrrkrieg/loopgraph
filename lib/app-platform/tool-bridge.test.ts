@@ -207,6 +207,37 @@ describe("hosted app tool bridge", () => {
     });
   });
 
+  it("binds App action commits to the same trusted machine tenant and distributed ledgers", async () => {
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    mocks.runtimeTool.mockImplementation(async (name, input, options) => {
+      expect(name).toBe("loopgraph_app_operation_action_commit");
+      expect(input).toMatchObject({
+        workspaceId: "main",
+        companyId: "main",
+        installationId: "installed-sales-app",
+        actionId: "appact_12345678"
+      });
+      expect(options).toMatchObject({
+        connectorBroker: mocks.externalBroker,
+        connectorTenant: { organizationId: "123e4567-e89b-12d3-a456-426614174000", projectKey: "main" },
+        routingStore: mocks.routingStore,
+        hermesOperationsStore: mocks.hermesOperationsStore,
+        appOperationActionStore: mocks.appOperationActionStore,
+        outcomeStore: mocks.outcomeStore,
+        connections: []
+      });
+      return { status: "succeeded" };
+    });
+
+    await callLoopgraphAppTool("loopgraph_app_operation_action_commit", {
+      installationId: "installed-sales-app",
+      actionId: "appact_12345678",
+      routeJobId: "job-sales-write",
+      agentInstanceId: "hermes-sales",
+      callId: "commit-1"
+    });
+  });
+
   it("allows internal Loopgraph reads without requiring an external provider Broker", async () => {
     vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
     mocks.getExternalBroker.mockReturnValue(undefined);

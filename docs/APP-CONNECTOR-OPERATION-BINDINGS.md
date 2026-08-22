@@ -149,8 +149,15 @@ The installed App operations page approves an action by its Loopgraph App action
 
 Approval requires the `integrations.manage` permission and hosted step-up authentication. Loopgraph appends a secret-free `approval_granted` lifecycle event containing the action-record digest, approval receipt identity, expiry, accountable actor, and a digest of the review reason. Review text remains in the authoritative Connector Broker control plane. An approval does not run the provider write; the later Hermes commit path must still revalidate the exact route and consume the receipt.
 
-This executor has no provider-write commit method and no arbitrary HTTP fallback. The
-workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
+This executor has no arbitrary HTTP fallback. Its separate
+`loopgraph_app_operation_action_commit` method and workload-authenticated
+`/api/hermes/apps/operations/commit` route accept only the App installation/action, original route
+job, assigned agent, and stable call identity. They reload the immutable action and unexpired
+approval event, re-resolve the pinned App operation, and revalidate the LoopSpec, company object,
+route, durable assignment, connection health/scopes/environment, Broker prepared-action identity,
+and fingerprint before deriving the commit request. Commit-requested and terminal Broker receipt
+facts are appended to the lifecycle ledger; canonical provider input remains only in Connector
+Broker storage. The workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
 operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the
 caller. That route requires its own durable, tenant-scoped `hermes.app_operations` workload grant;
 the broader Connector Broker capability cannot substitute for it. The machine tenant is derived
@@ -172,10 +179,10 @@ content-addressed, so an exact retry is idempotent but a later pause/resume cycl
 transaction. The LoopSpec change is committed before the App registry state: if registry persistence
 is interrupted, the older App state remains the stricter provider-operation authority.
 
-This binding and executor prove that a routed job has a bounded implementation and current trusted
-connection. They do not prove that a new OAuth application has been registered correctly or that a
-prepared write should be approved. Those facts still require live tenant onboarding, sandbox
-verification, webhook/transformer validation, and the existing staged activation and action-commit
+This binding and executor prove that a routed job has a bounded implementation, current trusted
+connection, and exact approval-bound commit path. They do not prove that a new OAuth application has
+been registered correctly or that a prepared write should be approved. Those facts still require
+live tenant onboarding, sandbox verification, webhook/transformer validation, and the existing staged activation and action-commit
 gates. The non-read `loopgraph.graph-change.propose` operation remains behind the existing semantic
 graph proposal, review, and transaction boundary; it is not silently treated as a read or a provider
 operation.

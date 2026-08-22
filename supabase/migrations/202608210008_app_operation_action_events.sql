@@ -107,6 +107,37 @@ begin
         and prepared.capability = v_action#>>'{providerBinding,brokerCapability}'
         and prepared.operation = v_action#>>'{providerBinding,operation}'
   ) then raise exception 'App action approval event does not match a Connector Broker approval receipt'; end if;
+  if p_event->>'eventType' like 'commit_%' and (
+    p_event#>>'{actor,type}' <> 'workload'
+    or p_event#>>'{actor,subject}' <> v_action->>'agentInstanceId'
+    or coalesce(p_event#>>'{commit,requestId}', '') = ''
+    or coalesce(p_event#>>'{commit,idempotencyKey}', '') = ''
+  ) then raise exception 'App action commit event does not match its assigned Hermes agent'; end if;
+  if p_event->>'eventType' in ('commit_succeeded', 'commit_failed')
+    and p_event#>>'{commit,connectorReceiptId}' is not null
+    and not exists (
+      select 1
+        from public.connector_operation_receipts operation_receipt
+        where operation_receipt.organization_id = p_organization_id
+          and operation_receipt.project_key = p_project_key
+          and operation_receipt.request_id = p_event#>>'{commit,requestId}'
+          and operation_receipt.idempotency_key = p_event#>>'{commit,idempotencyKey}'
+          and operation_receipt.response#>>'{receipt,receiptId}' = p_event#>>'{commit,connectorReceiptId}'
+          and operation_receipt.installation_id = v_action#>>'{providerBinding,connectionId}'
+          and operation_receipt.provider_id = v_action#>>'{providerBinding,providerId}'
+          and operation_receipt.capability = v_action#>>'{providerBinding,brokerCapability}'
+          and operation_receipt.operation = v_action#>>'{providerBinding,operation}'
+          and operation_receipt.actor_subject = 'hermes-agent:' || (v_action->>'agentInstanceId')
+          and operation_receipt.workspace_id = p_workspace_id
+          and operation_receipt.loop_id = v_action->>'loopId'
+          and operation_receipt.loop_spec_hash = replace(v_action->>'loopVersionHash', 'sha256:', '')
+          and operation_receipt.route_job_id = v_action->>'routeJobId'
+          and (
+            (p_event->>'eventType' = 'commit_succeeded' and operation_receipt.response->>'status' = 'succeeded')
+            or (p_event->>'eventType' = 'commit_failed' and operation_receipt.response->>'status' in ('denied', 'failed'))
+          )
+    )
+  then raise exception 'App action commit event does not match a Connector Broker receipt'; end if;
 
   insert into public.loopgraph_app_operation_action_events (
     organization_id,

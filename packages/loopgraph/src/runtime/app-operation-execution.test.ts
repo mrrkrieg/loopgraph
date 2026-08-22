@@ -6,6 +6,7 @@ import {
   CONNECTOR_BROKER_PROTOCOL_VERSION,
   CONNECTOR_AUDIT_RECEIPT_VERSION,
   CONNECTOR_PREPARED_ACTION_VERSION,
+  APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
   APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION,
   canonicalAppDigest,
   businessProblemSchema,
@@ -14,6 +15,7 @@ import {
   hermesExecutionEventSchema,
   routeJobSchema,
   type AppOperationResolution,
+  type ConnectorActionCommitRequest,
   type ConnectorActionPrepareRequest,
   type ConnectorBrokerRequest
 } from "../core";
@@ -135,6 +137,106 @@ describe("App operation execution", () => {
     });
     expect(JSON.stringify(actions[0])).not.toContain("lifecycleStage");
     expect(JSON.stringify(actions[0])).not.toContain("qualified");
+  });
+
+  it("commits only the approved immutable App action through its original route and agent", async () => {
+    const fixture = await createFixture("prepare_action", {
+      logicalCapability: "crm.lead.write",
+      brokerCapability: "provider.action.execute",
+      operation: "crm.contacts.update"
+    });
+    await fixture.service.invoke({
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.write",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-prepare-lead-commit",
+      input: { leadId: "lead-42", lifecycleStage: "qualified" },
+      now: NOW
+    });
+    const action = (await fixture.actionStore.list({ workspaceId: "workspace-sales" }))[0]!;
+    const approvalBase = {
+      schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+      id: "appactevt_approval123",
+      workspaceId: action.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      eventType: "approval_granted" as const,
+      actor: { type: "user" as const, subject: "reviewer-1" },
+      approval: {
+        connectorApprovalReceiptId: "connector-approval-12345678",
+        reasonDigest: canonicalAppDigest("reviewed"),
+        expiresAt: "2026-08-20T12:01:30.000Z"
+      },
+      occurredAt: NOW.toISOString()
+    };
+    await fixture.actionStore.recordEvent({
+      ...approvalBase,
+      eventDigest: canonicalAppDigest({ ...approvalBase, eventDigest: undefined })
+    });
+
+    const result = await fixture.service.commitAction({
+      installationId: action.installationId,
+      actionId: action.id,
+      routeJobId: action.routeJobId,
+      agentInstanceId: action.agentInstanceId,
+      callId: "commit-lead-update-1",
+      now: NOW
+    });
+
+    expect(result).toMatchObject({ status: "succeeded", actionId: action.id, routeJobId: action.routeJobId });
+    expect(fixture.broker.commitAction).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: "hubspot",
+      installationId: "hubspot-production",
+      capability: "provider.action.execute",
+      operation: "crm.contacts.update",
+      preparedActionId: action.brokerPreparedActionId,
+      preparedActionFingerprint: action.brokerPreparedActionFingerprint,
+      approvalReceiptId: "connector-approval-12345678",
+      actor: { type: "workload", subject: "hermes-agent:hermes-sales" },
+      context: expect.objectContaining({ routeJobId: action.routeJobId, companyObject: { type: "lead", id: "lead-42" } })
+    }));
+    expect((await fixture.actionStore.listEvents({ workspaceId: "workspace-sales", actionId: action.id }))
+      .map((event) => event.eventType)).toEqual(expect.arrayContaining(["approval_granted", "commit_requested", "commit_succeeded"]));
+  });
+
+  it("refuses commit when approval is missing or the caller changes the route identity", async () => {
+    const fixture = await createFixture("prepare_action", {
+      logicalCapability: "crm.lead.write",
+      brokerCapability: "provider.action.execute",
+      operation: "crm.contacts.update"
+    });
+    await fixture.service.invoke({
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.write",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-prepare-without-approval",
+      input: { leadId: "lead-42", lifecycleStage: "qualified" },
+      now: NOW
+    });
+    const action = (await fixture.actionStore.list({ workspaceId: "workspace-sales" }))[0]!;
+
+    await expect(fixture.service.commitAction({
+      installationId: action.installationId,
+      actionId: action.id,
+      routeJobId: action.routeJobId,
+      agentInstanceId: action.agentInstanceId,
+      callId: "commit-without-approval",
+      now: NOW
+    })).rejects.toThrow(/requires an unexpired/i);
+    await expect(fixture.service.commitAction({
+      installationId: action.installationId,
+      actionId: action.id,
+      routeJobId: "caller-selected-route",
+      agentInstanceId: action.agentInstanceId,
+      callId: "commit-wrong-route",
+      now: NOW
+    })).rejects.toThrow(/does not match the routed/i);
+    expect(fixture.broker.commitAction).not.toHaveBeenCalled();
   });
 
   it("executes an allowlisted Loopgraph runtime read through the same durable route authority", async () => {
@@ -404,6 +506,13 @@ async function createFixture(
         riskClass: "write" as const
       },
       receipt: auditReceipt(request)
+    })),
+    commitAction: vi.fn(async (request: ConnectorActionCommitRequest) => ({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      status: "succeeded" as const,
+      result: { leadId: "lead-42", lifecycleStage: "qualified" },
+      receipt: auditReceipt(request)
     }))
   };
   const runtime: AppRuntimeOperationTransport = {
@@ -465,7 +574,7 @@ async function createFixture(
   };
 }
 
-function auditReceipt(request: ConnectorBrokerRequest | ConnectorActionPrepareRequest) {
+function auditReceipt(request: ConnectorBrokerRequest | ConnectorActionPrepareRequest | ConnectorActionCommitRequest) {
   if (!request.context) throw new Error("Test Broker request requires routed context");
   return {
     schemaVersion: CONNECTOR_AUDIT_RECEIPT_VERSION,

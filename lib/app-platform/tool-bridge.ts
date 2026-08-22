@@ -37,6 +37,7 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
   "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_action_commit",
   "loopgraph_connector_schema_record",
   "loopgraph_app_field_mappings_get",
   "loopgraph_app_field_mapping_confirm",
@@ -45,12 +46,14 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
-  "loopgraph_app_operation_invoke"
+  "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_action_commit"
 ]);
 
 const APP_ACTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_operation_invoke",
-  "loopgraph_app_operation_actions_get"
+  "loopgraph_app_operation_actions_get",
+  "loopgraph_app_operation_action_commit"
 ]);
 
 const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
@@ -110,7 +113,7 @@ export async function callLoopgraphAppTool(
     });
   }
   const projectRoot = pathFromInput(effectiveInput, options.projectRoot);
-  const operationExecutionOptions = name === "loopgraph_app_operation_invoke"
+  const operationExecutionOptions = ["loopgraph_app_operation_invoke", "loopgraph_app_operation_action_commit"].includes(name)
     ? await trustedOperationExecution(projectRoot)
     : undefined;
   const callOptions = {

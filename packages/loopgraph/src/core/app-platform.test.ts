@@ -443,7 +443,8 @@ describe("Loopgraph App Platform contracts", () => {
       "AppEvalJudgment",
       "AppPromotionRecommendation",
       "AppOperationAction",
-      "AppOperationActionEvent"
+      "AppOperationActionEvent",
+      "AppOperationActionCommitResult"
     ]));
     expect(JSON.stringify(schemas.LoopPackManifest)).toContain("loopgraph-pack/v1alpha1");
   });

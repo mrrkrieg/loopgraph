@@ -16,6 +16,9 @@ describe("App operation action events migration", () => {
     expect(sql).toContain("does not match its immutable parent");
     expect(sql).toContain("connector_action_approvals approval");
     expect(sql).toContain("App action approval event does not match a Connector Broker approval receipt");
+    expect(sql).toContain("App action commit event does not match its assigned Hermes agent");
+    expect(sql).toContain("connector_operation_receipts operation_receipt");
+    expect(sql).toContain("App action commit event does not match a Connector Broker receipt");
     expect(sql).toContain("'canonicalInput'");
     expect(sql).toContain("private.append_security_audit_event");
     expect(sql).toContain("security definer\nset search_path = ''");

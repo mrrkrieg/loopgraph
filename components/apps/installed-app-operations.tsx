@@ -108,7 +108,7 @@ export function InstalledAppActionsPanel({ operations, canApproveActions = false
                   <span>Receipt {action.brokerPrepareReceiptId}</span>
                 </div>
               </details>
-              {action.effectiveStatus === "prepared" && action.approvalRequired && canApproveActions ? (
+              {["prepared", "failed"].includes(action.effectiveStatus) && action.approvalRequired && canApproveActions ? (
                 <form action={approveInstalledAppOperationAction} className="mt-4 rounded-md border border-orange-200 bg-orange-50 p-3">
                   <input name="installationId" type="hidden" value={action.installationId} />
                   <input name="actionId" type="hidden" value={action.id} />
