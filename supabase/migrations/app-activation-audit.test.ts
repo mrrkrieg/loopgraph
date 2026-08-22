@@ -11,6 +11,7 @@ describe("hosted App activation audit migration", () => {
     expect(sql).toContain("'app.activation.approved'");
     expect(sql).toContain("'app.activation.consumed'");
     expect(sql).toContain("'app_activation_approval'");
+    expect(sql).toContain("^activation-approval\\.[0-9a-f]{16}$");
     expect(sql).toContain("pg_column_size(p_audit_context) > 4096");
     expect(sql).toContain("'installationIdDigest', 'appIdDigest', 'artifactDigest', 'approvalDigest'");
     expect(sql).toContain("'fromState', 'requestedMode', 'evidenceRefCount', 'expiresAt'");

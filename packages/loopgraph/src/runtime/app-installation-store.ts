@@ -78,7 +78,7 @@ const appActivationMutationAuditContextSchema = z.object({
     "app.activation.consumed"
   ]),
   targetType: z.literal("app_activation_approval"),
-  targetId: z.string().regex(/^activation-approval\.[0-9a-f]{64}$/),
+  targetId: z.string().regex(/^activation-approval\.[0-9a-f]{16}$/),
   metadata: z.object({
     installationIdDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     appIdDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),

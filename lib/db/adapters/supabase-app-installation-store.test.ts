@@ -130,7 +130,7 @@ describe("Supabase App installation store", () => {
   it("commits bounded activation authority metadata through the audited registry RPC", async () => {
     const fake = new InstallationSupabase();
     const store = new SupabaseAppInstallationStore(fake.client, scope);
-    const approvalId = `activation-approval.${"c".repeat(64)}`;
+    const approvalId = `activation-approval.${"c".repeat(16)}`;
     await store.withExclusiveUpdate(async (registry) => ({
       registry: {
         ...registry,
@@ -180,7 +180,7 @@ describe("Supabase App installation store", () => {
       actor: "security-approver",
       action: "app.activation.approved",
       targetType: "app_activation_approval",
-      targetId: `activation-approval.${"c".repeat(64)}`,
+      targetId: `activation-approval.${"c".repeat(16)}`,
       metadata: {
         installationIdDigest: `sha256:${"d".repeat(64)}`,
         appIdDigest: `sha256:${"e".repeat(64)}`,

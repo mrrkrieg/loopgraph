@@ -57,7 +57,7 @@ begin
     then raise exception 'invalid Loopgraph App onboarding audit context'; end if;
   elsif p_audit_context->>'action' in ('app.activation.approved', 'app.activation.consumed') then
     if p_audit_context->>'targetType' <> 'app_activation_approval'
-      or coalesce(p_audit_context->>'targetId', '') !~ '^activation-approval\.[0-9a-f]{64}$'
+      or coalesce(p_audit_context->>'targetId', '') !~ '^activation-approval\.[0-9a-f]{16}$'
       or p_audit_context->'metadata' - array[
         'installationIdDigest', 'appIdDigest', 'artifactDigest', 'approvalDigest',
         'fromState', 'requestedMode', 'evidenceRefCount', 'expiresAt'
