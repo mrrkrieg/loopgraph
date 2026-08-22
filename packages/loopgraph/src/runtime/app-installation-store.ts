@@ -23,7 +23,7 @@ export const appLifecycleOperationSchema = z.object({
   idempotencyKey: z.string().min(16).max(160),
   installationId: z.string().min(1).max(160),
   appId: z.string().min(1).max(160),
-  action: z.enum(["install", "uninstall", "activate", "pause", "resume"]),
+  action: z.enum(["install", "uninstall", "activate", "pause", "resume", "rollback"]),
   targetArtifactDigest: z.string().min(16).max(160),
   status: z.enum(["prepared", "requires_reconciliation", "completed"]),
   desired: z.object({
@@ -54,6 +54,19 @@ export const appLifecycleOperationSchema = z.object({
     remainingLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     remainingLoopIds: z.array(z.string().min(1).max(160)).max(100)
   }).strict().optional(),
+  rollback: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceLoopIds: z.array(z.string().min(1).max(160)).max(100),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
   actor: z.string().min(1).max(160),
   startedAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -70,8 +83,11 @@ export const appLifecycleOperationSchema = z.object({
   if ((operation.status === "requires_reconciliation") !== Boolean(operation.failureCode)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["failureCode"], message: "Only interrupted lifecycle operations may contain a failure code" });
   }
-  if (operation.resultReceiptId && operation.action !== "uninstall") {
-    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Only completed uninstall operations may reference a lifecycle receipt" });
+  if (operation.resultReceiptId && !["uninstall", "rollback"].includes(operation.action)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Only completed receipt-producing lifecycle operations may reference a lifecycle receipt" });
+  }
+  if (operation.action === "rollback" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed rollback operations require their exact lifecycle receipt" });
   }
   if ((operation.action === "activate") !== Boolean(operation.activation)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["activation"], message: "Only activation operations require exact activation authority" });
@@ -83,6 +99,12 @@ export const appLifecycleOperationSchema = z.object({
   if (operation.action !== "uninstall" && operation.uninstall) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall"], message: "Only uninstall operations may contain exact removal intent" });
   }
+  if ((operation.action === "rollback") !== Boolean(operation.rollback)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback"], message: "Only rollback operations require an exact rematerialization contract" });
+  }
+  if (operation.rollback && Date.parse(operation.rollback.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback", "fromUpdatedAt"], message: "Rollback source revision cannot be newer than the prepared operation" });
+  }
   if (operation.action === "uninstall" && operation.uninstall && (
     operation.uninstall.fromUpdatedAt !== operation.startedAt &&
     Date.parse(operation.uninstall.fromUpdatedAt) > Date.parse(operation.startedAt)
@@ -91,6 +113,15 @@ export const appLifecycleOperationSchema = z.object({
   }
   if (operation.action === "uninstall" && operation.uninstall && operation.uninstall.remainingLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall", "remainingLoopIds"], message: "Remaining shared LoopSpecs must be a subset of the recorded source inventory" });
+  }
+  if (operation.rollback && (
+    new Set(operation.rollback.sourceLoopIds).size !== operation.rollback.sourceLoopIds.length ||
+    new Set(operation.rollback.targetLoopIds).size !== operation.rollback.targetLoopIds.length ||
+    new Set(operation.desired.loopIds).size !== operation.desired.loopIds.length ||
+    operation.rollback.targetLoopIds.length !== operation.desired.loopIds.length ||
+    operation.rollback.targetLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback", "targetLoopIds"], message: "Rollback target LoopSpecs must match the desired inventory" });
   }
   if ((operation.activation || operation.rollout) && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Rollout recovery may change only owned LoopSpec rollout state" });

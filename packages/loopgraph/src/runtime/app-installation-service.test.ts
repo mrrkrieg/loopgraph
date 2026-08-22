@@ -1441,4 +1441,125 @@ describe("atomic app installation lifecycle", () => {
     const conformance = await input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T12:05:00.000Z"));
     expect(conformance.status).toBe("passed");
   });
+
+  it("resumes an interrupted rollback only for the exact actor, installation, and LoopSpec target", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T13:00:00.000Z"));
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:01:00.000Z")
+    });
+    const updated = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:02:00.000Z")
+    });
+
+    store.interruptNextLifecycleRegistryCommit("rollback");
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:03:00.000Z")
+    )).rejects.toThrow(/simulated worker interruption after rollback LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toMatchObject({ version: "1.1.0", state: "ready_to_test" });
+    expect(interrupted.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "rollback",
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      targetArtifactDigest: applied.installation.artifactDigest,
+      rollback: expect.objectContaining({
+        fromUpdatedAt: updated.installation!.updatedAt,
+        sourceArtifactDigest: updated.installation!.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(updated.installation),
+        targetInstallationDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      })
+    }));
+    await expect(input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T13:03:30.000Z")))
+      .rejects.toThrow(/must be reconciled before another operation/i);
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "another-admin",
+      new Date("2026-08-08T13:03:40.000Z")
+    )).rejects.toThrow(/idempotency conflict/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const recordedTargetWorkspace = await readFile(workspacePath, "utf8");
+    const driftedWorkspace = JSON.parse(recordedTargetWorkspace) as { registeredSpecs: Array<Record<string, unknown>> };
+    driftedWorkspace.registeredSpecs.push({
+      id: "unexpected-rollback-loop",
+      name: "Unexpected rollback loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-rollback-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T13:03:45.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(driftedWorkspace, null, 2), "utf8");
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:03:50.000Z")
+    )).rejects.toThrow(/Active LoopSpec inventory is missing unexpected-rollback-loop/i);
+    await writeFile(workspacePath, recordedTargetWorkspace, "utf8");
+
+    const recovered = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:04:00.000Z")
+    );
+    const replayed = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:04:30.000Z")
+    );
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "another-admin",
+      new Date("2026-08-08T13:04:40.000Z")
+    )).rejects.toThrow(/different actor or installation revision/i);
+    expect((await store.read()).lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "rollback",
+      status: "completed",
+      resultReceiptId: recovered.receipt.id
+    }));
+    expect(recovered.installation).toMatchObject({ version: "1.0.0", state: "rolled_back", mode: "simulation" });
+
+    const secondPlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:05:00.000Z")
+    });
+    const secondUpdate = await input.service.applyUpdate({
+      plan: secondPlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:06:00.000Z")
+    });
+    const secondRollback = await input.service.rollback(
+      applied.installation.id,
+      secondUpdate.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:07:00.000Z")
+    );
+    expect(secondRollback.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "rollback" && operation.status === "completed"))
+      .toHaveLength(2);
+  });
 });

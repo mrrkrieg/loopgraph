@@ -1067,57 +1067,201 @@ export class AppInstallationService {
   }
 
   async rollback(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      if (installation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh rollback request");
-      const revision = installation.history.at(-1);
-      if (!revision) throw new Error("No reversible installed-app revision is available");
-      const loaded = await this.loadArtifactRevision(installation, revision.version, revision.artifactDigest);
-      const compiled = await compileLoopPack(loaded, { selectedModules: revision.selectedModules });
-      const timestamp = now.toISOString();
-      const namespace = installationNamespace(installation);
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-rollback-${contentHash({ installationId, from: installation.artifactDigest, to: revision.artifactDigest, timestamp })}`,
-        idempotencyKey: canonicalAppDigest({ action: "rollback", installationId, from: installation.artifactDigest, to: revision.artifactDigest, timestamp }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const restored: WorkspaceAppInstallation = {
-        ...installation,
-        version: revision.version,
-        artifactDigest: revision.artifactDigest,
-        state: "rolled_back",
-        mode: "simulation",
-        selectedModules: revision.selectedModules,
-        presetId: revision.presetId,
-        configuration: revision.configuration,
-        overlay: revision.overlay,
-        connectionBindings: revision.connectionBindings,
-        operationBindings: revision.operationBindings,
-        fieldMappingIds: revision.fieldMappingIds,
-        permissions: revision.permissions,
-        ownedAssets: revision.ownedAssets,
-        history: installation.history.slice(0, -1),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, restored, {
-        action: "rollback",
-        actor,
-        reason: `Restored the exact ${revision.version} installation snapshot; fresh conformance is required before activation.`,
-        evidenceRetained: true,
-        reversible: installation.history.length > 1,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !revision.ownedAssets.some((restoredAsset) => restoredAsset.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, revision.ownedAssets));
+    const observedRegistry = await this.installationStore.read();
+    const observedCurrentInstallation = observedRegistry.installations.find((candidate) => candidate.id === installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "rollback" &&
+      candidate.installationId === installationId &&
+      candidate.status === "completed" &&
+      candidate.rollback?.sourceArtifactDigest === expectedArtifactDigest &&
+      observedCurrentInstallation !== undefined &&
+      canonicalAppDigest(observedCurrentInstallation) === candidate.rollback.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      const installation = observedCurrentInstallation;
+      if (!receipt || !installation) throw new Error("Completed rollback operation is missing its durable result");
+      assertRollbackReplayAuthority(completed, receipt, installation, actor);
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const observedInstallation = requireInstallation(observedRegistry, installationId);
+    if (observedInstallation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh rollback request");
+    const revision = observedInstallation.history.at(-1);
+    if (!revision) throw new Error("No reversible installed-app revision is available");
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, installationId);
+    const idempotencyKey = canonicalAppDigest({
+      action: "rollback",
+      workspaceId: this.workspaceId,
+      installationId,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      targetArtifactDigest: revision.artifactDigest,
+      revisionDigest: canonicalAppDigest(revision)
     });
+    const operationId = lifecycleOperationId("rollback", installationId, revision.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const loaded = await this.loadArtifactRevision(observedInstallation, revision.version, revision.artifactDigest);
+    const compiled = await compileLoopPack(loaded, { selectedModules: revision.selectedModules });
+    const namespace = installationNamespace(observedInstallation);
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      observedInstallation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const restored: WorkspaceAppInstallation = {
+      ...observedInstallation,
+      version: revision.version,
+      artifactDigest: revision.artifactDigest,
+      state: "rolled_back",
+      mode: "simulation",
+      selectedModules: revision.selectedModules,
+      presetId: revision.presetId,
+      configuration: revision.configuration,
+      overlay: revision.overlay,
+      connectionBindings: revision.connectionBindings,
+      operationBindings: revision.operationBindings,
+      fieldMappingIds: revision.fieldMappingIds,
+      permissions: revision.permissions,
+      ownedAssets: revision.ownedAssets,
+      history: observedInstallation.history.slice(0, -1),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, observedInstallation.id, revision.ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const sourceLoopIds = installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId,
+      appId: observedInstallation.appId,
+      action: "rollback",
+      targetArtifactDigest: revision.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...revision.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(revision.configuration).sort()
+      },
+      rollback: existingOperation?.rollback ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceArtifactDigest: observedInstallation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        targetInstallationDigest: canonicalAppDigest(restored),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, installationId),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor,
+      now
+    });
+    if (!operation.rollback) throw new Error(`App rollback recovery record is incomplete: ${operation.id}`);
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      const receipt = operation.resultReceiptId
+        ? registry.lifecycleReceipts.find((candidate) => candidate.id === operation.resultReceiptId)
+        : undefined;
+      const installation = registry.installations.find((candidate) => candidate.id === installationId);
+      if (!receipt || !installation) throw new Error("Completed rollback operation is missing its durable result");
+      assertRollbackReplayAuthority(operation, receipt, installation, actor);
+      return { installation, receipt, lock: createInstallationLock(registry) };
+    }
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.rollback || currentOperation.status === "completed") {
+          throw new Error(`App rollback recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.rollback;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, installation.id, revision.ownedAssets);
+        const currentRestored = { ...restored, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "rollback" ||
+          currentOperation.actor !== actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== revision.artifactDigest ||
+          installation.artifactDigest !== recovery.sourceArtifactDigest ||
+          installation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentRestored) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, installation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...revision.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(revision.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App rollback recovery record does not match the current installation or exact target revision");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after rollback recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: recovery.sourceWorkspaceRevision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Rollback LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentRestored, {
+          action: "rollback",
+          actor,
+          reason: `Restored the exact ${revision.version} installation snapshot; fresh conformance is required before activation.`,
+          evidenceRetained: true,
+          reversible: installation.history.length > 1,
+          removedAssetIds: installation.ownedAssets.filter((asset) => !revision.ownedAssets.some((restoredAsset) => restoredAsset.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentRestored, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async detach(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
@@ -2376,6 +2520,26 @@ function assertUninstallReplayAuthority(
   }
 }
 
+function assertRollbackReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string
+): void {
+  if (
+    operation.action !== "rollback" ||
+    !operation.rollback ||
+    operation.actor !== actor ||
+    receipt.action !== "rollback" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id ||
+    receipt.resultingArtifactDigest !== operation.targetArtifactDigest ||
+    canonicalAppDigest(installation) !== operation.rollback.targetInstallationDigest
+  ) {
+    throw new Error("Completed rollback result is bound to a different actor or installation revision");
+  }
+}
+
 function ownershipFromCompiled(
   compiled: Awaited<ReturnType<typeof compileLoopPack>>,
   installationId: string,
@@ -2745,6 +2909,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     activation: existing.activation,
     rollout: existing.rollout,
     uninstall: existing.uninstall,
+    rollback: existing.rollback,
     actor: existing.actor
   };
   if (canonicalAppDigest(existingIntent) !== canonicalAppDigest(intent)) {

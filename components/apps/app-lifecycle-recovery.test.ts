@@ -126,4 +126,49 @@ describe("AppLifecycleRecoveryNotice", () => {
       uninstall: { ...operation.uninstall!, remainingLoopIds: ["another-installation-loop"] }
     })).toThrow(/subset of the recorded source inventory/);
   });
+
+  it("explains exact rollback recovery and exposes only bounded source and target identity", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.rollback123",
+      idempotencyKey: "rollback12345678",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "rollback",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: ["mapping.lead"], companyContextKeys: ["sales.icp"] },
+      rollback: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"b".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"c".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"d".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"e".repeat(64)}`,
+        sourceLoopIds: ["sales.qualify"],
+        targetInstallationDigest: `sha256:${"f".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"1".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"2".repeat(64)}`,
+        targetLoopIds: ["sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("exact source or target LoopSpec topology");
+    expect(html).toContain(operation.rollback?.sourceArtifactDigest ?? "missing");
+    expect(html).toContain(operation.targetArtifactDigest);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      rollback: { ...operation.rollback!, targetLoopIds: ["different-loop"] }
+    })).toThrow(/must match the desired inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
 });
