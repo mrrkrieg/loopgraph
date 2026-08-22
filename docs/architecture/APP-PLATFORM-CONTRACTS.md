@@ -85,6 +85,8 @@ Reviewers may label each historical decision `correct`, `incomplete`, or `false_
 
 Browser activation is a two-mutation protocol over the same App service used by Hermes and CLI. The status projection returns only activation approvals belonging to the requested installation set. The browser further selects a receipt only when its installation, App, artifact digest, source state, requested mode, expiry, and consumption state match the current view. Hosted approval requires step-up authentication, and activation receives the exact receipt ID; neither the browser nor a caller-supplied actor label can synthesize authority.
 
+Approval creation and receipt consumption return strict audit contexts from that shared service. In hosted mode the Supabase installation-store adapter commits the registry revision and appends `app.activation.approved` or `app.activation.consumed` through one service-role-only database function. The 4 KiB allowlist accepts only the actor, content-addressed receipt ID, hashed App/installation identities, exact artifact and approval digests, source state, requested mode, expiry, and evidence count. Review reasons and evidence references remain in the authoritative receipt; they are not duplicated into the security chain. Invalid audit metadata, an unavailable audit append, or a registry revision that does not advance aborts the transaction.
+
 ## Configuration precedence
 
 Configuration is resolved in this deterministic order:

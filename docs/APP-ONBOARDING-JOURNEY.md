@@ -60,6 +60,8 @@ Activation is a two-step runtime protocol, not a prompt convention. After the ac
 
 The installed-App browser follows the same boundary. It never combines approval and activation into one button: the first form requires an explicit reason and confirmation (plus step-up authentication in hosted mode), then the refreshed read model exposes only an unconsumed, unexpired receipt matching the exact current App. A second form consumes that receipt. Stale, cross-App, cross-artifact, wrong-state, wrong-mode, expired, or already-consumed approvals are not offered by the UI and are rejected again by the runtime.
 
+Hosted approval creation and receipt consumption are also audit-fenced registry mutations. Each accepted transition appends `app.activation.approved` or `app.activation.consumed` to the tenant/project security chain in the same database transaction as the registry revision. The bounded event contains the accountable actor, content-addressed receipt ID, hashed installation and App identities, pinned artifact and approval digests, source state, requested mode, expiry, and evidence-reference count. Approval text, evidence references, provider data, credentials, tokens, and raw App or installation identifiers remain outside the audit envelope. A failed audit validation or append rolls back the authority change.
+
 ## CLI
 
 ```bash

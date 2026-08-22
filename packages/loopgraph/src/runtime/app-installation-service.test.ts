@@ -7,7 +7,16 @@ import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchem
 import { FileConnectorFieldMappingStore, type ConnectorFieldMappingStore } from "./app-connector-service";
 import { FileCompanyContextStore } from "./company-context-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
-import { FileAppInstallationStore } from "./app-installation-store";
+import {
+  FileAppInstallationStore,
+  appInstallationRegistrySchema,
+  assertAppInstallationRegistryRevision,
+  emptyAppInstallationRegistry,
+  type AppInstallationMutationAuditContext,
+  type AppInstallationRegistry,
+  type AppInstallationStore,
+  type AppInstallationUpdate
+} from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { callLoopgraphAppTool } from "./app-tools";
 import { FileLoopSpecRegistryStore } from "./loop-spec-store";
@@ -20,7 +29,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function harness() {
+async function harness(options: { installationStore?: AppInstallationStore } = {}) {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-install-"));
   temporaryDirectories.push(projectRoot);
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "marketplace"), packsRoot);
@@ -48,7 +57,11 @@ async function harness() {
       confirmedBy: "admin-1"
     }));
   }
-  const service = new AppInstallationService(marketplace, projectRoot, "acme", "acme-company", { contextStore, mappingStore });
+  const service = new AppInstallationService(marketplace, projectRoot, "acme", "acme-company", {
+    contextStore,
+    mappingStore,
+    installationStore: options.installationStore
+  });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
     id: "hubspot-production",
@@ -72,6 +85,34 @@ const installValues = {
   followUpSlaMinutes: 30,
   customerFacingPolicy: "draft_only"
 };
+
+class AuditCapturingInstallationStore implements AppInstallationStore {
+  readonly persistence = "file" as const;
+  readonly audits: AppInstallationMutationAuditContext[] = [];
+  private registry: AppInstallationRegistry;
+
+  constructor(workspaceId: string) {
+    this.registry = emptyAppInstallationRegistry(workspaceId);
+  }
+
+  async read() {
+    return this.registry;
+  }
+
+  async readLockfile() {
+    return undefined;
+  }
+
+  async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
+    const current = this.registry;
+    const result = await operation(current);
+    const next = appInstallationRegistrySchema.parse(result.registry);
+    assertAppInstallationRegistryRevision(current, next);
+    this.registry = next;
+    if (result.audit) this.audits.push(result.audit);
+    return result.value;
+  }
+}
 
 class InterruptOnceMappingStore implements ConnectorFieldMappingStore {
   readonly persistence = "file" as const;
@@ -534,6 +575,72 @@ describe("atomic app installation lifecycle", () => {
       binding: { providerId: "hubspot", operation: "crm.contacts.read" }
     });
   });
+
+  it("emits bounded activation approval and consumption audit contexts", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const approvalReason = "Approve the exact tested artifact for shadow observation.";
+    const approval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "security-approver",
+      reason: approvalReason,
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      approval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+
+    expect(store.audits).toHaveLength(2);
+    expect(store.audits[0]).toMatchObject({
+      actor: "security-approver",
+      action: "app.activation.approved",
+      targetType: "app_activation_approval",
+      targetId: approval.id,
+      metadata: {
+        artifactDigest: applied.installation.artifactDigest,
+        approvalDigest: approval.approvalDigest,
+        fromState: "simulation_passed",
+        requestedMode: "shadow",
+        evidenceRefCount: 1,
+        expiresAt: "2026-08-08T12:18:00.000Z"
+      }
+    });
+    expect(store.audits[1]).toMatchObject({
+      actor: "operations-activator",
+      action: "app.activation.consumed",
+      targetType: "app_activation_approval",
+      targetId: approval.id,
+      metadata: {
+        approvalDigest: approval.approvalDigest,
+        fromState: "simulation_passed",
+        requestedMode: "shadow",
+        evidenceRefCount: 1
+      }
+    });
+    for (const audit of store.audits) {
+      expect(audit.metadata.appIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+      if (audit.action === "app.activation.approved" || audit.action === "app.activation.consumed") {
+        expect(audit.metadata.installationIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+      }
+    }
+    const serialized = JSON.stringify(store.audits);
+    expect(serialized).not.toContain(approvalReason);
+    expect(serialized).not.toContain(evaluation.id);
+    expect(serialized).not.toContain(applied.installation.id);
+    expect(serialized).not.toContain(applied.installation.appId);
+  }, 20_000);
 
   it("keeps installed LoopSpec routing synchronized with App rollout, pause, and resume", async () => {
     const input = await harness();

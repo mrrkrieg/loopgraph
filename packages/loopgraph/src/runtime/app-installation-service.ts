@@ -1450,7 +1450,27 @@ export class AppInstallationService {
         activationApprovals: [...registry.activationApprovals, receipt],
         updatedAt: approvedAt
       };
-      return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: receipt };
+      return {
+        registry: nextRegistry,
+        lock: createInstallationLock(nextRegistry),
+        audit: {
+          actor: input.approvedBy,
+          action: "app.activation.approved" as const,
+          targetType: "app_activation_approval" as const,
+          targetId: receipt.id,
+          metadata: {
+            installationIdDigest: canonicalAppDigest(installation.id),
+            appIdDigest: canonicalAppDigest(installation.appId),
+            artifactDigest: receipt.artifactDigest,
+            approvalDigest: receipt.approvalDigest,
+            fromState: receipt.fromState,
+            requestedMode: receipt.requestedMode,
+            evidenceRefCount: receipt.evidenceRefs.length,
+            expiresAt: receipt.expiresAt
+          }
+        },
+        value: receipt
+      };
     });
   }
 
@@ -1490,7 +1510,27 @@ export class AppInstallationService {
         activationApprovals: registry.activationApprovals.map((candidate) => candidate.id === approval.id ? consumedApproval : candidate),
         updatedAt: timestamp
       };
-      return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: updated };
+      return {
+        registry: nextRegistry,
+        lock: createInstallationLock(nextRegistry),
+        audit: {
+          actor,
+          action: "app.activation.consumed" as const,
+          targetType: "app_activation_approval" as const,
+          targetId: approval.id,
+          metadata: {
+            installationIdDigest: canonicalAppDigest(installation.id),
+            appIdDigest: canonicalAppDigest(installation.appId),
+            artifactDigest: approval.artifactDigest,
+            approvalDigest: approval.approvalDigest,
+            fromState: approval.fromState,
+            requestedMode: approval.requestedMode,
+            evidenceRefCount: approval.evidenceRefs.length,
+            expiresAt: approval.expiresAt
+          }
+        },
+        value: updated
+      };
     });
   }
 

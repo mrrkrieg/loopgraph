@@ -918,7 +918,8 @@ describe("shared Loopgraph App tools", () => {
       actor: "sales-operations"
     }, options) as AppOnboardingJourney;
 
-    expect(store.audits[0]).toMatchObject({
+    const saveAudit = store.audits[0];
+    expect(saveAudit).toMatchObject({
       actor: "sales-operations",
       action: "app.onboarding_draft.saved",
       targetType: "app_onboarding_draft",
@@ -930,8 +931,11 @@ describe("shared Loopgraph App tools", () => {
         fieldMappingCount: 0
       }
     });
-    expect(store.audits[0]?.metadata.appIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(store.audits[0]?.metadata.presetIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    if (!saveAudit || (saveAudit.action !== "app.onboarding_draft.saved" && saveAudit.action !== "app.onboarding_draft.reset")) {
+      throw new Error("Expected an onboarding draft audit event");
+    }
+    expect(saveAudit.metadata.appIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(saveAudit.metadata.presetIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
 
     await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
       projectRoot,

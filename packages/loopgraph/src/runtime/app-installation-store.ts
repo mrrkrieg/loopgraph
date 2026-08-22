@@ -52,7 +52,7 @@ export const appLifecycleOperationSchema = z.object({
 
 export type AppLifecycleOperation = z.infer<typeof appLifecycleOperationSchema>;
 
-export const appInstallationMutationAuditContextSchema = z.object({
+const appOnboardingMutationAuditContextSchema = z.object({
   actor: z.string().min(1).max(300),
   action: z.enum([
     "app.onboarding_draft.saved",
@@ -70,6 +70,50 @@ export const appInstallationMutationAuditContextSchema = z.object({
     fieldMappingCount: z.number().int().nonnegative().max(200)
   }).strict()
 }).strict();
+
+const appActivationMutationAuditContextSchema = z.object({
+  actor: z.string().min(1).max(300),
+  action: z.enum([
+    "app.activation.approved",
+    "app.activation.consumed"
+  ]),
+  targetType: z.literal("app_activation_approval"),
+  targetId: z.string().regex(/^activation-approval\.[0-9a-f]{64}$/),
+  metadata: z.object({
+    installationIdDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    appIdDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    artifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    approvalDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    fromState: z.enum([
+      "selected",
+      "resolving",
+      "waiting_for_connections",
+      "waiting_for_configuration",
+      "ready_to_test",
+      "simulation_passed",
+      "shadow",
+      "recommend",
+      "execute_with_approval",
+      "live",
+      "paused",
+      "broken",
+      "degraded",
+      "update_available",
+      "deprecated",
+      "revoked",
+      "uninstalling",
+      "rolled_back"
+    ]),
+    requestedMode: z.enum(["shadow", "recommend", "execute_with_approval"]),
+    evidenceRefCount: z.number().int().nonnegative().max(100),
+    expiresAt: z.string().datetime()
+  }).strict()
+}).strict();
+
+export const appInstallationMutationAuditContextSchema = z.union([
+  appOnboardingMutationAuditContextSchema,
+  appActivationMutationAuditContextSchema
+]);
 
 export type AppInstallationMutationAuditContext = z.infer<typeof appInstallationMutationAuditContextSchema>;
 
