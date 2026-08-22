@@ -336,11 +336,45 @@ describe("atomic app installation lifecycle", () => {
     const interrupted = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(interrupted.installations).toHaveLength(1);
     expect(interrupted.lifecycleOperations.find((operation) => operation.action === "uninstall"))
-      .toMatchObject({ status: "requires_reconciliation" });
+      .toMatchObject({
+        status: "requires_reconciliation",
+        actor: "admin-1",
+        uninstall: {
+          fromUpdatedAt: applied.installation.updatedAt,
+          reasonDigest: canonicalAppDigest({ reason: uninstall.reason }),
+          sourceInstallationDigest: canonicalAppDigest(applied.installation),
+          remainingLoopIds: []
+        }
+      });
     await expect(service.test(applied.installation.id, "admin-1", new Date("2026-08-08T10:12:30.000Z")))
       .rejects.toThrow(/must be reconciled before another operation/i);
+    await expect(service.uninstall({ ...uninstall, actor: "admin-2", now: new Date("2026-08-08T10:12:40.000Z") }))
+      .rejects.toThrow(/idempotency conflict/i);
+    await expect(service.uninstall({ ...uninstall, reason: "A different removal reason.", now: new Date("2026-08-08T10:12:50.000Z") }))
+      .rejects.toThrow(/must be reconciled/i);
+
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }) as { stage: string; nextAction: { input: Record<string, unknown> } };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      nextAction: {
+        input: {
+          action: "uninstall",
+          reasonDigest: canonicalAppDigest({ reason: uninstall.reason }),
+          fromUpdatedAt: applied.installation.updatedAt,
+          remainingLoopIds: []
+        }
+      }
+    });
 
     const recovered = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:13:00.000Z") });
+    await expect(service.uninstall({ ...uninstall, actor: "admin-2", now: new Date("2026-08-08T10:13:30.000Z") }))
+      .rejects.toThrow(/different actor or removal reason/i);
+    await expect(service.uninstall({ ...uninstall, reason: "Changed after completion.", now: new Date("2026-08-08T10:13:40.000Z") }))
+      .rejects.toThrow(/different actor or removal reason/i);
     const replayed = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:14:00.000Z") });
     expect(replayed.receipt.id).toBe(recovered.receipt.id);
     const registry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
@@ -371,6 +405,40 @@ describe("atomic app installation lifecycle", () => {
     const finalRegistry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(finalRegistry.lifecycleOperations.filter((candidate) => candidate.action === "uninstall" && candidate.status === "completed"))
       .toHaveLength(2);
+  });
+
+  it("fails closed when owned LoopSpec topology drifts during uninstall recovery", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T10:20:00.000Z"));
+    const uninstall = {
+      installationId: applied.installation.id,
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      actor: "admin-1",
+      reason: "Remove the exact installed Sales App.",
+      confirmed: true
+    };
+    store.interruptNextLifecycleRegistryCommit("uninstall");
+    await expect(input.service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:22:00.000Z") }))
+      .rejects.toThrow(/simulated worker interruption/);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as {
+      registeredSpecs: Array<Record<string, unknown>>;
+    };
+    workspace.registeredSpecs.push({
+      id: "unexpected-recovery-loop",
+      name: "Unexpected recovery loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-recovery-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T10:22:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2), "utf8");
+
+    await expect(input.service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:23:00.000Z") }))
+      .rejects.toThrow(/Active LoopSpec inventory is missing unexpected-recovery-loop/);
+    expect((await store.read()).lifecycleOperations.find((operation) => operation.action === "uninstall"))
+      .toMatchObject({ status: "requires_reconciliation" });
   });
 
   it("binds only current approved company context and records installation ownership", async () => {

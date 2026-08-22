@@ -281,7 +281,7 @@ function decideStage(input: {
         ? "An exact App installation was interrupted and must be resumed before another plan can be applied."
         : action === "activate"
           ? "App activation was interrupted and its exact approved transition must be reconciled before another lifecycle action can run."
-          : action === "pause" || action === "resume"
+            : action === "pause" || action === "resume"
             ? `App ${action} was interrupted and its exact rollout transition must be reconciled before another lifecycle action can run.`
           : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
       nextAction: {
@@ -290,9 +290,9 @@ function decideStage(input: {
           ? "Retry the exact previously approved install request. Loopgraph will replay only unfinished idempotent work."
           : action === "activate"
             ? "Retry the exact recorded activation receipt and target mode. Loopgraph will reconcile LoopSpec state and consume authority only once."
-            : action === "pause" || action === "resume"
+          : action === "pause" || action === "resume"
               ? `Retry the exact recorded ${action} request. Loopgraph will reconcile only the pinned owned LoopSpecs and complete the state transition once.`
-            : "Repeat the uninstall confirmation for this exact installation and artifact digest. Loopgraph will replay only unfinished idempotent work.",
+            : "Repeat the uninstall confirmation with the same accountable actor and exact original reason. Loopgraph will accept only the recorded installation revision and pre-removal or post-removal LoopSpec topology.",
         requiresHumanConfirmation: true,
         input: {
           operationId: input.lifecycleOperation.id,
@@ -305,6 +305,10 @@ function decideStage(input: {
           } : input.lifecycleOperation.rollout ? {
             targetState: input.lifecycleOperation.rollout.targetState,
             mode: input.lifecycleOperation.rollout.targetMode
+          } : input.lifecycleOperation.uninstall ? {
+            reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
+            fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,
+            remainingLoopIds: input.lifecycleOperation.uninstall.remainingLoopIds
           } : {})
         }
       }

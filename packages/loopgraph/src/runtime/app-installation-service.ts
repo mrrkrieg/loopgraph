@@ -62,7 +62,8 @@ import {
 import {
   FileLoopSpecRegistryStore,
   createStoredLoopSpecArtifact,
-  type LoopSpecRegistryStore
+  type LoopSpecRegistryStore,
+  type StoredLoopSpecArtifact
 } from "./loop-spec-store";
 import {
   type LoopgraphWorkspaceRegistry
@@ -1164,6 +1165,10 @@ export class AppInstallationService {
   }): Promise<AppLifecycleMutationResult> {
     if (!input.confirmed) throw new Error("Uninstall requires an explicit confirmation");
     const now = input.now ?? new Date();
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Uninstall requires an accountable reason");
+    assertSecretFree({ reason }, "app_uninstall_reason");
+    const reasonDigest = canonicalAppDigest({ reason });
     const observedRegistry = await this.installationStore.read();
     const observedInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
     if (!observedInstallation) {
@@ -1178,15 +1183,20 @@ export class AppInstallationService {
         ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
         : undefined;
       if (!receipt) throw new Error(`App installation not found: ${input.installationId}`);
+      assertUninstallReplayAuthority(completed!, receipt, input.actor, reasonDigest);
       return { receipt, lock: createInstallationLock(observedRegistry) };
     }
     if (observedInstallation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, observedInstallation.id);
     const idempotencyKey = canonicalAppDigest({
       action: "uninstall",
       workspaceId: this.workspaceId,
       installationId: input.installationId,
       artifactDigest: input.expectedArtifactDigest,
-      installedAt: observedInstallation.installedAt
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      reasonDigest
     });
     const operationId = lifecycleOperationId("uninstall", input.installationId, input.expectedArtifactDigest, idempotencyKey);
     const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
@@ -1195,9 +1205,15 @@ export class AppInstallationService {
         ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === existingOperation.resultReceiptId)
         : undefined;
       if (!receipt) throw new Error("Completed uninstall operation is missing its durable lifecycle receipt");
+      assertUninstallReplayAuthority(existingOperation, receipt, input.actor, reasonDigest);
       return { receipt, lock: createInstallationLock(observedRegistry) };
     }
     const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedLoopIds = installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const observedLoopArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopInventoryDigest = installationLoopInventoryDigest(observedLoopArtifacts, observedLoopIds);
+    const remainingLoopIds = sharedInstallationLoopIds(observedRegistry, observedInstallation).filter((loopId) => observedLoopIds.includes(loopId));
+    const remainingLoopInventoryDigest = installationLoopInventoryDigest(observedLoopArtifacts, remainingLoopIds);
     const operation = await this.prepareLifecycleOperation({
       id: operationId,
       idempotencyKey,
@@ -1206,37 +1222,85 @@ export class AppInstallationService {
       action: "uninstall",
       targetArtifactDigest: observedInstallation.artifactDigest,
       desired: existingOperation?.desired ?? {
-        loopIds: installationLoopIds(observedWorkspace.workspace, observedInstallation.id),
-        fieldMappingIds: observedInstallation.fieldMappingIds,
-        companyContextKeys: companyContextKeys(observedInstallation.configuration)
+        loopIds: observedLoopIds,
+        fieldMappingIds: [...observedInstallation.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(observedInstallation.configuration).sort()
+      },
+      uninstall: existingOperation?.uninstall ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        reasonDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest,
+        remainingLoopInventoryDigest,
+        remainingLoopIds
       },
       actor: input.actor,
       now
     });
+    if (!operation.uninstall) {
+      throw new Error(`Legacy App uninstall recovery record ${operation.id} cannot be resumed automatically; reconcile it with an administrator`);
+    }
     try {
       return await this.installationStore.withExclusiveUpdate(async (registry) => {
         const installation = requireInstallation(registry, input.installationId);
-        if (installation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.uninstall || currentOperation.status === "completed") {
+          throw new Error(`App uninstall recovery record is unavailable: ${operation.id}`);
+        }
+        const removal = currentOperation.uninstall;
+        if (
+          currentOperation.action !== "uninstall" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== installation.artifactDigest ||
+          installation.artifactDigest !== input.expectedArtifactDigest ||
+          installation.updatedAt !== removal.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== removal.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== removal.sourceOwnershipDigest ||
+          removal.reasonDigest !== reasonDigest ||
+          canonicalAppDigest([...installation.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(installation.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App uninstall recovery record does not match the current installation or confirmed removal intent");
+        }
         const timestamp = now.toISOString();
         const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
         const loopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-        const sharedLoopIds = new Set(installation.ownedAssets.flatMap((asset) => {
-          const registryAsset = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
-          return asset.kind === "loop_spec" && (registryAsset?.ownerInstallationIds.length ?? 0) > 1 && asset.assetId.startsWith("loop.")
-            ? [asset.assetId.slice("loop.".length)]
-            : [];
-        }));
-        const removableLoopIds = loopIds.filter((loopId) => !sharedLoopIds.has(loopId));
-        if (removableLoopIds.length > 0) {
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, loopIds);
+        const sourceInventoryPresent = currentInventoryDigest === removal.sourceLoopInventoryDigest &&
+          canonicalAppDigest(loopIds) === canonicalAppDigest(currentOperation.desired.loopIds);
+        const remainingInventoryPresent = currentInventoryDigest === removal.remainingLoopInventoryDigest &&
+          canonicalAppDigest(loopIds) === canonicalAppDigest(removal.remainingLoopIds);
+        if (!sourceInventoryPresent && !remainingInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after uninstall recovery was prepared");
+        }
+        const sharedLoopIds = sharedInstallationLoopIds(registry, installation);
+        if (canonicalAppDigest(sharedLoopIds) !== canonicalAppDigest(removal.remainingLoopIds)) {
+          throw new Error("Shared App ownership changed after uninstall recovery was prepared");
+        }
+        const removableLoopIds = currentOperation.desired.loopIds.filter((loopId) => !sharedLoopIds.includes(loopId));
+        if (sourceInventoryPresent && removableLoopIds.length > 0) {
           await this.loopSpecStore.commitMaterializationAtomically({
             commitId: operation.id,
             idempotencyKey: operation.idempotencyKey,
-            expectedRevision: workspaceSnapshot.revision,
+            expectedRevision: removal.sourceWorkspaceRevision,
             projectRoot: this.projectRoot,
             committedAt: timestamp,
             artifacts: [],
             removeLoopIds: removableLoopIds
           });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(removal.remainingLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== removal.remainingLoopInventoryDigest
+          ) {
+            throw new Error("Uninstall LoopSpec materialization did not produce the exact recorded remaining topology");
+          }
         }
         const { assets, removedAssetIds, preservedSharedAssetIds } = releaseOwnedAssets(registry.assets, installation.id);
         await this.mappingStore.detachInstallation(installation.id, now);
@@ -1247,7 +1311,7 @@ export class AppInstallationService {
           actor: input.actor,
           now
         });
-        if (sharedLoopIds.size === 0) {
+        if (sharedLoopIds.length === 0) {
           await rm(path.join(this.projectRoot, ".loopgraph", "apps", "installations", installation.id), { recursive: true, force: true });
         }
         const nextRevision = registry.revision + 1;
@@ -1255,7 +1319,7 @@ export class AppInstallationService {
           installationId: installation.id,
           action: "uninstall",
           actor: input.actor,
-          reason: input.reason,
+          reason,
           previousArtifactDigest: installation.artifactDigest,
           removedAssetIds,
           preservedSharedAssetIds,
@@ -2272,6 +2336,46 @@ function installationLoopIds(workspace: LoopgraphWorkspaceRegistry, installation
   }).map((entry) => entry.id).sort();
 }
 
+function installationLoopInventoryDigest(artifacts: StoredLoopSpecArtifact[], loopIds: string[]): string {
+  const byId = new Map(artifacts.map((artifact) => [artifact.loopId, artifact]));
+  const inventory = [...loopIds].sort().map((loopId) => {
+    const artifact = byId.get(loopId);
+    if (!artifact) throw new Error(`Active LoopSpec inventory is missing ${loopId}`);
+    return { loopId, versionHash: artifact.versionHash };
+  });
+  return canonicalAppDigest(inventory);
+}
+
+function sharedInstallationLoopIds(
+  registry: AppInstallationRegistry,
+  installation: WorkspaceAppInstallation
+): string[] {
+  return installation.ownedAssets.flatMap((asset) => {
+    const registryAsset = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
+    return asset.kind === "loop_spec" && (registryAsset?.ownerInstallationIds.length ?? 0) > 1 && asset.assetId.startsWith("loop.")
+      ? [asset.assetId.slice("loop.".length)]
+      : [];
+  }).sort();
+}
+
+function installationOwnershipDigest(registry: AppInstallationRegistry, installationId: string): string {
+  return canonicalAppDigest(registry.assets
+    .filter((asset) => asset.ownerInstallationIds.includes(installationId))
+    .sort((left, right) => left.assetId.localeCompare(right.assetId)));
+}
+
+function assertUninstallReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  actor: string,
+  reasonDigest: string
+): void {
+  const recordedReasonDigest = operation.uninstall?.reasonDigest ?? canonicalAppDigest({ reason: receipt.reason.trim() });
+  if (operation.action !== "uninstall" || operation.actor !== actor || receipt.actor !== actor || recordedReasonDigest !== reasonDigest) {
+    throw new Error("Completed uninstall result is bound to a different actor or removal reason");
+  }
+}
+
 function ownershipFromCompiled(
   compiled: Awaited<ReturnType<typeof compileLoopPack>>,
   installationId: string,
@@ -2640,6 +2744,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     desired: existing.desired,
     activation: existing.activation,
     rollout: existing.rollout,
+    uninstall: existing.uninstall,
     actor: existing.actor
   };
   if (canonicalAppDigest(existingIntent) !== canonicalAppDigest(intent)) {

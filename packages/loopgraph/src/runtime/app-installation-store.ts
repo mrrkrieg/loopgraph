@@ -44,6 +44,16 @@ export const appLifecycleOperationSchema = z.object({
     targetState: appInstallationStateSchema,
     targetMode: z.enum(["shadow", "recommend", "execute_with_approval"])
   }).strict().optional(),
+  uninstall: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    reasonDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    remainingLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    remainingLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
   actor: z.string().min(1).max(160),
   startedAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -69,6 +79,18 @@ export const appLifecycleOperationSchema = z.object({
   const isRolloutOperation = operation.action === "pause" || operation.action === "resume";
   if (isRolloutOperation !== Boolean(operation.rollout)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollout"], message: "Only pause and resume operations require exact rollout state" });
+  }
+  if (operation.action !== "uninstall" && operation.uninstall) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall"], message: "Only uninstall operations may contain exact removal intent" });
+  }
+  if (operation.action === "uninstall" && operation.uninstall && (
+    operation.uninstall.fromUpdatedAt !== operation.startedAt &&
+    Date.parse(operation.uninstall.fromUpdatedAt) > Date.parse(operation.startedAt)
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall", "fromUpdatedAt"], message: "Uninstall source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.action === "uninstall" && operation.uninstall && operation.uninstall.remainingLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall", "remainingLoopIds"], message: "Remaining shared LoopSpecs must be a subset of the recorded source inventory" });
   }
   if ((operation.activation || operation.rollout) && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Rollout recovery may change only owned LoopSpec rollout state" });

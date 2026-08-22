@@ -66,6 +66,8 @@ Activation also uses a durable cross-store recovery journal. Before changing any
 
 Pause and resume use the same journal boundary without creating new rollout authority. The operation records the exact source state and revision timestamp, approved mode, target state and mode, pinned artifact, actor, and owned LoopSpec IDs before changing the runtime graph. Pause reconciles those loops to shadow while retaining the last approved mode in the App registry; resume reconciles them back to that exact mode. A retry is accepted only for the same actor and unchanged source revision, artifact, and owned-loop inventory. A completed immediate retry does not advance the registry again, while a later pause/resume cycle has a new source revision and therefore a new transaction identity.
 
+Uninstall recovery is bound to the exact destructive intent rather than only the installation ID. Before any LoopSpec, mapping, context, or generated-file side effect, Loopgraph records digests of the complete source installation and its ownership graph, the source workspace revision, exact pre-removal loop inventory, exact shared-loop inventory allowed to remain, accountable actor, and normalized reason. Only the reason digest enters recovery metadata. A retry must provide the same actor and exact original reason, and the current graph must match either the recorded pre-removal state or the exact post-removal shared state. Any third topology, ownership change, source-installation change, or legacy unfinished record without this binding requires administrator reconciliation instead of automatic continuation.
+
 ## CLI
 
 ```bash

@@ -50,6 +50,7 @@ export function AppLifecycleRecoveryNotice({
                 <dl className="mt-2 space-y-2 font-mono">
                   <div><dt className="inline font-sans font-semibold">Operation: </dt><dd className="inline break-all">{operation.id}</dd></div>
                   <div><dt className="inline font-sans font-semibold">Artifact: </dt><dd className="inline break-all">{operation.targetArtifactDigest}</dd></div>
+                  {operation.uninstall ? <div><dt className="inline font-sans font-semibold">Reason digest: </dt><dd className="inline break-all">{operation.uninstall.reasonDigest}</dd></div> : null}
                   <div><dt className="inline font-sans font-semibold">Updated: </dt><dd className="inline">{new Date(operation.updatedAt).toLocaleString()}</dd></div>
                 </dl>
               </details>
@@ -72,7 +73,7 @@ export function recoveryInstruction(operation: AppLifecycleOperation): string {
     const target = operation.rollout?.targetState.replace(/_/g, " ") ?? operation.action;
     return `Retry only the recorded ${operation.action} transition to ${target}. Loopgraph will reconcile the exact owned LoopSpec inventory and complete the App state change once; competing lifecycle work remains blocked.`;
   }
-  return "Open the installed App and repeat uninstall with the same artifact digest and an accountable confirmation. Already completed removals and ownership releases will not be duplicated.";
+  return "Open the installed App and repeat uninstall as the same actor with the exact original reason. Loopgraph accepts only the recorded installation revision and exact pre-removal or post-removal LoopSpec topology; completed removals and ownership releases are not duplicated.";
 }
 
 function Count({ label, value }: { label: string; value: number }) {
