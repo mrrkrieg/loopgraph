@@ -34,6 +34,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_operation_invoke",
       "loopgraph_app_operation_actions_get",
       "loopgraph_app_operation_action_commit",
+      "loopgraph_app_operation_action_reconcile",
       "loopgraph_app_maturity_get",
       "loopgraph_app_verification_registry_get",
       "loopgraph_app_verifier_trust_add",

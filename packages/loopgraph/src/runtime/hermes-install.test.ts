@@ -290,6 +290,9 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_app_historical_replay");
     expect(designSkill).toContain("loopgraph_app_update_plan");
     expect(designSkill).toContain("loopgraph_app_uninstall");
+    expect(designSkill).toContain("loopgraph_app_operation_action_reconcile");
+    expect(designSkill).toContain("do not call commit again");
+    expect(designSkill).toContain("without repeating the provider write");
     expect(designSkill).toContain("never authorizes activation");
     expect(routerSkill).toContain("name: loopgraph-event-router");
     expect(routerSkill).toContain(`skillProtocol: ${HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION}`);

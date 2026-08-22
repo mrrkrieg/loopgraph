@@ -252,6 +252,8 @@ In a hosted workspace, the installer reads eligible connections directly from th
 
 Every prepared write also receives a durable, secret-free App ownership record tied to its exact route, agent, pinned artifact, LoopSpec, provider binding, company-object identity digest, and Broker receipt. The Installed App topology shows that action and its human gate without copying canonical provider input out of Connector Broker storage. Preparation is visible evidence—not approval and not execution. In hosted operation, an administrator approves that exact App action—not caller-supplied provider parameters—after MFA step-up. Approval is append-only and receipt-bound, and still does not run the provider write. The administrator can also revoke one exact prepared or approved action, invalidating unused Broker approvals without disconnecting the provider. Only the assigned Hermes route can request the separate commit, naming the App action rather than a provider or fingerprint; Loopgraph revalidates the pinned operation, route, company object, agent, connection, scopes, approval, and absence of revocation before Connector Broker consumes it.
 
+Interrupted commits fail closed. If the Broker may have completed a provider write but Loopgraph has no terminal App event, Hermes reconciles the exact action from the Broker's durable idempotency receipt. It never repeats the provider call or guesses the outcome: resolved receipts become terminal evidence, pending work is revisited later, and unresolved work is escalated for operator investigation.
+
 The same application service is available through the CLI:
 
 ```bash

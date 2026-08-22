@@ -167,6 +167,16 @@ from the verified deployment binding rather than a browser cookie. The Connector
 independently rechecks tenant identity, scopes, connection health, kill switches, idempotency, and
 audit policy at the moment of use.
 
+If Loopgraph records `commit_requested` but the App process stops before it can append the terminal
+event, the action is treated as unknown—not safe to retry. The assigned Hermes route uses the
+separate `loopgraph_app_operation_action_reconcile` method or workload-authenticated
+`/api/hermes/apps/operations/reconcile` route. It supplies only the App action and original route
+identity. Loopgraph re-derives the Broker tenant, action, fingerprint, operation, actor, and company
+context, and the Broker looks up the original idempotency receipt. A matching durable response is
+copied into secret-free terminal App evidence; `pending` causes Hermes to wait, while `unresolved`
+requires operator investigation. Reconciliation never invokes a provider handler and never turns
+an unknown outcome into permission for replacement work.
+
 ## Rollout and graph state
 
 App rollout is not a display-only installation flag. Activating an App atomically rewrites the

@@ -4,6 +4,7 @@ import { DepartmentTypeSchema } from "./department-skills";
 import { contentDigest } from "./hash";
 import {
   brokerCapabilitySchema,
+  connectorActionReconcileResponseSchema,
   connectorActionPrepareResponseSchema,
   connectorBrokerResponseSchema,
   connectorOperationSchema
@@ -36,6 +37,7 @@ export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-e
 export const APP_OPERATION_ACTION_SCHEMA_VERSION = "loopgraph-app-operation-action/v1alpha1" as const;
 export const APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION = "loopgraph-app-operation-action-event/v1alpha1" as const;
 export const APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION = "loopgraph-app-operation-action-commit/v1alpha1" as const;
+export const APP_OPERATION_ACTION_RECONCILIATION_SCHEMA_VERSION = "loopgraph-app-operation-action-reconciliation/v1alpha1" as const;
 export const APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION = "loopgraph-app-runtime-operation-response/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
@@ -1090,6 +1092,34 @@ export const appOperationActionCommitResultSchema = z.object({
   }
 });
 
+export const appOperationActionReconciliationResultSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_RECONCILIATION_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  actionId: appIdSchema,
+  loopId: appIdSchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  reconciliationCallId: z.string().min(1).max(160),
+  originalRequestId: z.string().min(8).max(128),
+  originalIdempotencyKey: z.string().min(8).max(192),
+  status: z.enum(["resolved_succeeded", "resolved_failed", "pending", "unresolved"]),
+  brokerReconciliation: connectorActionReconcileResponseSchema,
+  completedAt: isoDateTimeSchema,
+  reconciliationDigest: artifactDigestSchema
+}).strict().superRefine((result, ctx) => {
+  const brokerStatus = result.brokerReconciliation.status;
+  if ((brokerStatus === "resolved") !== result.status.startsWith("resolved_")) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: "App and Broker reconciliation status do not match" });
+  }
+  if (result.originalRequestId !== result.brokerReconciliation.originalRequestId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerReconciliation", "originalRequestId"], message: "Broker reconciliation does not belong to the interrupted App commit" });
+  }
+  if (canonicalAppDigest({ ...result, reconciliationDigest: undefined }) !== result.reconciliationDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reconciliationDigest"], message: "App action reconciliation digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -1620,6 +1650,7 @@ export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionRe
 export type AppOperationAction = z.infer<typeof appOperationActionSchema>;
 export type AppOperationActionEvent = z.infer<typeof appOperationActionEventSchema>;
 export type AppOperationActionCommitResult = z.infer<typeof appOperationActionCommitResultSchema>;
+export type AppOperationActionReconciliationResult = z.infer<typeof appOperationActionReconciliationResultSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1670,6 +1701,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppOperationAction: zodToJsonSchema(appOperationActionSchema, "AppOperationAction") as Record<string, unknown>,
     AppOperationActionEvent: zodToJsonSchema(appOperationActionEventSchema, "AppOperationActionEvent") as Record<string, unknown>,
     AppOperationActionCommitResult: zodToJsonSchema(appOperationActionCommitResultSchema, "AppOperationActionCommitResult") as Record<string, unknown>,
+    AppOperationActionReconciliationResult: zodToJsonSchema(appOperationActionReconciliationResultSchema, "AppOperationActionReconciliationResult") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,

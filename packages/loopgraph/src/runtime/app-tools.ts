@@ -109,6 +109,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_operation_invoke",
   "loopgraph_app_operation_actions_get",
   "loopgraph_app_operation_action_commit",
+  "loopgraph_app_operation_action_reconcile",
   "loopgraph_app_maturity_get",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
@@ -312,6 +313,8 @@ export const appOperationActionCommitInputSchema = projectSchema.extend({
   agentInstanceId: z.string().min(1).max(256),
   callId: z.string().min(1).max(160).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
 }).strict();
+
+export const appOperationActionReconcileInputSchema = appOperationActionCommitInputSchema;
 
 export const appMaturityGetInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
@@ -519,6 +522,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_operation_invoke", description: "Invoke one resolved App capability for an active durable route job through its exact trusted Connector Broker binding; reads execute and writes only create fingerprint-bound prepared actions.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_actions_get", description: "List secret-free App ownership records and append-only approval/commit evidence for provider actions, scoped to the trusted workspace and optional installation, loop, route, or status filters.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_operation_action_commit", description: "Ask the exact assigned Hermes route to commit one App-owned prepared action after Loopgraph revalidates its pinned artifact, LoopSpec, company object, connection, agent assignment, fingerprint, and approval receipt. Provider parameters are never caller-selectable.", readOnly: false, idempotent: true, destructive: true },
+  { name: "loopgraph_app_operation_action_reconcile", description: "Recover an interrupted App action commit from the Connector Broker's durable receipt without repeating the provider write or guessing an unknown outcome.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
@@ -1283,6 +1287,33 @@ export async function callLoopgraphAppTool(
       connections: await appConnections(projectRoot, options.connections)
     });
     return execution.commitAction({
+      installationId: parsed.installationId,
+      actionId: parsed.actionId,
+      routeJobId: parsed.routeJobId,
+      agentInstanceId: parsed.agentInstanceId,
+      callId: parsed.callId,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_app_operation_action_reconcile") {
+    const parsed = appOperationActionReconcileInputSchema.parse({ ...raw, projectRoot, ...identity });
+    const actionStore = options.appOperationActionStore ?? new FileAppOperationActionStore(
+      path.join(getLoopgraphRoot(projectRoot), "apps"),
+      identity.workspaceId
+    );
+    const execution = new AppOperationExecutionService({
+      appService: service,
+      actionStore,
+      routingStore: options.routingStore ?? new FileRoutingStore(getLoopgraphRoot(projectRoot)),
+      operationsStore: options.hermesOperationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot)),
+      broker: options.connectorBroker,
+      runtime: options.appRuntimeOperations,
+      tenant: options.connectorTenant,
+      workspaceId: identity.workspaceId,
+      companyId: identity.companyId,
+      connections: await appConnections(projectRoot, options.connections)
+    });
+    return execution.reconcileAction({
       installationId: parsed.installationId,
       actionId: parsed.actionId,
       routeJobId: parsed.routeJobId,
