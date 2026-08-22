@@ -17,7 +17,7 @@ const projectKeySchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/);
 const originSchema = z.string().url();
 
 const stagingReceiptSchema = z.object({
-  schemaVersion: z.literal("staging-validation/v4"),
+  schemaVersion: z.literal("staging-validation/v5"),
   targetOrigin: originSchema,
   organizationId: z.string().uuid(),
   projectKey: projectKeySchema,
@@ -30,6 +30,7 @@ const stagingReceiptSchema = z.object({
     name: z.enum([
       "readiness",
       "operational_metrics",
+      "app_action_reconciliation_health",
       "audit_integrity",
       "unauthenticated_user_denial",
       "cross_tenant_user_denial",
@@ -39,13 +40,22 @@ const stagingReceiptSchema = z.object({
     status: z.number().int().min(100).max(599),
     ok: z.literal(true),
     detail: z.string().min(1).max(1024)
-  }).strict()).length(7),
+  }).strict()).length(8),
   quotaEvidence: z.object({
     bucket: z.literal("admin"),
     limit: z.number().int().min(1).max(10),
     allowedRequests: z.number().int().min(1).max(10),
     deniedStatus: z.literal(429),
     retryAfterSeconds: z.number().int().min(1).max(30)
+  }).strict(),
+  appActionReconciliationEvidence: z.object({
+    requestedTotal: safeInteger,
+    succeededTotal: safeInteger,
+    failedTotal: safeInteger,
+    pending: z.literal(0),
+    stale: z.literal(0),
+    oldestAgeSeconds: z.literal(0),
+    staleAfterSeconds: z.number().int().min(60).max(86_400)
   }).strict()
 }).strict();
 
@@ -232,6 +242,7 @@ export function buildProductionEvidenceManifest(
     [
       "readiness",
       "operational_metrics",
+      "app_action_reconciliation_health",
       "audit_integrity",
       "unauthenticated_user_denial",
       "cross_tenant_user_denial",
@@ -243,6 +254,7 @@ export function buildProductionEvidenceManifest(
   requireExactStatuses(staging.results, {
     readiness: 200,
     operational_metrics: 200,
+    app_action_reconciliation_health: 200,
     audit_integrity: 200,
     unauthenticated_user_denial: 401,
     cross_tenant_user_denial: 403,
@@ -345,7 +357,14 @@ export function buildProductionEvidenceManifest(
       auditHeadHash: staging.auditCheckpoint.headHash,
       checks: staging.results.length,
       quotaBucket: staging.quotaEvidence.bucket,
-      quotaLimit: staging.quotaEvidence.limit
+      quotaLimit: staging.quotaEvidence.limit,
+      actionCommitRequests: staging.appActionReconciliationEvidence.requestedTotal,
+      actionCommitSucceeded: staging.appActionReconciliationEvidence.succeededTotal,
+      actionCommitFailed: staging.appActionReconciliationEvidence.failedTotal,
+      actionReconciliationPending: staging.appActionReconciliationEvidence.pending,
+      actionReconciliationStale: staging.appActionReconciliationEvidence.stale,
+      actionReconciliationStaleAfterSeconds:
+        staging.appActionReconciliationEvidence.staleAfterSeconds
     }),
     marketplace: descriptor(marketplace, marketplace.checkedAt, {
       checks: marketplace.checks.length,

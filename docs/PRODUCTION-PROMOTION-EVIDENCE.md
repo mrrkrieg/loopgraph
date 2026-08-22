@@ -26,7 +26,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 
 | Receipt | What it binds |
 |---|---|
-| `staging-validation/v4` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, verified audit checkpoint, unauthenticated/foreign/suspended user denial, and one complete database-owned user quota window ending in `429` |
+| `staging-validation/v5` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, zero pending/stale App action commits, the reviewed action-reconciliation threshold, verified audit checkpoint, unauthenticated/foreign/suspended user denial, and one complete database-owned user quota window ending in `429` |
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
 | `backup-restore-rehearsal/v2` | Protected source database identity digest, distinct disposable target, matching PostgreSQL versions, exact row-count/SHA-256 fingerprints for every application table, restored audit integrity, and evidence-family counts |
 | `audit-drain/v3` | Exact staging origin and tenant, retained audit head, exact staging and marketplace sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
@@ -37,6 +37,11 @@ hash of the staging and marketplace audit checkpoints, and both checkpoints must
 externally acknowledged retained range. The recovery source must match the database identity
 approved inside the protected recovery environment. A missing, stale, duplicated, cross-tenant, or
 cross-deployment receipt fails the compiler.
+
+The staging receipt includes only aggregate App action evidence: requested, succeeded, and failed
+commit counts plus the zero-valued pending/stale backlog and reviewed stale threshold. It does not
+include App IDs, action IDs, provider inputs, Broker receipts, credentials, or customer payloads.
+Any nonterminal action commit blocks manifest compilation and production promotion.
 
 The resulting `loopgraph-production-promotion-evidence/v1` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
@@ -122,6 +127,10 @@ Repository tests validate schemas, content binding, freshness, mixed-evidence re
 user-boundary statuses, quota-window completeness, fingerprint coverage, and manifest reconstruction. A real workflow run is still required to prove
 the Vercel deployment, Supabase database, protected runner mounts, receiver key, immutable storage,
 GitHub attestation service, and environment approval all exist and are correctly configured.
+The aggregate staging gate proves there is no unresolved App action backlog at promotion time. A
+staging-only fixture provider or an approved non-production provider account is still required to
+demonstrate the deliberate interruption/reconciliation scenario and independently count that the
+provider mutation occurred exactly once.
 
 Retain the manifest, four receipts, GitHub attestation, workflow URL, promoted deployment URL, and
 alert/configuration revisions according to enterprise policy. The external WORM receiver remains

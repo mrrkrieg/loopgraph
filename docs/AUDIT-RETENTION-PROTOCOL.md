@@ -44,7 +44,7 @@ The sender independently rejects:
 - an empty page that claims more work; and
 - a final event hash different from the verified checkpoint.
 
-For a production release, the sender also reads the exact `staging-validation/v4` and
+For a production release, the sender also reads the exact `staging-validation/v5` and
 `hosted-marketplace-staging-validation/v2` receipts. It rejects a different source origin, tenant,
 or project, then proves both named sequence/hash checkpoints while traversing the pinned chain. A
 checkpoint older than the protected predecessor state fails closed because it can no longer be

@@ -60,7 +60,19 @@ describe("production promotion evidence manifest", () => {
       },
       scope: { organizationId, projectKey: "main", databaseIdentityDigest },
       evidence: {
-        staging: { summary: { checks: 7, quotaBucket: "admin", quotaLimit: 3 } },
+        staging: {
+          summary: {
+            checks: 8,
+            quotaBucket: "admin",
+            quotaLimit: 3,
+            actionCommitRequests: 12,
+            actionCommitSucceeded: 10,
+            actionCommitFailed: 2,
+            actionReconciliationPending: 0,
+            actionReconciliationStale: 0,
+            actionReconciliationStaleAfterSeconds: 300
+          }
+        },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
         recovery: { summary: { criticalTables: RECOVERY_TABLES.length } },
         auditRetention: { summary: { throughSequence: 50 } }
@@ -154,6 +166,23 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(wrongStatus, config))
       .toThrow(/unexpected control status/i);
+  });
+
+  it("rejects staging evidence with a nonterminal App action commit", () => {
+    const receipts = releaseReceipts();
+    receipts.staging = {
+      ...(receipts.staging as Record<string, unknown>),
+      appActionReconciliationEvidence: {
+        requestedTotal: 12,
+        succeededTotal: 10,
+        failedTotal: 1,
+        pending: 1,
+        stale: 1,
+        oldestAgeSeconds: 600,
+        staleAfterSeconds: 300
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(receipts, config)).toThrow();
   });
 
   it("requires every claimed checkpoint to be inside the signed retained range", () => {
@@ -264,7 +293,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
   ).toString("base64url");
   return {
     staging: {
-      schemaVersion: "staging-validation/v4",
+      schemaVersion: "staging-validation/v5",
       targetOrigin: deploymentOrigin,
       organizationId,
       projectKey: "main",
@@ -273,6 +302,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       results: [
         { name: "readiness", status: 200 },
         { name: "operational_metrics", status: 200 },
+        { name: "app_action_reconciliation_health", status: 200 },
         { name: "audit_integrity", status: 200 },
         { name: "unauthenticated_user_denial", status: 401 },
         { name: "cross_tenant_user_denial", status: 403 },
@@ -285,6 +315,15 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         allowedRequests: 3,
         deniedStatus: 429,
         retryAfterSeconds: 1
+      },
+      appActionReconciliationEvidence: {
+        requestedTotal: 12,
+        succeededTotal: 10,
+        failedTotal: 2,
+        pending: 0,
+        stale: 0,
+        oldestAgeSeconds: 0,
+        staleAfterSeconds: 300
       }
     },
     marketplace: {

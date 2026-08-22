@@ -424,7 +424,7 @@ async function main() {
 }
 
 const stagingCheckpointReceiptSchema = z.object({
-  schemaVersion: z.literal("staging-validation/v4"),
+  schemaVersion: z.literal("staging-validation/v5"),
   targetOrigin: z.string().url(),
   organizationId: z.string().uuid(),
   projectKey: z.string(),
