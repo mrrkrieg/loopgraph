@@ -1388,7 +1388,13 @@ describe("atomic app installation lifecycle", () => {
       now: new Date("2026-08-08T12:03:30.000Z")
     })).rejects.toThrow(/fresh install plan/i);
 
-    const repaired = await input.service.repair(applied.installation.id, "sales-admin", new Date("2026-08-08T12:04:00.000Z"));
+    const repaired = await input.service.repair({
+      installationId: applied.installation.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: overlaid.installation!.artifactDigest,
+      expectedUpdatedAt: overlaid.installation!.updatedAt,
+      now: new Date("2026-08-08T12:04:00.000Z")
+    });
     expect(repaired.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
     expect(repaired.receipt.action).toBe("repair");
     expect(repaired.installation?.ownedAssets).toEqual(expect.arrayContaining([
@@ -1621,6 +1627,161 @@ describe("atomic app installation lifecycle", () => {
     expect((await store.read()).lifecycleOperations.filter((operation) =>
       operation.action === "overlay" && operation.status === "completed"
     )).toHaveLength(2);
+  });
+
+  it("recovers and replays only the exact actor-bound pinned-artifact repair", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:06:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt
+    };
+
+    store.interruptNextLifecycleRegistryCommit("repair");
+    await expect(input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:07:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after repair LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toEqual(applied.installation);
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "repair");
+    expect(recovery).toMatchObject({
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      targetArtifactDigest: applied.installation.artifactDigest,
+      repair: {
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.repair ?? {}).sort()).toEqual([
+      "fromUpdatedAt",
+      "sourceArtifactDigest",
+      "sourceInstallationDigest",
+      "sourceLoopIds",
+      "sourceLoopInventoryDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    await expect(input.service.repair({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:07:30.000Z")
+    })).rejects.toThrow(/idempotency conflict|must be reconciled/i);
+
+    const recovered = await input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:08:00.000Z")
+    });
+    expect(recovered.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
+    expect(recovered.receipt).toMatchObject({ action: "repair", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:09:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.repair({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:09:30.000Z")
+    })).rejects.toThrow(/exact replay/i);
+
+    const later = await input.service.repair({
+      installationId: recovered.installation!.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: recovered.installation!.artifactDigest,
+      expectedUpdatedAt: recovered.installation!.updatedAt,
+      now: new Date("2026-08-08T12:10:00.000Z")
+    });
+    expect(later.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) =>
+      operation.action === "repair" && operation.status === "completed"
+    )).toHaveLength(2);
+  });
+
+  it("recovers repair after an unrelated workspace revision while refusing owned drift", async () => {
+    const loopSpecStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    const input = await harness({ loopSpecStore });
+    const store = new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme");
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:11:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt
+    };
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:12:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const recovery = (await store.read()).lifecycleOperations.find((operation) => operation.action === "repair");
+    expect(recovery).toMatchObject({ status: "requires_reconciliation" });
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }) as { stage: string; nextAction: { input: Record<string, unknown> } };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      nextAction: {
+        input: {
+          action: "repair",
+          expectedArtifactDigest: applied.installation.artifactDigest,
+          expectedUpdatedAt: applied.installation.updatedAt
+        }
+      }
+    });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:12:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(recovery!.repair!.sourceWorkspaceRevision);
+
+    const repaired = await input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:13:00.000Z")
+    });
+    expect(repaired.receipt.action).toBe("repair");
+
+    const laterRequest = {
+      installationId: repaired.installation!.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: repaired.installation!.artifactDigest,
+      expectedUpdatedAt: repaired.installation!.updatedAt
+    };
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.repair({
+      ...laterRequest,
+      now: new Date("2026-08-08T12:13:20.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as { registeredSpecs: Array<Record<string, unknown>> };
+    workspace.registeredSpecs.push({
+      id: "unexpected-repair-loop",
+      name: "Unexpected repair loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-repair-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T12:13:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2));
+    await expect(input.service.repair({
+      ...laterRequest,
+      now: new Date("2026-08-08T12:14:00.000Z")
+    })).rejects.toThrow(/topology changed/i);
   });
 
   it("plans permission-aware updates, requires review, and restores the exact prior revision", async () => {

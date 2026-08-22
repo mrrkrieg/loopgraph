@@ -45,6 +45,24 @@ describe("installed App browser actions", () => {
     });
   });
 
+  it("binds browser repair to the exact source artifact and installation revision", async () => {
+    const formData = new FormData();
+    formData.set("installationId", "install.customer-health");
+    formData.set("action", "repair");
+    formData.set("expectedArtifactDigest", "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    formData.set("expectedUpdatedAt", "2026-08-22T20:00:00.000Z");
+
+    await operateInstalledAppAction(formData);
+
+    expect(mocks.callTool).toHaveBeenCalledWith("loopgraph_app_repair", {
+      projectRoot: "/srv/loopgraph/tenant/main",
+      installationId: "install.customer-health",
+      actor: "admin@example.com",
+      expectedArtifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      expectedUpdatedAt: "2026-08-22T20:00:00.000Z"
+    });
+  });
+
   it("opens the new private installation after a browser duplicate", async () => {
     mocks.callTool.mockResolvedValue({ installation: { id: "install.private-sales" } });
     const formData = new FormData();

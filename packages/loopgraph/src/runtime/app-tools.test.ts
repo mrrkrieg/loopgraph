@@ -13,7 +13,7 @@ import {
   type AppInstallationStore,
   type AppInstallationUpdate
 } from "./app-installation-store";
-import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
+import { appRepairInputSchema, callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
 import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
 import { createAppIndependentVerificationReceipt } from "./app-operational-maturity";
@@ -87,6 +87,24 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_marketplace_source_add",
       "loopgraph_marketplace_source_refresh"
     ]);
+  });
+
+  it("requires both source bindings when repair requests exact replay", () => {
+    const base = {
+      projectRoot: "/srv/loopgraph/main",
+      installationId: "install.sales",
+      actor: "admin"
+    };
+    expect(appRepairInputSchema.safeParse(base).success).toBe(false);
+    expect(appRepairInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }).success).toBe(false);
+    expect(appRepairInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      expectedUpdatedAt: "2026-08-22T20:00:00.000Z"
+    }).success).toBe(true);
   });
 
   it("exposes the same secret-free prepared-action ledger to Hermes and local callers", async () => {

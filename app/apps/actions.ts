@@ -26,10 +26,15 @@ export async function operateInstalledAppAction(formData: FormData) {
   const installationId = requiredFormString(formData, "installationId");
   const action = requiredFormString(formData, "action");
   if (!(action in actionTools)) throw new Error(`Unsupported app operation: ${action}`);
+  const exactRepairSource = action === "repair" ? {
+    expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt")
+  } : {};
   await callLoopgraphAppTool(actionTools[action as keyof typeof actionTools], {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
-    actor
+    actor,
+    ...exactRepairSource
   });
   revalidateInstalledApp(installationId);
 }

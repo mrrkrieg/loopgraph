@@ -341,7 +341,13 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
               {data.installation.state === "simulation_passed" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
               {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
               {data.installation.state === "paused" ? <OperationForm action="resume" installationId={data.installation.id} label="Resume app" primary /> : <OperationForm action="pause" installationId={data.installation.id} label="Pause app" />}
-              <OperationForm action="repair" installationId={data.installation.id} label="Repair generated assets" />
+              <OperationForm
+                action="repair"
+                installationId={data.installation.id}
+                label="Repair generated assets"
+                expectedArtifactDigest={data.installation.artifactDigest}
+                expectedUpdatedAt={data.installation.updatedAt}
+              />
             </div>}
           </SectionCard>
           <SectionCard title="Pinned installation">
@@ -358,7 +364,7 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
 
 function ScoreCard({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="rounded-xl border border-line bg-white p-4 shadow-sm"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold capitalize">{value}</div><div className="mt-1 text-xs text-ink/45">{detail}</div></div>; }
 function Definition({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="border-b border-line py-3 last:border-0"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className={`mt-1 break-all text-xs text-ink/65 ${mono ? "font-mono" : ""}`}>{value}</div></div>; }
-function OperationForm({ action, installationId, label, primary = false }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} /><button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
+function OperationForm({ action, installationId, label, primary = false, expectedArtifactDigest, expectedUpdatedAt }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean; expectedArtifactDigest?: string; expectedUpdatedAt?: string }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} />{expectedArtifactDigest ? <input name="expectedArtifactDigest" type="hidden" value={expectedArtifactDigest} /> : null}{expectedUpdatedAt ? <input name="expectedUpdatedAt" type="hidden" value={expectedUpdatedAt} /> : null}<button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
 function ActivationRecoveryControl({
   installationId,
   operationId,

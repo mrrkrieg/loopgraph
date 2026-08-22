@@ -164,6 +164,12 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
           ? "Retry activation with the exact recorded approval receipt and target mode; do not create a replacement approval."
           : recovery.action === "pause" || recovery.action === "resume"
             ? `Retry the exact recorded ${recovery.action} request; do not start another lifecycle action until its LoopSpec state is reconciled.`
+          : recovery.action === "configure"
+            ? "Retry the exact confirmed configuration request with the same actor; do not replace its values while recovery is pending."
+          : recovery.action === "overlay"
+            ? "Retry the exact recorded overlay operations with the same actor; do not substitute a different graph customization."
+          : recovery.action === "repair"
+            ? "Retry repair against the exact recorded artifact and source revision with the same actor; do not start another lifecycle action until its generated topology is reconciled."
           : recovery.action === "update"
             ? "Retry the exact recorded update plan with the same actor and permission approvals; do not create a replacement plan or start another lifecycle action."
           : recovery.action === "rollback"
@@ -289,6 +295,10 @@ function decideStage(input: {
               ? `App ${action} was interrupted and its exact rollout transition must be reconciled before another lifecycle action can run.`
               : action === "configure"
                 ? "App configuration was interrupted and its exact confirmed-value request must be reconciled before another lifecycle action can run."
+              : action === "overlay"
+                ? "An App overlay was interrupted and its exact customization and source or target topology must be reconciled before another lifecycle action can run."
+              : action === "repair"
+                ? "App repair was interrupted and its exact pinned artifact, source revision, and regenerated topology must be reconciled before another lifecycle action can run."
               : action === "update"
                 ? "An App update was interrupted and its exact reviewed plan, permission approvals, and source or target topology must be reconciled before another lifecycle action can run."
               : action === "rollback"
@@ -306,6 +316,8 @@ function decideStage(input: {
                 ? "Retry the exact confirmed configuration request as the same actor. Loopgraph will compare only bounded digests in the recovery journal and return the original receipt after completion."
               : action === "overlay"
                 ? "Retry the exact overlay operations as the same actor. Loopgraph will compare only bounded digests, reconcile the recorded source or target owned LoopSpec topology, and return the original receipt after completion."
+              : action === "repair"
+                ? "Retry repair against the exact source artifact and revision as the same actor. Loopgraph will reconcile only the recorded source or regenerated target topology and return the original receipt after completion."
               : action === "update"
                 ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
               : action === "rollback"
@@ -335,6 +347,11 @@ function decideStage(input: {
             operationsDigest: input.lifecycleOperation.overlay.operationsDigest,
             sourceLoopIds: input.lifecycleOperation.overlay.sourceLoopIds,
             targetLoopIds: input.lifecycleOperation.overlay.targetLoopIds
+          } : input.lifecycleOperation.repair ? {
+            expectedUpdatedAt: input.lifecycleOperation.repair.fromUpdatedAt,
+            expectedArtifactDigest: input.lifecycleOperation.repair.sourceArtifactDigest,
+            sourceLoopIds: input.lifecycleOperation.repair.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.repair.targetLoopIds
           } : input.lifecycleOperation.uninstall ? {
             reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
             fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,

@@ -979,10 +979,18 @@ apps
   .command("repair")
   .description("Recompile the exact pinned app and return it to write-blocked testing")
   .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--expected <digest>", "Source artifact digest from apps status")
+  .requiredOption("--updated-at <timestamp>", "Source installation revision time from apps status")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--actor <id>", "Accountable repair identity", "cli")
-  .action(async (installationId: string, options: { project: string; actor: string }) => {
-    await printAppTool("loopgraph_app_repair", { projectRoot: options.project, installationId, actor: options.actor });
+  .action(async (installationId: string, options: { expected: string; updatedAt: string; project: string; actor: string }) => {
+    await printAppTool("loopgraph_app_repair", {
+      projectRoot: options.project,
+      installationId,
+      expectedArtifactDigest: options.expected,
+      expectedUpdatedAt: options.updatedAt,
+      actor: options.actor
+    });
   });
 
 apps

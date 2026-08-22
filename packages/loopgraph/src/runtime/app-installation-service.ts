@@ -1002,48 +1002,206 @@ export class AppInstallationService {
     }
   }
 
-  async repair(installationId: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      const loaded = await this.loadInstallationArtifact(installation);
-      const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
-      const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
-      const timestamp = now.toISOString();
-      const namespace = installationNamespace(installation);
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-repair-${contentHash({ installationId, digest: installation.artifactDigest, timestamp })}`,
-        idempotencyKey: canonicalAppDigest({ action: "repair", installationId, digest: installation.artifactDigest, timestamp }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        state: "ready_to_test",
-        mode: "simulation",
-        permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
-        ownedAssets,
-        history: appendHistory(installation, actor, "repair", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "repair",
-        actor,
-        reason: "Recompiled the pinned immutable artifact and restored generated assets in write-blocked test mode.",
-        evidenceRetained: true,
-        reversible: true,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, ownedAssets));
+  async repair(input: {
+    installationId: string;
+    actor: string;
+    expectedArtifactDigest: string;
+    expectedUpdatedAt: string;
+    now?: Date;
+  }): Promise<AppLifecycleMutationResult> {
+    const now = input.now ?? new Date();
+    const observedRegistry = await this.installationStore.read();
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) => {
+      const repair = candidate.repair;
+      return candidate.action === "repair" &&
+        candidate.installationId === input.installationId &&
+        repair !== undefined &&
+        repair.fromUpdatedAt === input.expectedUpdatedAt &&
+        repair.sourceArtifactDigest === input.expectedArtifactDigest &&
+        candidate.status === "completed";
     });
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      const installation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+      if (!receipt || !installation) throw new Error("Completed repair operation is missing its durable result");
+      assertRepairReplayAuthority(completed, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const observedInstallation = requireInstallation(observedRegistry, input.installationId);
+    if (observedInstallation.artifactDigest !== input.expectedArtifactDigest) {
+      throw new Error("Installed app changed; create a fresh repair request");
+    }
+    if (observedInstallation.updatedAt !== input.expectedUpdatedAt) {
+      throw new Error("Installed app revision changed; create a fresh repair request");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, observedInstallation.id);
+    const idempotencyKey = canonicalAppDigest({
+      action: "repair",
+      workspaceId: this.workspaceId,
+      installationId: observedInstallation.id,
+      sourceInstallationDigest,
+      sourceOwnershipDigest
+    });
+    const operationId = lifecycleOperationId("repair", observedInstallation.id, observedInstallation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? new Date(
+      Math.max(now.getTime(), Date.parse(observedInstallation.updatedAt) + 1)
+    ).toISOString();
+    const effectiveNow = new Date(Math.max(now.getTime(), Date.parse(timestamp)));
+    const loaded = await this.loadInstallationArtifact(observedInstallation);
+    const compiled = await compileLoopPack(loaded, { selectedModules: observedInstallation.selectedModules });
+    const activeCapabilities = assertInstalledCompositionAuthority(compiled, observedInstallation);
+    const namespace = installationNamespace(observedInstallation);
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      observedInstallation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const ownedAssets = ownershipFromCompiled(compiled, observedInstallation.id, namespace, observedInstallation.ownedAssets);
+    const updated: WorkspaceAppInstallation = {
+      ...observedInstallation,
+      state: "ready_to_test",
+      mode: "simulation",
+      permissions: observedInstallation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+      ownedAssets,
+      history: appendHistory(observedInstallation, input.actor, "repair", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, observedInstallation.id, ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopIds = existingOperation?.repair?.sourceLoopIds ?? installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: observedInstallation.id,
+      appId: observedInstallation.appId,
+      action: "repair",
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...observedInstallation.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(observedInstallation.configuration).sort()
+      },
+      repair: existingOperation?.repair ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceArtifactDigest: observedInstallation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopObservedInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, observedInstallation.id),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now: effectiveNow
+    });
+    if (!operation.repair) throw new Error(`App repair recovery record is incomplete: ${operation.id}`);
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      const receipt = operation.resultReceiptId
+        ? registry.lifecycleReceipts.find((candidate) => candidate.id === operation.resultReceiptId)
+        : undefined;
+      const installation = registry.installations.find((candidate) => candidate.id === input.installationId);
+      if (!receipt || !installation) throw new Error("Completed repair operation is missing its durable result");
+      assertRepairReplayAuthority(operation, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      return { installation, receipt, lock: createInstallationLock(registry) };
+    }
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.repair || currentOperation.status === "completed") {
+          throw new Error(`App repair recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.repair;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, installation.id, ownedAssets);
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "repair" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== installation.artifactDigest ||
+          installation.artifactDigest !== recovery.sourceArtifactDigest ||
+          installation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, installation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...installation.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(installation.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App repair recovery record does not match the current installation or pinned artifact");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopObservedInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after repair recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Repair LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "repair",
+          actor: input.actor,
+          reason: "Recompiled the pinned immutable artifact and restored generated assets in write-blocked test mode.",
+          evidenceRetained: true,
+          reversible: true,
+          removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, effectiveNow, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, effectiveNow);
+      throw error;
+    }
   }
 
   async duplicate(input: {
@@ -2911,6 +3069,14 @@ function installationLoopInventoryDigest(artifacts: StoredLoopSpecArtifact[], lo
   return canonicalAppDigest(inventory);
 }
 
+function installationLoopObservedInventoryDigest(artifacts: StoredLoopSpecArtifact[], loopIds: string[]): string {
+  const byId = new Map(artifacts.map((artifact) => [artifact.loopId, artifact]));
+  return canonicalAppDigest([...loopIds].sort().map((loopId) => ({
+    loopId,
+    versionHash: byId.get(loopId)?.versionHash ?? null
+  })));
+}
+
 function sharedInstallationLoopIds(
   registry: AppInstallationRegistry,
   installation: WorkspaceAppInstallation
@@ -3355,6 +3521,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     rollout: existing.rollout,
     configure: existing.configure,
     overlay: existing.overlay,
+    repair: existing.repair,
     uninstall: existing.uninstall,
     update: existing.update,
     rollback: existing.rollback,
@@ -3369,9 +3536,9 @@ function assertLifecyclePreparationSource(
   registry: AppInstallationRegistry,
   input: PrepareLifecycleOperationInput
 ): void {
-  const source = input.configure ?? input.overlay ?? input.update ?? input.rollback ?? input.uninstall;
+  const source = input.configure ?? input.overlay ?? input.repair ?? input.update ?? input.rollback ?? input.uninstall;
   if (!source) return;
-  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
+  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.repair?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
   const installation = requireInstallation(registry, input.installationId);
   if (
     installation.updatedAt !== source.fromUpdatedAt ||
@@ -3434,6 +3601,31 @@ function assertOverlayReplayAuthority(
     receipt.installationId !== installation.id
   ) {
     throw new Error("Completed overlay operation does not authorize this exact replay");
+  }
+}
+
+function assertRepairReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedArtifactDigest: string,
+  expectedUpdatedAt: string
+): void {
+  if (
+    operation.action !== "repair" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.repair ||
+    operation.repair.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.repair.fromUpdatedAt !== expectedUpdatedAt ||
+    operation.repair.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "repair" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed repair operation does not authorize this exact replay");
   }
 }
 

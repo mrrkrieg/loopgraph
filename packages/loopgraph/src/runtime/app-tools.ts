@@ -460,7 +460,10 @@ export const appOverlayApplyInputSchema = appInstallationActionInputSchema.exten
   expectedArtifactDigest: artifactDigestSchema,
   expectedOverlayRevision: z.number().int().nonnegative().default(0)
 }).strict();
-export const appRepairInputSchema = appInstallationActionInputSchema;
+export const appRepairInputSchema = appInstallationActionInputSchema.extend({
+  expectedArtifactDigest: artifactDigestSchema,
+  expectedUpdatedAt: z.string().datetime()
+}).strict();
 export const appDuplicateInputSchema = appInstallationActionInputSchema.extend({
   derivedAppId: z.string().min(3).max(160),
   overlayOperations: z.array(appOverlayOperationSchema).max(100).default([])
@@ -576,7 +579,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_promotion_recommendation", description: "Derive a non-activating promotion recommendation from conformance, historical replay, human labels, and review burden.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_configure", description: "Apply or exactly replay confirmed company configuration against a prior configuration digest, returning the App to write-blocked testing without storing values in the recovery journal.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_overlay_apply", description: "Apply or exactly replay version-bound workspace customization and owned LoopSpec rematerialization without mutating the immutable base artifact or retaining operations in the recovery journal.", readOnly: false, idempotent: true, destructive: false },
-  { name: "loopgraph_app_repair", description: "Recompile the exact pinned artifact, restore owned generated assets, and require fresh conformance.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_repair", description: "Recompile the exact pinned artifact, restore owned generated assets, and require fresh conformance. Pass the source artifact digest and revision time for an exact replay-safe request.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_duplicate", description: "Create a private derived installation with namespaced loops and an independent workspace overlay.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_diff", description: "Inspect immutable base, effective configuration, overlay, derivation, history, and update availability.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_update_plan", description: "Create a content-bound three-way update plan with graph, overlay-conflict, and permission diffs.", readOnly: true, idempotent: true, destructive: false },
@@ -1704,7 +1707,13 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_repair") {
     const parsed = appRepairInputSchema.parse({ ...raw, projectRoot, ...identity });
-    return service.repair(parsed.installationId, parsed.actor, options.now);
+    return service.repair({
+      installationId: parsed.installationId,
+      actor: parsed.actor,
+      expectedArtifactDigest: parsed.expectedArtifactDigest,
+      expectedUpdatedAt: parsed.expectedUpdatedAt,
+      now: options.now
+    });
   }
   if (name === "loopgraph_app_duplicate") {
     const parsed = appDuplicateInputSchema.parse({ ...raw, projectRoot, ...identity });
