@@ -32,7 +32,7 @@ The returned `loopgraph-app-onboarding/v1alpha1` object contains:
 - the current content-bound install plan and field-mapping plan when applicable;
 - an exact impact projection of every LoopSpec, skill, route, event contract, schedule, metric, fixture, evaluation, dashboard, connector binding, field mapping, and graph asset to create or reuse, including conflicts, permissions, and evidence/learning edges;
 - persisted installation, readiness, and write-blocked evaluation state;
-- an unfinished install, activation, pause, resume, rollback, or uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker stopped between stores;
+- an unfinished install, activation, pause, resume, update, rollback, or uninstall recovery identity, status, affected resource counts, and exact retry boundary when a worker stopped between stores;
 - one exact next action, including a tool name when a safe tool call exists;
 - an explicit `requiresHumanConfirmation` boundary.
 
@@ -93,6 +93,8 @@ loopgraph apps onboard-save loopgraph.sales.qualify-route-inbound-leads \
 ## Browser
 
 The Marketplace installer and Installed App detail page render the same eight-step contract. Opening the App-only install URL resumes a saved Hermes/CLI/browser preset; when none exists, that URL presents the declared stacks rather than returning a 404. An already installed App opens its operating view. Validated answers save through the shared draft tool, and a reload resumes the saved stack, modules, answers, and current blockers. Choosing another stack produces a clean preview, labels the saved stack that was excluded, and requires an explicit replacement checkbox. An explicit “start over” disclosure shows exactly what remains untouched and submits the current draft identity and revision through the shared reset tool. Before approval, the installer expands the content-bound plan into an exact impact review: every created asset, reused company resource, blocking shared-object conflict, provider-authority decision, declared outcome metric, and signed evidence edge is visible. The current step and human approval boundary remain visible before and after installation, so the user is not dropped into a generic status dashboard and asked to infer what comes next. The Installed Apps list and detail page also render unfinished lifecycle recovery above normal controls, show the affected LoopSpec/mapping/context counts, and replace competing actions with the exact reconciliation path.
+
+Update apply follows the same resumable rule. Before changing an owned LoopSpec, Loopgraph journals the content-bound plan digest, exact permission approval set, accountable actor, source installation and ownership digests, original workspace revision, and the complete expected source and target LoopSpec inventories. If the worker stops after materialization, the original Hermes, CLI, or browser session may retry the same reviewed plan after its normal plan window expires. A different actor, approval set, plan, installation revision, ownership graph, or third topology is rejected, and successful replay returns the original lifecycle receipt instead of creating another update.
 
 ## Safety invariants
 

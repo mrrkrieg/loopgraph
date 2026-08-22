@@ -1442,6 +1442,130 @@ describe("atomic app installation lifecycle", () => {
     expect(conformance.status).toBe("passed");
   });
 
+  it("resumes an interrupted update only for the exact actor, reviewed plan, approvals, and LoopSpec target", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:10:00.000Z"));
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:11:00.000Z")
+    });
+
+    store.interruptNextLifecycleRegistryCommit("update");
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:12:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after update LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toMatchObject({ version: "1.0.0", artifactDigest: applied.installation.artifactDigest });
+    expect(interrupted.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "update",
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      targetArtifactDigest: updatePlan.toDigest,
+      update: expect.objectContaining({
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        planDigest: updatePlan.planDigest,
+        approvedPermissionCapabilities: ["crm.lead.update"],
+        targetInstallationDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      })
+    }));
+    await expect(input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T12:12:30.000Z")))
+      .rejects.toThrow(/must be reconciled before another operation/i);
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:12:40.000Z")
+    })).rejects.toThrow(/idempotency conflict/i);
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update", "crm.account.read"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:12:45.000Z")
+    })).rejects.toThrow(/do not require review/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const recordedTargetWorkspace = await readFile(workspacePath, "utf8");
+    const driftedWorkspace = JSON.parse(recordedTargetWorkspace) as { registeredSpecs: Array<Record<string, unknown>> };
+    driftedWorkspace.registeredSpecs.push({
+      id: "unexpected-update-loop",
+      name: "Unexpected update loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-update-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T12:12:50.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(driftedWorkspace, null, 2), "utf8");
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:12:55.000Z")
+    })).rejects.toThrow(/Active LoopSpec inventory is missing unexpected-update-loop/i);
+    await writeFile(workspacePath, recordedTargetWorkspace, "utf8");
+
+    const recovered = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:42:00.000Z")
+    });
+    const replayed = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:43:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:43:30.000Z")
+    })).rejects.toThrow(/different actor, reviewed plan, or installation revision/i);
+    expect(recovered.installation).toMatchObject({ version: "1.1.0", state: "ready_to_test", mode: "simulation" });
+    expect((await store.read()).lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "update",
+      status: "completed",
+      resultReceiptId: recovered.receipt.id
+    }));
+
+    const rolledBack = await input.service.rollback(
+      applied.installation.id,
+      recovered.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:44:00.000Z")
+    );
+    const secondPlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:45:00.000Z")
+    });
+    const secondUpdate = await input.service.applyUpdate({
+      plan: secondPlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:46:00.000Z")
+    });
+    expect(rolledBack.installation).toMatchObject({ version: "1.0.0" });
+    expect(secondUpdate.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "update" && operation.status === "completed"))
+      .toHaveLength(2);
+  });
+
   it("resumes an interrupted rollback only for the exact actor, installation, and LoopSpec target", async () => {
     const store = new AuditCapturingInstallationStore("acme");
     const input = await harness({ installationStore: store });

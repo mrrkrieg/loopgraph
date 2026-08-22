@@ -267,7 +267,7 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
             </div>
           </SectionCard>
 
-          {data.updatePlan ? (
+          {data.updatePlan && !recovery ? (
             <SectionCard title={`Update available · v${data.updatePlan.toVersion}`} description="Updates are three-way merges: original base + company overlay + new immutable base. Permission increases and conflicts require explicit review.">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-md bg-surface p-4"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">Graph change</div><div className="mt-2 text-sm">+{data.updatePlan.graphDiff.nodesAdded.length} / −{data.updatePlan.graphDiff.nodesRemoved.length} nodes</div></div>
@@ -315,6 +315,17 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
               ) : <p className="mt-4 rounded-md border border-orange-300 bg-white p-3 text-xs leading-5 text-orange-900/75">This exact activation cannot be resumed from the browser. Use the Hermes or CLI retry returned by the onboarding journey; do not create a replacement approval.</p>
             ) : recovery.action === "pause" || recovery.action === "resume" ? (
               <div className="mt-4"><OperationForm action={recovery.action} installationId={data.installation.id} label={`Reconcile and finish ${recovery.action}`} primary /></div>
+            ) : recovery.action === "update" ? (
+              data.updatePlan && recovery.update?.planDigest === data.updatePlan.planDigest ? (
+                <form action={applyInstalledAppUpdateAction} className="mt-4 space-y-3">
+                  <input name="installationId" type="hidden" value={data.installation.id} />
+                  <textarea className="hidden" name="plan" readOnly value={JSON.stringify(data.updatePlan)} />
+                  {(recovery.update?.approvedPermissionCapabilities ?? []).map((capability) => (
+                    <input key={capability} name="approvedPermissionCapabilities" type="hidden" value={capability} />
+                  ))}
+                  <button className="w-full rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" type="submit">Reconcile and finish update</button>
+                </form>
+              ) : <p className="mt-4 rounded-md border border-orange-300 bg-white p-3 text-xs leading-5 text-orange-900/75">This exact reviewed update is not present in this browser session. Return to the Hermes or CLI session holding the original plan and retry it with the same actor and recorded permission approvals; do not create a replacement plan.</p>
             ) : recovery.action === "rollback" ? (
               <form action={rollbackInstalledAppAction} className="mt-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={recovery.rollback?.sourceArtifactDigest ?? data.installation.artifactDigest} /><button className="w-full rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" type="submit">Reconcile and finish rollback</button></form>
             ) : <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href={recovery.action === "uninstall" ? "#app-uninstall" : `/marketplace/${encodeURIComponent(data.detail.app.id)}/install`}>{recovery.action === "uninstall" ? "Finish recovery" : "Return to exact install"}</a> : <div className="mt-4 space-y-2">

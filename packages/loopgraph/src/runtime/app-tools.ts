@@ -580,7 +580,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_duplicate", description: "Create a private derived installation with namespaced loops and an independent workspace overlay.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_diff", description: "Inspect immutable base, effective configuration, overlay, derivation, history, and update availability.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_update_plan", description: "Create a content-bound three-way update plan with graph, overlay-conflict, and permission diffs.", readOnly: true, idempotent: true, destructive: false },
-  { name: "loopgraph_app_update_apply", description: "Apply an unexpired reviewed update plan, preserving overlays and requiring fresh evidence.", readOnly: false, idempotent: false, destructive: false },
+  { name: "loopgraph_app_update_apply", description: "Apply an exact reviewed update plan, or safely resume its journaled cross-store recovery, while preserving overlays and requiring fresh evidence.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_rollback", description: "Restore the exact prior installed revision and return to write-blocked conformance.", readOnly: false, idempotent: true, destructive: true },
   { name: "loopgraph_app_detach", description: "Pin a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app.", readOnly: false, idempotent: false, destructive: true },
   { name: "loopgraph_app_uninstall", description: "Remove only installation-owned runtime assets while retaining shared company resources and evidence.", readOnly: false, idempotent: false, destructive: true },

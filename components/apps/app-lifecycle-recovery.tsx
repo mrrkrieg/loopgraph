@@ -51,6 +51,8 @@ export function AppLifecycleRecoveryNotice({
                   <div><dt className="inline font-sans font-semibold">Operation: </dt><dd className="inline break-all">{operation.id}</dd></div>
                   <div><dt className="inline font-sans font-semibold">Artifact: </dt><dd className="inline break-all">{operation.targetArtifactDigest}</dd></div>
                   {operation.uninstall ? <div><dt className="inline font-sans font-semibold">Reason digest: </dt><dd className="inline break-all">{operation.uninstall.reasonDigest}</dd></div> : null}
+                  {operation.update ? <div><dt className="inline font-sans font-semibold">Plan digest: </dt><dd className="inline break-all">{operation.update.planDigest}</dd></div> : null}
+                  {operation.update ? <div><dt className="inline font-sans font-semibold">Source artifact: </dt><dd className="inline break-all">{operation.update.sourceArtifactDigest}</dd></div> : null}
                   {operation.rollback ? <div><dt className="inline font-sans font-semibold">Source artifact: </dt><dd className="inline break-all">{operation.rollback.sourceArtifactDigest}</dd></div> : null}
                   <div><dt className="inline font-sans font-semibold">Updated: </dt><dd className="inline">{new Date(operation.updatedAt).toLocaleString()}</dd></div>
                 </dl>
@@ -73,6 +75,9 @@ export function recoveryInstruction(operation: AppLifecycleOperation): string {
   if (operation.action === "pause" || operation.action === "resume") {
     const target = operation.rollout?.targetState.replace(/_/g, " ") ?? operation.action;
     return `Retry only the recorded ${operation.action} transition to ${target}. Loopgraph will reconcile the exact owned LoopSpec inventory and complete the App state change once; competing lifecycle work remains blocked.`;
+  }
+  if (operation.action === "update") {
+    return "Return to the Hermes, CLI, or browser session that submitted the reviewed update and retry that exact plan as the same actor. Loopgraph accepts only the recorded permission approvals and exact source or target LoopSpec topology; the journaled plan may finish after its original approval window expires.";
   }
   if (operation.action === "rollback") {
     return "Open the installed App and retry rollback as the same actor. Loopgraph accepts only the recorded source installation revision and exact source or target LoopSpec topology; a replacement revision cannot be selected during recovery.";

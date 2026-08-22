@@ -164,6 +164,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
           ? "Retry activation with the exact recorded approval receipt and target mode; do not create a replacement approval."
           : recovery.action === "pause" || recovery.action === "resume"
             ? `Retry the exact recorded ${recovery.action} request; do not start another lifecycle action until its LoopSpec state is reconciled.`
+          : recovery.action === "update"
+            ? "Retry the exact recorded update plan with the same actor and permission approvals; do not create a replacement plan or start another lifecycle action."
           : recovery.action === "rollback"
             ? "Retry the exact recorded rollback request with the same actor; do not select another revision or start another lifecycle action."
           : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
@@ -283,8 +285,10 @@ function decideStage(input: {
         ? "An exact App installation was interrupted and must be resumed before another plan can be applied."
         : action === "activate"
           ? "App activation was interrupted and its exact approved transition must be reconciled before another lifecycle action can run."
-          : action === "pause" || action === "resume"
+            : action === "pause" || action === "resume"
               ? `App ${action} was interrupted and its exact rollout transition must be reconciled before another lifecycle action can run.`
+              : action === "update"
+                ? "An App update was interrupted and its exact reviewed plan, permission approvals, and source or target topology must be reconciled before another lifecycle action can run."
               : action === "rollback"
                 ? "App rollback was interrupted and its exact source and target revisions must be reconciled before another lifecycle action can run."
                 : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
@@ -296,6 +300,8 @@ function decideStage(input: {
             ? "Retry the exact recorded activation receipt and target mode. Loopgraph will reconcile LoopSpec state and consume authority only once."
             : action === "pause" || action === "resume"
               ? `Retry the exact recorded ${action} request. Loopgraph will reconcile only the pinned owned LoopSpecs and complete the state transition once.`
+              : action === "update"
+                ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
               : action === "rollback"
                 ? "Retry the exact rollback request as the same actor. Loopgraph will accept only the recorded source installation and exact source or target LoopSpec topology."
                 : "Repeat the uninstall confirmation with the same accountable actor and exact original reason. Loopgraph will accept only the recorded installation revision and pre-removal or post-removal LoopSpec topology.",
@@ -315,6 +321,13 @@ function decideStage(input: {
             reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
             fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,
             remainingLoopIds: input.lifecycleOperation.uninstall.remainingLoopIds
+          } : input.lifecycleOperation.update ? {
+            planDigest: input.lifecycleOperation.update.planDigest,
+            fromUpdatedAt: input.lifecycleOperation.update.fromUpdatedAt,
+            sourceArtifactDigest: input.lifecycleOperation.update.sourceArtifactDigest,
+            approvedPermissionCapabilities: input.lifecycleOperation.update.approvedPermissionCapabilities,
+            sourceLoopIds: input.lifecycleOperation.update.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.update.targetLoopIds
           } : input.lifecycleOperation.rollback ? {
             fromUpdatedAt: input.lifecycleOperation.rollback.fromUpdatedAt,
             sourceArtifactDigest: input.lifecycleOperation.rollback.sourceArtifactDigest,

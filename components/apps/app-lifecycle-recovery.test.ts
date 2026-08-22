@@ -171,4 +171,53 @@ describe("AppLifecycleRecoveryNotice", () => {
       completedAt: "2026-08-21T10:02:00.000Z"
     })).toThrow(/require their exact lifecycle receipt/);
   });
+
+  it("explains exact update recovery without persisting the reviewed plan body", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.update123",
+      idempotencyKey: "update1234567890",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "update",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: ["mapping.lead"], companyContextKeys: ["sales.icp"] },
+      update: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"b".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"c".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"d".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"e".repeat(64)}`,
+        sourceLoopIds: ["sales.qualify"],
+        planDigest: `sha256:${"f".repeat(64)}`,
+        approvedPermissionCapabilities: ["crm.lead.update"],
+        targetInstallationDigest: `sha256:${"1".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"2".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"3".repeat(64)}`,
+        targetLoopIds: ["sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("recorded permission approvals");
+    expect(html).toContain("original approval window expires");
+    expect(html).toContain(operation.update?.planDigest ?? "missing");
+    expect(html).toContain(operation.update?.sourceArtifactDigest ?? "missing");
+    expect(html).not.toContain("configuration");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      update: { ...operation.update!, targetLoopIds: ["different-loop"] }
+    })).toThrow(/must be unique and match the desired inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
 });
