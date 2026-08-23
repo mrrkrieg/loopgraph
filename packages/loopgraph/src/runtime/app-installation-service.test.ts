@@ -908,6 +908,18 @@ describe("atomic app installation lifecycle", () => {
       "operations-activator",
       new Date("2026-08-08T12:04:00.000Z")
     );
+    const preProofPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:04:15.000Z"));
+    expect(preProofPlan).toMatchObject({
+      totalInstallations: 1,
+      totalMatched: 1,
+      counts: { notApplicable: 1 },
+      items: [{
+        installationId: applied.installation.id,
+        status: "not_applicable",
+        priority: "none",
+        nextAction: { kind: "run_historical_replay" }
+      }]
+    });
 
     const blockedRecommend = await input.service.activationGate(
       applied.installation.id,
@@ -987,6 +999,28 @@ describe("atomic app installation lifecycle", () => {
     })).rejects.toThrow(/production_proven/i);
 
     await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:07:30.000Z"));
+    const currentPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:08:00.000Z"));
+    expect(currentPlan.items[0]).toMatchObject({
+      installationId: applied.installation.id,
+      status: "current",
+      priority: "none",
+      affectedEvidence: [],
+      nextAction: { kind: "monitor" }
+    });
+    const renewSoonPlan = await input.service.evidenceRenewalPlan(
+      { statuses: ["renew_soon"] },
+      new Date("2026-09-02T12:08:00.000Z")
+    );
+    expect(renewSoonPlan).toMatchObject({
+      totalMatched: 1,
+      counts: { renewSoon: 1 },
+      items: [{ status: "renew_soon", priority: "high", nextAction: { kind: "renew_proof" } }]
+    });
+    const expiredPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-09-08T12:08:00.000Z"));
+    expect(expiredPlan).toMatchObject({
+      counts: { expired: 1 },
+      items: [{ status: "expired", priority: "critical", nextAction: { kind: "renew_proof" } }]
+    });
     const executeGate = await input.service.activationGate(
       applied.installation.id,
       "execute_with_approval",
@@ -1029,6 +1063,11 @@ describe("atomic app installation lifecycle", () => {
           summary: expect.stringMatching(/future/i)
         })
       ])
+    });
+    const invalidPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:10:00.000Z"));
+    expect(invalidPlan).toMatchObject({
+      counts: { invalid: 1 },
+      items: [{ status: "invalid", priority: "critical", nextAction: { kind: "repair_evidence" } }]
     });
   }, 20_000);
 

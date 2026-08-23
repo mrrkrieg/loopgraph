@@ -4,6 +4,7 @@ import YAML from "yaml";
 import {
   APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
+  APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
@@ -12,6 +13,7 @@ import {
   appConfigurationSchema,
   appIdSchema,
   appEvalJudgmentSchema,
+  appEvidenceRenewalPlanSchema,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
@@ -30,6 +32,7 @@ import {
   type AppConfiguration,
   type AppActivationApprovalReceipt,
   type AppEvalRun,
+  type AppEvidenceRenewalPlan,
   type AppEvalJudgment,
   type AppHistoricalReplayRequest,
   type AppInstallPlan,
@@ -101,7 +104,11 @@ import {
 } from "./app-evidence-freshness";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
-import { FileAppVerificationStore, type AppVerificationStore } from "./app-verification-store";
+import {
+  FileAppVerificationStore,
+  type AppVerificationRegistry,
+  type AppVerificationStore
+} from "./app-verification-store";
 import { assertSecretFree } from "./secret-redaction";
 
 export type PlanAppInstallationInput = {
@@ -2876,6 +2883,54 @@ export class AppInstallationService {
     return this.buildOperationalMaturity(registry, installation, readiness, now);
   }
 
+  async evidenceRenewalPlan(input: {
+    statuses?: Array<AppEvidenceRenewalPlan["items"][number]["status"]>;
+    limit?: number;
+  } = {}, now = new Date()): Promise<AppEvidenceRenewalPlan> {
+    const registry = await this.installationStore.read();
+    const installations = registry.installations;
+    const [evidenceByInstallation, verificationRegistry] = await Promise.all([
+      this.loadOperationalEvidenceBatch(installations),
+      this.verificationStore.read()
+    ]);
+    const readiness = await Promise.all(installations.map((installation) =>
+      this.buildReadiness(registry, installation, now)));
+    const assessments = await Promise.all(installations.map((installation, index) =>
+      this.buildOperationalMaturity(
+        registry,
+        installation,
+        readiness[index]!,
+        now,
+        true,
+        evidenceByInstallation.get(installation.id),
+        verificationRegistry
+      )));
+    const allItems = assessments.map((assessment) => renewalPlanItem(assessment));
+    const counts = {
+      notApplicable: allItems.filter((item) => item.status === "not_applicable").length,
+      incomplete: allItems.filter((item) => item.status === "incomplete").length,
+      current: allItems.filter((item) => item.status === "current").length,
+      renewSoon: allItems.filter((item) => item.status === "renew_soon").length,
+      expired: allItems.filter((item) => item.status === "expired").length,
+      invalid: allItems.filter((item) => item.status === "invalid").length
+    };
+    const selectedStatuses = input.statuses ? new Set(input.statuses) : undefined;
+    const matched = allItems
+      .filter((item) => !selectedStatuses || selectedStatuses.has(item.status))
+      .sort(compareRenewalPlanItems);
+    const limit = Math.min(Math.max(input.limit ?? 100, 1), 100);
+    return appEvidenceRenewalPlanSchema.parse({
+      schemaVersion: APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
+      workspaceId: this.workspaceId,
+      companyId: this.companyId,
+      generatedAt: now.toISOString(),
+      totalInstallations: installations.length,
+      totalMatched: matched.length,
+      counts,
+      items: matched.slice(0, limit)
+    });
+  }
+
   async activationGate(
     installationId: string,
     mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">,
@@ -2892,10 +2947,13 @@ export class AppInstallationService {
     readiness: AppReadiness,
     now: Date,
     includeIndependentVerification = true,
-    evidenceSnapshot?: AppOperationalEvidenceSnapshot
+    evidenceSnapshot?: AppOperationalEvidenceSnapshot,
+    verificationSnapshot?: AppVerificationRegistry
   ): Promise<AppOperationalMaturityAssessment> {
     const operatingEvidence = evidenceSnapshot ?? await this.loadOperationalEvidence(installation);
-    const verificationRegistry = includeIndependentVerification ? await this.verificationStore.read() : undefined;
+    const verificationRegistry = includeIndependentVerification
+      ? verificationSnapshot ?? await this.verificationStore.read()
+      : undefined;
     return assessAppOperationalMaturity({
       installation,
       readiness,
@@ -2917,8 +2975,14 @@ export class AppInstallationService {
   private async loadOperationalEvidence(
     installation: WorkspaceAppInstallation
   ): Promise<AppOperationalEvidenceSnapshot> {
+    const snapshots = await this.loadOperationalEvidenceBatch([installation]);
+    return snapshots.get(installation.id) ?? emptyOperationalEvidenceSnapshot();
+  }
+
+  private async loadOperationalEvidenceBatch(
+    installations: WorkspaceAppInstallation[]
+  ): Promise<Map<string, AppOperationalEvidenceSnapshot>> {
     const workspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
-    const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
     const [outcomes, valueEntries, completedEvents] = await Promise.all([
       this.outcomeStore.listObservedOutcomes({ workspaceId: this.workspaceId, companyId: this.companyId }),
       this.outcomeStore.listValueLedgerEntries({ workspaceId: this.workspaceId, companyId: this.companyId }),
@@ -2928,29 +2992,32 @@ export class AppInstallationService {
         eventType: "run.completed"
       })
     ]);
-    const appRuns = completedEvents.filter((event) => loopIds.has(event.loopId));
-    const appOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
-    const appValueEntries = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
-    return {
-      completedRunRefs: uniqueStrings(appRuns.map((event) => `run:${event.runId}`)),
-      observedOutcomeRefs: uniqueStrings(appOutcomes.map((outcome) => `outcome:${outcome.id}`)),
-      observedValueRefs: uniqueStrings(appValueEntries.map((entry) => `value:${entry.id}`)),
-      latestCompletedRun: latestTimestampedEvidence(
-        appRuns,
-        (event) => `run:${event.runId}`,
-        (event) => event.recordedAt
-      ),
-      latestObservedOutcome: latestTimestampedEvidence(
-        appOutcomes,
-        (outcome) => `outcome:${outcome.id}`,
-        (outcome) => outcome.evaluationWindow.end
-      ),
-      latestObservedValue: latestTimestampedEvidence(
-        appValueEntries,
-        (entry) => `value:${entry.id}`,
-        (entry) => entry.window.end
-      )
-    };
+    return new Map(installations.map((installation) => {
+      const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
+      const appRuns = completedEvents.filter((event) => loopIds.has(event.loopId));
+      const appOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
+      const appValueEntries = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
+      return [installation.id, {
+        completedRunRefs: uniqueStrings(appRuns.map((event) => `run:${event.runId}`)),
+        observedOutcomeRefs: uniqueStrings(appOutcomes.map((outcome) => `outcome:${outcome.id}`)),
+        observedValueRefs: uniqueStrings(appValueEntries.map((entry) => `value:${entry.id}`)),
+        latestCompletedRun: latestTimestampedEvidence(
+          appRuns,
+          (event) => `run:${event.runId}`,
+          (event) => event.recordedAt
+        ),
+        latestObservedOutcome: latestTimestampedEvidence(
+          appOutcomes,
+          (outcome) => `outcome:${outcome.id}`,
+          (outcome) => outcome.evaluationWindow.end
+        ),
+        latestObservedValue: latestTimestampedEvidence(
+          appValueEntries,
+          (entry) => `value:${entry.id}`,
+          (entry) => entry.window.end
+        )
+      } satisfies AppOperationalEvidenceSnapshot] as const;
+    }));
   }
 
   private async buildActivationGate(
@@ -4463,6 +4530,103 @@ function latestTimestampedEvidence<T>(
   const latest = [...values].sort((left, right) =>
     Date.parse(observedAt(right)) - Date.parse(observedAt(left)) || reference(left).localeCompare(reference(right)))[0];
   return latest ? { reference: reference(latest), observedAt: observedAt(latest) } : undefined;
+}
+
+function emptyOperationalEvidenceSnapshot(): AppOperationalEvidenceSnapshot {
+  return {
+    completedRunRefs: [],
+    observedOutcomeRefs: [],
+    observedValueRefs: []
+  };
+}
+
+function renewalPlanItem(
+  assessment: AppOperationalMaturityAssessment
+): AppEvidenceRenewalPlan["items"][number] {
+  const affectedEvidence: AppEvidenceRenewalPlan["items"][number]["affectedEvidence"] =
+    assessment.freshness.requirements.flatMap((requirement) => requirement.status === "current" ? [] : [{
+      id: requirement.id,
+      status: requirement.status,
+      summary: requirement.summary
+    }]);
+  const firstBlockedGate = assessment.gates.find((gate) => gate.status === "blocked");
+  const status = assessment.freshness.status;
+  const priority: AppEvidenceRenewalPlan["items"][number]["priority"] = ["expired", "invalid"].includes(status)
+    ? "critical"
+    : status === "renew_soon"
+      ? "high"
+      : status === "incomplete"
+        ? "medium"
+        : "none";
+  let nextAction: AppEvidenceRenewalPlan["items"][number]["nextAction"];
+  if (status === "invalid") {
+    nextAction = {
+      kind: "repair_evidence",
+      summary: "Inspect and replace missing, unbound, malformed, or future-dated production evidence before promotion."
+    };
+  } else if (["expired", "renew_soon"].includes(status)) {
+    nextAction = {
+      kind: "renew_proof",
+      summary: status === "expired"
+        ? "Run a new bounded replay and record recent completed work, observed outcomes, and observed net value."
+        : `Renew the affected proof before ${assessment.freshness.validUntil ?? "the current evidence window expires"}.`
+    };
+  } else if (["not_applicable", "incomplete"].includes(status)) {
+    const replayMissing = assessment.freshness.requirements.find((requirement) =>
+      requirement.id === "historical_replay")?.status === "missing";
+    const operatingEvidenceMissing = assessment.freshness.requirements.some((requirement) =>
+      requirement.id !== "historical_replay" && requirement.status === "missing");
+    nextAction = firstBlockedGate?.level === "tested" || firstBlockedGate?.level === "connected"
+      ? {
+          kind: "complete_setup",
+          summary: firstBlockedGate.remediation ?? "Complete conformance, connection, mapping, configuration, and permission readiness."
+        }
+      : replayMissing
+        ? {
+            kind: "run_historical_replay",
+            summary: "Run and completely review a bounded write-blocked historical replay for this exact App artifact."
+          }
+        : operatingEvidenceMissing
+          ? {
+              kind: "record_operating_evidence",
+              summary: "Record recent completed App work, observed outcomes, and observed net value."
+            }
+          : {
+              kind: "complete_setup",
+              summary: firstBlockedGate?.remediation ?? "Complete the remaining evidence-derived maturity gate."
+            };
+  } else {
+    nextAction = {
+      kind: "monitor",
+      summary: assessment.freshness.renewalRecommendedAt
+        ? `Monitor the App and renew production proof by ${assessment.freshness.renewalRecommendedAt}.`
+        : "Monitor routing quality, review burden, outcomes, and value."
+    };
+  }
+  return {
+    installationId: assessment.installationId,
+    appId: assessment.appId,
+    artifactDigest: assessment.artifactDigest,
+    maturity: assessment.maturity,
+    status,
+    priority,
+    ...(assessment.freshness.validUntil ? { validUntil: assessment.freshness.validUntil } : {}),
+    ...(assessment.freshness.renewalRecommendedAt
+      ? { renewalRecommendedAt: assessment.freshness.renewalRecommendedAt }
+      : {}),
+    affectedEvidence,
+    nextAction
+  };
+}
+
+function compareRenewalPlanItems(
+  left: AppEvidenceRenewalPlan["items"][number],
+  right: AppEvidenceRenewalPlan["items"][number]
+): number {
+  const priority = { critical: 0, high: 1, medium: 2, none: 3 } as const;
+  return priority[left.priority] - priority[right.priority] ||
+    (left.validUntil ?? "9999").localeCompare(right.validUntil ?? "9999") ||
+    left.installationId.localeCompare(right.installationId);
 }
 
 function uniqueStrings(values: string[]): string[] {

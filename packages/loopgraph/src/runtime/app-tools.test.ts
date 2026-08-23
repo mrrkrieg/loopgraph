@@ -47,6 +47,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_operation_action_commit",
       "loopgraph_app_operation_action_reconcile",
       "loopgraph_app_maturity_get",
+      "loopgraph_apps_renewal_plan",
       "loopgraph_app_verification_registry_get",
       "loopgraph_app_verifier_trust_add",
       "loopgraph_app_verifier_trust_revoke",
@@ -401,6 +402,15 @@ describe("shared Loopgraph App tools", () => {
     expect(status.installations).toEqual([]);
     expect(status.readiness).toEqual([]);
     expect(status.lock).toBeUndefined();
+
+    const renewalPlan = await callLoopgraphAppTool("loopgraph_apps_renewal_plan", { projectRoot }) as {
+      totalInstallations: number;
+      totalMatched: number;
+      counts: Record<string, number>;
+      items: unknown[];
+    };
+    expect(renewalPlan).toMatchObject({ totalInstallations: 0, totalMatched: 0, items: [] });
+    expect(Object.values(renewalPlan.counts).reduce((total, count) => total + count, 0)).toBe(0);
 
     const plan = await callLoopgraphAppTool("loopgraph_app_install_plan", {
       projectRoot,

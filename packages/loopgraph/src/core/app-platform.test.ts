@@ -6,6 +6,7 @@ import {
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
   APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+  APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
   appActivationGateSchema,
   appEvalRunSchema,
@@ -15,6 +16,7 @@ import {
   appOperationActionSchema,
   appInstallationLockSchema,
   appMaturityEvidenceSchema,
+  appEvidenceRenewalPlanSchema,
   appPlatformJsonSchemas,
   assertSafeInitialRollout,
   canonicalAppDigest,
@@ -262,6 +264,28 @@ describe("Loopgraph App Platform contracts", () => {
     expect(() => appMaturityEvidenceSchema.parse({ ...evidence, evidenceDigest: digest("tampered") })).toThrow(/digest/i);
   });
 
+  it("keeps fleet evidence-renewal plans tenant-bound, bounded, and internally consistent", () => {
+    const plan = appEvidenceRenewalPlanSchema.parse({
+      schemaVersion: APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      generatedAt: now,
+      totalInstallations: 0,
+      totalMatched: 0,
+      counts: { notApplicable: 0, incomplete: 0, current: 0, renewSoon: 0, expired: 0, invalid: 0 },
+      items: []
+    });
+    expect(plan.items).toEqual([]);
+    expect(() => appEvidenceRenewalPlanSchema.parse({
+      ...plan,
+      totalInstallations: 1
+    })).toThrow(/counts must equal/i);
+    expect(() => appEvidenceRenewalPlanSchema.parse({
+      ...plan,
+      totalMatched: 1
+    })).toThrow(/within the installation total/i);
+  });
+
   it("requires signed catalogs to carry exact publisher trust material instead of a key label alone", () => {
     const signature = loopPackSignatureSchema.parse({
       schemaVersion: "loopgraph-pack-signature/v1alpha1",
@@ -490,6 +514,7 @@ describe("Loopgraph App Platform contracts", () => {
       "AppOnboardingDraft",
       "AppOnboardingResetResult",
       "AppActivationGate",
+      "AppEvidenceRenewalPlan",
       "AppOperationAction",
       "AppOperationActionEvent",
       "AppOperationActionCommitResult"

@@ -691,6 +691,24 @@ apps
   });
 
 apps
+  .command("renewal-plan")
+  .description("Rank installed Apps by missing, expiring, expired, or invalid operating proof")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--status <statuses...>", "Only return these statuses: not_applicable, incomplete, current, renew_soon, expired, invalid")
+  .option("--limit <count>", "Maximum Apps to return", "100")
+  .action(async (options: { project: string; workspace?: string; company?: string; status?: string[]; limit: string }) => {
+    await printAppTool("loopgraph_apps_renewal_plan", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      statuses: options.status,
+      limit: Number(options.limit)
+    });
+  });
+
+apps
   .command("verifier-trust")
   .description("Trust an approved verifier public key; the JSON file must not contain private key material")
   .requiredOption("--file <path>", "JSON AppVerifierTrustKey containing approval accountability")

@@ -161,6 +161,30 @@ describe("hosted app tool bridge", () => {
     });
   });
 
+  it("uses the same distributed tenant evidence for fleet renewal planning", async () => {
+    vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
+    mocks.runtimeTool.mockImplementation(async (name, input, options) => {
+      expect(name).toBe("loopgraph_apps_renewal_plan");
+      expect(input).toMatchObject({ workspaceId: "main", companyId: "main" });
+      expect(options).toMatchObject({
+        outcomeStore: mocks.outcomeStore,
+        hermesOperationsStore: mocks.hermesOperationsStore,
+        loopSpecStore: mocks.loopSpecStore
+      });
+      expect(options.appVerificationStoreFactory("main")).toBe(mocks.appVerificationStore);
+      return { totalInstallations: 0, totalMatched: 0, items: [] };
+    });
+    await callLoopgraphAppTool("loopgraph_apps_renewal_plan", {
+      workspaceId: "other-tenant",
+      companyId: "other-company"
+    });
+    expect(mocks.getOutcomeStore).toHaveBeenCalledWith({ projectRoot: "/srv/loopgraph/tenant/main" });
+    expect(mocks.getAppVerificationStore).toHaveBeenCalledWith({
+      projectRoot: "/srv/loopgraph/tenant/main",
+      workspaceId: "main"
+    });
+  });
+
   it("injects distributed outcome and Hermes execution evidence into every activation boundary", async () => {
     mocks.runtimeTool.mockImplementation(async (name, _input, options) => {
       expect([

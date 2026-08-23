@@ -47,6 +47,7 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
+  "loopgraph_apps_renewal_plan",
   "loopgraph_app_activation_gate_get",
   "loopgraph_app_activation_approve",
   "loopgraph_app_activate",
@@ -64,6 +65,7 @@ const APP_ACTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
+  "loopgraph_apps_renewal_plan",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
   "loopgraph_app_verifier_trust_revoke",
