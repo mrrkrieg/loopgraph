@@ -111,6 +111,11 @@ Set `LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS` to a JSON array of trusted issuer poli
 
 - accepts RS256 and ES256 JWTs only;
 - obtains keys from the configured JWKS URI and caches them for a bounded interval;
+- refreshes once when a previously unseen key ID appears or a cached same-ID key no longer verifies,
+  so an issuer can rotate signing keys before the prior cache TTL expires;
+- deduplicates concurrent JWKS loads, caps a JWKS at 100 keys, rejects redirects and malformed key
+  documents, and permits at most one rotation-triggered refresh per issuer every 30 seconds so an
+  attacker-controlled key ID cannot become an outbound request amplifier;
 - checks issuer, audience, expiry/not-before, allowed subject patterns, tenant claims, and the exact
   machine capability;
 - derives a non-secret credential ID from issuer + subject for durable replay and rate-limit receipts;
@@ -124,6 +129,13 @@ web-identity token with STS or uses ECS/EC2/Lambda workload credentials. Static 
 tokens fail closed unless `LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` is deliberately enabled during
 migration. Static AWS access keys are also rejected in production unless the temporary
 `LOOPGRAPH_ALLOW_STATIC_AWS_CREDENTIALS=true` escape hatch is explicitly enabled.
+
+Use an overlap window when rotating issuer keys: publish the old and new public keys, begin issuing
+tokens with the new `kid`, wait through the maximum accepted token lifetime, and only then remove the
+old key. A same-`kid` emergency replacement is supported through the signature-failure refresh, but a
+new unique `kid` is preferred because it produces an unambiguous rotation boundary. A JWKS fetch or
+parse failure always denies the request; the verifier never accepts a token merely because an older
+cached key set exists.
 
 For sender-bound identities, set `LOOPGRAPH_TRUSTED_MTLS_PROXY=true` only when the broker origin is
 unreachable except through a gateway that removes inbound `x-loopgraph-mtls-*` headers, verifies the

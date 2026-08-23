@@ -12,6 +12,10 @@ users, organizations, and machine workers must not share an implicit administrat
 - Independently authenticated machine routes verify signed workload identity against configured
   issuer/JWKS/audience/capability policy. Legacy worker bearer tokens are a temporary, explicit
   compatibility mode; provider webhooks use provider-specific raw-body verification and replay claims.
+- Workload identity tolerates legitimate signing-key rotation through one bounded JWKS refresh on a
+  new key ID or cached-key signature mismatch. Concurrent refreshes within one runtime share one
+  fetch, malformed or oversized key sets fail closed, redirects are rejected, and unknown key IDs
+  are refresh-throttled.
 - Organization access comes from `organization_memberships`, never editable user metadata.
 - Roles are monotonic: `viewer`, `operator`, `admin`, and `owner`.
 - Request-bound Design Studio reads and writes use the user's cookie-bound Supabase client.

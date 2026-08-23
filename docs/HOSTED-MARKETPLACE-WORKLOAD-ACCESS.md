@@ -116,6 +116,9 @@ The executable first release of that matrix is `npm run validate:marketplace-sta
 It validates a private exact release with separate allowed, foreign-tenant,
 revoked-grant, and observability identities, then emits a secret-free JSON receipt.
 The protected staging workflow blocks production promotion unless all seven checks
-pass. Issuer key rotation, rate-limit saturation, backup/restore, external
-retention, and cross-replica human refresh-token rotation remain separate
-operational drills.
+pass. The verifier now performs a bounded immediate JWKS refresh for a new `kid` or a
+same-`kid` signature change, shares concurrent refreshes, and rate-limits unknown-key
+refresh attempts. The live issuer drill must still prove the provider publishes the
+overlap set and that separate deployed replicas observe it. Rate-limit saturation,
+backup/restore, external retention, and cross-replica human refresh-token rotation
+remain separate operational drills.

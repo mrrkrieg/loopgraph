@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## One-line summary
 
@@ -198,6 +198,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   reconciliation and weekly management review.
 - Hosted machine authorization decisions append to a tenant/project hash-chained security audit
   ledger in the same database transaction as replay and rate enforcement.
+- Workload issuer rotation no longer waits for the cached JWKS TTL. A new key ID or a same-ID key
+  replacement triggers one bounded refresh; each verifier deduplicates concurrent loads, caps and
+  validates key documents, rejects redirects and fetch failures, and throttles attacker-controlled
+  misses.
 - Hosted routing state, route jobs, Hermes design tasks, and Hermes callback receipts use
   tenant/project-scoped Supabase stores. Active design-task creation is idempotent, and task plus
   callback updates use revision fencing so independent replicas cannot overwrite one another.
@@ -260,10 +264,12 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    staging project, run the App snapshot staging gate, and complete clean-install plus hosted
    multi-user release audits. The executable gate is present; the environment-specific receipt
    remains external.
-6. Validate issuer rotation, device-code and request rate-limit saturation, refresh-token replay,
+6. Validate issuer rotation against the real identity provider, device-code and request rate-limit saturation, refresh-token replay,
    cross-replica session/cache behavior, membership removal, and release revocation in staging.
-   Durable workload grant revocation, cross-tenant denial, replay rejection, exact signed staging,
-   and audit presence are already part of the executable marketplace gate.
+   The verifier now handles new-`kid` and same-`kid` rotation immediately with a deduplicated,
+   throttled, fail-closed JWKS refresh. Durable workload grant revocation, cross-tenant denial,
+   replay rejection, exact signed staging, and audit presence are already part of the executable
+   marketplace gate; only a live provider/replica receipt can prove deployment propagation.
 7. Configure the protected App evidence-health staging workload identities and run
    `validate:app-evidence-health-staging` against each deployed environment. The executable gate is
    present; only the first deployment-specific receipt remains external. The gate now runs the
