@@ -1053,21 +1053,23 @@ apps
   });
 
 for (const action of ["rollback", "detach"] as const) {
-  apps
+  const command = apps
     .command(action)
     .description(action === "rollback" ? "Restore the exact prior installation revision" : "Pin a local immutable snapshot and stop upstream updates")
     .argument("<installation-id>", "Installed app ID")
     .requiredOption("--expected <digest>", "Current installed artifact digest")
     .option("--project <root>", "Explicit project root", process.cwd())
-    .option("--actor <id>", "Accountable actor identity", "cli")
-    .action(async (installationId: string, options: { expected: string; project: string; actor: string }) => {
-      await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
-        projectRoot: options.project,
-        installationId,
-        expectedArtifactDigest: options.expected,
-        actor: options.actor
-      });
+    .option("--actor <id>", "Accountable actor identity", "cli");
+  if (action === "detach") command.requiredOption("--updated-at <timestamp>", "Exact current installation revision time");
+  command.action(async (installationId: string, options: { expected: string; updatedAt?: string; project: string; actor: string }) => {
+    await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
+      projectRoot: options.project,
+      installationId,
+      expectedArtifactDigest: options.expected,
+      ...(action === "detach" ? { expectedUpdatedAt: options.updatedAt } : {}),
+      actor: options.actor
     });
+  });
 }
 
 apps

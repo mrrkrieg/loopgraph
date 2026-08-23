@@ -324,6 +324,8 @@ function decideStage(input: {
                 ? "Retry repair against the exact source artifact and revision as the same actor. Loopgraph will reconcile only the recorded source or regenerated target topology and return the original receipt after completion."
               : action === "duplicate"
                 ? "Retry the exact private App ID and overlay as the same actor. Loopgraph will reconcile namespaced LoopSpecs, field mappings, company context, ownership, and the derived installation without duplicating completed work."
+              : action === "detach"
+                ? "Retry detach against the exact source artifact and revision as the same actor. Loopgraph will accept only the recorded owned topology and immutable snapshot, then return the original receipt after completion."
               : action === "update"
                 ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
               : action === "rollback"
@@ -365,6 +367,12 @@ function decideStage(input: {
             operationsDigest: input.lifecycleOperation.duplicate.operationsDigest,
             targetInstallationId: input.lifecycleOperation.duplicate.targetInstallationId,
             targetLoopIds: input.lifecycleOperation.duplicate.targetLoopIds
+          } : input.lifecycleOperation.detach ? {
+            expectedUpdatedAt: input.lifecycleOperation.detach.fromUpdatedAt,
+            expectedArtifactDigest: input.lifecycleOperation.detach.sourceArtifactDigest,
+            snapshotPath: input.lifecycleOperation.detach.snapshotPath,
+            sourceLoopIds: input.lifecycleOperation.detach.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.detach.targetLoopIds
           } : input.lifecycleOperation.uninstall ? {
             reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
             fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,

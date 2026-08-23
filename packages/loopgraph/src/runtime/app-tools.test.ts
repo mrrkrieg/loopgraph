@@ -13,7 +13,7 @@ import {
   type AppInstallationStore,
   type AppInstallationUpdate
 } from "./app-installation-store";
-import { appDuplicateInputSchema, appRepairInputSchema, callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
+import { appDetachInputSchema, appDuplicateInputSchema, appRepairInputSchema, callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
 import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
 import { createAppIndependentVerificationReceipt } from "./app-operational-maturity";
@@ -124,6 +124,24 @@ describe("shared Loopgraph App tools", () => {
       ...base,
       expectedArtifactDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       expectedUpdatedAt: "2026-08-22T21:00:00.000Z"
+    }).success).toBe(true);
+  });
+
+  it("requires both exact source bindings for replay-safe detach", () => {
+    const base = {
+      projectRoot: "/srv/loopgraph/main",
+      installationId: "install.private-sales",
+      actor: "admin"
+    };
+    expect(appDetachInputSchema.safeParse(base).success).toBe(false);
+    expect(appDetachInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }).success).toBe(false);
+    expect(appDetachInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      expectedUpdatedAt: "2026-08-22T22:00:00.000Z"
     }).success).toBe(true);
   });
 

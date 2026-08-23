@@ -1444,12 +1444,13 @@ describe("atomic app installation lifecycle", () => {
       mapping.dependentInstallationIds.includes(duplicated.installation!.id)
     )).toBe(true);
 
-    const detached = await input.service.detach(
-      duplicated.installation!.id,
-      duplicated.installation!.artifactDigest,
-      "sales-admin",
-      new Date("2026-08-08T12:06:00.000Z")
-    );
+    const detached = await input.service.detach({
+      installationId: duplicated.installation!.id,
+      expectedArtifactDigest: duplicated.installation!.artifactDigest,
+      expectedUpdatedAt: duplicated.installation!.updatedAt,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
     expect(detached.installation?.derivation?.snapshotPath).toContain("private-snapshots");
     expect(detached.installation?.derivation?.detachedAt).toBe("2026-08-08T12:06:00.000Z");
 
@@ -1938,6 +1939,161 @@ describe("atomic app installation lifecycle", () => {
       ...request,
       now: new Date("2026-08-08T12:21:00.000Z")
     })).rejects.toThrow(/topology changed/i);
+  });
+
+  it("recovers and exactly replays an actor-bound immutable detach snapshot", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:22:00.000Z"));
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.detached-recovery",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:23:00.000Z")
+    });
+    const request = {
+      installationId: duplicated.installation!.id,
+      expectedArtifactDigest: duplicated.installation!.artifactDigest,
+      expectedUpdatedAt: duplicated.installation!.updatedAt,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("detach");
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:24:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after detach/i);
+
+    const interrupted = await store.read();
+    const source = interrupted.installations.find((installation) => installation.id === duplicated.installation!.id);
+    expect(source?.derivation?.detachedAt).toBeUndefined();
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "detach");
+    expect(recovery).toMatchObject({
+      installationId: duplicated.installation!.id,
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      detach: {
+        fromUpdatedAt: duplicated.installation!.updatedAt,
+        sourceArtifactDigest: duplicated.installation!.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(duplicated.installation),
+        snapshotArtifactDigest: duplicated.installation!.artifactDigest,
+        snapshotFilesDigest: expect.stringMatching(/^sha256:/),
+        snapshotPath: expect.stringContaining("private-snapshots"),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.detach ?? {}).sort()).toEqual([
+      "fromUpdatedAt",
+      "snapshotArtifactDigest",
+      "snapshotFilesDigest",
+      "snapshotPath",
+      "sourceArtifactDigest",
+      "sourceInstallationDigest",
+      "sourceLoopIds",
+      "sourceLoopInventoryDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    expect(await readFile(path.join(input.projectRoot, recovery!.detach!.snapshotPath, "loopgraph.pack.yaml"), "utf8")).toContain("loopgraph.sales.qualify-route-inbound-leads");
+    await expect(input.service.detach({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:24:30.000Z")
+    })).rejects.toThrow(/idempotency conflict|must be reconciled/i);
+
+    const unrelatedLoopStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    await unrelatedLoopStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:24:45.000Z"));
+    expect((await unrelatedLoopStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(recovery!.detach!.sourceWorkspaceRevision);
+
+    const recovered = await input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:25:00.000Z")
+    });
+    expect(recovered.installation?.derivation).toMatchObject({
+      detachedAt: "2026-08-08T12:24:00.000Z",
+      detachedBy: "sales-admin",
+      snapshotPath: recovery!.detach!.snapshotPath
+    });
+    expect(recovered.receipt).toMatchObject({ action: "detach", actor: "sales-admin", reversible: false });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:26:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.detach({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:26:30.000Z")
+    })).rejects.toThrow(/exact replay/i);
+    await writeFile(
+      path.join(input.projectRoot, recovery!.detach!.snapshotPath, "README.md"),
+      "tampered after detach",
+      "utf8"
+    );
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:27:00.000Z")
+    })).rejects.toThrow(/snapshot no longer matches/i);
+  });
+
+  it("refuses owned topology drift while detach recovery is pending", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:27:00.000Z"));
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.detach-drift",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:28:00.000Z")
+    });
+    const request = {
+      installationId: duplicated.installation!.id,
+      expectedArtifactDigest: duplicated.installation!.artifactDigest,
+      expectedUpdatedAt: duplicated.installation!.updatedAt,
+      actor: "sales-admin"
+    };
+    store.interruptNextLifecycleRegistryCommit("detach");
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:29:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after detach/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as { registeredSpecs: Array<Record<string, unknown>> };
+    workspace.registeredSpecs.push({
+      id: "unexpected-detach-loop",
+      name: "Unexpected detach loop",
+      path: path.join(
+        ".loopgraph",
+        "apps",
+        "installations",
+        duplicated.installation!.id,
+        "generated",
+        "loops",
+        "unexpected-detach-loop.yaml"
+      ),
+      department: "sales",
+      addedAt: "2026-08-08T12:29:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2), "utf8");
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:30:00.000Z")
+    })).rejects.toThrow(/topology changed|inventory is missing/i);
   });
 
   it("plans permission-aware updates, requires review, and restores the exact prior revision", async () => {

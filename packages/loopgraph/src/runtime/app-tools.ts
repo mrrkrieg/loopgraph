@@ -482,7 +482,10 @@ export const appUpdateApplyInputSchema = projectSchema.extend({
   actor: z.string().min(1).default("hermes")
 }).strict();
 export const appRollbackInputSchema = appInstallationActionInputSchema.extend({ expectedArtifactDigest: artifactDigestSchema }).strict();
-export const appDetachInputSchema = appRollbackInputSchema;
+export const appDetachInputSchema = appInstallationActionInputSchema.extend({
+  expectedArtifactDigest: artifactDigestSchema,
+  expectedUpdatedAt: z.string().datetime()
+}).strict();
 export const appUninstallInputSchema = appInstallationActionInputSchema.extend({
   expectedArtifactDigest: artifactDigestSchema,
   reason: z.string().min(1).max(2000),
@@ -587,7 +590,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_update_plan", description: "Create a content-bound three-way update plan with graph, overlay-conflict, and permission diffs.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_update_apply", description: "Apply an exact reviewed update plan, or safely resume its journaled cross-store recovery, while preserving overlays and requiring fresh evidence.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_rollback", description: "Restore the exact prior installed revision and return to write-blocked conformance.", readOnly: false, idempotent: true, destructive: true },
-  { name: "loopgraph_app_detach", description: "Pin a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app.", readOnly: false, idempotent: false, destructive: true },
+  { name: "loopgraph_app_detach", description: "Pin or exactly replay a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app. Bind the request to the exact source artifact and installation revision.", readOnly: false, idempotent: true, destructive: true },
   { name: "loopgraph_app_uninstall", description: "Remove only installation-owned runtime assets while retaining shared company resources and evidence.", readOnly: false, idempotent: false, destructive: true },
   { name: "loopgraph_app_activation_approve", description: "Record an accountable, short-lived, content-bound approval for one exact non-live App mode transition.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_activate", description: "Consume a matching one-time approval receipt to promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: false, destructive: false },
@@ -1758,7 +1761,13 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_detach") {
     const parsed = appDetachInputSchema.parse({ ...raw, projectRoot, ...identity });
-    return service.detach(parsed.installationId, parsed.expectedArtifactDigest, parsed.actor, options.now);
+    return service.detach({
+      installationId: parsed.installationId,
+      expectedArtifactDigest: parsed.expectedArtifactDigest,
+      expectedUpdatedAt: parsed.expectedUpdatedAt,
+      actor: parsed.actor,
+      now: options.now
+    });
   }
   if (name === "loopgraph_app_uninstall") {
     const parsed = appUninstallInputSchema.parse({ ...raw, projectRoot, ...identity });

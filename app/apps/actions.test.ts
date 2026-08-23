@@ -21,6 +21,7 @@ vi.mock("@/lib/app-platform/tool-bridge", () => ({ callLoopgraphAppTool: mocks.c
 import {
   activateInstalledAppAction,
   approveInstalledAppActivationAction,
+  detachInstalledAppAction,
   duplicateInstalledAppAction,
   operateInstalledAppAction
 } from "./actions";
@@ -97,6 +98,23 @@ describe("installed App browser actions", () => {
 
     await expect(duplicateInstalledAppAction(formData)).rejects.toThrow(/did not return the new private App installation identity/);
     expect(mocks.redirect).not.toHaveBeenCalled();
+  });
+
+  it("binds browser detach to the exact source artifact and installation revision", async () => {
+    const formData = new FormData();
+    formData.set("installationId", "install.private-sales");
+    formData.set("expectedArtifactDigest", "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    formData.set("expectedUpdatedAt", "2026-08-22T22:00:00.000Z");
+
+    await detachInstalledAppAction(formData);
+
+    expect(mocks.callTool).toHaveBeenCalledWith("loopgraph_app_detach", {
+      projectRoot: "/srv/loopgraph/tenant/main",
+      installationId: "install.private-sales",
+      expectedArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      expectedUpdatedAt: "2026-08-22T22:00:00.000Z",
+      actor: "admin@example.com"
+    });
   });
 
   it("records an explicit short-lived activation approval without activating", async () => {

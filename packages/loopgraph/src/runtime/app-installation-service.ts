@@ -1,4 +1,4 @@
-import { cp, readFile, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -2028,39 +2028,187 @@ export class AppInstallationService {
     }
   }
 
-  async detach(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
-    const registry = await this.installationStore.read();
-    const installation = requireOperableInstallation(registry, installationId);
+  async detach(input: {
+    installationId: string;
+    expectedArtifactDigest: string;
+    expectedUpdatedAt: string;
+    actor: string;
+    now?: Date;
+  }): Promise<AppLifecycleMutationResult> {
+    const now = input.now ?? new Date();
+    const observedRegistry = await this.installationStore.read();
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "detach" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.detach?.fromUpdatedAt === input.expectedUpdatedAt &&
+      candidate.detach.sourceArtifactDigest === input.expectedArtifactDigest
+    );
+    if (completed?.detach) {
+      const installation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!installation || !receipt) throw new Error("Completed detach operation is missing its durable result");
+      assertDetachReplayAuthority(completed, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      await assertSnapshotArtifact(
+        this.projectRoot,
+        completed.detach.snapshotPath,
+        completed.detach.snapshotArtifactDigest,
+        completed.detach.snapshotFilesDigest
+      );
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const installation = requireInstallation(observedRegistry, input.installationId);
     if (!installation.derivation) throw new Error("Only a private derived app can detach from upstream");
     if (installation.derivation.detachedAt) throw new Error("Private app is already detached from upstream");
-    if (installation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh detach request");
+    if (installation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh detach request");
+    if (installation.updatedAt !== input.expectedUpdatedAt) throw new Error("Installed app revision changed; create a fresh detach request");
     const loaded = await this.loadInstallationArtifact(installation);
-    const timestamp = now.toISOString();
-    const snapshotPath = path.join(".loopgraph", "apps", "private-snapshots", installation.derivation.derivedAppId, installation.version);
-    await cp(loaded.root, path.join(this.projectRoot, snapshotPath), { recursive: true, force: true });
-    return this.installationStore.withExclusiveUpdate(async (current) => {
-      const fresh = requireOperableInstallation(current, installationId);
-      if (fresh.artifactDigest !== expectedArtifactDigest || fresh.derivation?.detachedAt) throw new Error("Installed app changed while detaching");
-      const updated: WorkspaceAppInstallation = {
-        ...fresh,
-        derivation: {
-          ...fresh.derivation!,
-          detachedAt: timestamp,
-          detachedBy: actor,
-          snapshotPath
-        },
-        history: appendHistory(fresh, actor, "detach", timestamp),
-        updatedAt: timestamp
-      };
-      return lifecycleMutation(current, updated, {
-        action: "detach",
-        actor,
-        reason: "Pinned a workspace-local immutable snapshot and disabled future upstream updates for this private app.",
-        evidenceRetained: true,
-        reversible: false,
-        createdAt: timestamp
-      });
+    if (loaded.artifact.digest !== input.expectedArtifactDigest) throw new Error("Source App artifact no longer matches the installed digest");
+    const sourceInstallationDigest = canonicalAppDigest(installation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, installation.id);
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const sourceLoopIds = installationLoopIds(observedWorkspace.workspace, installation.id);
+    const sourceArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopInventoryDigest = installationLoopInventoryDigest(sourceArtifacts, sourceLoopIds);
+    const idempotencyKey = canonicalAppDigest({
+      action: "detach",
+      workspaceId: this.workspaceId,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      sourceLoopInventoryDigest,
+      sourceLoopIds
     });
+    const operationId = lifecycleOperationId("detach", installation.id, installation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? new Date(
+      Math.max(now.getTime(), Date.parse(installation.updatedAt) + 1)
+    ).toISOString();
+    const operationTime = new Date(timestamp);
+    const snapshotPath = path.posix.join(
+      ".loopgraph",
+      "apps",
+      "private-snapshots",
+      installation.derivation.derivedAppId,
+      installation.version
+    );
+    if (!existingOperation && await pathExists(resolvePackFile(this.projectRoot, snapshotPath))) {
+      throw new Error(`Private App snapshot target already exists: ${snapshotPath}`);
+    }
+    const updated: WorkspaceAppInstallation = {
+      ...installation,
+      derivation: {
+        ...installation.derivation,
+        detachedAt: timestamp,
+        detachedBy: input.actor,
+        snapshotPath
+      },
+      history: appendHistory(installation, input.actor, "detach", timestamp),
+      updatedAt: timestamp
+    };
+    const targetLoopIds = [...sourceLoopIds].sort();
+    const targetLoopInventoryDigest = sourceLoopInventoryDigest;
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: installation.id,
+      appId: installation.appId,
+      action: "detach",
+      targetArtifactDigest: installation.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...installation.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(installation.configuration).sort()
+      },
+      detach: existingOperation?.detach ?? {
+        fromUpdatedAt: installation.updatedAt,
+        sourceArtifactDigest: installation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest,
+        sourceLoopIds: [...sourceLoopIds].sort(),
+        snapshotPath,
+        snapshotArtifactDigest: loaded.artifact.digest,
+        snapshotFilesDigest: loopPackFileInventoryDigest(loaded),
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: sourceOwnershipDigest,
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now: operationTime
+    });
+    if (!operation.detach) throw new Error(`App detach recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const current = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.detach || currentOperation.status === "completed") {
+          throw new Error(`App detach recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.detach;
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "detach" ||
+          currentOperation.actor !== input.actor ||
+          current.updatedAt !== recovery.fromUpdatedAt ||
+          current.artifactDigest !== recovery.sourceArtifactDigest ||
+          current.derivation?.detachedAt !== undefined ||
+          canonicalAppDigest(current) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, current.id) !== recovery.sourceOwnershipDigest ||
+          recovery.snapshotPath !== snapshotPath ||
+          recovery.snapshotArtifactDigest !== loaded.artifact.digest ||
+          recovery.snapshotFilesDigest !== loopPackFileInventoryDigest(loaded) ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest(registry, current.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest([...current.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(current.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys) ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds)
+        ) {
+          throw new Error("App detach recovery record does not match the exact source or detached target");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, current.id);
+        const currentArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(currentArtifacts, currentLoopIds);
+        if (
+          canonicalAppDigest(currentLoopIds) !== canonicalAppDigest(recovery.sourceLoopIds) ||
+          canonicalAppDigest(currentLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          currentInventoryDigest !== recovery.sourceLoopInventoryDigest ||
+          currentInventoryDigest !== recovery.targetLoopInventoryDigest
+        ) {
+          throw new Error("Owned LoopSpec topology changed after detach recovery was prepared");
+        }
+
+        await materializePrivateSnapshot({
+          projectRoot: this.projectRoot,
+          sourceRoot: loaded.root,
+          snapshotPath: recovery.snapshotPath,
+          expectedArtifactDigest: recovery.snapshotArtifactDigest,
+          expectedFilesDigest: recovery.snapshotFilesDigest,
+          operationId: currentOperation.id
+        });
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "detach",
+          actor: input.actor,
+          reason: "Pinned a workspace-local immutable snapshot and disabled future upstream updates for this private app.",
+          evidenceRetained: true,
+          reversible: false,
+          createdAt: currentOperation.startedAt
+        });
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, operationTime, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, operationTime);
+      throw error;
+    }
   }
 
   async uninstall(input: {
@@ -3462,6 +3610,81 @@ function resolvePackFile(root: string, relativePath: string): string {
   return absolute;
 }
 
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function loopPackFileInventoryDigest(loaded: LoopPackLoadResult): string {
+  return canonicalAppDigest(loaded.artifact.files
+    .map((file) => ({ path: file.path, digest: file.digest, sizeBytes: file.sizeBytes }))
+    .sort((left, right) => left.path.localeCompare(right.path)));
+}
+
+async function assertSnapshotArtifact(
+  projectRoot: string,
+  snapshotPath: string,
+  expectedArtifactDigest: string,
+  expectedFilesDigest: string
+): Promise<void> {
+  const snapshotRoot = resolvePackFile(projectRoot, snapshotPath);
+  const snapshot = await loadLoopPackDirectory(snapshotRoot);
+  if (
+    snapshot.artifact.digest !== expectedArtifactDigest ||
+    loopPackFileInventoryDigest(snapshot) !== expectedFilesDigest
+  ) {
+    throw new Error("Private App snapshot no longer matches its recorded immutable artifact digest");
+  }
+}
+
+async function materializePrivateSnapshot(input: {
+  projectRoot: string;
+  sourceRoot: string;
+  snapshotPath: string;
+  expectedArtifactDigest: string;
+  expectedFilesDigest: string;
+  operationId: string;
+}): Promise<void> {
+  const snapshotRoot = resolvePackFile(input.projectRoot, input.snapshotPath);
+  if (await pathExists(snapshotRoot)) {
+    await assertSnapshotArtifact(input.projectRoot, input.snapshotPath, input.expectedArtifactDigest, input.expectedFilesDigest);
+    return;
+  }
+
+  const stagingPath = path.posix.join(
+    ".loopgraph",
+    "apps",
+    "private-snapshots",
+    ".staging",
+    contentHash({ operationId: input.operationId, snapshotPath: input.snapshotPath })
+  );
+  const stagingRoot = resolvePackFile(input.projectRoot, stagingPath);
+  await rm(stagingRoot, { recursive: true, force: true });
+  await mkdir(path.dirname(stagingRoot), { recursive: true });
+  await cp(input.sourceRoot, stagingRoot, { recursive: true, force: false, errorOnExist: true });
+  const staged = await loadLoopPackDirectory(stagingRoot);
+  if (
+    staged.artifact.digest !== input.expectedArtifactDigest ||
+    loopPackFileInventoryDigest(staged) !== input.expectedFilesDigest
+  ) {
+    throw new Error("Staged private App snapshot does not match the exact source artifact");
+  }
+  await mkdir(path.dirname(snapshotRoot), { recursive: true });
+  try {
+    await rename(stagingRoot, snapshotRoot);
+  } catch (error) {
+    if (!(await pathExists(snapshotRoot))) throw error;
+    await assertSnapshotArtifact(input.projectRoot, input.snapshotPath, input.expectedArtifactDigest, input.expectedFilesDigest);
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
+  await assertSnapshotArtifact(input.projectRoot, input.snapshotPath, input.expectedArtifactDigest, input.expectedFilesDigest);
+}
+
 function resolveSelectedModules(modules: Array<{ id: string; defaultEnabled: boolean; dependsOn: string[] }>, requested?: string[]): string[] {
   const selected = new Set(requested ?? modules.filter((moduleDefinition) => moduleDefinition.defaultEnabled).map((moduleDefinition) => moduleDefinition.id));
   const known = new Set(modules.map((moduleDefinition) => moduleDefinition.id));
@@ -3717,6 +3940,7 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     overlay: existing.overlay,
     repair: existing.repair,
     duplicate: existing.duplicate,
+    detach: existing.detach,
     uninstall: existing.uninstall,
     update: existing.update,
     rollback: existing.rollback,
@@ -3731,9 +3955,9 @@ function assertLifecyclePreparationSource(
   registry: AppInstallationRegistry,
   input: PrepareLifecycleOperationInput
 ): void {
-  const source = input.configure ?? input.overlay ?? input.repair ?? input.duplicate ?? input.update ?? input.rollback ?? input.uninstall;
+  const source = input.configure ?? input.overlay ?? input.repair ?? input.duplicate ?? input.detach ?? input.update ?? input.rollback ?? input.uninstall;
   if (!source) return;
-  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.repair?.sourceArtifactDigest ?? input.duplicate?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
+  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.repair?.sourceArtifactDigest ?? input.duplicate?.sourceArtifactDigest ?? input.detach?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
   const installation = requireInstallation(registry, input.installationId);
   if (
     installation.updatedAt !== source.fromUpdatedAt ||
@@ -3851,6 +4075,33 @@ function assertDuplicateReplayAuthority(
     receipt.installationId !== installation.id
   ) {
     throw new Error("Completed duplicate operation does not authorize this exact replay");
+  }
+}
+
+function assertDetachReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedArtifactDigest: string,
+  expectedUpdatedAt: string
+): void {
+  if (
+    operation.action !== "detach" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.detach ||
+    operation.detach.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.detach.fromUpdatedAt !== expectedUpdatedAt ||
+    operation.detach.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.detach.snapshotPath !== installation.derivation?.snapshotPath ||
+    operation.detach.snapshotArtifactDigest !== installation.artifactDigest ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "detach" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed detach operation does not authorize this exact replay");
   }
 }
 

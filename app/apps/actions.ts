@@ -249,6 +249,7 @@ export async function detachInstalledAppAction(formData: FormData) {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
     actor
   });
   revalidateInstalledApp(installationId);
