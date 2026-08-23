@@ -1452,6 +1452,7 @@ describe("atomic app installation lifecycle", () => {
       now: new Date("2026-08-08T12:06:00.000Z")
     });
     expect(detached.installation?.derivation?.snapshotPath).toContain("private-snapshots");
+    expect(detached.installation?.derivation?.snapshotFilesDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(detached.installation?.derivation?.detachedAt).toBe("2026-08-08T12:06:00.000Z");
 
     const uninstalled = await input.service.uninstall({
@@ -2020,7 +2021,8 @@ describe("atomic app installation lifecycle", () => {
     expect(recovered.installation?.derivation).toMatchObject({
       detachedAt: "2026-08-08T12:24:00.000Z",
       detachedBy: "sales-admin",
-      snapshotPath: recovery!.detach!.snapshotPath
+      snapshotPath: recovery!.detach!.snapshotPath,
+      snapshotFilesDigest: recovery!.detach!.snapshotFilesDigest
     });
     expect(recovered.receipt).toMatchObject({ action: "detach", actor: "sales-admin", reversible: false });
     const completedRevision = (await store.read()).revision;

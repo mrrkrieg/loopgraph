@@ -2115,7 +2115,8 @@ export class AppInstallationService {
         ...installation.derivation,
         detachedAt: timestamp,
         detachedBy: input.actor,
-        snapshotPath
+        snapshotPath,
+        snapshotFilesDigest: snapshotDescriptor.filesDigest
       },
       history: appendHistory(installation, input.actor, "detach", timestamp),
       updatedAt: timestamp
@@ -3042,6 +3043,13 @@ export class AppInstallationService {
 
   private async loadInstallationArtifact(installation: WorkspaceAppInstallation): Promise<LoopPackLoadResult> {
     if (installation.derivation?.detachedAt && installation.derivation.snapshotPath) {
+      if (installation.derivation.snapshotFilesDigest) {
+        return this.snapshotStore.loadExact({
+          snapshotPath: installation.derivation.snapshotPath,
+          artifactDigest: installation.artifactDigest,
+          filesDigest: installation.derivation.snapshotFilesDigest
+        });
+      }
       const completed = [...(await this.installationStore.read()).lifecycleOperations].reverse().find((operation) =>
         operation.action === "detach" &&
         operation.installationId === installation.id &&
@@ -4041,6 +4049,10 @@ function assertDetachReplayAuthority(
     operation.detach.targetInstallationDigest !== canonicalAppDigest(installation) ||
     operation.detach.snapshotPath !== installation.derivation?.snapshotPath ||
     operation.detach.snapshotArtifactDigest !== installation.artifactDigest ||
+    (
+      installation.derivation?.snapshotFilesDigest !== undefined &&
+      operation.detach.snapshotFilesDigest !== installation.derivation.snapshotFilesDigest
+    ) ||
     operation.resultReceiptId !== receipt.id ||
     receipt.action !== "detach" ||
     receipt.actor !== actor ||

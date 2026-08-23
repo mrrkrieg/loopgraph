@@ -114,6 +114,13 @@ receive logical snapshot receipts rather than object keys or download capabiliti
 immutable, tenant-scoped, and verified against both the App artifact and full file inventory before
 they become replay authority. An all-command restrictive Storage policy denies the bucket to every
 non-bypass role even if another project policy is broadly permissive.
+The detached installation carries its complete immutable archive descriptor, so recovery remains
+valid after bounded lifecycle-operation history ages out. A protected scheduled reconciliation scans
+only one exact tenant/project registry scope, verifies every current detached App through the signed
+LoopPack loader, fails closed on missing, corrupt, untracked, or unavailable archives, and emits only
+aggregate counts plus an opaque scope digest. The protected job rejects arbitrary refs, binds the
+runtime scope to a separately pinned digest, and requires an explicit policy before an empty detached
+inventory can pass.
 
 Production activation still requires organization-specific provider sandbox validation, backup and
 restore rehearsal, SLOs and alerts, revocation drills, audit export retention, and policy approval.

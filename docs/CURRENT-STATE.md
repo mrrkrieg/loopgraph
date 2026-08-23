@@ -151,6 +151,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   secret-free receipt is required by promotion and must match both the validated source Storage
   origin and the same signed App payload; PostgreSQL recovery is no longer presented as proof of
   external detached-App bytes.
+- Current detached Apps now carry their complete immutable snapshot descriptor instead of depending
+  on a bounded lifecycle journal for recovery. A protected scheduled tenant/project reconciliation
+  verifies every archive through the signed LoopPack loader, fails on missing, corrupt, untracked,
+  or unavailable recovery authority, and retains only aggregate health evidence.
 
 ### Verification
 

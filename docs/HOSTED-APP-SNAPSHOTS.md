@@ -5,7 +5,10 @@ hosted replica can recover the same immutable LoopPack after the original worker
 
 ## Authority model
 
-The completed App lifecycle operation is the durable receipt. It binds:
+The detached installation is the durable recovery authority. It carries the logical snapshot path,
+artifact digest, and complete signed-file digest so recovery does not depend on a bounded lifecycle
+journal entry remaining among the 100 most recent operations. The completed App lifecycle operation
+still provides the accountable mutation receipt and binds:
 
 - organization, project, workspace, and installation identity;
 - the logical private snapshot path;
@@ -56,6 +59,11 @@ policies cannot override it for a non-bypass role.
 7. A replica may promote the verified extraction into its tenant runtime cache. A damaged cache is
    replaced from the authoritative archive; symbolic-link ancestors are rejected.
 
+New detached installations carry the complete immutable descriptor directly. Registries written
+before that field existed retain a bounded compatibility fallback to their completed detach
+operation. If that legacy operation has already aged out, execution and reconciliation fail closed
+as untracked rather than guessing from a path or accepting an arbitrary object.
+
 If upload succeeds but the registry transaction is interrupted, the prepared lifecycle operation
 can retry against the same exact object. If the registry commits but a later read cannot verify the
 object, App execution stops and requires operator recovery.
@@ -77,6 +85,32 @@ access-review procedures. At minimum:
 Standard uploads are deliberately bounded to 100 MiB. Large App distributions should use an
 external artifact registry or a future resumable-upload adapter rather than raising the limit
 without memory, timeout, and recovery analysis.
+
+## Continuous reconciliation
+
+`npm run reconcile:app-snapshots` reads App installation registries for one exact protected
+organization/project scope and verifies every currently detached App through the same immutable
+snapshot loader used by execution. It distinguishes missing, content-invalid, descriptor-untracked,
+and temporarily unavailable archives and exits non-zero unless every detached installation verifies.
+
+The scheduled `Hosted App snapshot reconciliation` workflow runs on the protected self-hosted
+runner. Its service-role credential is supplied only as an absolute, non-symlink, mode-`0600`
+projected file. It is schedule-only, runs only from the protected `loopgraph/canvas-first` ref,
+checks out the exact scheduled commit without persisting Git credentials, and SHA-pins every
+third-party action. The job refuses a
+tenant/project/Storage origin that does not match an independently pinned scope digest. An empty
+detached-App inventory is healthy only when the protected deployment explicitly sets the empty
+inventory policy to `yes`.
+
+Operators generate the non-secret pinned value after setting the three scope environment variables:
+
+```bash
+npm run --silent print:app-snapshot-reconciliation-scope
+```
+
+The evidence artifact contains a scope digest, timestamps, fixed control names, and
+aggregate counts only. It contains no organization ID, project key, workspace ID, App ID,
+installation ID, actor, snapshot path, object key, content digest, archive, or credential.
 
 ## Staging release proof
 

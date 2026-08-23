@@ -1250,7 +1250,8 @@ export const workspaceAppInstallationSchema = z.object({
     createdBy: z.string().min(1),
     detachedAt: isoDateTimeSchema.optional(),
     detachedBy: z.string().min(1).optional(),
-    snapshotPath: packRelativePathSchema.optional()
+    snapshotPath: packRelativePathSchema.optional(),
+    snapshotFilesDigest: artifactDigestSchema.optional()
   }).strict().optional(),
   history: z.array(appInstallationRevisionSchema).max(20).default([]),
   installedAt: isoDateTimeSchema,
