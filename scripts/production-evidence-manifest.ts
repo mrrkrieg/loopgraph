@@ -114,6 +114,29 @@ const appSnapshotReceiptSchema = z.object({
   }).strict()).length(8)
 }).strict();
 
+const appSnapshotFenceProbeCheckNames = [
+  "registry_insert_advanced",
+  "registry_update_advanced",
+  "registry_delete_advanced",
+  "storage_upload_advanced",
+  "storage_replace_advanced",
+  "storage_delete_advanced",
+  "probe_authority_clean",
+  "probe_generation_clean"
+] as const;
+
+const appSnapshotFenceProbeReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-app-snapshot-fence-probe/v1"),
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  scopeDigest: digestSchema,
+  healthy: z.literal(true),
+  checks: z.array(z.object({
+    name: z.enum(appSnapshotFenceProbeCheckNames),
+    ok: z.literal(true)
+  }).strict()).length(appSnapshotFenceProbeCheckNames.length)
+}).strict();
+
 const appSnapshotRecoveryReceiptSchema = z.object({
   schemaVersion: z.literal("hosted-app-snapshot-restore-rehearsal/v1"),
   sourceOrigin: originSchema,
@@ -266,7 +289,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v7"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v8"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -287,6 +310,9 @@ export const productionEvidenceManifestSchema = z.object({
     appSnapshotRetention: z.object({
       unreferencedInventoryDigest: digestSchema
     }).strict(),
+    appSnapshotFenceProbe: z.object({
+      scopeDigest: digestSchema
+    }).strict(),
     auditRetentionTrust: z.object({
       keyId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/),
       publicKeyDigest: digestSchema
@@ -296,6 +322,7 @@ export const productionEvidenceManifestSchema = z.object({
     staging: evidenceDescriptorSchema,
     appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
+    appSnapshotFenceProbe: evidenceDescriptorSchema,
     appSnapshots: evidenceDescriptorSchema,
     appSnapshotRecovery: evidenceDescriptorSchema,
     appSnapshotReconciliation: evidenceDescriptorSchema,
@@ -311,6 +338,7 @@ export type ProductionEvidenceReceipts = {
   staging: unknown;
   appActionExactlyOnce: unknown;
   marketplace: unknown;
+  appSnapshotFenceProbe: unknown;
   appSnapshots: unknown;
   appSnapshotRecovery: unknown;
   appSnapshotReconciliation: unknown;
@@ -345,6 +373,9 @@ export function buildProductionEvidenceManifest(
   const staging = stagingReceiptSchema.parse(receipts.staging);
   const appActionExactlyOnce = verifyAppActionExactlyOnceProof(receipts.appActionExactlyOnce);
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
+  const appSnapshotFenceProbe = appSnapshotFenceProbeReceiptSchema.parse(
+    receipts.appSnapshotFenceProbe
+  );
   const appSnapshots = appSnapshotReceiptSchema.parse(receipts.appSnapshots);
   const appSnapshotRecovery = appSnapshotRecoveryReceiptSchema.parse(receipts.appSnapshotRecovery);
   const appSnapshotReconciliation = appSnapshotReconciliationReceiptSchema.parse(
@@ -362,6 +393,7 @@ export function buildProductionEvidenceManifest(
     ["staging validation", staging.checkedAt],
     ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
+    ["App snapshot mutation fence probe", appSnapshotFenceProbe.checkedAt],
     ["App snapshot validation", appSnapshots.checkedAt],
     ["App snapshot recovery rehearsal", appSnapshotRecovery.completedAt],
     ["App snapshot reconciliation", appSnapshotReconciliation.checkedAt],
@@ -380,6 +412,14 @@ export function buildProductionEvidenceManifest(
   }
   if (appSnapshots.targetOrigin !== trustedOrigin(config.storageOrigin, "Release Storage origin")) {
     throw new Error("App snapshot evidence does not belong to the exact protected Storage origin");
+  }
+  const appSnapshotFenceProbeScopeDigest = canonicalAppDigest({
+    origin: appSnapshots.targetOrigin,
+    organizationId: config.organizationId.toLowerCase(),
+    probeNamespace: "fence_probe"
+  });
+  if (appSnapshotFenceProbe.scopeDigest !== appSnapshotFenceProbeScopeDigest) {
+    throw new Error("App snapshot mutation fence probe does not match the protected Storage and tenant scope");
   }
   if (
     appSnapshotRecovery.sourceOrigin !== appSnapshots.targetOrigin ||
@@ -485,6 +525,11 @@ export function buildProductionEvidenceManifest(
       "independent_audit_evidence"
     ],
     "Marketplace validation"
+  );
+  requireExactNames(
+    appSnapshotFenceProbe.checks.map((check) => check.name),
+    [...appSnapshotFenceProbeCheckNames],
+    "App snapshot mutation fence probe"
   );
   requireExactNames(
     appSnapshots.checks.map((check) => check.name),
@@ -600,6 +645,9 @@ export function buildProductionEvidenceManifest(
     appSnapshotRetention: {
       unreferencedInventoryDigest: config.expectedAppSnapshotUnreferencedInventoryDigest
     },
+    appSnapshotFenceProbe: {
+      scopeDigest: appSnapshotFenceProbeScopeDigest
+    },
     auditRetentionTrust: {
       keyId: config.auditRetentionKeyId,
       publicKeyDigest: sha256Digest(auditRetentionPublicKey.export({ type: "spki", format: "der" }))
@@ -639,6 +687,11 @@ export function buildProductionEvidenceManifest(
       auditThroughSequence: marketplace.auditEvidence.throughSequence,
       auditHeadHash: marketplace.auditEvidence.headHash,
       artifactDigest: marketplace.app.artifactDigest
+    }),
+    appSnapshotFenceProbe: descriptor(appSnapshotFenceProbe, appSnapshotFenceProbe.checkedAt, {
+      scopeDigest: appSnapshotFenceProbe.scopeDigest,
+      checks: appSnapshotFenceProbe.checks.length,
+      healthy: appSnapshotFenceProbe.healthy
     }),
     appSnapshots: descriptor(appSnapshots, appSnapshots.checkedAt, {
       storageOrigin: appSnapshots.targetOrigin,
@@ -701,7 +754,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v7",
+    schemaVersion: "loopgraph-production-promotion-evidence/v8",
     release,
     scope,
     evidence,
@@ -727,6 +780,9 @@ export function verifyProductionEvidenceManifest(input: {
     staging: stagingReceiptSchema.parse(input.receipts.staging),
     appActionExactlyOnce: verifyAppActionExactlyOnceProof(input.receipts.appActionExactlyOnce),
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
+    appSnapshotFenceProbe: appSnapshotFenceProbeReceiptSchema.parse(
+      input.receipts.appSnapshotFenceProbe
+    ),
     appSnapshots: appSnapshotReceiptSchema.parse(input.receipts.appSnapshots),
     appSnapshotRecovery: appSnapshotRecoveryReceiptSchema.parse(input.receipts.appSnapshotRecovery),
     appSnapshotReconciliation: appSnapshotReconciliationReceiptSchema.parse(
@@ -739,6 +795,7 @@ export function verifyProductionEvidenceManifest(input: {
     ["staging validation", receiptsAtPromotion.staging.checkedAt],
     ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
+    ["App snapshot mutation fence probe", receiptsAtPromotion.appSnapshotFenceProbe.checkedAt],
     ["App snapshot validation", receiptsAtPromotion.appSnapshots.checkedAt],
     ["App snapshot recovery rehearsal", receiptsAtPromotion.appSnapshotRecovery.completedAt],
     ["App snapshot reconciliation", receiptsAtPromotion.appSnapshotReconciliation.checkedAt],
@@ -795,6 +852,13 @@ function validateConfig(config: ProductionEvidenceConfig) {
     marketplaceApp: config.marketplaceApp,
     appSnapshotRetention: {
       unreferencedInventoryDigest: config.expectedAppSnapshotUnreferencedInventoryDigest
+    },
+    appSnapshotFenceProbe: {
+      scopeDigest: canonicalAppDigest({
+        origin: trustedOrigin(config.storageOrigin, "Release Storage origin"),
+        organizationId: config.organizationId.toLowerCase(),
+        probeNamespace: "fence_probe"
+      })
     },
     auditRetentionTrust: {
       keyId: config.auditRetentionKeyId,
@@ -861,6 +925,9 @@ async function main() {
     staging: await readJsonReceipt("LOOPGRAPH_STAGING_RECEIPT_FILE"),
     appActionExactlyOnce: await readJsonReceipt("LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE"),
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
+    appSnapshotFenceProbe: await readJsonReceipt(
+      "LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE"
+    ),
     appSnapshots: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE"),
     appSnapshotRecovery: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE"),
     appSnapshotReconciliation: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE"),

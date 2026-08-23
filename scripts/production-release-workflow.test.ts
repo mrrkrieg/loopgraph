@@ -216,6 +216,7 @@ describe("staging release workflow contract", () => {
     expect(JSON.stringify(jobs["app-snapshot-reconciliation"])).not.toMatch(/actions\/[a-z-]+@v\d/);
     expect(source.match(/LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE/g)).toHaveLength(2);

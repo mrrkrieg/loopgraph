@@ -130,9 +130,11 @@ row-level event mask and that independently pinned function bodies, owners, hard
 and effective execute capabilities have not drifted. It never emits object keys and never deletes archives
 automatically.
 
-The protected production release chain repeats that reconciliation for the exact Storage origin and
-tenant/project proven earlier in the same run. Its fresh, healthy aggregate receipt is a mandatory
-input to `loopgraph-production-promotion-evidence/v7`; a missing, stale, cross-scope, incomplete,
+The protected production release chain first actively rehearses the exact deployed registry and
+Storage mutation fence in a random reserved staging scope, then repeats reconciliation for the exact
+Storage origin and tenant/project proven earlier in the same run. Both fresh, healthy aggregate
+receipts are mandatory inputs to `loopgraph-production-promotion-evidence/v8`; a missing, stale,
+cross-scope, incomplete,
 retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
 pinned in reconciliation, release-evidence, and production environments. The credential-bearing
 release workflow is accepted only as a

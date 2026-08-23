@@ -1,8 +1,8 @@
 # Production promotion evidence
 
-Loopgraph promotes an exact prebuilt deployment only when one workflow run proves seven independent
-environment control surfaces plus the commit-bound App action exactly-once contract, then binds all
-eight receipts into one attested manifest. A build result, environment approval, or green staging
+Loopgraph promotes an exact prebuilt deployment only when one workflow run proves eight independent
+environment control receipts plus the commit-bound App action exactly-once contract, then binds all
+nine receipts into one attested manifest. A build result, environment approval, or green staging
 URL alone is not sufficient evidence.
 
 ```mermaid
@@ -10,6 +10,7 @@ flowchart LR
   V["Build and prebuilt staging deployment"] --> S["Staging readiness receipt"]
   V --> F["App action fault-injection receipt"]
   V --> M["Marketplace isolation and artifact receipt"]
+  V --> Q["Active snapshot mutation-fence receipt"]
   V --> H["Hosted App snapshot isolation and replica receipt"]
   H --> B["Cross-origin App snapshot restore receipt"]
   H --> C["Current detached-App reconciliation receipt"]
@@ -18,6 +19,7 @@ flowchart LR
   S --> E["Promotion evidence compiler"]
   F --> E
   M --> E
+  Q --> E
   H --> E
   B --> E
   C --> E
@@ -38,6 +40,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | `staging-validation/v5` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, zero pending/stale App action commits, the reviewed action-reconciliation threshold, verified audit checkpoint, unauthenticated/foreign/suspended user denial, and one complete database-owned user quota window ending in `429` |
 | `app-action-exactly-once-proof/v1` | Exact source commit, real Broker prepare/commit/idempotency/reconcile code, a simulated lost App terminal write, receipt-only recovery, one replay, one provider-fixture invocation, and an explicit no-network/no-credential boundary |
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
+| `hosted-app-snapshot-fence-probe/v1` | Pinned Storage origin and organization scope, real registry insert/update/delete plus private Storage upload/non-upserting replacement/delete generation advances, verified authority/generation cleanup, and an aggregate-only status surface |
 | `hosted-app-snapshot-staging-validation/v1` | Exact Supabase Storage origin and tenant/project, private bounded bucket, authenticated read/insert/update/delete denial, first-writer immutability, content-bound recovery through a second replica root, and verified probe cleanup |
 | `hosted-app-snapshot-restore-rehearsal/v1` | Exact validated source and separately reviewed restore origins, tenant/project, source export, first-writer restore, clean-target exact load, source preservation during target cleanup, exact probe cleanup, and the same artifact/file payload exercised by the isolation gate |
 | `hosted-app-snapshot-reconciliation/v3` | Exact validated Storage origin and tenant/project scope digest, live service-only attestation of the full unconditional row-level trigger event masks plus independently pinned function bodies, owners, search paths, and execute capabilities, fixed control set, explicit empty-inventory policy, two identical full registry-plus-Storage passes within a bounded stability window, the same trigger-maintained mutation generation before/after and across those passes, complete current detached-installation scan, exact signed-archive verification, reverse Storage inventory, zero malformed objects, and an independently pinned opaque digest for intentionally retained unreferenced archives |
@@ -66,16 +69,17 @@ environment, then against independently configured release-evidence/production v
 therefore cannot silently bless newly orphaned archives. Malformed Storage objects always fail and
 are never covered by the retention digest. No release receipt contains object keys or archive paths.
 
-The resulting `loopgraph-production-promotion-evidence/v7` manifest records the repository, commit,
+The resulting `loopgraph-production-promotion-evidence/v8` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
-marketplace release, approved unreferenced-snapshot inventory digest, trusted retention key ID and
+marketplace release, active mutation-probe scope, approved unreferenced-snapshot inventory digest,
+trusted retention key ID and
 public-key digest, canonical SHA-256 digest of each receipt, essential control summaries, and one
 digest over the entire evidence set. The compiler
 verifies the receiver acknowledgement against that protected Ed25519 trust anchor. It does not
 contain workload tokens, database URLs, passwords, provider payloads, or private signing material.
 
 GitHub's provenance action attests the exact manifest file with workflow OIDC. The production job
-downloads the current run's immutable artifacts, rebuilds and compares the manifest from the eight
+downloads the current run's immutable artifacts, rebuilds and compares the manifest from the nine
 receipts, checks the upstream evidence-set digest, verifies the GitHub attestation, and only
 then calls `vercel promote` for the same deployment URL.
 
@@ -119,10 +123,16 @@ receive the token files or marketplace environment configuration.
 - the same reviewed Supabase origin and publishable key used by hosted staging;
 - the allowed-user session bundle, projected as a private mode-`0600` file; and
 - `LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE`, projected only to this environment as an
-  absolute mode-`0600` non-symlink file.
+  absolute mode-`0600` non-symlink file; and
+- `LOOPGRAPH_EXPECTED_APP_SNAPSHOT_FENCE_PROBE_SCOPE_DIGEST`, independently reviewed from the exact
+  Storage origin, lowercase organization UUID, and reserved `fence_probe` namespace.
 
-The job creates a unique content-bound probe, validates it through two isolated runtime roots, and
-removes it. Only the validated Storage origin and secret-free receipt leave this environment.
+Before the snapshot isolation check, the job creates a random reserved project scope and actively
+proves registry insert/update/delete plus Storage upload/non-upserting replacement/delete all advance
+the deployed mutation generation. Cleanup refuses to erase generation evidence while any probe
+registry row or object remains. The job then creates a separate content-bound snapshot probe,
+validates it through two isolated runtime roots, and removes it. Only the validated Storage origin
+and two aggregate secret-free receipts leave this environment.
 
 ### `app-snapshot-recovery`
 
@@ -212,6 +222,6 @@ access and fails unless interruption, receipt-only recovery, and replay cause ex
 mutation. An approved non-production provider account is still required to prove the external
 provider's own idempotency behavior and the deployed distributed stores under a real process loss.
 
-Retain the manifest, eight receipts, GitHub attestation, workflow URL, promoted deployment URL, and
+Retain the manifest, nine receipts, GitHub attestation, workflow URL, promoted deployment URL, and
 alert/configuration revisions according to enterprise policy. The external WORM receiver remains
 the authoritative audit boundary even if GitHub artifacts expire.

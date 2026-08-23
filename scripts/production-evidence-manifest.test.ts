@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v7",
+      schemaVersion: "loopgraph-production-promotion-evidence/v8",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -70,7 +70,14 @@ describe("production promotion evidence manifest", () => {
         organizationId,
         projectKey: "main",
         databaseIdentityDigest,
-        appSnapshotRetention: { unreferencedInventoryDigest }
+        appSnapshotRetention: { unreferencedInventoryDigest },
+        appSnapshotFenceProbe: {
+          scopeDigest: canonicalAppDigest({
+            origin: storageOrigin,
+            organizationId,
+            probeNamespace: "fence_probe"
+          })
+        }
       },
       evidence: {
         staging: {
@@ -100,6 +107,17 @@ describe("production promotion evidence manifest", () => {
           }
         },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
+        appSnapshotFenceProbe: {
+          summary: {
+            scopeDigest: canonicalAppDigest({
+              origin: storageOrigin,
+              organizationId,
+              probeNamespace: "fence_probe"
+            }),
+            checks: 8,
+            healthy: true
+          }
+        },
         appSnapshots: {
           summary: {
             storageOrigin,
@@ -199,6 +217,27 @@ describe("production promotion evidence manifest", () => {
     const snapshot = missingControl.appSnapshots as { checks: Array<Record<string, unknown>> };
     missingControl.appSnapshots = { ...snapshot, checks: snapshot.checks.slice(1) };
     expect(() => buildProductionEvidenceManifest(missingControl, config)).toThrow();
+  });
+
+  it("rejects a mutation fence probe for another scope or with an incomplete control set", () => {
+    const wrongScope = releaseReceipts();
+    wrongScope.appSnapshotFenceProbe = {
+      ...(wrongScope.appSnapshotFenceProbe as Record<string, unknown>),
+      scopeDigest: `sha256:${"f".repeat(64)}`
+    };
+    expect(() => buildProductionEvidenceManifest(wrongScope, config))
+      .toThrow(/mutation fence probe.*protected Storage and tenant scope/i);
+
+    const duplicatedControl = releaseReceipts();
+    const probe = duplicatedControl.appSnapshotFenceProbe as {
+      checks: Array<Record<string, unknown>>;
+    };
+    duplicatedControl.appSnapshotFenceProbe = {
+      ...probe,
+      checks: [probe.checks[0], ...probe.checks.slice(0, -1)]
+    };
+    expect(() => buildProductionEvidenceManifest(duplicatedControl, config))
+      .toThrow(/omitted or duplicated/i);
   });
 
   it("rejects snapshot recovery evidence for another source, target, or incomplete restore proof", () => {
@@ -557,6 +596,27 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "replay_denial",
         "independent_audit_evidence"
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
+    },
+    appSnapshotFenceProbe: {
+      schemaVersion: "hosted-app-snapshot-fence-probe/v1",
+      checkedAt,
+      durationMs: 1_000,
+      scopeDigest: canonicalAppDigest({
+        origin: storageOrigin,
+        organizationId,
+        probeNamespace: "fence_probe"
+      }),
+      healthy: true,
+      checks: [
+        "registry_insert_advanced",
+        "registry_update_advanced",
+        "registry_delete_advanced",
+        "storage_upload_advanced",
+        "storage_replace_advanced",
+        "storage_delete_advanced",
+        "probe_authority_clean",
+        "probe_generation_clean"
+      ].map((name) => ({ name, ok: true }))
     },
     appSnapshots: {
       schemaVersion: "hosted-app-snapshot-staging-validation/v1",
