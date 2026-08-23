@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v12",
+      schemaVersion: "loopgraph-production-promotion-evidence/v13",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -114,6 +114,19 @@ describe("production promotion evidence manifest", () => {
           }
         },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
+        cliSessions: {
+          summary: {
+            primaryOrigin: deploymentOrigin,
+            replicaOrigin: "https://staging-replica.loopgraph.test",
+            checks: 10,
+            requestRateLimit: 10,
+            deviceFingerprintLimit: 5,
+            auditedRequestId: "cli_rate_12345678",
+            auditThroughSequence: 45,
+            auditHeadHash: "8".repeat(64),
+            disposableSessionRevoked: true
+          }
+        },
         appEvidenceHealth: {
           summary: {
             checks: 8,
@@ -222,7 +235,7 @@ describe("production promotion evidence manifest", () => {
         auditRetention: { summary: { throughSequence: 50 } }
       }
     });
-    expect(Object.keys(manifest.evidence)).toHaveLength(11);
+    expect(Object.keys(manifest.evidence)).toHaveLength(12);
     expect(manifest.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
 
     expect(verifyProductionEvidenceManifest({
@@ -242,6 +255,28 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(receipts, config))
       .toThrow(/exact promoted deployment origin/i);
+  });
+
+  it("requires CLI evidence from a distinct replica with the exact control contract", () => {
+    const sameReplica = releaseReceipts();
+    sameReplica.cliSessions = {
+      ...(sameReplica.cliSessions as Record<string, unknown>),
+      replicaOrigin: deploymentOrigin
+    };
+    expect(() => buildProductionEvidenceManifest(sameReplica, config))
+      .toThrow(/distinct replica origin/i);
+
+    const wrongStatus = releaseReceipts();
+    const receipt = wrongStatus.cliSessions as { checks: Array<Record<string, unknown>> };
+    wrongStatus.cliSessions = {
+      ...receipt,
+      checks: receipt.checks.map((check) =>
+        check.name === "refresh_replay_family_revocation"
+          ? { ...check, status: 200 }
+          : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
   });
 
   it("rejects App evidence health from another deployment, tenant, or stale projection", () => {
@@ -564,7 +599,8 @@ describe("production promotion evidence manifest", () => {
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "f".repeat(64) },
         { name: "marketplace", sequence: 42, hash: "6".repeat(64) },
-        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) }
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
+        { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(alteredCheckpoint, config))
@@ -630,7 +666,8 @@ describe("production promotion evidence manifest", () => {
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "4".repeat(64) },
         { name: "marketplace", sequence: 51, hash: "7".repeat(64) },
-        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) }
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
+        { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(aboveSignedHead, config))
@@ -784,6 +821,39 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "replay_denial",
         "independent_audit_evidence"
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
+    },
+    cliSessions: {
+      schemaVersion: "hosted-cli-session-staging-validation/v1",
+      primaryOrigin: deploymentOrigin,
+      replicaOrigin: "https://staging-replica.loopgraph.test",
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 5_000,
+      controls: {
+        deviceFingerprintLimit: 5,
+        requestRateLimit: 10,
+        crossReplica: true,
+        disposableSessionRevoked: true
+      },
+      auditEvidence: {
+        afterSequence: 44,
+        throughSequence: 45,
+        headHash: "8".repeat(64),
+        requestId: "cli_rate_12345678"
+      },
+      checks: [
+        { name: "device_issuance_saturation", status: 429 },
+        { name: "polling_slow_down", status: 429 },
+        { name: "primary_refresh_rotation", status: 200 },
+        { name: "cross_replica_refresh_rotation", status: 200 },
+        { name: "stale_request_metadata_denial", status: 400 },
+        { name: "suspended_membership_denial", status: 403 },
+        { name: "revoked_session_denial", status: 401 },
+        { name: "request_rate_saturation", status: 429 },
+        { name: "refresh_replay_family_revocation", status: 400 },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
     },
     appEvidenceHealth: {
       schemaVersion: "hosted-app-evidence-health-staging-validation/v3",
@@ -1029,7 +1099,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       }
     },
     auditRetention: {
-      schemaVersion: "audit-drain/v4",
+      schemaVersion: "audit-drain/v5",
       organizationId,
       projectKey: "main",
       sourceOrigin: deploymentOrigin,
@@ -1046,7 +1116,8 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "4".repeat(64) },
         { name: "marketplace", sequence: 42, hash: "6".repeat(64) },
-        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) }
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
+        { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) }
       ]
     }
   };

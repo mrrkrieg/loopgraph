@@ -142,7 +142,7 @@ The protected production release chain first actively rehearses the exact deploy
 Storage mutation fence and the distributed learning/entity stores in random reserved staging
 scopes, then repeats reconciliation for the exact Storage origin and tenant/project proven earlier
 in the same run. All fresh, healthy aggregate receipts are mandatory inputs to
-`loopgraph-production-promotion-evidence/v12`; a missing, stale,
+`loopgraph-production-promotion-evidence/v13`; a missing, stale,
 cross-scope, incomplete,
 retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
 pinned in reconciliation, release-evidence, and production environments. The credential-bearing

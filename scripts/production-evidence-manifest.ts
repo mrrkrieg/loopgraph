@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { canonicalAppDigest } from "loopgraph/core";
 import {
-  auditDrainReceiptV4Schema,
+  auditDrainReceiptV5Schema,
   canonicalJson,
   readBoundedIntegrityFile,
   retentionAcknowledgementSigningPayload,
@@ -87,6 +87,55 @@ const marketplaceReceiptSchema = z.object({
     detail: z.string().min(1).max(2048)
   }).strict()).length(7)
 }).strict();
+
+const cliSessionCheckNames = [
+  "device_issuance_saturation",
+  "polling_slow_down",
+  "primary_refresh_rotation",
+  "cross_replica_refresh_rotation",
+  "stale_request_metadata_denial",
+  "suspended_membership_denial",
+  "revoked_session_denial",
+  "request_rate_saturation",
+  "refresh_replay_family_revocation",
+  "independent_audit_evidence"
+] as const;
+
+const cliSessionReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-cli-session-staging-validation/v1"),
+  primaryOrigin: originSchema,
+  replicaOrigin: originSchema,
+  organizationId: z.string().uuid(),
+  projectKey: projectKeySchema,
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  controls: z.object({
+    deviceFingerprintLimit: z.literal(5),
+    requestRateLimit: z.number().int().min(2).max(20),
+    crossReplica: z.literal(true),
+    disposableSessionRevoked: z.literal(true)
+  }).strict(),
+  auditEvidence: z.object({
+    afterSequence: safeInteger,
+    throughSequence: safeInteger,
+    headHash: hashSchema,
+    requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/)
+  }).strict(),
+  checks: z.array(z.object({
+    name: z.enum(cliSessionCheckNames),
+    ok: z.literal(true),
+    status: z.number().int().min(100).max(599),
+    detail: z.string().min(1).max(2048)
+  }).strict()).length(cliSessionCheckNames.length)
+}).strict().superRefine((receipt, context) => {
+  if (receipt.auditEvidence.afterSequence > receipt.auditEvidence.throughSequence) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["auditEvidence"],
+      message: "CLI session audit checkpoint precedes its starting sequence"
+    });
+  }
+});
 
 const appEvidenceCountSchema = z.object({
   invalid: safeInteger,
@@ -474,7 +523,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v12"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v13"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -510,6 +559,7 @@ export const productionEvidenceManifestSchema = z.object({
     staging: evidenceDescriptorSchema,
     appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
+    cliSessions: evidenceDescriptorSchema,
     appEvidenceHealth: evidenceDescriptorSchema,
     appSnapshotFenceProbe: evidenceDescriptorSchema,
     learningEntities: evidenceDescriptorSchema,
@@ -528,6 +578,7 @@ export type ProductionEvidenceReceipts = {
   staging: unknown;
   appActionExactlyOnce: unknown;
   marketplace: unknown;
+  cliSessions: unknown;
   appEvidenceHealth: unknown;
   appSnapshotFenceProbe: unknown;
   learningEntities: unknown;
@@ -565,6 +616,7 @@ export function buildProductionEvidenceManifest(
   const staging = stagingReceiptSchema.parse(receipts.staging);
   const appActionExactlyOnce = verifyAppActionExactlyOnceProof(receipts.appActionExactlyOnce);
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
+  const cliSessions = cliSessionReceiptSchema.parse(receipts.cliSessions);
   const appEvidenceHealth = appEvidenceHealthReceiptSchema.parse(receipts.appEvidenceHealth);
   const appSnapshotFenceProbe = appSnapshotFenceProbeReceiptSchema.parse(
     receipts.appSnapshotFenceProbe
@@ -576,7 +628,7 @@ export function buildProductionEvidenceManifest(
     receipts.appSnapshotReconciliation
   );
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
-  const auditRetention = auditDrainReceiptV4Schema.parse(receipts.auditRetention);
+  const auditRetention = auditDrainReceiptV5Schema.parse(receipts.auditRetention);
   validateConfig(config);
   const auditRetentionPublicKey = createPublicKey(config.auditRetentionPublicKeyPem);
   if (auditRetentionPublicKey.asymmetricKeyType !== "ed25519") {
@@ -587,6 +639,7 @@ export function buildProductionEvidenceManifest(
     ["staging validation", staging.checkedAt],
     ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
+    ["CLI session validation", cliSessions.checkedAt],
     ["App evidence health validation", appEvidenceHealth.checkedAt],
     ["App snapshot mutation fence probe", appSnapshotFenceProbe.checkedAt],
     ["hosted learning and entity validation", learningEntities.checkedAt],
@@ -602,10 +655,16 @@ export function buildProductionEvidenceManifest(
   if (
     staging.targetOrigin !== deploymentOrigin ||
     marketplace.targetOrigin !== deploymentOrigin ||
+    trustedOrigin(cliSessions.primaryOrigin, "CLI session primary origin") !== deploymentOrigin ||
     appEvidenceHealth.targetOrigin !== deploymentOrigin ||
     auditRetention.sourceOrigin !== deploymentOrigin
   ) {
     throw new Error("Release receipts do not belong to the exact promoted deployment origin");
+  }
+  if (
+    trustedOrigin(cliSessions.replicaOrigin, "CLI session replica origin") === deploymentOrigin
+  ) {
+    throw new Error("CLI session evidence must exercise a distinct replica origin");
   }
   if (appSnapshots.targetOrigin !== trustedOrigin(config.storageOrigin, "Release Storage origin")) {
     throw new Error("App snapshot evidence does not belong to the exact protected Storage origin");
@@ -666,12 +725,14 @@ export function buildProductionEvidenceManifest(
   if (
     staging.organizationId !== config.organizationId ||
     marketplace.organizationId !== config.organizationId ||
+    cliSessions.organizationId !== config.organizationId ||
     appEvidenceHealth.organizationId !== config.organizationId ||
     appSnapshots.organizationId !== config.organizationId ||
     appSnapshotRecovery.organizationId !== config.organizationId ||
     auditRetention.organizationId !== config.organizationId ||
     staging.projectKey !== config.projectKey ||
     marketplace.projectKey !== config.projectKey ||
+    cliSessions.projectKey !== config.projectKey ||
     appEvidenceHealth.projectKey !== config.projectKey ||
     appSnapshots.projectKey !== config.projectKey ||
     appSnapshotRecovery.projectKey !== config.projectKey ||
@@ -733,6 +794,31 @@ export function buildProductionEvidenceManifest(
     ],
     "Marketplace validation"
   );
+  requireExactNames(
+    cliSessions.checks.map((check) => check.name),
+    [...cliSessionCheckNames],
+    "CLI session validation"
+  );
+  const cliSessionStatuses = new Map<string, number>(
+    cliSessions.checks.map((check) => [check.name, check.status])
+  );
+  const expectedCliSessionStatuses = new Map<string, number>([
+    ["device_issuance_saturation", 429],
+    ["polling_slow_down", 429],
+    ["primary_refresh_rotation", 200],
+    ["cross_replica_refresh_rotation", 200],
+    ["stale_request_metadata_denial", 400],
+    ["suspended_membership_denial", 403],
+    ["revoked_session_denial", 401],
+    ["request_rate_saturation", 429],
+    ["refresh_replay_family_revocation", 400],
+    ["independent_audit_evidence", 200]
+  ]);
+  if ([...expectedCliSessionStatuses].some(
+    ([name, status]) => cliSessionStatuses.get(name) !== status
+  )) {
+    throw new Error("CLI session validation returned an unexpected control status");
+  }
   requireExactNames(
     appEvidenceHealth.checks.map((check) => check.name),
     [...appEvidenceCheckNames],
@@ -812,7 +898,7 @@ export function buildProductionEvidenceManifest(
   );
   requireExactNames(
     auditRetention.verifiedReleaseCheckpoints.map((checkpoint) => checkpoint.name),
-    ["staging", "marketplace", "app_evidence_health"],
+    ["staging", "marketplace", "app_evidence_health", "cli_sessions"],
     "Audit retention checkpoint proof"
   );
   const retainedStaging = auditRetention.verifiedReleaseCheckpoints.find(
@@ -824,6 +910,9 @@ export function buildProductionEvidenceManifest(
   const retainedAppEvidenceHealth = auditRetention.verifiedReleaseCheckpoints.find(
     (checkpoint) => checkpoint.name === "app_evidence_health"
   );
+  const retainedCliSessions = auditRetention.verifiedReleaseCheckpoints.find(
+    (checkpoint) => checkpoint.name === "cli_sessions"
+  );
   if (
     retainedStaging?.sequence !== staging.auditCheckpoint.headSequence ||
     retainedStaging?.hash !== staging.auditCheckpoint.headHash ||
@@ -831,6 +920,8 @@ export function buildProductionEvidenceManifest(
     retainedMarketplace?.hash !== marketplace.auditEvidence.headHash ||
     retainedAppEvidenceHealth?.sequence !== appEvidenceHealth.auditEvidence.throughSequence ||
     retainedAppEvidenceHealth?.hash !== appEvidenceHealth.auditEvidence.headHash ||
+    retainedCliSessions?.sequence !== cliSessions.auditEvidence.throughSequence ||
+    retainedCliSessions?.hash !== cliSessions.auditEvidence.headHash ||
     auditRetention.verifiedReleaseCheckpoints.some((checkpoint) =>
       checkpoint.sequence < auditRetention.fromSequence ||
       checkpoint.sequence > auditRetention.throughSequence
@@ -928,6 +1019,17 @@ export function buildProductionEvidenceManifest(
       auditHeadHash: marketplace.auditEvidence.headHash,
       artifactDigest: marketplace.app.artifactDigest
     }),
+    cliSessions: descriptor(cliSessions, cliSessions.checkedAt, {
+      primaryOrigin: cliSessions.primaryOrigin,
+      replicaOrigin: cliSessions.replicaOrigin,
+      checks: cliSessions.checks.length,
+      requestRateLimit: cliSessions.controls.requestRateLimit,
+      deviceFingerprintLimit: cliSessions.controls.deviceFingerprintLimit,
+      auditedRequestId: cliSessions.auditEvidence.requestId,
+      auditThroughSequence: cliSessions.auditEvidence.throughSequence,
+      auditHeadHash: cliSessions.auditEvidence.headHash,
+      disposableSessionRevoked: cliSessions.controls.disposableSessionRevoked
+    }),
     appEvidenceHealth: descriptor(appEvidenceHealth, appEvidenceHealth.checkedAt, {
       checks: appEvidenceHealth.checks.length,
       auditedRequestId: appEvidenceHealth.auditEvidence.requestId,
@@ -1018,7 +1120,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v12",
+    schemaVersion: "loopgraph-production-promotion-evidence/v13",
     release,
     scope,
     evidence,
@@ -1044,6 +1146,7 @@ export function verifyProductionEvidenceManifest(input: {
     staging: stagingReceiptSchema.parse(input.receipts.staging),
     appActionExactlyOnce: verifyAppActionExactlyOnceProof(input.receipts.appActionExactlyOnce),
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
+    cliSessions: cliSessionReceiptSchema.parse(input.receipts.cliSessions),
     appEvidenceHealth: appEvidenceHealthReceiptSchema.parse(input.receipts.appEvidenceHealth),
     appSnapshotFenceProbe: appSnapshotFenceProbeReceiptSchema.parse(
       input.receipts.appSnapshotFenceProbe
@@ -1055,12 +1158,13 @@ export function verifyProductionEvidenceManifest(input: {
       input.receipts.appSnapshotReconciliation
     ),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
-    auditRetention: auditDrainReceiptV4Schema.parse(input.receipts.auditRetention)
+    auditRetention: auditDrainReceiptV5Schema.parse(input.receipts.auditRetention)
   };
   for (const [label, timestamp] of [
     ["staging validation", receiptsAtPromotion.staging.checkedAt],
     ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
+    ["CLI session validation", receiptsAtPromotion.cliSessions.checkedAt],
     ["App evidence health validation", receiptsAtPromotion.appEvidenceHealth.checkedAt],
     ["App snapshot mutation fence probe", receiptsAtPromotion.appSnapshotFenceProbe.checkedAt],
     ["hosted learning and entity validation", receiptsAtPromotion.learningEntities.checkedAt],
@@ -1200,6 +1304,7 @@ async function main() {
     staging: await readJsonReceipt("LOOPGRAPH_STAGING_RECEIPT_FILE"),
     appActionExactlyOnce: await readJsonReceipt("LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE"),
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
+    cliSessions: await readJsonReceipt("LOOPGRAPH_CLI_SESSION_RECEIPT_FILE"),
     appEvidenceHealth: await readJsonReceipt("LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE"),
     appSnapshotFenceProbe: await readJsonReceipt(
       "LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE"

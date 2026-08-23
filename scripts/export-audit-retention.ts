@@ -222,7 +222,7 @@ export async function drainAuditRetention(
       }
       const completedAt = now();
       return auditDrainReceiptSchema.parse({
-        schemaVersion: "audit-drain/v4",
+        schemaVersion: "audit-drain/v5",
         organizationId: config.organizationId,
         projectKey: config.projectKey,
         sourceOrigin: source.origin,
@@ -383,6 +383,7 @@ async function main() {
     stagingFile: required("LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE"),
     marketplaceFile: required("LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE"),
     appEvidenceHealthFile: required("LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE"),
+    cliSessionsFile: required("LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE"),
     sourceOrigin: source.origin,
     organizationId,
     projectKey
@@ -457,10 +458,23 @@ const appEvidenceHealthCheckpointReceiptSchema = z.object({
   }).passthrough()
 }).passthrough();
 
+const cliSessionCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-cli-session-staging-validation/v1"),
+  primaryOrigin: z.string().url(),
+  replicaOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
 async function readReleaseCheckpoints(input: {
   stagingFile: string;
   marketplaceFile: string;
   appEvidenceHealthFile: string;
+  cliSessionsFile: string;
   sourceOrigin: string;
   organizationId: string;
   projectKey: string;
@@ -482,6 +496,13 @@ async function readReleaseCheckpoints(input: {
       1024 * 1024
     )
   ));
+  const cliSessions = cliSessionCheckpointReceiptSchema.parse(JSON.parse(
+    await readBoundedIntegrityFile(
+      input.cliSessionsFile,
+      "LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE",
+      1024 * 1024
+    )
+  ));
   for (const receipt of [staging, marketplace, appEvidenceHealth]) {
     if (
       trustedEndpoint(receipt.targetOrigin, "Release checkpoint origin", true).origin !== input.sourceOrigin ||
@@ -490,6 +511,16 @@ async function readReleaseCheckpoints(input: {
     ) {
       throw new Error("Release audit checkpoint receipt belongs to a different source or tenant scope");
     }
+  }
+  if (
+    trustedEndpoint(cliSessions.primaryOrigin, "CLI session release checkpoint origin", true).origin !==
+      input.sourceOrigin ||
+    trustedEndpoint(cliSessions.replicaOrigin, "CLI session replica checkpoint origin", true).origin ===
+      input.sourceOrigin ||
+    cliSessions.organizationId !== input.organizationId ||
+    cliSessions.projectKey !== input.projectKey
+  ) {
+    throw new Error("CLI session release audit checkpoint belongs to a different source, replica, or tenant scope");
   }
   return releaseAuditCheckpointSetSchema.parse([
     {
@@ -506,6 +537,11 @@ async function readReleaseCheckpoints(input: {
       name: "app_evidence_health",
       sequence: appEvidenceHealth.auditEvidence.throughSequence,
       hash: appEvidenceHealth.auditEvidence.headHash
+    },
+    {
+      name: "cli_sessions",
+      sequence: cliSessions.auditEvidence.throughSequence,
+      hash: cliSessions.auditEvidence.headHash
     }
   ]);
 }

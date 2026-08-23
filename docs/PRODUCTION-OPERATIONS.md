@@ -22,7 +22,7 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   credentials. Update those pins only through a reviewed dependency change that resolves the
   vendor's release tag to its exact commit.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
-- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging, marketplace, and App evidence-health receipts and proves all three exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
+- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging, marketplace, App evidence-health, and CLI-session receipts and proves all four exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
 - `npm run validate:cli-session-staging` is the isolated human-session drill. Through two replica
   origins it saturates device issuance and one small request window, proves polling slowdown,
@@ -56,7 +56,7 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   Missing, corrupt, untracked, unavailable, malformed, retention-drifted,
   unstable, incomplete, cross-scope, or stale evidence blocks promotion.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's eleven receipts to one source commit,
+- `npm run release:evidence:build` binds the current run's twelve receipts to one source commit,
   deployment, source and restore Storage origins, tenant/project, database identity, exact
   marketplace artifact, independently reviewed active mutation and learning/entity probe scopes,
   and retained-snapshot inventory.
@@ -143,10 +143,11 @@ contract, and parity between the schedule projection and protected Prometheus ga
 ## Release evidence
 
 The protected workflow stores the staging, App action, marketplace, hosted App evidence-health,
+cross-replica CLI-session,
 active App snapshot
 mutation-fence, distributed learning/entity, App snapshot isolation, App snapshot recovery,
 App snapshot reconciliation, database recovery, and audit-retention receipts as separate artifacts,
-compiles `loopgraph-production-promotion-evidence/v12`, and creates a GitHub OIDC
+compiles `loopgraph-production-promotion-evidence/v13`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured
@@ -155,7 +156,7 @@ must not be replaced with a checkbox or an environment variable claiming a check
 [Production promotion evidence](./PRODUCTION-PROMOTION-EVIDENCE.md) for the schemas and protected
 environment setup.
 
-The `audit-drain/v4` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
+The `audit-drain/v5` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
 the application database through the protected runner's `LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE`; the
 sender atomically advances this predecessor only after verification. Production promotion depends
 on the protected `audit-retention-staging` job; an unavailable
