@@ -116,6 +116,12 @@ invokes the provider handler. A request older than the configured threshold is s
 
 ## App evidence freshness runbook
 
+Before treating the monitor as production evidence, run the protected
+`npm run --silent validate:app-evidence-health-staging` gate against the exact deployment. It proves
+workload authorization, cross-tenant denial, replay rejection, the aggregate-only response
+contract, and parity between the schedule projection and protected Prometheus gauges. See
+[Hosted App evidence-health staging gate](./HOSTED-APP-EVIDENCE-HEALTH-STAGING-GATE.md).
+
 1. Confirm the protected alert is scoped to the expected tenant/project and compare invalid,
    expired, renew-soon, and truncation metrics.
 2. Ask Hermes for the versioned fleet renewal plan or open Installed Apps. Do not copy provider

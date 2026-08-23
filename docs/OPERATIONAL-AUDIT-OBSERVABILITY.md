@@ -153,6 +153,7 @@ After applying migrations to staging:
    non-production provider account that independently records invocation count. The aggregate
    `staging-validation/v5` gate proves the final zero-backlog state but cannot by itself prove the
    external provider's idempotency behavior.
-10. Run the App evidence-health schedule, verify its protected response contains aggregate counts
-    only, and prove invalid/expired/renew-soon fixtures set the expected protected metrics without
-    creating replay, approval, activation, or provider-write records.
+10. Run `npm run --silent validate:app-evidence-health-staging` from a protected runner. Preserve
+    the secret-free receipt and separately prove invalid/expired/renew-soon fixtures set the
+    expected protected metrics without creating replay, approval, activation, or provider-write
+    records.
