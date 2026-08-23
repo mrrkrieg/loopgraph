@@ -16,6 +16,9 @@ declare
   v_generation_reader_service_only boolean;
   v_mutation_functions_trigger_only boolean;
   v_mutation_functions_hardened boolean;
+  v_function_definition_digests jsonb;
+  v_function_owners_pinned boolean;
+  v_function_acls_pinned boolean;
 begin
   select exists (
     select 1
@@ -29,6 +32,8 @@ begin
         'public.loopgraph_app_snapshot_inventory_generation_bump()'
       )
       and trigger_row.tgenabled in ('O', 'A')
+      and trigger_row.tgtype = 29
+      and trigger_row.tgqual is null
       and not trigger_row.tgisinternal
   ) into v_storage_trigger_enabled;
 
@@ -44,6 +49,8 @@ begin
         'public.loopgraph_app_snapshot_inventory_generation_bump_registry()'
       )
       and trigger_row.tgenabled in ('O', 'A')
+      and trigger_row.tgtype = 29
+      and trigger_row.tgqual is null
       and not trigger_row.tgisinternal
   ) into v_registry_trigger_enabled;
 
@@ -91,16 +98,90 @@ begin
     pg_catalog.to_regprocedure('public.loopgraph_app_snapshot_inventory_generation_bump_registry()')
   ]);
 
+  select
+    pg_catalog.jsonb_object_agg(
+      definition_row.definition_key,
+      case
+        when function_row.oid is null then null
+        else 'sha256:' || pg_catalog.encode(
+          extensions.digest(
+            pg_catalog.convert_to(function_row.prosrc, 'UTF8'),
+            'sha256'
+          ),
+          'hex'
+        )
+      end
+      order by definition_row.ordinal
+    ),
+    count(function_row.oid) = 6
+      and coalesce(pg_catalog.bool_and(
+        pg_catalog.pg_get_userbyid(function_row.proowner) = 'postgres'
+      ), false),
+    count(function_row.oid) = 6
+      and coalesce(pg_catalog.bool_and(
+        not pg_catalog.has_function_privilege('anon', function_row.oid, 'EXECUTE')
+        and not pg_catalog.has_function_privilege('authenticated', function_row.oid, 'EXECUTE')
+        and (
+          pg_catalog.has_function_privilege('service_role', function_row.oid, 'EXECUTE')
+          = definition_row.allow_service_role
+        )
+        and not exists (
+          select 1
+          from pg_catalog.aclexplode(
+            coalesce(
+              function_row.proacl,
+              pg_catalog.acldefault('f', function_row.proowner)
+            )
+          ) privilege_row
+          where privilege_row.privilege_type = 'EXECUTE'
+            and privilege_row.grantee <> function_row.proowner
+            and not (
+              definition_row.allow_service_role
+              and privilege_row.grantee = pg_catalog.to_regrole('service_role')
+            )
+        )
+      ), false)
+  into
+    v_function_definition_digests,
+    v_function_owners_pinned,
+    v_function_acls_pinned
+  from (values
+    (1, 'generationAdvance', 'public.loopgraph_app_snapshot_inventory_generation_advance(uuid,text)', false),
+    (2, 'scopeBump', 'public.loopgraph_app_snapshot_inventory_generation_bump_scope(text)', false),
+    (3, 'storageTrigger', 'public.loopgraph_app_snapshot_inventory_generation_bump()', false),
+    (4, 'registryTrigger', 'public.loopgraph_app_snapshot_inventory_generation_bump_registry()', false),
+    (5, 'generationReader', 'public.loopgraph_app_snapshot_inventory_generation_get(uuid,text)', true),
+    (6, 'fenceAttestation', 'public.loopgraph_app_snapshot_inventory_fence_status_get()', true)
+  ) as definition_row(ordinal, definition_key, function_signature, allow_service_role)
+  left join pg_catalog.pg_proc function_row
+    on function_row.oid = pg_catalog.to_regprocedure(definition_row.function_signature);
+
   return jsonb_build_object(
     'schemaVersion', 'hosted-app-snapshot-inventory-fence/v1',
     'storageTriggerEnabled', v_storage_trigger_enabled,
     'registryTriggerEnabled', v_registry_trigger_enabled,
     'generationReaderServiceOnly', v_generation_reader_service_only,
     'mutationFunctionsTriggerOnly', v_mutation_functions_trigger_only,
-    'mutationFunctionsHardened', v_mutation_functions_hardened
+    'mutationFunctionsHardened', v_mutation_functions_hardened,
+    'functionDefinitionDigests', v_function_definition_digests,
+    'functionOwnersPinned', v_function_owners_pinned,
+    'functionAclsPinned', v_function_acls_pinned
   );
 end;
 $$;
+
+alter function public.loopgraph_app_snapshot_inventory_generation_advance(uuid, text)
+  owner to postgres;
+alter function public.loopgraph_app_snapshot_inventory_generation_bump_scope(text)
+  owner to postgres;
+alter function public.loopgraph_app_snapshot_inventory_generation_bump()
+  owner to postgres;
+alter function public.loopgraph_app_snapshot_inventory_generation_bump_registry()
+  owner to postgres;
+alter function public.loopgraph_app_snapshot_inventory_generation_get(uuid, text)
+  owner to postgres;
+alter function public.loopgraph_app_snapshot_inventory_fence_status_get()
+  owner to postgres;
 
 revoke all on function public.loopgraph_app_snapshot_inventory_fence_status_get()
   from public, anon, authenticated;

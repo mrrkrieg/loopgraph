@@ -125,8 +125,9 @@ rejects every malformed object, and binds the exact unreferenced archive set to 
 reviewed opaque digest. It requires two identical full registry-plus-Storage passes, fails under
 bounded continuous mutation, and fences each pass with a registry-and-Storage-trigger-maintained
 tenant/project mutation generation read before the registry and after the final Storage page. It
-first proves from live PostgreSQL catalogs that both exact triggers are enabled and the generation
-reader remains service-role-only. It never emits object keys and never deletes archives
+first proves from live PostgreSQL catalogs that both exact triggers retain their full unconditional
+row-level event mask and that independently pinned function bodies, owners, hardened search paths,
+and effective execute capabilities have not drifted. It never emits object keys and never deletes archives
 automatically.
 
 The protected production release chain repeats that reconciliation for the exact Storage origin and

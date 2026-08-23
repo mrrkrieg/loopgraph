@@ -1,5 +1,6 @@
 import { generateKeyPairSync, sign } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS } from "./hosted-app-snapshot-inventory-fence";
 import {
   canonicalJson,
   retentionAcknowledgementSigningPayload,
@@ -133,14 +134,7 @@ describe("production promotion evidence manifest", () => {
                 organizationId,
                 projectKey: "main"
               }),
-              status: {
-                schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
-                storageTriggerEnabled: true,
-                registryTriggerEnabled: true,
-                generationReaderServiceOnly: true,
-                mutationFunctionsTriggerOnly: true,
-                mutationFunctionsHardened: true
-              }
+              status: HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS
             }),
             inventoryPasses: 2,
             inventoryGeneration: 3,
@@ -238,14 +232,7 @@ describe("production promotion evidence manifest", () => {
       scopeDigest: wrongScopeDigest,
       inventoryFenceDigest: canonicalAppDigest({
         scopeDigest: wrongScopeDigest,
-        status: {
-          schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
-          storageTriggerEnabled: true,
-          registryTriggerEnabled: true,
-          generationReaderServiceOnly: true,
-          mutationFunctionsTriggerOnly: true,
-          mutationFunctionsHardened: true
-        }
+        status: HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS
       }),
       inventoryGenerationDigest: canonicalAppDigest({
         scopeDigest: wrongScopeDigest,
@@ -629,14 +616,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
           organizationId,
           projectKey: "main"
         }),
-        status: {
-          schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
-          storageTriggerEnabled: true,
-          registryTriggerEnabled: true,
-          generationReaderServiceOnly: true,
-          mutationFunctionsTriggerOnly: true,
-          mutationFunctionsHardened: true
-        }
+        status: HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS
       }),
       inventoryPasses: 2,
       inventoryGeneration: 3,

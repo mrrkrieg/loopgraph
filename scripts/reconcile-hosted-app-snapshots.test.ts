@@ -9,6 +9,7 @@ import {
   reconcileHostedAppSnapshotRegistries,
   reconcileHostedAppSnapshots
 } from "./reconcile-hosted-app-snapshots";
+import { HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS } from "./hosted-app-snapshot-inventory-fence";
 
 const scope = {
   supabaseUrl: "https://snapshot-production.supabase.co",
@@ -118,6 +119,27 @@ describe("hosted App snapshot reconciliation", () => {
         registryTriggerEnabled: true,
         generationReaderServiceOnly: true,
         mutationFunctionsHardened: false
+      },
+      {
+        storageTriggerEnabled: true,
+        registryTriggerEnabled: true,
+        generationReaderServiceOnly: true,
+        functionOwnersPinned: false
+      },
+      {
+        storageTriggerEnabled: true,
+        registryTriggerEnabled: true,
+        generationReaderServiceOnly: true,
+        functionAclsPinned: false
+      },
+      {
+        storageTriggerEnabled: true,
+        registryTriggerEnabled: true,
+        generationReaderServiceOnly: true,
+        functionDefinitionDigests: {
+          ...HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS.functionDefinitionDigests,
+          storageTrigger: `sha256:${"0".repeat(64)}`
+        }
       }
     ]) {
       await expect(reconcileHostedAppSnapshots(config, {
@@ -315,6 +337,9 @@ function registryClient(
       generationReaderServiceOnly: boolean;
       mutationFunctionsTriggerOnly?: boolean;
       mutationFunctionsHardened?: boolean;
+      functionDefinitionDigests?: Record<string, string>;
+      functionOwnersPinned?: boolean;
+      functionAclsPinned?: boolean;
     };
   } = {}
 ): SupabaseClient {
@@ -334,12 +359,7 @@ function registryClient(
     rpc: async (name: string) => name === "loopgraph_app_snapshot_inventory_fence_status_get"
       ? {
           data: {
-            schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
-            storageTriggerEnabled: true,
-            registryTriggerEnabled: true,
-            generationReaderServiceOnly: true,
-            mutationFunctionsTriggerOnly: true,
-            mutationFunctionsHardened: true,
+            ...HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS,
             ...hooks.fenceStatus
           },
           error: null

@@ -35,7 +35,8 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `npm run reconcile:app-snapshots` verifies every current detached installation through the signed
   archive loader for the exact Storage origin and tenant/project proven by the preceding gates. It
   first attests from live PostgreSQL catalogs that both exact mutation triggers are installed and
-  enabled and that the generation reader remains service-role-only. It also inventories Storage
+  enabled with the full unconditional row-level event mask, and that independently pinned function
+  bodies, owners, search paths, and execute capabilities remain exact. It also inventories Storage
   back to current registry authority. The protected environment pins that
   scope and the reviewed unreferenced-archive digest independently and requires an explicit
   empty-inventory policy. Two identical full passes are required, and persistent mutation exhausts a

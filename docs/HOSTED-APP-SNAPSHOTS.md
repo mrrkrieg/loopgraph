@@ -108,12 +108,15 @@ and fails closed under continuous mutation; a single offset-paginated traversal 
 evidence.
 
 Before reading any inventory, reconciliation calls a service-role-only live attestation RPC. The
-RPC inspects PostgreSQL catalogs and returns only five booleans: whether both exact triggers are
-enabled, whether the generation reader remains hardened and service-role-only, and whether all four
-mutation functions remain hardened and trigger-only. A missing, disabled, replaced, or overexposed
-fence aborts reconciliation before it can produce a healthy receipt. The receipt binds
-that exact all-true status to the protected scope as an opaque digest; it does not expose catalog
-rows, function definitions, role grants, tenant identifiers, or object paths.
+RPC inspects PostgreSQL catalogs and returns only bounded booleans plus opaque SHA-256 function-body
+fingerprints. Both triggers must be enabled, row-level, unconditional `AFTER INSERT OR UPDATE OR
+DELETE` triggers bound to the expected functions. The generation reader, four mutation functions,
+and attestation RPC must match independently pinned function-body fingerprints, remain owned by
+`postgres`, preserve their empty search paths, and expose exactly the expected effective execute
+capabilities. A missing, disabled, predicate-restricted, event-reduced, replaced, re-owned, or
+overexposed fence aborts reconciliation before it can produce a healthy receipt. The receipt binds
+that exact status to the protected scope as one opaque digest; it does not expose catalog rows,
+function definitions, role grants, tenant identifiers, or object paths.
 
 The scheduled `Hosted App snapshot reconciliation` workflow runs on the protected self-hosted
 runner. Its service-role credential is supplied only as an absolute, non-symlink, mode-`0600`

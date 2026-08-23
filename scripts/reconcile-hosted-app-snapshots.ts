@@ -15,6 +15,7 @@ import {
   inventoryHostedAppSnapshotObjects
 } from "../lib/db/adapters/supabase-app-snapshot-store";
 import { readProjectedSecretFile } from "./projected-secret-file";
+import { HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS } from "./hosted-app-snapshot-inventory-fence";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -213,6 +214,9 @@ export async function attestHostedAppSnapshotInventoryFence(
   const status = data as Record<string, unknown>;
   const keys = Object.keys(status).sort();
   const expectedKeys = [
+    "functionAclsPinned",
+    "functionDefinitionDigests",
+    "functionOwnersPinned",
     "generationReaderServiceOnly",
     "mutationFunctionsHardened",
     "mutationFunctionsTriggerOnly",
@@ -220,15 +224,31 @@ export async function attestHostedAppSnapshotInventoryFence(
     "schemaVersion",
     "storageTriggerEnabled"
   ];
+  const definitionDigests = status.functionDefinitionDigests;
+  const expectedDefinitionDigests =
+    HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS.functionDefinitionDigests;
+  const definitionKeys = definitionDigests && typeof definitionDigests === "object"
+    && !Array.isArray(definitionDigests)
+    ? Object.keys(definitionDigests).sort()
+    : [];
+  const expectedDefinitionKeys = Object.keys(expectedDefinitionDigests).sort();
   if (
     keys.length !== expectedKeys.length ||
     expectedKeys.some((key, index) => keys[index] !== key) ||
-    status.schemaVersion !== "hosted-app-snapshot-inventory-fence/v1" ||
+    status.schemaVersion !== HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS.schemaVersion ||
     status.storageTriggerEnabled !== true ||
     status.registryTriggerEnabled !== true ||
     status.generationReaderServiceOnly !== true ||
     status.mutationFunctionsTriggerOnly !== true ||
-    status.mutationFunctionsHardened !== true
+    status.mutationFunctionsHardened !== true ||
+    status.functionOwnersPinned !== true ||
+    status.functionAclsPinned !== true ||
+    definitionKeys.length !== expectedDefinitionKeys.length ||
+    expectedDefinitionKeys.some((key, index) => definitionKeys[index] !== key) ||
+    expectedDefinitionKeys.some(
+      (key) => (definitionDigests as Record<string, unknown>)[key]
+        !== expectedDefinitionDigests[key as keyof typeof expectedDefinitionDigests]
+    )
   ) {
     throw new Error("Hosted App snapshot mutation fence is not fully enabled");
   }

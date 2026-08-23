@@ -11,6 +11,7 @@ import {
 } from "./audit-retention-protocol";
 import { RECOVERY_TABLES } from "./recovery-contract";
 import { verifyAppActionExactlyOnceProof } from "./prove-app-action-exactly-once";
+import { HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS } from "./hosted-app-snapshot-inventory-fence";
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const hashSchema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -202,14 +203,7 @@ const appSnapshotReconciliationReceiptSchema = z.object({
   if (
     receipt.inventoryFenceDigest !== canonicalAppDigest({
       scopeDigest: receipt.scopeDigest,
-      status: {
-        schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
-        storageTriggerEnabled: true,
-        registryTriggerEnabled: true,
-        generationReaderServiceOnly: true,
-        mutationFunctionsTriggerOnly: true,
-        mutationFunctionsHardened: true
-      }
+      status: HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS
     })
   ) {
     context.addIssue({
