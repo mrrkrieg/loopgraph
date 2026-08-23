@@ -47,6 +47,9 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
+  "loopgraph_app_activation_gate_get",
+  "loopgraph_app_activation_approve",
+  "loopgraph_app_activate",
   "loopgraph_app_operation_invoke",
   "loopgraph_app_operation_action_commit",
   "loopgraph_app_operation_action_reconcile"

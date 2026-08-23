@@ -68,6 +68,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_rollback",
       "loopgraph_app_detach",
       "loopgraph_app_uninstall",
+      "loopgraph_app_activation_gate_get",
       "loopgraph_app_activation_approve",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
@@ -739,6 +740,16 @@ describe("shared Loopgraph App tools", () => {
         input: { installationId: applied.installation.id, mode: "shadow" }
       }
     });
+    const shadowGate = await callLoopgraphAppTool("loopgraph_app_activation_gate_get", {
+      projectRoot,
+      installationId: applied.installation.id,
+      mode: "shadow"
+    }) as { status: string; requiredMaturity: string; gateDigest: string };
+    expect(shadowGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "connected",
+      gateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/)
+    });
     const approval = await callLoopgraphAppTool("loopgraph_app_activation_approve", {
       projectRoot,
       installationId: applied.installation.id,
@@ -746,7 +757,15 @@ describe("shared Loopgraph App tools", () => {
       approvedBy: "sales-operations",
       reason: "The write-blocked rehearsal passed and shadow routing is approved.",
       evidenceRefs: ["operator-review:shadow"]
-    }) as { receipt: { id: string }; nextAction: { toolName: string; input: { approvalReceiptId: string } } };
+    }) as { receipt: { id: string; schemaVersion: string; activationGate: { gateDigest: string; status: string; requiredMaturity: string } }; nextAction: { toolName: string; input: { approvalReceiptId: string } } };
+    expect(approval.receipt).toMatchObject({
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha2",
+      activationGate: {
+        gateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        status: "ready",
+        requiredMaturity: "connected"
+      }
+    });
     expect(approval.nextAction).toMatchObject({
       toolName: "loopgraph_app_activate",
       input: { approvalReceiptId: approval.receipt.id }

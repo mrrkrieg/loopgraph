@@ -834,6 +834,24 @@ for (const action of ["test", "pause", "resume"] as const) {
 }
 
 apps
+  .command("activation-gate")
+  .description("Explain the current evidence-derived gate for one ordered App mode transition")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--mode <mode>", "shadow, recommend, or execute_with_approval")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { mode: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_activation_gate_get", {
+      projectRoot: options.project,
+      installationId,
+      mode: options.mode,
+      workspaceId: options.workspace,
+      companyId: options.company
+    });
+  });
+
+apps
   .command("activation-approve")
   .description("Approve one exact, short-lived non-live App mode transition")
   .argument("<installation-id>", "Installed app ID")

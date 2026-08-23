@@ -1,6 +1,7 @@
 import "server-only";
 
 import type {
+  AppActivationGate,
   AppActivationApprovalReceipt,
   AppEvalRun,
   AppFieldMappingPlan,
@@ -399,6 +400,7 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   onboardingJourney: AppOnboardingJourney;
   operations: InstalledAppOperationsView;
   maturity: AppOperationalMaturityAssessment;
+  activationGate?: AppActivationGate;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const installed = await callLoopgraphAppTool("loopgraph_app_install_status", {
@@ -410,7 +412,8 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
   const installedLoops = installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? [];
   const evaluations = installed.evaluations.filter((evaluation) => evaluation.installationId === installationId);
-  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence, maturity, actions] = await Promise.all([
+  const nextActivationMode = activationModeAfter(installation.state);
+  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence, maturity, actions, activationGate] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", {
       projectRoot,
       appId: installation.appId,
@@ -439,7 +442,14 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
       projectRoot,
       installationId,
       limit: 100
-    }) as Promise<{ actions: AppOperationAction[]; events: AppOperationActionEvent[] }>
+    }) as Promise<{ actions: AppOperationAction[]; events: AppOperationActionEvent[] }>,
+    nextActivationMode
+      ? callLoopgraphAppTool("loopgraph_app_activation_gate_get", {
+          projectRoot,
+          installationId,
+          mode: nextActivationMode
+        }) as Promise<AppActivationGate>
+      : Promise.resolve(undefined)
   ]);
   const updatePlan = diff.updateAvailable
     ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
@@ -478,6 +488,14 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     installedLoops,
     onboardingJourney,
     operations,
-    maturity
+    maturity,
+    activationGate
   };
+}
+
+function activationModeAfter(state: WorkspaceAppInstallation["state"]): "shadow" | "recommend" | "execute_with_approval" | undefined {
+  if (state === "simulation_passed") return "shadow";
+  if (state === "shadow") return "recommend";
+  if (state === "recommend") return "execute_with_approval";
+  return undefined;
 }

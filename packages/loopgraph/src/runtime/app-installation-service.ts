@@ -2,10 +2,12 @@ import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
+  APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
+  appActivationGateSchema,
   appActivationApprovalReceiptSchema,
   appConfigurationSchema,
   appIdSchema,
@@ -22,6 +24,7 @@ import {
   canonicalAppDigest,
   contentHash,
   loopSpecVersionHash,
+  type AppActivationGate,
   type AppConfigField,
   type AppConnectorOperationBinding,
   type AppConfiguration,
@@ -32,6 +35,7 @@ import {
   type AppInstallPlan,
   type AppInstallationLock,
   type AppLifecycleReceipt,
+  type AppOperationalMaturityAssessment,
   type AppOverlay,
   type AppOperationResolution,
   type AppReadiness,
@@ -87,6 +91,10 @@ import {
   runAppHistoricalReplay,
   runAppSyntheticConformance
 } from "./app-quality-engine";
+import { assessAppOperationalMaturity } from "./app-operational-maturity";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
+import { FileAppVerificationStore, type AppVerificationStore } from "./app-verification-store";
 import { assertSecretFree } from "./secret-redaction";
 
 export type PlanAppInstallationInput = {
@@ -176,6 +184,9 @@ export class AppInstallationService {
   private readonly mappingStore: ConnectorFieldMappingStore;
   private readonly loopSpecStore: LoopSpecRegistryStore;
   private readonly snapshotStore: AppSnapshotStore;
+  private readonly outcomeStore: OutcomeStore;
+  private readonly operationsStore: HermesOperationsStore;
+  private readonly verificationStore: AppVerificationStore;
 
   constructor(
     private readonly marketplace: LocalAppMarketplace,
@@ -188,6 +199,9 @@ export class AppInstallationService {
       mappingStore?: ConnectorFieldMappingStore;
       loopSpecStore?: LoopSpecRegistryStore;
       snapshotStore?: AppSnapshotStore;
+      outcomeStore?: OutcomeStore;
+      operationsStore?: HermesOperationsStore;
+      verificationStore?: AppVerificationStore;
     } = {}
   ) {
     const appsRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps");
@@ -196,6 +210,9 @@ export class AppInstallationService {
     this.mappingStore = dependencies.mappingStore ?? new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), workspaceId);
     this.loopSpecStore = dependencies.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
     this.snapshotStore = dependencies.snapshotStore ?? new FileAppSnapshotStore(projectRoot);
+    this.outcomeStore = dependencies.outcomeStore ?? new FileOutcomeStore(path.join(path.resolve(projectRoot), ".loopgraph"));
+    this.operationsStore = dependencies.operationsStore ?? new FileHermesOperationsStore(path.join(path.resolve(projectRoot), ".loopgraph"));
+    this.verificationStore = dependencies.verificationStore ?? new FileAppVerificationStore(appsRoot, workspaceId);
   }
 
   private async prepareLifecycleOperation(input: PrepareLifecycleOperationInput): Promise<AppLifecycleOperation> {
@@ -2505,8 +2522,12 @@ export class AppInstallationService {
 
   async promotionRecommendation(installationId: string, now = new Date()): Promise<AppPromotionRecommendation> {
     const registry = await this.installationStore.read();
-    requireInstallation(registry, installationId);
-    return createPromotionRecommendation({ installationId, evaluations: registry.evaluations, now });
+    const installation = requireInstallation(registry, installationId);
+    return createPromotionRecommendation({
+      installationId,
+      evaluations: registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest),
+      now
+    });
   }
 
   async diff(installationId: string): Promise<{
@@ -2546,12 +2567,8 @@ export class AppInstallationService {
     }
     return this.installationStore.withExclusiveUpdate(async (registry) => {
       const installation = requireOperableInstallation(registry, input.installationId);
-      assertLifecycleTransition(installation.state, input.mode, input.mode);
-      const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installation.id && run.status === "passed");
-      if (!latestPassed) throw new Error("App must pass conformance before activation");
-      if (input.mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
-        throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
-      }
+      const activationGate = await this.buildActivationGate(registry, installation, input.mode, now);
+      assertActivationGateReady(activationGate);
       const approvedAt = now.toISOString();
       const expiresAt = new Date(now.getTime() + expiresInSeconds * 1000).toISOString();
       const approvalContent = {
@@ -2564,6 +2581,7 @@ export class AppInstallationService {
         approvedBy: input.approvedBy,
         reason: input.reason,
         evidenceRefs: input.evidenceRefs ?? [],
+        activationGate,
         approvedAt,
         expiresAt
       } as const;
@@ -2636,10 +2654,17 @@ export class AppInstallationService {
       }
       return observedInstallation;
     }
+    const observedGate = await this.buildActivationGate(
+      observedRegistry,
+      observedInstallation,
+      mode,
+      now
+    );
     assertActivationReady({
       registry: observedRegistry,
       installation: observedInstallation,
       approval: observedApproval,
+      currentGate: observedGate,
       mode,
       now,
       allowExpired: Boolean(existingOperation)
@@ -2685,7 +2710,8 @@ export class AppInstallationService {
         if (Date.parse(currentOperation.startedAt) >= Date.parse(approval.expiresAt)) {
           throw new Error("App activation recovery began after its approval expired");
         }
-        assertActivationReady({ registry, installation, approval, mode, now, allowExpired: true });
+        const currentGate = await this.buildActivationGate(registry, installation, mode, now);
+        assertActivationReady({ registry, installation, approval, currentGate, mode, now, allowExpired: true });
         if (currentOperation.activation.fromState !== installation.state || currentOperation.activation.targetMode !== mode) {
           throw new Error("App activation recovery record does not match the current lifecycle transition");
         }
@@ -2739,6 +2765,14 @@ export class AppInstallationService {
   async readiness(installationId: string, now = new Date()): Promise<AppReadiness> {
     const registry = await this.installationStore.read();
     const installation = requireInstallation(registry, installationId);
+    return this.buildReadiness(registry, installation, now);
+  }
+
+  private async buildReadiness(
+    registry: AppInstallationRegistry,
+    installation: WorkspaceAppInstallation,
+    now: Date
+  ): Promise<AppReadiness> {
     const loaded = await this.loadInstallationArtifact(installation);
     const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
     const activeCapabilities = compiledCapabilityKeys(compiled);
@@ -2761,7 +2795,7 @@ export class AppInstallationService {
     const recipe = (await loadConnectorRecipes(loaded)).find((candidate) => candidate.id === recipeId);
     const mappingsRequired = Boolean(recipe?.fieldMappings.some((mapping) => mapping.requiredLogicalFields.length > 0));
     const exactEvaluations = registry.evaluations.filter((run) =>
-      run.installationId === installationId && run.artifactDigest === installation.artifactDigest);
+      run.installationId === installation.id && run.artifactDigest === installation.artifactDigest);
     const latestSynthetic = [...exactEvaluations].reverse().find((run) => run.level === "synthetic");
     const syntheticPassed = latestSynthetic?.status === "passed" &&
       latestSynthetic.writeBlocked &&
@@ -2806,13 +2840,160 @@ export class AppInstallationService {
     const state = failureCount > 0 ? "blocked" : installation.state === "shadow" ? "ready_for_recommend" : "ready_for_shadow";
     return appReadinessSchema.parse({
       schemaVersion: APP_EVAL_SCHEMA_VERSION,
-      installationId,
+      installationId: installation.id,
       state,
       score: Math.round((passCount / checks.length) * 100),
       maturity: syntheticPassed && connectionsPassed && mappingsPassed ? "connected" : syntheticPassed ? "tested" : "concept",
       checks,
       evaluatedAt: now.toISOString(),
       evidenceDerived: true
+    });
+  }
+
+  async operationalMaturity(
+    installationId: string,
+    now = new Date()
+  ): Promise<AppOperationalMaturityAssessment> {
+    const registry = await this.installationStore.read();
+    const installation = requireInstallation(registry, installationId);
+    const readiness = await this.buildReadiness(registry, installation, now);
+    return this.buildOperationalMaturity(registry, installation, readiness, now);
+  }
+
+  async activationGate(
+    installationId: string,
+    mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">,
+    now = new Date()
+  ): Promise<AppActivationGate> {
+    const registry = await this.installationStore.read();
+    const installation = requireInstallation(registry, installationId);
+    return this.buildActivationGate(registry, installation, mode, now);
+  }
+
+  private async buildOperationalMaturity(
+    registry: AppInstallationRegistry,
+    installation: WorkspaceAppInstallation,
+    readiness: AppReadiness,
+    now: Date,
+    includeIndependentVerification = true
+  ): Promise<AppOperationalMaturityAssessment> {
+    const workspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
+    const [outcomes, valueEntries, completedEvents] = await Promise.all([
+      this.outcomeStore.listObservedOutcomes({ workspaceId: this.workspaceId, companyId: this.companyId }),
+      this.outcomeStore.listValueLedgerEntries({ workspaceId: this.workspaceId, companyId: this.companyId }),
+      this.operationsStore.listExecutionEvents({
+        workspaceId: this.workspaceId,
+        companyId: this.companyId,
+        eventType: "run.completed"
+      })
+    ]);
+    const verificationRegistry = includeIndependentVerification ? await this.verificationStore.read() : undefined;
+    return assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: registry.evaluations,
+      operatingEvidence: {
+        completedRunRefs: uniqueStrings(completedEvents
+          .filter((event) => loopIds.has(event.loopId))
+          .map((event) => `run:${event.runId}`)),
+        observedOutcomeRefs: outcomes
+          .filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed")
+          .map((outcome) => `outcome:${outcome.id}`),
+        observedValueRefs: valueEntries
+          .filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed")
+          .map((entry) => `value:${entry.id}`)
+      },
+      verificationReceipts: verificationRegistry?.receipts,
+      trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
+      now
+    });
+  }
+
+  private async buildActivationGate(
+    registry: AppInstallationRegistry,
+    installation: WorkspaceAppInstallation,
+    mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">,
+    now: Date
+  ): Promise<AppActivationGate> {
+    const readiness = await this.buildReadiness(registry, installation, now);
+    const maturity = await this.buildOperationalMaturity(registry, installation, readiness, now, false);
+    const recommendation = createPromotionRecommendation({
+      installationId: installation.id,
+      evaluations: registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest),
+      now
+    });
+    const requiredMaturity = mode === "execute_with_approval" ? "production_proven" as const : "connected" as const;
+    const requiredMaturityGate = maturity.gates.find((gate) => gate.level === requiredMaturity)!;
+    let lifecycleError: string | undefined;
+    try {
+      assertLifecycleTransition(installation.state, mode, mode);
+    } catch (error) {
+      lifecycleError = error instanceof Error ? error.message : "The requested activation transition is invalid.";
+    }
+    const recommendationReady = mode !== "recommend" || recommendation.recommendedMode === "recommend";
+    const permissionReady = mode !== "execute_with_approval" || !installation.permissions.some((permission) =>
+      permission.authority === "execute" && permission.decision === "allow");
+    const checks: AppActivationGate["checks"] = [
+      {
+        id: "ordered-lifecycle",
+        status: lifecycleError ? "blocked" : "pass",
+        summary: lifecycleError ?? `The ordered ${installation.state} → ${mode} transition is valid.`,
+        evidenceRefs: [installation.updatedAt],
+        ...(lifecycleError ? { remediation: "Complete the preceding rollout stage or reconcile the unfinished lifecycle operation before requesting approval." } : {})
+      },
+      {
+        id: "operational-maturity",
+        status: requiredMaturityGate.status === "achieved" ? "pass" : "blocked",
+        summary: requiredMaturityGate.status === "achieved"
+          ? `The exact installed artifact has achieved ${requiredMaturity} maturity.`
+          : `${mode} requires ${requiredMaturity} maturity. ${requiredMaturityGate.summary}`,
+        evidenceRefs: requiredMaturityGate.evidenceRefs,
+        ...(requiredMaturityGate.status === "blocked" ? { remediation: requiredMaturityGate.remediation ?? "Resolve the blocked maturity gate." } : {})
+      },
+      {
+        id: "promotion-evidence",
+        status: mode === "recommend" ? recommendationReady ? "pass" : "blocked" : "not_applicable",
+        summary: mode === "recommend"
+          ? recommendationReady
+            ? "Historical replay is passing, fully reviewed, and the evidence-derived recommendation is recommend mode."
+            : `The current evidence recommends ${recommendation.recommendedMode}; recommendation mode is not yet justified.`
+          : `${mode} uses its operational-maturity gate instead of the recommend-mode replay gate.`,
+        evidenceRefs: mode === "recommend" ? recommendation.evidenceRefs.slice(-100) : [],
+        ...(!recommendationReady ? { remediation: "Run and completely label a bounded historical replay, then resolve every failing promotion gate." } : {})
+      },
+      {
+        id: "permission-boundary",
+        status: permissionReady ? "pass" : "blocked",
+        summary: permissionReady
+          ? mode === "execute_with_approval"
+            ? "Every execute capability remains approval-bound or forbidden; no direct execute grant is present."
+            : "This mode cannot commit provider writes."
+          : "Execute-with-approval cannot contain a direct allow decision for an execute capability.",
+        evidenceRefs: installation.permissions
+          .map((permission) => `${permission.capability}:${permission.authority}:${permission.decision}`)
+          .slice(0, 100),
+        ...(!permissionReady ? { remediation: "Change every execute capability to approval_required or forbid before promotion." } : {})
+      }
+    ];
+    const evidenceRefs = uniqueStrings(checks.flatMap((check) => check.evidenceRefs)).slice(0, 100);
+    const gateWithoutDigest = {
+      schemaVersion: APP_ACTIVATION_GATE_SCHEMA_VERSION,
+      installationId: installation.id,
+      appId: installation.appId,
+      artifactDigest: installation.artifactDigest,
+      fromState: installation.state,
+      requestedMode: mode,
+      status: checks.some((check) => check.status === "blocked") ? "blocked" as const : "ready" as const,
+      requiredMaturity,
+      observedMaturity: maturity.maturity,
+      checks,
+      evidenceRefs,
+      evaluatedAt: now.toISOString()
+    };
+    return appActivationGateSchema.parse({
+      ...gateWithoutDigest,
+      gateDigest: canonicalAppDigest(gateWithoutDigest)
     });
   }
 
@@ -3762,11 +3943,12 @@ function assertActivationReady(input: {
   registry: AppInstallationRegistry;
   installation: WorkspaceAppInstallation;
   approval: AppActivationApprovalReceipt;
+  currentGate: AppActivationGate;
   mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
   now: Date;
   allowExpired: boolean;
 }): void {
-  const { registry, installation, approval, mode, now, allowExpired } = input;
+  const { registry, installation, approval, currentGate, mode, now, allowExpired } = input;
   if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
   if (!allowExpired && Date.parse(approval.expiresAt) <= now.getTime()) {
     throw new Error("App activation approval receipt has expired");
@@ -3777,12 +3959,35 @@ function assertActivationReady(input: {
   if (approval.artifactDigest !== installation.artifactDigest || approval.fromState !== installation.state || approval.requestedMode !== mode) {
     throw new Error("App activation approval receipt does not match the current artifact, state, and requested mode");
   }
-  const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installation.id && run.status === "passed");
-  if (!latestPassed) throw new Error("App must pass conformance before activation");
-  if (mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
-    throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
+  if (!("activationGate" in approval)) {
+    throw new Error("Legacy App activation approvals are not evidence-bound; create a fresh activation approval");
+  }
+  const approvedGate = approval.activationGate;
+  if (
+    approvedGate.installationId !== installation.id ||
+    approvedGate.appId !== installation.appId ||
+    approvedGate.artifactDigest !== installation.artifactDigest ||
+    approvedGate.fromState !== installation.state ||
+    approvedGate.requestedMode !== mode ||
+    approvedGate.requiredMaturity !== currentGate.requiredMaturity
+  ) {
+    throw new Error("App activation approval gate does not match the current installation transition");
+  }
+  assertActivationGateReady(currentGate);
+  const currentEvidence = new Set(currentGate.evidenceRefs);
+  const missingApprovedEvidence = approvedGate.evidenceRefs.filter((reference) => !currentEvidence.has(reference));
+  if (missingApprovedEvidence.length > 0) {
+    throw new Error("App activation evidence changed after approval; create a fresh evidence-bound approval");
   }
   assertLifecycleTransition(installation.state, mode, mode);
+}
+
+function assertActivationGateReady(gate: AppActivationGate): void {
+  if (gate.status === "ready") return;
+  const blockers = gate.checks
+    .filter((check) => check.status === "blocked")
+    .map((check) => `${check.id}: ${check.summary}`);
+  throw new Error(`App activation gate is blocked:\n- ${blockers.join("\n- ")}`);
 }
 
 type RolloutTransitionIntent = {
@@ -4125,4 +4330,8 @@ function assertLifecycleTransition(from: WorkspaceAppInstallation["state"], requ
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)].sort();
 }

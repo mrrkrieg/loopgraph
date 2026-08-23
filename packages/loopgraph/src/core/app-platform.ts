@@ -30,7 +30,9 @@ export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
 export const APP_ONBOARDING_DRAFT_SCHEMA_VERSION = "loopgraph-app-onboarding-draft/v1alpha1" as const;
 export const APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION = "loopgraph-app-onboarding-reset-result/v1alpha1" as const;
-export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
+export const APP_ACTIVATION_GATE_SCHEMA_VERSION = "loopgraph-app-activation-gate/v1alpha1" as const;
+export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha2" as const;
+export const LEGACY_APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
 export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
@@ -58,6 +60,7 @@ export const APP_PLATFORM_INVARIANTS = [
   "Provider schema samples are connection-bound, short-lived, redacted-only, and never trusted as field mappings without confirmation.",
   "Workspace customization is stored as an overlay and never mutates the pinned artifact.",
   "Quality and maturity labels are derived from recorded evidence.",
+  "App activation approvals embed a machine-derived gate and cannot override missing maturity, replay, lifecycle, or permission evidence.",
   "App mode activation requires a content-bound, unexpired, single-use human approval receipt.",
   "Prepared provider actions receive a secret-free App ownership record before they can enter a separate approval or commit lifecycle.",
   "Low-level implementation details are hidden behind an explicit Advanced surface."
@@ -1648,8 +1651,85 @@ export const appLifecycleReceiptSchema = z.object({
 
 const appActivatableModeSchema = z.enum(["shadow", "recommend", "execute_with_approval"]);
 
-export const appActivationApprovalReceiptSchema = z.object({
+const appActivationGateCheckSchema = z.object({
+  id: appIdSchema,
+  status: z.enum(["pass", "blocked", "not_applicable"]),
+  summary: z.string().min(1).max(1000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  remediation: z.string().min(1).max(1000).optional()
+}).strict();
+
+export const appActivationGateSchema = z.object({
+  schemaVersion: z.literal(APP_ACTIVATION_GATE_SCHEMA_VERSION),
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  fromState: appInstallationStateSchema,
+  requestedMode: appActivatableModeSchema,
+  status: z.enum(["ready", "blocked"]),
+  requiredMaturity: z.enum(["connected", "production_proven"]),
+  observedMaturity: appMaturitySchema,
+  checks: z.array(appActivationGateCheckSchema).min(4).max(8),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  evaluatedAt: isoDateTimeSchema,
+  gateDigest: artifactDigestSchema
+}).strict().superRefine((gate, ctx) => {
+  const expectedStatus = gate.checks.some((check) => check.status === "blocked") ? "blocked" : "ready";
+  if (gate.status !== expectedStatus) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: `Activation gate status must be ${expectedStatus}` });
+  }
+  if (gate.gateDigest !== canonicalAppDigest({ ...gate, gateDigest: undefined })) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gateDigest"], message: "Activation gate digest does not match the evaluated content" });
+  }
+});
+
+const appActivationApprovalReceiptV2Schema = z.object({
   schemaVersion: z.literal(APP_ACTIVATION_APPROVAL_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  fromState: appInstallationStateSchema,
+  requestedMode: appActivatableModeSchema,
+  approvedBy: z.string().min(1).max(300),
+  reason: z.string().min(1).max(2000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  activationGate: appActivationGateSchema,
+  approvedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  approvalDigest: artifactDigestSchema,
+  consumedAt: isoDateTimeSchema.optional(),
+  consumedBy: z.string().min(1).max(300).optional()
+}).strict().superRefine((receipt, ctx) => {
+  if (Date.parse(receipt.expiresAt) <= Date.parse(receipt.approvedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Activation approval expiry must follow approval" });
+  }
+  if (receipt.approvalDigest !== canonicalAppDigest({
+    schemaVersion: receipt.schemaVersion,
+    id: receipt.id,
+    workspaceId: receipt.workspaceId,
+    installationId: receipt.installationId,
+    appId: receipt.appId,
+    artifactDigest: receipt.artifactDigest,
+    fromState: receipt.fromState,
+    requestedMode: receipt.requestedMode,
+    approvedBy: receipt.approvedBy,
+    reason: receipt.reason,
+    evidenceRefs: receipt.evidenceRefs,
+    activationGate: receipt.activationGate,
+    approvedAt: receipt.approvedAt,
+    expiresAt: receipt.expiresAt
+  })) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approvalDigest"], message: "Activation approval digest does not match the approved content" });
+  }
+  if (Boolean(receipt.consumedAt) !== Boolean(receipt.consumedBy)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["consumedAt"], message: "Consumed activation approvals require both timestamp and actor" });
+  }
+});
+
+const legacyAppActivationApprovalReceiptSchema = z.object({
+  schemaVersion: z.literal(LEGACY_APP_ACTIVATION_APPROVAL_SCHEMA_VERSION),
   id: appIdSchema,
   workspaceId: appIdSchema,
   installationId: appIdSchema,
@@ -1690,6 +1770,11 @@ export const appActivationApprovalReceiptSchema = z.object({
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["consumedAt"], message: "Consumed activation approvals require both timestamp and actor" });
   }
 });
+
+export const appActivationApprovalReceiptSchema = z.union([
+  appActivationApprovalReceiptV2Schema,
+  legacyAppActivationApprovalReceiptSchema
+]);
 
 export type LoopPackManifest = z.infer<typeof loopPackManifestSchema>;
 export type LoopPackArtifact = z.infer<typeof loopPackArtifactSchema>;
@@ -1736,6 +1821,7 @@ export type AppOnboardingResetResult = z.infer<typeof appOnboardingResetResultSc
 export type AppOnboardingJourney = z.infer<typeof appOnboardingJourneySchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
+export type AppActivationGate = z.infer<typeof appActivationGateSchema>;
 export type AppActivationApprovalReceipt = z.infer<typeof appActivationApprovalReceiptSchema>;
 export type AppInstallationState = z.infer<typeof appInstallationStateSchema>;
 export type AppRolloutMode = z.infer<typeof appRolloutModeSchema>;
@@ -1779,6 +1865,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppEvalJudgment: zodToJsonSchema(appEvalJudgmentSchema, "AppEvalJudgment") as Record<string, unknown>,
     AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
+    AppActivationGate: zodToJsonSchema(appActivationGateSchema, "AppActivationGate") as Record<string, unknown>,
     AppOnboardingDraft: zodToJsonSchema(appOnboardingDraftSchema, "AppOnboardingDraft") as Record<string, unknown>,
     AppOnboardingResetResult: zodToJsonSchema(appOnboardingResetResultSchema, "AppOnboardingResetResult") as Record<string, unknown>,
     AppOnboardingJourney: zodToJsonSchema(appOnboardingJourneySchema, "AppOnboardingJourney") as Record<string, unknown>,

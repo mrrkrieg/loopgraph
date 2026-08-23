@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
-import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchema } from "../core";
+import {
+  MARKETPLACE_SCHEMA_VERSION,
+  canonicalAppDigest,
+  connectionInstanceSchema,
+  hermesExecutionEventSchema,
+  observedOutcomeSchema,
+  valueLedgerEntrySchema
+} from "../core";
 import { FileConnectorFieldMappingStore, type ConnectorFieldMappingStore } from "./app-connector-service";
 import { FileCompanyContextStore } from "./company-context-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
@@ -26,6 +33,8 @@ import {
   type LoopSpecRegistryStore
 } from "./loop-spec-store";
 import { readLoopgraphWorkspace } from "./workspace";
+import { FileOutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore } from "./hermes-operations-store";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -41,6 +50,8 @@ async function harness(options: { installationStore?: AppInstallationStore; loop
   await marketplace.refreshAllCatalogSources();
   const mappingStore = new FileConnectorFieldMappingStore(path.join(projectRoot, ".loopgraph", "apps", "field-mappings.json"), "acme");
   const contextStore = new FileCompanyContextStore(path.join(projectRoot, ".loopgraph", "apps", "company-context.json"));
+  const outcomeStore = new FileOutcomeStore(path.join(projectRoot, ".loopgraph"));
+  const operationsStore = new FileHermesOperationsStore(path.join(projectRoot, ".loopgraph"));
   const logicalFields = [
     ["lead", "lead.id", "id"],
     ["lead", "lead.email", "email"],
@@ -66,7 +77,9 @@ async function harness(options: { installationStore?: AppInstallationStore; loop
     contextStore,
     mappingStore,
     installationStore: options.installationStore,
-    loopSpecStore: options.loopSpecStore
+    loopSpecStore: options.loopSpecStore,
+    outcomeStore,
+    operationsStore
   });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
@@ -79,7 +92,7 @@ async function harness(options: { installationStore?: AppInstallationStore; loop
     readPolicy: "read_only",
     writePolicy: "not_allowed"
   });
-  return { projectRoot, service, marketplace, contextStore, mappingStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
+  return { projectRoot, service, marketplace, contextStore, mappingStore, outcomeStore, operationsStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
 }
 
 const installValues = {
@@ -234,6 +247,124 @@ async function installSalesApp(input: Awaited<ReturnType<typeof harness>>, now =
     now
   });
   return input.service.apply(plan, "admin-1", new Date(now.getTime() + 60_000));
+}
+
+async function recordRecommendationProof(
+  input: Awaited<ReturnType<typeof harness>>,
+  installationId: string,
+  now = new Date("2026-08-08T12:04:30.000Z")
+) {
+  const events = Array.from({ length: 5 }, (_, index) => ({
+    id: `historical-qualified-lead-${index + 1}`,
+    occurredAt: new Date(Date.UTC(2026, 7, 1 + index, 9)).toISOString(),
+    source: "hubspot",
+    eventType: "lead.created",
+    subject: { type: "lead", id: `lead-historical-${index + 1}` },
+    normalizedPayload: {
+      leadId: `lead-historical-${index + 1}`,
+      email: `buyer-${index + 1}@example.test`,
+      company: `Example ${index + 1}`
+    },
+    evidenceRefs: [`evidence:historical:${index + 1}`],
+    connectorState: "connected" as const,
+    expectedAction: "route" as const,
+    expectedLoopId: "sales-inbound-lead-intake"
+  }));
+  const replay = await input.service.historicalReplay({
+    schemaVersion: "loopgraph-app-eval/v1alpha1",
+    installationId,
+    from: "2026-08-01T00:00:00.000Z",
+    to: "2026-08-08T00:00:00.000Z",
+    maxEvents: events.length,
+    events,
+    requestedAt: now.toISOString(),
+    requestedBy: "sales-manager"
+  }, now);
+  for (const scenario of replay.scenarios) {
+    await input.service.labelEvaluation({
+      schemaVersion: "loopgraph-app-eval/v1alpha1",
+      runId: replay.id,
+      scenarioId: scenario.id,
+      label: "correct",
+      reviewMinutes: 1,
+      reviewedBy: "sales-manager",
+      reviewedAt: new Date(now.getTime() + 30_000).toISOString()
+    });
+  }
+  return replay;
+}
+
+async function recordProductionProof(
+  input: Awaited<ReturnType<typeof harness>>,
+  installationId: string,
+  now = new Date("2026-08-08T12:07:00.000Z")
+) {
+  const loopId = "sales-inbound-lead-intake";
+  const runId = "run-qualified-lead-production-proof";
+  const outcomeId = "outcome-qualified-pipeline-production-proof";
+  await input.operationsStore.appendExecutionEvent(hermesExecutionEventSchema.parse({
+    id: "execution-qualified-lead-production-proof",
+    idempotencyKey: "execution-qualified-lead-production-proof",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    agentInstanceId: "hermes-sales",
+    eventType: "run.completed",
+    routeJobId: "job-qualified-lead-production-proof",
+    routeCommitId: "commit-qualified-lead-production-proof",
+    routeAttemptId: "attempt-qualified-lead-production-proof",
+    eventId: "event-qualified-lead-production-proof",
+    problemId: "problem-qualified-lead-production-proof",
+    loopId,
+    loopSpecHash: "a".repeat(64),
+    runId,
+    correlationId: "correlation-qualified-lead-production-proof",
+    sequence: 1,
+    summary: "Hermes completed the governed lead-intake work.",
+    occurredAt: now.toISOString(),
+    recordedAt: now.toISOString()
+  }));
+  await input.outcomeStore.saveObservedOutcome(observedOutcomeSchema.parse({
+    id: outcomeId,
+    workspaceId: "acme",
+    companyId: "acme-company",
+    loopId,
+    metricDefinitionId: "qualified_pipeline_created",
+    metricKey: "qualified_pipeline_created",
+    unit: "count",
+    desiredDirection: "increase",
+    evaluationWindow: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-08T00:00:00.000Z" },
+    baseline: { value: 0, sampleIds: ["sample-qualified-pipeline-baseline"] },
+    observed: { value: 1, sampleIds: ["sample-qualified-pipeline-observed"] },
+    target: 1,
+    absoluteDelta: 1,
+    status: "target_met",
+    truthStatus: "observed",
+    confidence: 1,
+    evidenceSufficiency: { sufficient: true, reasons: [] },
+    guardrails: [],
+    runIds: [runId],
+    problemIds: ["problem-qualified-lead-production-proof"],
+    evidenceRefs: [`run:${runId}`],
+    evaluatedAt: now.toISOString()
+  }));
+  await input.outcomeStore.saveValueLedgerEntry(valueLedgerEntrySchema.parse({
+    id: "value-qualified-lead-production-proof",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    loopId,
+    window: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-08T00:00:00.000Z" },
+    grossSavedMinutes: 30,
+    hiddenCostMinutes: { review: 5, rework: 0, botsitting: 0, escalation: 0, governance: 0 },
+    observedCostMinutes: 5,
+    netSavedMinutes: 25,
+    truthStatus: "observed",
+    observedOutcomeIds: [outcomeId],
+    runIds: [runId],
+    reviewIds: ["review-qualified-lead-production-proof"],
+    evidenceRefs: [`outcome:${outcomeId}`, `run:${runId}`],
+    recordedAt: now.toISOString()
+  }));
+  return { installationId, runId, outcomeId };
 }
 
 async function addUpdateCatalog(input: Awaited<ReturnType<typeof harness>>): Promise<void> {
@@ -732,6 +863,123 @@ describe("atomic app installation lifecycle", () => {
     });
   });
 
+  it("requires ordered evidence gates before recommend and execute-with-approval authority can be created", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    const synthetic = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const shadowGate = await input.service.activationGate(
+      applied.installation.id,
+      "shadow",
+      new Date("2026-08-08T12:03:00.000Z")
+    );
+    expect(shadowGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "connected",
+      observedMaturity: "connected"
+    });
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "security-approver",
+      reason: "Observe the exact connected and tested App without provider writes.",
+      evidenceRefs: [synthetic.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    expect(shadowApproval).toMatchObject({
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha2",
+      activationGate: {
+        gateDigest: shadowGate.gateDigest,
+        requiredMaturity: "connected",
+        status: "ready"
+      }
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      shadowApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+
+    const blockedRecommend = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-08-08T12:04:30.000Z")
+    );
+    expect(blockedRecommend).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "promotion-evidence", status: "blocked" })
+      ])
+    });
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "A human approval cannot substitute for reviewed routing evidence.",
+      now: new Date("2026-08-08T12:04:30.000Z")
+    })).rejects.toThrow(/promotion-evidence/i);
+
+    const replay = await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:05:00.000Z"));
+    const recommendGate = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-08-08T12:05:30.000Z")
+    );
+    expect(recommendGate).toMatchObject({ status: "ready", requiredMaturity: "connected" });
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "Five bounded historical decisions were completely reviewed.",
+      evidenceRefs: [replay.id],
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:06:30.000Z")
+    );
+
+    const blockedExecute = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:07:00.000Z")
+    );
+    expect(blockedExecute).toMatchObject({
+      status: "blocked",
+      requiredMaturity: "production_proven",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "operational-maturity", status: "blocked" })
+      ])
+    });
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "execute_with_approval",
+      approvedBy: "security-approver",
+      reason: "Approval alone cannot create production proof.",
+      now: new Date("2026-08-08T12:07:00.000Z")
+    })).rejects.toThrow(/production_proven/i);
+
+    await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:07:30.000Z"));
+    const executeGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:08:00.000Z")
+    );
+    expect(executeGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "production_proven",
+      observedMaturity: "production_proven"
+    });
+  }, 20_000);
+
   it("emits bounded activation approval and consumption audit contexts", async () => {
     const store = new AuditCapturingInstallationStore("acme");
     const input = await harness({ installationStore: store });
@@ -822,6 +1070,7 @@ describe("atomic app installation lifecycle", () => {
       "operations-activator",
       new Date("2026-08-08T12:04:00.000Z")
     );
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     const recommendApproval = await input.service.approveActivation({
       installationId: applied.installation.id,
       mode: "recommend",
@@ -969,8 +1218,10 @@ describe("atomic app installation lifecycle", () => {
 
     await activate("shadow", "2026-08-08T12:03:00.000Z", "2026-08-08T12:04:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     await activate("recommend", "2026-08-08T12:05:00.000Z", "2026-08-08T12:06:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["recommend"]));
+    await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:06:30.000Z"));
     await activate("execute_with_approval", "2026-08-08T12:07:00.000Z", "2026-08-08T12:08:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
 
@@ -996,6 +1247,7 @@ describe("atomic app installation lifecycle", () => {
       now: new Date("2026-08-08T12:03:00.000Z")
     });
     await input.service.activate(applied.installation.id, "shadow", shadowApproval.id, "admin-1", new Date("2026-08-08T12:04:00.000Z"));
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     const recommendApproval = await input.service.approveActivation({
       installationId: applied.installation.id,
       mode: "recommend",
@@ -1156,6 +1408,55 @@ describe("atomic app installation lifecycle", () => {
     );
     expect(replayed).toEqual(activated);
     expect((await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision).toBe(completedRevision);
+  });
+
+  it("loads legacy activation receipts for audit history but refuses to consume them as authority", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const immutable = {
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha1" as const,
+      id: "activation-approval.1111111111111111",
+      workspaceId: "acme",
+      installationId: applied.installation.id,
+      appId: applied.installation.appId,
+      artifactDigest: applied.installation.artifactDigest,
+      fromState: "simulation_passed" as const,
+      requestedMode: "shadow" as const,
+      approvedBy: "legacy-approver",
+      reason: "This historical receipt predates evidence-bound activation gates.",
+      evidenceRefs: [evaluation.id],
+      approvedAt: "2026-08-08T12:03:00.000Z",
+      expiresAt: "2026-08-08T12:18:00.000Z"
+    };
+    await store.withExclusiveUpdate(async (registry) => ({
+      registry: {
+        ...registry,
+        revision: registry.revision + 1,
+        activationApprovals: [...registry.activationApprovals, {
+          ...immutable,
+          approvalDigest: canonicalAppDigest(immutable)
+        }],
+        updatedAt: immutable.approvedAt
+      },
+      value: undefined
+    }));
+
+    await expect(input.service.activate(
+      applied.installation.id,
+      "shadow",
+      immutable.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    )).rejects.toThrow(/legacy.*not evidence-bound/i);
+    const retained = (await store.read()).activationApprovals.find((approval) => approval.id === immutable.id);
+    expect(retained).toMatchObject({ id: immutable.id, schemaVersion: immutable.schemaVersion });
+    expect(retained).not.toHaveProperty("consumedAt");
   });
 
   it("plans, materializes, and tests only the modules selected by the operator", async () => {

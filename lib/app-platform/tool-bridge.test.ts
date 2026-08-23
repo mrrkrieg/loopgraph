@@ -161,6 +161,42 @@ describe("hosted app tool bridge", () => {
     });
   });
 
+  it("injects distributed outcome and Hermes execution evidence into every activation boundary", async () => {
+    mocks.runtimeTool.mockImplementation(async (name, _input, options) => {
+      expect([
+        "loopgraph_app_activation_gate_get",
+        "loopgraph_app_activation_approve",
+        "loopgraph_app_activate"
+      ]).toContain(name);
+      expect(options).toMatchObject({
+        outcomeStore: mocks.outcomeStore,
+        hermesOperationsStore: mocks.hermesOperationsStore,
+        loopSpecStore: mocks.loopSpecStore
+      });
+      return { ok: true };
+    });
+    for (const name of [
+      "loopgraph_app_activation_gate_get",
+      "loopgraph_app_activation_approve",
+      "loopgraph_app_activate"
+    ] as const) {
+      await callLoopgraphAppTool(name, {
+        installationId: "install.app",
+        mode: "shadow",
+        ...(name === "loopgraph_app_activation_approve" ? {
+          approvedBy: "security-approver",
+          reason: "Review the evidence-bound gate."
+        } : {}),
+        ...(name === "loopgraph_app_activate" ? {
+          actor: "operations-activator",
+          approvalReceiptId: "activation-approval.1111111111111111"
+        } : {})
+      });
+    }
+    expect(mocks.getOutcomeStore).toHaveBeenCalledTimes(3);
+    expect(mocks.getHermesOperationsStore).toHaveBeenCalledTimes(3);
+  });
+
   it("binds headless Hermes App execution to the verified machine tenant without a browser session", async () => {
     vi.stubEnv("LOOPGRAPH_HOSTED_PROJECT_KEY", "main");
     mocks.runtimeTool.mockImplementation(async (name, input, options) => {

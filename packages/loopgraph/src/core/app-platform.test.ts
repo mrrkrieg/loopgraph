@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_CONFIGURATION_SCHEMA_VERSION,
+  APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
   APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
+  appActivationGateSchema,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
@@ -482,11 +484,51 @@ describe("Loopgraph App Platform contracts", () => {
       "AppPromotionRecommendation",
       "AppOnboardingDraft",
       "AppOnboardingResetResult",
+      "AppActivationGate",
       "AppOperationAction",
       "AppOperationActionEvent",
       "AppOperationActionCommitResult"
     ]));
     expect(JSON.stringify(schemas.LoopPackManifest)).toContain("loopgraph-pack/v1alpha1");
+  });
+
+  it("binds activation readiness to a canonical, internally consistent gate digest", () => {
+    const gateContent = {
+      schemaVersion: APP_ACTIVATION_GATE_SCHEMA_VERSION,
+      installationId: "install.sales-inbound",
+      appId: "loopgraph.sales.inbound-leads",
+      artifactDigest: digest("sales-inbound-artifact"),
+      fromState: "shadow" as const,
+      requestedMode: "recommend" as const,
+      status: "ready" as const,
+      requiredMaturity: "connected" as const,
+      observedMaturity: "connected" as const,
+      checks: [
+        { id: "ordered-lifecycle", status: "pass" as const, summary: "The transition is ordered.", evidenceRefs: [] },
+        { id: "operational-maturity", status: "pass" as const, summary: "Connected maturity is achieved.", evidenceRefs: ["evaluation:synthetic"] },
+        { id: "promotion-evidence", status: "pass" as const, summary: "Historical decisions are reviewed.", evidenceRefs: ["evaluation:replay"] },
+        { id: "permission-boundary", status: "pass" as const, summary: "Writes remain blocked.", evidenceRefs: [] }
+      ],
+      evidenceRefs: ["evaluation:synthetic", "evaluation:replay"],
+      evaluatedAt: now
+    };
+    const gate = appActivationGateSchema.parse({
+      ...gateContent,
+      gateDigest: canonicalAppDigest(gateContent)
+    });
+    expect(gate.status).toBe("ready");
+    expect(() => appActivationGateSchema.parse({ ...gate, observedMaturity: "concept" })).toThrow(/digest/i);
+    expect(() => appActivationGateSchema.parse({
+      ...gate,
+      status: "ready",
+      checks: gate.checks.map((check) => check.id === "promotion-evidence" ? { ...check, status: "blocked" } : check),
+      gateDigest: canonicalAppDigest({
+        ...gate,
+        status: "ready",
+        checks: gate.checks.map((check) => check.id === "promotion-evidence" ? { ...check, status: "blocked" } : check),
+        gateDigest: undefined
+      })
+    })).toThrow(/status must be blocked/i);
   });
 
   it("only permits safe initial rollout modes", () => {

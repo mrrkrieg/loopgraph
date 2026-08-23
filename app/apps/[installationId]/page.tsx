@@ -152,6 +152,39 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
             </div>
           </SectionCard>
 
+          {data.activationGate ? (
+            <SectionCard
+              title={`Next activation gate · ${data.activationGate.requestedMode.replace(/_/g, " ")}`}
+              description="Hermes, CLI, and this browser read the same backend gate. A human approval can authorize a ready transition, but it cannot override missing evidence."
+            >
+              <div className={`mb-4 rounded-md border p-4 ${data.activationGate.status === "ready" ? "border-emerald-200 bg-emerald-50" : "border-orange-200 bg-orange-50"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">Required maturity</div>
+                    <div className="mt-1 font-semibold capitalize">{data.activationGate.requiredMaturity.replace(/_/g, " ")}</div>
+                  </div>
+                  <span className={`text-xs font-semibold uppercase tracking-[0.1em] ${data.activationGate.status === "ready" ? "text-emerald-700" : "text-orange-800"}`}>{data.activationGate.status}</span>
+                </div>
+                <p className="mt-2 text-xs text-ink/55">Observed maturity: <span className="font-semibold capitalize">{data.activationGate.observedMaturity.replace(/_/g, " ")}</span></p>
+              </div>
+              <div className="space-y-3">
+                {data.activationGate.checks.map((check) => (
+                  <div className="rounded-md border border-line p-3" key={check.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{check.id.replace(/-/g, " ")}</div>
+                      <div className={`text-xs font-semibold uppercase ${check.status === "pass" ? "text-emerald-700" : check.status === "blocked" ? "text-red-700" : "text-ink/40"}`}>{check.status.replace(/_/g, " ")}</div>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-ink/65">{check.summary}</p>
+                    {check.remediation ? <p className="mt-2 text-xs leading-5 text-orange-800">Next: {check.remediation}</p> : null}
+                  </div>
+                ))}
+              </div>
+              {data.activationGate.requestedMode === "execute_with_approval" && data.activationGate.status === "ready" ? (
+                <p className="mt-4 rounded-md border border-line bg-surface p-3 text-xs leading-5 text-ink/65">The production-proof gate is ready. Execute authority remains deliberately unavailable in the browser; ask Hermes or use the CLI to create and consume the short-lived approval receipt.</p>
+              ) : null}
+            </SectionCard>
+          ) : null}
+
           <SectionCard title="Readiness checks" description="Promotion is evidence-derived. A downloaded or installed app is never automatically eligible to receive live work.">
             <div className="space-y-3">{data.readiness.checks.map((check) => <div className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-[8rem_minmax(0,1fr)_5rem]" key={check.id}><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{check.category}</div><div className="text-sm text-ink/70">{check.summary}</div><div className={`text-right text-xs font-semibold uppercase ${check.status === "pass" ? "text-emerald-700" : check.status === "fail" ? "text-red-700" : "text-orange-700"}`}>{check.status}</div></div>)}</div>
           </SectionCard>
@@ -342,8 +375,8 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
               <form action={rollbackInstalledAppAction} className="mt-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={recovery.rollback?.sourceArtifactDigest ?? data.installation.artifactDigest} /><button className="w-full rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" type="submit">Reconcile and finish rollback</button></form>
             ) : <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href={recovery.action === "uninstall" ? "#app-uninstall" : `/marketplace/${encodeURIComponent(data.detail.app.id)}/install`}>{recovery.action === "uninstall" ? "Finish recovery" : "Return to exact install"}</a> : <div className="mt-4 space-y-2">
               {data.installation.state === "ready_to_test" || data.installation.state === "broken" ? <OperationForm action="test" installationId={data.installation.id} label="Run conformance tests" primary /> : null}
-              {data.installation.state === "simulation_passed" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
-              {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
+              {data.installation.state === "simulation_passed" && data.activationGate?.requestedMode === "shadow" && data.activationGate.status === "ready" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
+              {data.installation.state === "shadow" && data.activationGate?.requestedMode === "recommend" && data.activationGate.status === "ready" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
               {data.installation.state === "paused" ? <OperationForm action="resume" installationId={data.installation.id} label="Resume app" primary /> : <OperationForm action="pause" installationId={data.installation.id} label="Pause app" />}
               <OperationForm
                 action="repair"

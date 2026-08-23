@@ -389,11 +389,16 @@ Every marketplace version carries its exact source ID, transport, URI, commit wh
 
 After installation, Loopgraph computes a stricter operational maturity ceiling that cannot skip gates. `connected` means every required logical capability and setup contract is ready for the exact tested artifact. `production_proven` requires reviewed historical routing plus completed work and observed outcome/value records—not task volume or modeled savings. `loopgraph_verified` additionally requires a signed receipt from an explicitly trusted independent verifier key. The installed-App view shows all four gates, their evidence references, and the next action needed to advance safely.
 
+Activation consumes that evidence instead of merely displaying it. Shadow requires `connected` maturity; recommendation mode additionally requires a passing, completely human-reviewed historical replay; `execute_with_approval` requires `production_proven` maturity and keeps every execute capability approval-bound. `loopgraph apps activation-gate` returns the exact blockers before anyone creates authority. Every new approval embeds the immutable gate snapshot, and activation re-evaluates the current gate before consuming the one-time receipt. A human approval cannot override a failed gate, and legacy receipts that predate evidence-bound gates remain readable for audit history but cannot be consumed.
+
 Hermes, the CLI, and the browser use the same maturity service and durable workspace trust registry:
 
 ```bash
 # Inspect the evidence-derived ceiling for one exact installation.
 loopgraph apps maturity <installation-id>
+
+# Explain why the next transition is ready or blocked; this creates no authority.
+loopgraph apps activation-gate <installation-id> --mode recommend
 
 # Inspect current public-key trust, revocations, and receipts.
 loopgraph apps verification-status

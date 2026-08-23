@@ -294,6 +294,11 @@ export function createPromotionRecommendation(input: {
       summary: falsePositiveRate === undefined ? "False-positive rate needs reviewer labels." : `Observed false-positive rate is ${(falsePositiveRate * 100).toFixed(1)}%.`
     },
     {
+      id: "incomplete-rate",
+      status: incompleteRate === undefined ? "warn" : incompleteRate <= 0.05 ? "pass" : "fail",
+      summary: incompleteRate === undefined ? "Incomplete-decision rate needs reviewer labels." : `Observed incomplete-decision rate is ${(incompleteRate * 100).toFixed(1)}%.`
+    },
+    {
       id: "review-burden",
       status: !replayScenarios.length ? "warn" : estimatedReviewMinutes / replayScenarios.length <= 5 ? "pass" : "warn",
       summary: `${estimatedReviewMinutes.toFixed(1)} review minutes recorded across ${replayScenarios.length} historical decisions.`

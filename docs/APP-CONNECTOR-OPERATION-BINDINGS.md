@@ -193,6 +193,14 @@ registry. Shadow and recommend modes remain non-executing routes; execute-with-a
 owned loops eligible to produce governed route jobs. Pause returns all owned LoopSpecs to shadow,
 while resume restores the last approved App mode.
 
+Rollout eligibility is also not a display-only maturity label. Before approval, the shared App
+service derives a canonical activation gate from the exact artifact, current lifecycle state,
+connector/configuration readiness, replay review, completed runs, observed outcomes, net-value
+evidence, and permissions. Shadow requires connected maturity, recommend requires a passing and
+fully labeled replay recommendation, and execute-with-approval requires production-proven maturity.
+The approval receipt embeds that gate; consumption recomputes it and fails closed if evidence is no
+longer sufficient. Human approval supplies accountability, not a bypass around missing evidence.
+
 The transition verifies that the installation still owns a complete active LoopSpec set. Missing
 specs or routing contracts block the change. Each synchronization is revision-bound and
 content-addressed, so an exact retry is idempotent but a later pause/resume cycle creates a new graph
