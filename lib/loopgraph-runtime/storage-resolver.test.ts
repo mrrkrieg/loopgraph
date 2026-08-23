@@ -8,9 +8,12 @@ import {
   getCompanyContextStore,
   getConnectorFieldMappingStore,
   getDiscoveryDesignStore,
+  getEntityResolutionStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopSpecRegistryStore,
+  getMeasurementStore,
+  getOutcomeStore,
   getStorageAdapter,
   getProviderSchemaSnapshotStore,
   resetStorageAdapterCache,
@@ -176,6 +179,40 @@ describe("hosted runtime namespaces", () => {
     expect(secondCompany).not.toBe(first);
   });
 
+  it("scopes local learning evidence and canonical entities by project", () => {
+    const firstMeasurements = getMeasurementStore({
+      projectRoot: "/tmp/loopgraph-learning-a",
+      forceFile: true
+    });
+    const firstOutcomes = getOutcomeStore({
+      projectRoot: "/tmp/loopgraph-learning-a",
+      forceFile: true
+    });
+    const firstEntities = getEntityResolutionStore({
+      projectRoot: "/tmp/loopgraph-learning-a",
+      forceFile: true
+    });
+    const secondMeasurements = getMeasurementStore({
+      projectRoot: "/tmp/loopgraph-learning-b",
+      forceFile: true
+    });
+    const secondOutcomes = getOutcomeStore({
+      projectRoot: "/tmp/loopgraph-learning-b",
+      forceFile: true
+    });
+    const secondEntities = getEntityResolutionStore({
+      projectRoot: "/tmp/loopgraph-learning-b",
+      forceFile: true
+    });
+
+    expect(firstMeasurements.persistence).toBe("local");
+    expect(firstOutcomes.persistence).toBe("local");
+    expect(firstEntities.persistence).toBe("local");
+    expect(secondMeasurements).not.toBe(firstMeasurements);
+    expect(secondOutcomes).not.toBe(firstOutcomes);
+    expect(secondEntities).not.toBe(firstEntities);
+  });
+
   it("fails closed instead of using file state for hosted controller data", () => {
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
     vi.stubEnv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "publishable");
@@ -206,6 +243,15 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getCompanyContextStore({ workspaceId: "acme", companyId: "acme-company" })).toThrow(
       "Distributed company-context storage is required"
+    );
+    expect(() => getMeasurementStore()).toThrow(
+      "Distributed measurement storage is required"
+    );
+    expect(() => getOutcomeStore()).toThrow(
+      "Distributed outcome storage is required"
+    );
+    expect(() => getEntityResolutionStore()).toThrow(
+      "Distributed entity resolution is required"
     );
   });
 });
