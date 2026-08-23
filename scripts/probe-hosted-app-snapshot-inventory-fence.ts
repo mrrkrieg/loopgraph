@@ -68,10 +68,11 @@ export async function probeHostedAppSnapshotInventoryFence(
   if (!PROBE_SUFFIX_PATTERN.test(suffix)) {
     throw new Error("Hosted App snapshot fence probe identity is invalid");
   }
+  const organizationId = assertOrganizationId(config.organizationId);
   const projectKey = `fence_probe_${suffix}`;
   const workspaceId = `fence-probe-${suffix}`;
   const objectKey = [
-    config.organizationId,
+    organizationId,
     projectKey,
     workspaceId,
     digestSegment(`path:${suffix}`),
@@ -82,8 +83,8 @@ export async function probeHostedAppSnapshotInventoryFence(
   const nowMs = dependencies.nowMs ?? Date.now;
   const startedAt = nowMs();
 
-  await registryProbe(dependencies.client, config.organizationId, projectKey);
-  const generationBefore = await readGeneration(dependencies.client, config.organizationId, projectKey);
+  await registryProbe(dependencies.client, organizationId, projectKey);
+  const generationBefore = await readGeneration(dependencies.client, organizationId, projectKey);
   if (generationBefore !== 0) {
     throw new Error("Hosted App snapshot fence probe registry cleanup left residual generation state");
   }
@@ -104,7 +105,7 @@ export async function probeHostedAppSnapshotInventoryFence(
     );
     if (upload.error) throw new Error("Hosted App snapshot fence probe upload failed");
     uploaded = true;
-    const afterUpload = await readGeneration(dependencies.client, config.organizationId, projectKey);
+    const afterUpload = await readGeneration(dependencies.client, organizationId, projectKey);
     storageUploadAdvanced = afterUpload > generationBefore;
     if (!storageUploadAdvanced) {
       throw new Error("Hosted App snapshot Storage upload did not advance the fence");
@@ -113,10 +114,10 @@ export async function probeHostedAppSnapshotInventoryFence(
     const replace = await bucket.update(
       objectKey,
       probeBytes("replace", suffix),
-      { contentType: HOSTED_APP_SNAPSHOT_MEDIA_TYPE, cacheControl: "0", upsert: true }
+      { contentType: HOSTED_APP_SNAPSHOT_MEDIA_TYPE, cacheControl: "0", upsert: false }
     );
     if (replace.error) throw new Error("Hosted App snapshot fence probe replace failed");
-    const afterReplace = await readGeneration(dependencies.client, config.organizationId, projectKey);
+    const afterReplace = await readGeneration(dependencies.client, organizationId, projectKey);
     storageReplaceAdvanced = afterReplace > afterUpload;
     if (!storageReplaceAdvanced) {
       throw new Error("Hosted App snapshot Storage replace did not advance the fence");
@@ -125,7 +126,7 @@ export async function probeHostedAppSnapshotInventoryFence(
     const remove = await bucket.remove([objectKey]);
     if (remove.error) throw new Error("Hosted App snapshot fence probe removal failed");
     removed = true;
-    const afterDelete = await readGeneration(dependencies.client, config.organizationId, projectKey);
+    const afterDelete = await readGeneration(dependencies.client, organizationId, projectKey);
     storageDeleteAdvanced = afterDelete > afterReplace;
     if (!storageDeleteAdvanced) {
       throw new Error("Hosted App snapshot Storage delete did not advance the fence");
@@ -140,7 +141,7 @@ export async function probeHostedAppSnapshotInventoryFence(
     }
     const cleanup = await dependencies.client.rpc(
       "loopgraph_app_snapshot_storage_fence_probe_cleanup",
-      { p_organization_id: config.organizationId, p_project_key: projectKey }
+      { p_organization_id: organizationId, p_project_key: projectKey }
     );
     if (cleanup.error || cleanup.data !== true) {
       cleanupError = new Error("Hosted App snapshot fence probe database cleanup failed");

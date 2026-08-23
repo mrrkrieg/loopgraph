@@ -82,14 +82,27 @@ describe("hosted App snapshot inventory fence probe", () => {
     })).rejects.toThrow(/identity is invalid/i);
     expect(harness.calls).toEqual([]);
   });
+
+  it("uses one canonical lowercase organization identity for every RPC and Storage path", async () => {
+    const harness = probeClient();
+    await expect(probeHostedAppSnapshotInventoryFence({
+      ...config,
+      organizationId: scope.organizationId.toUpperCase()
+    }, {
+      client: harness.client,
+      probeSuffix: () => suffix
+    })).resolves.toMatchObject({ healthy: true });
+    expect(harness.calls).toContain("cleanup");
+  });
 });
 
-function probeClient(options: { failUpdate?: boolean } = {}) {
+function probeClient(harnessOptions: { failUpdate?: boolean } = {}) {
   let generation = 0;
   const calls: string[] = [];
   const client = {
     rpc: async (name: string, args: Record<string, unknown>) => {
       expect(args.p_project_key).toMatch(/^fence_probe_[0-9a-f]{24}$/);
+      expect(args.p_organization_id).toBe(scope.organizationId);
       if (name === "loopgraph_app_snapshot_registry_fence_probe") {
         calls.push("registry");
         return {
@@ -123,9 +136,10 @@ function probeClient(options: { failUpdate?: boolean } = {}) {
           generation += 1;
           return { data: { path: key }, error: null };
         },
-        update: async () => {
+        update: async (_key: string, _bytes: Uint8Array, uploadOptions: { upsert?: boolean }) => {
           calls.push("update");
-          if (options.failUpdate) return { data: null, error: new Error("replace failed") };
+          expect(uploadOptions.upsert).toBe(false);
+          if (harnessOptions.failUpdate) return { data: null, error: new Error("replace failed") };
           generation += 1;
           return { data: { path: "opaque" }, error: null };
         },
