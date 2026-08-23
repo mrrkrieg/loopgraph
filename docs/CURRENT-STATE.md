@@ -230,6 +230,12 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   replacement triggers one bounded refresh; each verifier deduplicates concurrent loads, caps and
   validates key documents, rejects redirects and fetch failures, and throttles attacker-controlled
   misses.
+- A protected issuer-rotation staging validator now drives one disposable previous/next key through
+  a fixed two-operation controller protocol, observes the live old-only, overlap, and new-only JWKS
+  states, exercises two deployed origins, waits beyond the verifier's five-minute maximum cache
+  lifetime, proves retired-key denial and continued next-key acceptance, and finds the final request
+  in the verified tenant audit chain. The secret-free receipt stores only public identity plus
+  controller-receipt digests; its protected workflow and promotion binding are the next gate.
 - Hosted marketplace release deprecation and revocation now cross an MFA-gated API and a separate
   service-role RPC. The database rechecks active administrator ownership, permits only monotonic
   lifecycle transitions, and commits the exact transition with a reason digest in the append-only
@@ -307,14 +313,15 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    remains external.
 6. Configure the protected `cli-session-staging` runner with two real replica origins and disposable
    session projections, then produce the first deployment-specific CLI receipt through the now-mandatory
-   release gate. Validate issuer rotation against the real identity provider, MFA administrator
+   release gate. Run issuer rotation against the real identity provider, MFA administrator
    controls, and hosted App release revocation as separate staging drills.
    The verifier now handles new-`kid` and same-`kid` rotation immediately with a deduplicated,
    throttled, fail-closed JWKS refresh. Refresh-token reuse now revokes its current family and enters
    the audit chain atomically. Durable workload grant revocation, cross-tenant denial, request replay
    rejection, exact signed staging, and audit presence are already part of the executable marketplace
    gate. The CLI-session matrix, exact workflow validator, sixth retained audit checkpoint, and v15
-   promotion binding are implemented; the environment-specific receipt, live issuer propagation,
+   promotion binding are implemented. The bounded live issuer-rotation validator is implemented;
+   its protected workflow/promotion binding and first environment-specific receipt,
    first live MFA administrator-control receipt, first live release-revocation receipt,
    migration application, and real alert delivery remain external. The aggregate CLI security
    projection, v2 SLO/runbook contract, and bounded MFA staging validator are implemented in the
@@ -359,3 +366,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Hosted marketplace access for Hermes and CLI](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md)
 - [Interactive CLI device authorization](./CLI-DEVICE-AUTHORIZATION.md)
 - [Hosted CLI session staging gate](./HOSTED-CLI-SESSION-STAGING-GATE.md)
+- [Hosted workload issuer rotation staging gate](./HOSTED-WORKLOAD-ISSUER-ROTATION-STAGING-GATE.md)

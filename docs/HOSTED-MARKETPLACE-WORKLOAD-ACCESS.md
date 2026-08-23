@@ -118,8 +118,12 @@ revoked-grant, and observability identities, then emits a secret-free JSON recei
 The protected staging workflow blocks production promotion unless all seven checks
 pass. The verifier now performs a bounded immediate JWKS refresh for a new `kid` or a
 same-`kid` signature change, shares concurrent refreshes, and rate-limits unknown-key
-refresh attempts. The live issuer drill must still prove the provider publishes the
-overlap set and that separate deployed replicas observe it. Rate-limit saturation,
+refresh attempts. `npm run validate:workload-issuer-rotation-staging` now drives a disposable
+previous/next key through a narrow protected rotation-controller protocol, observes the live
+old-only, overlap, and new-only JWKS states, and proves adoption plus retired-key denial through two
+deployed origins. See
+[Hosted workload issuer rotation staging gate](./HOSTED-WORKLOAD-ISSUER-ROTATION-STAGING-GATE.md).
+The first environment-specific receipt and production-promotion binding remain external. Rate-limit saturation,
 backup/restore, external retention, and cross-replica human refresh-token rotation
 remain separate operational drills. Exact release revocation now has its own executable destructive
 staging gate, including workload denial and local cache eviction; see
