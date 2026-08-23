@@ -54,6 +54,13 @@ objectives:
     alert:
       stale_nonterminal_commits: 1
       default_stale_after_seconds: 300
+  - id: app_evidence_freshness
+    target: 100
+    indicator: loopgraph_app_evidence_health
+    alert:
+      invalid_evidence: 1
+      expired_evidence: 1
+      renew_soon_evidence: 1
 ownership:
   primary: platform-on-call
   security: security-owner
@@ -64,3 +71,4 @@ runbooks:
   audit: docs/PRODUCTION-OPERATIONS.md
   app_lifecycle_recovery: docs/PRODUCTION-OPERATIONS.md
   app_action_reconciliation: docs/PRODUCTION-OPERATIONS.md
+  app_evidence_freshness: docs/PRODUCTION-OPERATIONS.md

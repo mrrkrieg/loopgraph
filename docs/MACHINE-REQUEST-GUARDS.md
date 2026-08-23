@@ -53,6 +53,7 @@ Requests are recorded under the narrow route capability:
 - `schedule.connector_revocations`
 - `schedule.measurements`
 - `schedule.management`
+- `schedule.app_evidence_health`
 - `schedule.app_action_reconciliation`
 
 Workload issuers should mint a different short-lived subject/audience/capability set for each worker

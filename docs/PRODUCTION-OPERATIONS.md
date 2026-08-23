@@ -67,6 +67,13 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   metrics without exposing action, installation, provider, or request identifiers. The default
   stale threshold is 300 seconds; set `LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS` only to a
   reviewed integer from 60 through 86400. An invalid value fails hosted configuration readiness.
+- App evidence freshness is derived from the same tenant-scoped, versioned renewal plan used by
+  Hermes, CLI, browser, and local supervisor. The protected metrics export aggregate invalid,
+  expired, renew-soon, incomplete, current, and not-applicable counts. Invalid, expired, or
+  renew-soon evidence degrades operations without removing healthy traffic workers; an unavailable,
+  malformed, cross-workspace, stale, or future-dated projection fails readiness closed. The hourly
+  scheduler has only `schedule.app_evidence_health` and cannot run replay, create approval, promote
+  an App, or invoke providers.
 
 ## App lifecycle recovery runbook
 
@@ -106,6 +113,21 @@ invokes the provider handler. A request older than the configured threshold is s
    and do not automatically repeat the mutation.
 6. Confirm pending and stale metrics return to zero and preserve the relevant audit-chain evidence
    before resuming promotion.
+
+## App evidence freshness runbook
+
+1. Confirm the protected alert is scoped to the expected tenant/project and compare invalid,
+   expired, renew-soon, and truncation metrics.
+2. Ask Hermes for the versioned fleet renewal plan or open Installed Apps. Do not copy provider
+   payloads, credentials, or arbitrary object values into logs or tickets.
+3. For invalid proof, repair the exact missing, unbound, malformed, or future-dated reference. For
+   expired proof, run a new bounded write-blocked replay and record current completed work, observed
+   outcomes, and observed net value. For renew-soon proof, schedule the returned safe action before
+   the evidence deadline.
+4. Keep replay, evidence recording, approval, and activation as separate accountable operations.
+   The health scheduler and metrics scraper must never perform them.
+5. Confirm the affected aggregate count returns to zero, the App maturity gate reflects the new
+   evidence clock, and relevant audit evidence is retained before considering promotion.
 
 ## Release evidence
 

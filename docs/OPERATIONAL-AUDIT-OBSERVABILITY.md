@@ -32,6 +32,7 @@ continuously export the chain head and events to a separately controlled retenti
 | `GET /api/health/live` | Public, no details | Confirms the web process can respond |
 | `GET /api/health/ready` | Public, no dependency details | Returns `200` only when hosted configuration, tenant namespace, database, and audit RPC are ready |
 | `GET /api/operations/metrics` | Workload identity with `observability.read` | Prometheus-format readiness and security-control counters |
+| `GET /api/cron/app-evidence-health` | Workload identity with `schedule.app_evidence_health` | Re-evaluates tenant App proof freshness hourly and emits one aggregate, secret-free operational observation |
 | `GET /api/operations/audit-export` | Workload identity with `observability.read` | Machine export bounded to one verified immutable checkpoint |
 | `GET /api/audit/export` | Signed-in organization `admin` or `owner` | Human export bounded to one verified immutable checkpoint |
 
@@ -106,6 +107,14 @@ Wire the protected metrics into the deployment monitoring system and begin with:
   `loopgraph_app_action_reconciliation_stale_after_seconds`: page the connector platform owner,
   preserve the original request identity, and inspect Broker receipt storage; never retry the
   provider mutation;
+- any `loopgraph_app_evidence_invalid > 0`: block App promotion, inspect the exact App through
+  Hermes or the authorized Installed Apps surface, and repair the bound evidence references;
+- any `loopgraph_app_evidence_expired > 0`: keep the affected App at its currently allowed mode
+  and renew proof through a bounded write-blocked replay plus current observed operating evidence;
+- any `loopgraph_app_evidence_renew_soon > 0`: schedule the service-authored Hermes renewal action
+  before the evidence window closes; monitoring must not invoke that action itself;
+- any `loopgraph_app_evidence_plan_truncated > 0`: inspect the full tenant renewal plan in bounded
+  pages before claiming fleet proof health;
 - increasing `loopgraph_discovery_oldest_active_seconds` while a design is expected to progress:
   inspect unresolved evidence, outbound Hermes delivery, and proposals waiting for review;
 - increasing `loopgraph_discovery_sessions_active` with no increase in
@@ -114,9 +123,12 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 
 The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
 Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, immutable
-design artifacts, App lifecycle recovery, and App action receipt reconciliation. App recovery
-metrics contain aggregate counts and age only; App IDs, installation IDs, action IDs, request IDs,
-actors, connector fields, and company-context keys are excluded.
+design artifacts, App lifecycle recovery, App action receipt reconciliation, and the same versioned
+App evidence-renewal contract consumed by Hermes. App recovery and evidence-health metrics contain
+aggregate counts only; App IDs, installation IDs, action IDs, request IDs, actors, connector fields,
+provider payloads, and company-context keys are excluded. Invalid, expired, or renew-soon proof
+sets `loopgraph_operational_degraded` without failing public traffic readiness. An unavailable,
+cross-workspace, malformed, stale, or future-dated evidence projection fails readiness closed.
 `loopgraph_operational_degraded` reports recoverable operator work without returning a public
 readiness failure that could remove healthy workers and make reconciliation harder.
 
@@ -141,3 +153,6 @@ After applying migrations to staging:
    non-production provider account that independently records invocation count. The aggregate
    `staging-validation/v5` gate proves the final zero-backlog state but cannot by itself prove the
    external provider's idempotency behavior.
+10. Run the App evidence-health schedule, verify its protected response contains aggregate counts
+    only, and prove invalid/expired/renew-soon fixtures set the expected protected metrics without
+    creating replay, approval, activation, or provider-write records.
