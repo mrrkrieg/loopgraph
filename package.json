@@ -45,6 +45,7 @@
     "rehearse:app-snapshot-restore": "node --import tsx --conditions=react-server scripts/rehearse-hosted-app-snapshot-restore.ts",
     "reconcile:app-snapshots": "node --import tsx --conditions=react-server scripts/reconcile-hosted-app-snapshots.ts",
     "print:app-snapshot-reconciliation-scope": "node --import tsx --conditions=react-server scripts/reconcile-hosted-app-snapshots.ts --print-scope-digest",
+    "print:app-snapshot-unreferenced-inventory": "node --import tsx --conditions=react-server scripts/reconcile-hosted-app-snapshots.ts --print-unreferenced-inventory-digest",
     "prove:app-action-exactly-once": "tsx scripts/prove-app-action-exactly-once.ts",
     "rehearse:restore": "tsx scripts/backup-restore-rehearsal.ts",
     "audit:drain": "tsx scripts/export-audit-retention.ts",

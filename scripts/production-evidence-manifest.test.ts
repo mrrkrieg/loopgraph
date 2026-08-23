@@ -21,6 +21,7 @@ const deploymentOrigin = "https://staging.loopgraph.test";
 const storageOrigin = "https://snapshot-staging.supabase.co";
 const snapshotRestoreOrigin = "https://snapshot-restore.supabase.co";
 const databaseIdentityDigest = `sha256:${"d".repeat(64)}`;
+const unreferencedInventoryDigest = canonicalAppDigest({ objectKeyDigests: [] });
 const auditRetentionKeyId = "retention_key_1";
 const auditRetentionKeys = generateKeyPairSync("ed25519");
 const auditRetentionPublicKeyPem = auditRetentionKeys.publicKey.export({
@@ -45,6 +46,7 @@ const config: ProductionEvidenceConfig = {
   projectKey: "main",
   databaseIdentityDigest,
   marketplaceApp,
+  expectedAppSnapshotUnreferencedInventoryDigest: unreferencedInventoryDigest,
   auditRetentionKeyId,
   auditRetentionPublicKeyPem,
   generatedAt,
@@ -57,13 +59,18 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v5",
+      schemaVersion: "loopgraph-production-promotion-evidence/v6",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
         deploymentOrigin
       },
-      scope: { organizationId, projectKey: "main", databaseIdentityDigest },
+      scope: {
+        organizationId,
+        projectKey: "main",
+        databaseIdentityDigest,
+        appSnapshotRetention: { unreferencedInventoryDigest }
+      },
       evidence: {
         staging: {
           summary: {
@@ -119,7 +126,17 @@ describe("production promotion evidence manifest", () => {
               organizationId,
               projectKey: "main"
             }),
-            checks: 6,
+            checks: 9,
+            inventoryPasses: 2,
+            inventoryGeneration: 3,
+            inventoryGenerationDigest: canonicalAppDigest({
+              scopeDigest: canonicalAppDigest({
+                origin: storageOrigin,
+                organizationId,
+                projectKey: "main"
+              }),
+              generation: 3
+            }),
             registriesScanned: 4,
             detachedInstallations: 3,
             verifiedSnapshots: 3,
@@ -127,6 +144,11 @@ describe("production promotion evidence manifest", () => {
             corruptSnapshots: 0,
             untrackedSnapshots: 0,
             unavailableSnapshots: 0,
+            storageObjects: 3,
+            referencedStorageObjects: 3,
+            unreferencedSnapshots: 0,
+            malformedStorageObjects: 0,
+            unreferencedInventoryDigest,
             healthy: true
           }
         },
@@ -195,9 +217,14 @@ describe("production promotion evidence manifest", () => {
 
   it("rejects snapshot reconciliation for another scope or any unhealthy inventory", () => {
     const wrongScope = releaseReceipts();
+    const wrongScopeDigest = `sha256:${"f".repeat(64)}`;
     wrongScope.appSnapshotReconciliation = {
       ...(wrongScope.appSnapshotReconciliation as Record<string, unknown>),
-      scopeDigest: `sha256:${"f".repeat(64)}`
+      scopeDigest: wrongScopeDigest,
+      inventoryGenerationDigest: canonicalAppDigest({
+        scopeDigest: wrongScopeDigest,
+        generation: 3
+      })
     };
     expect(() => buildProductionEvidenceManifest(wrongScope, config))
       .toThrow(/protected Storage and tenant scope/i);
@@ -215,6 +242,33 @@ describe("production promotion evidence manifest", () => {
     const receipt = incomplete.appSnapshotReconciliation as { checks: Array<Record<string, unknown>> };
     incomplete.appSnapshotReconciliation = { ...receipt, checks: receipt.checks.slice(1) };
     expect(() => buildProductionEvidenceManifest(incomplete, config)).toThrow();
+
+    const impossibleInventory = releaseReceipts();
+    impossibleInventory.appSnapshotReconciliation = {
+      ...(impossibleInventory.appSnapshotReconciliation as Record<string, unknown>),
+      storageObjects: 4,
+      referencedStorageObjects: 4
+    };
+    expect(() => buildProductionEvidenceManifest(impossibleInventory, config)).toThrow();
+  });
+
+  it("rejects an unreviewed or substituted App snapshot retention inventory", () => {
+    const substituted = releaseReceipts();
+    substituted.appSnapshotReconciliation = {
+      ...(substituted.appSnapshotReconciliation as Record<string, unknown>),
+      unreferencedSnapshots: 1,
+      storageObjects: 4,
+      unreferencedInventoryDigest: canonicalAppDigest({
+        objectKeyDigests: [canonicalAppDigest({ objectKey: "opaque-substitute" })]
+      })
+    };
+    expect(() => buildProductionEvidenceManifest(substituted, config))
+      .toThrow(/protected retention inventory/i);
+
+    expect(() => buildProductionEvidenceManifest(releaseReceipts(), {
+      ...config,
+      expectedAppSnapshotUnreferencedInventoryDigest: `sha256:${"f".repeat(64)}`
+    })).toThrow(/protected retention inventory/i);
   });
 
   it("rejects an exactly-once proof built from another source commit", () => {
@@ -383,6 +437,8 @@ function withoutGeneratedAt(value: ProductionEvidenceConfig) {
     projectKey: value.projectKey,
     databaseIdentityDigest: value.databaseIdentityDigest,
     marketplaceApp: value.marketplaceApp,
+    expectedAppSnapshotUnreferencedInventoryDigest:
+      value.expectedAppSnapshotUnreferencedInventoryDigest,
     auditRetentionKeyId: value.auditRetentionKeyId,
     auditRetentionPublicKeyPem: value.auditRetentionPublicKeyPem,
     maximumEvidenceAgeMinutes: value.maximumEvidenceAgeMinutes
@@ -525,13 +581,23 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       ].map((name) => ({ name, ok: true, detail: `${name} passed` }))
     },
     appSnapshotReconciliation: {
-      schemaVersion: "hosted-app-snapshot-reconciliation/v1",
+      schemaVersion: "hosted-app-snapshot-reconciliation/v2",
       checkedAt,
       durationMs: 8_000,
       scopeDigest: canonicalAppDigest({
         origin: storageOrigin,
         organizationId,
         projectKey: "main"
+      }),
+      inventoryPasses: 2,
+      inventoryGeneration: 3,
+      inventoryGenerationDigest: canonicalAppDigest({
+        scopeDigest: canonicalAppDigest({
+          origin: storageOrigin,
+          organizationId,
+          projectKey: "main"
+        }),
+        generation: 3
       }),
       registriesScanned: 4,
       detachedInstallations: 3,
@@ -540,6 +606,11 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       corruptSnapshots: 0,
       untrackedSnapshots: 0,
       unavailableSnapshots: 0,
+      storageObjects: 3,
+      referencedStorageObjects: 3,
+      unreferencedSnapshots: 0,
+      malformedStorageObjects: 0,
+      unreferencedInventoryDigest,
       healthy: true,
       checks: [
         "tenant_registry_scan",
@@ -547,6 +618,9 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "non_empty_inventory_policy",
         "durable_descriptor_authority",
         "exact_archive_verification",
+        "stable_cross_store_inventory",
+        "exact_storage_inventory",
+        "pinned_unreferenced_retention",
         "aggregate_only_receipt"
       ].map((name) => ({ name, ok: true }))
     },

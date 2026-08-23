@@ -187,6 +187,8 @@ describe("staging release workflow contract", () => {
         "${{ needs.marketplace.outputs.project_key }}",
       LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST:
         "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST }}",
+      LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST:
+        "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST }}",
       LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY:
         "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY }}"
     });
@@ -199,6 +201,8 @@ describe("staging release workflow contract", () => {
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_RELEASE_STORAGE_URL/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_RELEASE_SNAPSHOT_RESTORE_URL/g)).toHaveLength(2);
+    expect(source.match(/^\s+LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST:/gm))
+      .toHaveLength(2);
   });
 });
 

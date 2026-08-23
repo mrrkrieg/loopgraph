@@ -120,12 +120,20 @@ only one exact tenant/project registry scope, verifies every current detached Ap
 LoopPack loader, fails closed on missing, corrupt, untracked, or unavailable archives, and emits only
 aggregate counts plus an opaque scope digest. The protected job rejects arbitrary refs, binds the
 runtime scope to a separately pinned digest, and requires an explicit policy before an empty detached
-inventory can pass.
+inventory can pass. The same job also inventories the reverse Storage-to-registry direction,
+rejects every malformed object, and binds the exact unreferenced archive set to an independently
+reviewed opaque digest. It requires two identical full registry-plus-Storage passes, fails under
+bounded continuous mutation, and fences each pass with a registry-and-Storage-trigger-maintained
+tenant/project mutation generation read before the registry and after the final Storage page. It
+never emits object keys and never deletes archives
+automatically.
 
 The protected production release chain repeats that reconciliation for the exact Storage origin and
 tenant/project proven earlier in the same run. Its fresh, healthy aggregate receipt is a mandatory
-input to `loopgraph-production-promotion-evidence/v5`; a missing, stale, cross-scope, incomplete, or
-unhealthy receipt blocks promotion. The credential-bearing release workflow is accepted only as a
+input to `loopgraph-production-promotion-evidence/v6`; a missing, stale, cross-scope, incomplete,
+retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
+pinned in reconciliation, release-evidence, and production environments. The credential-bearing
+release workflow is accepted only as a
 `staging-release` repository dispatch, which resolves the workflow and commit from the protected
 default branch instead of accepting an arbitrary workflow ref.
 The complete release chain uses immutable commit SHAs for checkout, Node setup, artifact transfer,

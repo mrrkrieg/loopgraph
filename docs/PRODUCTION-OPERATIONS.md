@@ -33,14 +33,19 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   the validated source project into a separately protected disposable Storage project, load through
   an empty runtime, preserve the source during target cleanup, and clean only its random probe.
 - `npm run reconcile:app-snapshots` verifies every current detached installation through the signed
-  archive loader for the exact Storage origin and tenant/project proven by the preceding gates. The
-  protected environment pins that scope independently and requires an explicit empty-inventory
-  policy. Missing, corrupt, untracked, unavailable, incomplete, cross-scope, or stale evidence
-  blocks promotion.
+  archive loader for the exact Storage origin and tenant/project proven by the preceding gates. It
+  also inventories Storage back to current registry authority. The protected environment pins that
+  scope and the reviewed unreferenced-archive digest independently and requires an explicit
+  empty-inventory policy. Two identical full passes are required, and persistent mutation exhausts a
+  bounded retry window. Each pass is fenced by the same durable generation before the registry
+  read and after Storage traversal; registry and private-bucket triggers advance it transactionally
+  whenever an authoritative registry payload or archive object changes.
+  Missing, corrupt, untracked, unavailable, malformed, retention-drifted,
+  unstable, incomplete, cross-scope, or stale evidence blocks promotion.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
 - `npm run release:evidence:build` binds the current run's eight receipts to one source commit,
-  deployment, source and restore Storage origins, tenant/project, database identity, and exact
-  marketplace artifact.
+  deployment, source and restore Storage origins, tenant/project, database identity, exact
+  marketplace artifact, and independently reviewed retained-snapshot inventory.
   `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any
   substituted, stale, or mixed receipt.
 - App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
@@ -97,7 +102,7 @@ invokes the provider handler. A request older than the configured threshold is s
 
 The protected workflow stores the staging, App action, marketplace, App snapshot isolation,
 App snapshot recovery, App snapshot reconciliation, database recovery, and audit-retention receipts
-as separate artifacts, compiles `loopgraph-production-promotion-evidence/v5`, and creates a GitHub OIDC
+as separate artifacts, compiles `loopgraph-production-promotion-evidence/v6`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured

@@ -81,6 +81,7 @@ export const RECOVERY_TABLES = [
   "loopgraph_app_installation_registries",
   "loopgraph_app_operation_actions",
   "loopgraph_app_operation_action_events",
+  "loopgraph_app_snapshot_inventory_generations",
   "loopgraph_provider_schema_snapshots",
   "loopgraph_connector_field_mappings",
   "loopgraph_company_contexts",

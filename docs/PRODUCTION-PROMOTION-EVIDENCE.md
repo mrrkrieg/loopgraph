@@ -40,7 +40,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
 | `hosted-app-snapshot-staging-validation/v1` | Exact Supabase Storage origin and tenant/project, private bounded bucket, authenticated read/insert/update/delete denial, first-writer immutability, content-bound recovery through a second replica root, and verified probe cleanup |
 | `hosted-app-snapshot-restore-rehearsal/v1` | Exact validated source and separately reviewed restore origins, tenant/project, source export, first-writer restore, clean-target exact load, source preservation during target cleanup, exact probe cleanup, and the same artifact/file payload exercised by the isolation gate |
-| `hosted-app-snapshot-reconciliation/v1` | Exact validated Storage origin and tenant/project scope digest, fixed control set, explicit empty-inventory policy, complete current detached-installation scan, exact signed-archive verification, and zero missing, corrupt, untracked, or unavailable snapshots |
+| `hosted-app-snapshot-reconciliation/v2` | Exact validated Storage origin and tenant/project scope digest, fixed control set, explicit empty-inventory policy, two identical full registry-plus-Storage passes within a bounded stability window, the same trigger-maintained mutation generation before/after and across those passes, complete current detached-installation scan, exact signed-archive verification, reverse Storage inventory, zero malformed objects, and an independently pinned opaque digest for intentionally retained unreferenced archives |
 | `backup-restore-rehearsal/v2` | Protected source database identity digest, distinct disposable target, matching PostgreSQL versions, exact row-count/SHA-256 fingerprints for every application table, restored audit integrity, and evidence-family counts |
 | `audit-drain/v3` | Exact staging origin and tenant, retained audit head, exact staging and marketplace sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
 
@@ -61,10 +61,16 @@ commit counts plus the zero-valued pending/stale backlog and reviewed stale thre
 include App IDs, action IDs, provider inputs, Broker receipts, credentials, or customer payloads.
 Any nonterminal action commit blocks manifest compilation and production promotion.
 
-The resulting `loopgraph-production-promotion-evidence/v5` manifest records the repository, commit,
+The App snapshot retention digest is verified twice: first inside the isolated reconciliation
+environment, then against independently configured release-evidence/production values. Reconciliation
+therefore cannot silently bless newly orphaned archives. Malformed Storage objects always fail and
+are never covered by the retention digest. No release receipt contains object keys or archive paths.
+
+The resulting `loopgraph-production-promotion-evidence/v6` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
-marketplace release, trusted retention key ID and public-key digest, canonical SHA-256 digest of each
-receipt, essential control summaries, and one digest over the entire evidence set. The compiler
+marketplace release, approved unreferenced-snapshot inventory digest, trusted retention key ID and
+public-key digest, canonical SHA-256 digest of each receipt, essential control summaries, and one
+digest over the entire evidence set. The compiler
 verifies the receiver acknowledgement against that protected Ed25519 trust anchor. It does not
 contain workload tokens, database URLs, passwords, provider payloads, or private signing material.
 
@@ -136,12 +142,21 @@ origins. Only the validated restore origin and secret-free receipt leave this en
 - a source service-role credential projected as a private mode-`0600` non-symlink file;
 - the independently reviewed digest of the exact validated Storage origin, organization, and
   project scope; and
+- the independently reviewed digest of the exact unreferenced archive inventory; and
 - an explicit `yes` or `no` policy for whether a deployment with no detached Apps may pass.
 
 The workflow supplies the validated Storage origin and marketplace tenant/project as upstream job
 outputs. The job checks out the exact default-branch dispatch SHA, verifies every current detached
-installation, and emits only aggregate counts plus the opaque scope digest. It cannot select an App,
-workspace, object key, archive, or alternate tenant at dispatch time.
+installation, repeats the full registry-plus-Storage read until two consecutive content digests are
+identical, inventories the exact tenant/project Storage prefix, and emits only aggregate counts plus
+opaque scope/generation/retention digests. Database triggers increment the scoped generation in
+the same transaction as every committed registry-payload or private-bucket mutation, and the job
+reads it before the registry and after the last Storage page. Continuous mutation exhausts the
+bounded pass window and fails the job. It cannot
+select an App, workspace, object key, archive, or
+alternate tenant at dispatch time. The same retention digest must be independently configured as
+`LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST` in `release-evidence` and
+`production`; see [Hosted App snapshots](./HOSTED-APP-SNAPSHOTS.md) for the review procedure.
 
 ### `recovery-staging`
 

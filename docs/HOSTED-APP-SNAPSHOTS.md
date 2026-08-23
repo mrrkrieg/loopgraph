@@ -71,7 +71,9 @@ object, App execution stops and requires operator recovery.
 ## Operations and recovery
 
 Production activation must add the bucket to the organization's backup, restore, retention, and
-access-review procedures. At minimum:
+access-review procedures. Loopgraph never deletes an archive automatically: removal is an explicit,
+audited operator action after installation, legal-hold, recovery, and audit-retention requirements
+have all expired. At minimum:
 
 - inventory objects by tenant and compare them with completed detach receipts;
 - alert on missing objects, digest failures, unexpected media types, and access-policy drift;
@@ -88,10 +90,22 @@ without memory, timeout, and recovery analysis.
 
 ## Continuous reconciliation
 
-`npm run reconcile:app-snapshots` reads App installation registries for one exact protected
-organization/project scope and verifies every currently detached App through the same immutable
-snapshot loader used by execution. It distinguishes missing, content-invalid, descriptor-untracked,
-and temporarily unavailable archives and exits non-zero unless every detached installation verifies.
+`npm run reconcile:app-snapshots` reads App installation registries and recursively inventories the
+private Storage prefix for one exact protected organization/project scope. It verifies every
+currently detached App through the same immutable snapshot loader used by execution, then performs
+the reverse check from every valid Storage object back to current registry authority. It
+distinguishes missing, content-invalid, descriptor-untracked, temporarily unavailable,
+unreferenced, and malformed archives and exits non-zero unless every detached installation verifies,
+every Storage object has the exact server-derived shape, and the unreferenced set matches an
+independently reviewed retention digest. Because registry rows and Storage objects cannot be read in
+one database transaction, the gate repeats the complete registry-plus-Storage pass until two
+consecutive content digests are identical. Registry and private-bucket triggers advance one durable,
+tenant/project-scoped mutation generation in the same transaction as every committed registry
+payload or Storage-object insert, update, or delete. Each pass must observe the same generation
+before its registry read and after its final Storage read, and both matching passes must bind the
+same generation. The gate allows at most four passes
+and fails closed under continuous mutation; a single offset-paginated traversal is never release
+evidence.
 
 The scheduled `Hosted App snapshot reconciliation` workflow runs on the protected self-hosted
 runner. Its service-role credential is supplied only as an absolute, non-symlink, mode-`0600`
@@ -108,14 +122,37 @@ Operators generate the non-secret pinned value after setting the three scope env
 npm run --silent print:app-snapshot-reconciliation-scope
 ```
 
-The evidence artifact contains a scope digest, timestamps, fixed control names, and
-aggregate counts only. It contains no organization ID, project key, workspace ID, App ID,
+After pinning the scope digest and projecting the same service-role file used by reconciliation,
+inventory the current unreferenced set without exposing object keys. The command verifies the pinned
+Storage origin before it reads the service-role file or creates a privileged client:
+
+```bash
+npm run --silent print:app-snapshot-unreferenced-inventory
+```
+
+The command emits only the number of stability passes, durable mutation generation and its scoped
+digest, unreferenced count, malformed-object count, and an opaque canonical retention digest. A
+non-zero malformed count is always blocking and cannot be accepted by changing a digest.
+When the unreferenced digest changes, an operator must investigate the lifecycle/audit authority for
+the changed archives. If retention is still required, pin the reviewed digest independently in the
+`app-snapshot-reconciliation` environment and as
+`LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST` in both the
+`release-evidence` and `production` environments. If retention is no longer required, remove only
+the exact reviewed objects through an accountable admin procedure, rerun the inventory, and pin the
+new digest. Never paste object keys, tenant identifiers, archive contents, or service credentials
+into CI variables, logs, or tickets.
+
+The evidence artifact contains scope and retention-inventory digests, timestamps, fixed control
+names, and aggregate counts only. It contains no organization ID, project key, workspace ID, App ID,
 installation ID, actor, snapshot path, object key, content digest, archive, or credential.
 
 The production release workflow runs the same reconciliation after the bucket isolation gate and
 binds its fresh receipt to the validated Storage origin plus the exact marketplace tenant/project.
-Promotion fails if the independently pinned scope digest differs, any detached installation is not
-verified, any failure count is non-zero, the control set is incomplete, or the receipt is stale.
+Promotion fails if the independently pinned scope or retained-inventory digest differs, any detached
+installation is not verified, any malformed object or other failure count is non-zero, the control
+set is incomplete, or the receipt is stale. The production evidence compiler checks the same
+retention digest against separately protected release configuration, so the reconciliation job
+cannot approve its own changed archive set.
 The release is triggered with a `staging-release` repository dispatch so GitHub loads the workflow
 and source SHA from the protected default branch rather than a caller-selected ref.
 

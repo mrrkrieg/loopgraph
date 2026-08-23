@@ -141,10 +141,13 @@ const appSnapshotRecoveryReceiptSchema = z.object({
 }).strict();
 
 const appSnapshotReconciliationReceiptSchema = z.object({
-  schemaVersion: z.literal("hosted-app-snapshot-reconciliation/v1"),
+  schemaVersion: z.literal("hosted-app-snapshot-reconciliation/v2"),
   checkedAt: z.string().datetime({ offset: true }),
   durationMs: safeInteger,
   scopeDigest: digestSchema,
+  inventoryPasses: z.number().int().min(2).max(4),
+  inventoryGeneration: safeInteger,
+  inventoryGenerationDigest: digestSchema,
   registriesScanned: safeInteger,
   detachedInstallations: safeInteger,
   verifiedSnapshots: safeInteger,
@@ -152,6 +155,11 @@ const appSnapshotReconciliationReceiptSchema = z.object({
   corruptSnapshots: z.literal(0),
   untrackedSnapshots: z.literal(0),
   unavailableSnapshots: z.literal(0),
+  storageObjects: safeInteger,
+  referencedStorageObjects: safeInteger,
+  unreferencedSnapshots: safeInteger,
+  malformedStorageObjects: z.literal(0),
+  unreferencedInventoryDigest: digestSchema,
   healthy: z.literal(true),
   checks: z.array(z.object({
     name: z.enum([
@@ -160,16 +168,45 @@ const appSnapshotReconciliationReceiptSchema = z.object({
       "non_empty_inventory_policy",
       "durable_descriptor_authority",
       "exact_archive_verification",
+      "stable_cross_store_inventory",
+      "exact_storage_inventory",
+      "pinned_unreferenced_retention",
       "aggregate_only_receipt"
     ]),
     ok: z.literal(true)
-  }).strict()).length(6)
+  }).strict()).length(9)
 }).strict().superRefine((receipt, context) => {
   if (receipt.verifiedSnapshots !== receipt.detachedInstallations) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       path: ["verifiedSnapshots"],
       message: "Every detached App snapshot must verify before promotion"
+    });
+  }
+  if (receipt.referencedStorageObjects + receipt.unreferencedSnapshots !== receipt.storageObjects) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["storageObjects"],
+      message: "Referenced and retained App snapshots must cover the exact Storage inventory"
+    });
+  }
+  if (receipt.referencedStorageObjects > receipt.verifiedSnapshots) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["referencedStorageObjects"],
+      message: "Referenced Storage objects cannot exceed verified detached App snapshots"
+    });
+  }
+  if (
+    receipt.inventoryGenerationDigest !== canonicalAppDigest({
+      scopeDigest: receipt.scopeDigest,
+      generation: receipt.inventoryGeneration
+    })
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["inventoryGenerationDigest"],
+      message: "App snapshot inventory generation digest must bind the exact scoped generation"
     });
   }
 });
@@ -214,7 +251,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v5"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v6"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -231,6 +268,9 @@ export const productionEvidenceManifestSchema = z.object({
       id: z.string().min(1).max(256),
       version: z.string().min(1).max(128),
       artifactDigest: digestSchema
+    }).strict(),
+    appSnapshotRetention: z.object({
+      unreferencedInventoryDigest: digestSchema
     }).strict(),
     auditRetentionTrust: z.object({
       keyId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/),
@@ -275,6 +315,7 @@ export type ProductionEvidenceConfig = {
   projectKey: string;
   databaseIdentityDigest: string;
   marketplaceApp: { id: string; version: string; artifactDigest: string };
+  expectedAppSnapshotUnreferencedInventoryDigest: string;
   auditRetentionKeyId: string;
   auditRetentionPublicKeyPem: string;
   generatedAt: Date;
@@ -352,6 +393,12 @@ export function buildProductionEvidenceManifest(
     })
   ) {
     throw new Error("App snapshot reconciliation evidence does not match the protected Storage and tenant scope");
+  }
+  if (
+    appSnapshotReconciliation.unreferencedInventoryDigest !==
+    config.expectedAppSnapshotUnreferencedInventoryDigest
+  ) {
+    throw new Error("App snapshot reconciliation evidence does not match the protected retention inventory");
   }
   if (appActionExactlyOnce.sourceCommitSha !== config.commitSha) {
     throw new Error("App action exactly-once proof does not belong to the promoted source commit");
@@ -458,6 +505,9 @@ export function buildProductionEvidenceManifest(
       "non_empty_inventory_policy",
       "durable_descriptor_authority",
       "exact_archive_verification",
+      "stable_cross_store_inventory",
+      "exact_storage_inventory",
+      "pinned_unreferenced_retention",
       "aggregate_only_receipt"
     ],
     "App snapshot reconciliation"
@@ -531,6 +581,9 @@ export function buildProductionEvidenceManifest(
     projectKey: config.projectKey,
     databaseIdentityDigest: config.databaseIdentityDigest,
     marketplaceApp: config.marketplaceApp,
+    appSnapshotRetention: {
+      unreferencedInventoryDigest: config.expectedAppSnapshotUnreferencedInventoryDigest
+    },
     auditRetentionTrust: {
       keyId: config.auditRetentionKeyId,
       publicKeyDigest: sha256Digest(auditRetentionPublicKey.export({ type: "spki", format: "der" }))
@@ -593,6 +646,9 @@ export function buildProductionEvidenceManifest(
       {
         scopeDigest: appSnapshotReconciliation.scopeDigest,
         checks: appSnapshotReconciliation.checks.length,
+        inventoryPasses: appSnapshotReconciliation.inventoryPasses,
+        inventoryGeneration: appSnapshotReconciliation.inventoryGeneration,
+        inventoryGenerationDigest: appSnapshotReconciliation.inventoryGenerationDigest,
         registriesScanned: appSnapshotReconciliation.registriesScanned,
         detachedInstallations: appSnapshotReconciliation.detachedInstallations,
         verifiedSnapshots: appSnapshotReconciliation.verifiedSnapshots,
@@ -600,6 +656,11 @@ export function buildProductionEvidenceManifest(
         corruptSnapshots: appSnapshotReconciliation.corruptSnapshots,
         untrackedSnapshots: appSnapshotReconciliation.untrackedSnapshots,
         unavailableSnapshots: appSnapshotReconciliation.unavailableSnapshots,
+        storageObjects: appSnapshotReconciliation.storageObjects,
+        referencedStorageObjects: appSnapshotReconciliation.referencedStorageObjects,
+        unreferencedSnapshots: appSnapshotReconciliation.unreferencedSnapshots,
+        malformedStorageObjects: appSnapshotReconciliation.malformedStorageObjects,
+        unreferencedInventoryDigest: appSnapshotReconciliation.unreferencedInventoryDigest,
         healthy: appSnapshotReconciliation.healthy
       }
     ),
@@ -623,7 +684,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v5",
+    schemaVersion: "loopgraph-production-promotion-evidence/v6",
     release,
     scope,
     evidence,
@@ -715,6 +776,9 @@ function validateConfig(config: ProductionEvidenceConfig) {
     projectKey: config.projectKey,
     databaseIdentityDigest: config.databaseIdentityDigest,
     marketplaceApp: config.marketplaceApp,
+    appSnapshotRetention: {
+      unreferencedInventoryDigest: config.expectedAppSnapshotUnreferencedInventoryDigest
+    },
     auditRetentionTrust: {
       keyId: config.auditRetentionKeyId,
       publicKeyDigest: publicKeyDigest(config.auditRetentionPublicKeyPem)
@@ -802,6 +866,9 @@ async function main() {
       version: required("LOOPGRAPH_RELEASE_MARKETPLACE_APP_VERSION"),
       artifactDigest: required("LOOPGRAPH_RELEASE_MARKETPLACE_ARTIFACT_DIGEST")
     },
+    expectedAppSnapshotUnreferencedInventoryDigest: required(
+      "LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST"
+    ),
     auditRetentionKeyId: required("LOOPGRAPH_RELEASE_AUDIT_RETENTION_KEY_ID"),
     auditRetentionPublicKeyPem: required("LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM"),
     maximumEvidenceAgeMinutes: positiveInteger("LOOPGRAPH_RELEASE_EVIDENCE_MAX_AGE_MINUTES", 360)

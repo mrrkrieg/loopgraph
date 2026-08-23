@@ -3,12 +3,17 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { canonicalAppDigest } from "loopgraph/core";
 import {
   appInstallationRegistrySchema,
+  detachedAppSnapshotDescriptor,
   reconcileAppSnapshots,
   type AppInstallationRegistry,
   type AppSnapshotReconciliationResult,
   type AppSnapshotStore
 } from "loopgraph/runtime";
-import { SupabaseAppSnapshotStore } from "../lib/db/adapters/supabase-app-snapshot-store";
+import {
+  SupabaseAppSnapshotStore,
+  hostedAppSnapshotObjectKey,
+  inventoryHostedAppSnapshotObjects
+} from "../lib/db/adapters/supabase-app-snapshot-store";
 import { readProjectedSecretFile } from "./projected-secret-file";
 
 const UUID_PATTERN =
@@ -17,15 +22,24 @@ const PROJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const WORKSPACE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,159}$/;
 const REGISTRY_PAGE_SIZE = 100;
 const MAX_REGISTRIES = 10_000;
+const MAX_INVENTORY_STABILITY_PASSES = 4;
 
 type RegistryRow = { workspace_id: unknown; registry_payload: unknown };
 
 export type HostedAppSnapshotReconciliationReceipt = AppSnapshotReconciliationResult & {
-  schemaVersion: "hosted-app-snapshot-reconciliation/v1";
+  schemaVersion: "hosted-app-snapshot-reconciliation/v2";
   checkedAt: string;
   durationMs: number;
   scopeDigest: string;
+  inventoryPasses: number;
+  inventoryGeneration: number;
+  inventoryGenerationDigest: string;
   registriesScanned: number;
+  storageObjects: number;
+  referencedStorageObjects: number;
+  unreferencedSnapshots: number;
+  malformedStorageObjects: number;
+  unreferencedInventoryDigest: string;
   checks: Array<{
     name:
       | "tenant_registry_scan"
@@ -33,9 +47,28 @@ export type HostedAppSnapshotReconciliationReceipt = AppSnapshotReconciliationRe
       | "non_empty_inventory_policy"
       | "durable_descriptor_authority"
       | "exact_archive_verification"
+      | "stable_cross_store_inventory"
+      | "exact_storage_inventory"
+      | "pinned_unreferenced_retention"
       | "aggregate_only_receipt";
     ok: boolean;
   }>;
+};
+
+export type HostedAppSnapshotRetentionInventory = {
+  storageObjects: number;
+  referencedStorageObjects: number;
+  unreferencedSnapshots: number;
+  malformedStorageObjects: number;
+  unreferencedInventoryDigest: string;
+};
+
+type HostedAppSnapshotReconciliationPass = {
+  aggregate: AppSnapshotReconciliationResult & { registriesScanned: number };
+  retentionInventory: HostedAppSnapshotRetentionInventory;
+  generationBefore: number;
+  generationAfter: number;
+  stabilityDigest: string;
 };
 
 export async function reconcileHostedAppSnapshotRegistries(
@@ -83,6 +116,7 @@ export async function reconcileHostedAppSnapshots(
     organizationId: string;
     projectKey: string;
     expectedScopeDigest: string;
+    expectedUnreferencedInventoryDigest: string;
     allowEmptyInventory: boolean;
   },
   dependencies: {
@@ -92,29 +126,18 @@ export async function reconcileHostedAppSnapshots(
     projectRoot?: string;
   }
 ): Promise<HostedAppSnapshotReconciliationReceipt> {
-  const scopeDigest = hostedAppSnapshotReconciliationScopeDigest(config);
-  if (!/^sha256:[0-9a-f]{64}$/.test(config.expectedScopeDigest)) {
-    throw new Error("App snapshot reconciliation expected scope digest is invalid");
-  }
-  if (scopeDigest !== config.expectedScopeDigest) {
-    throw new Error("App snapshot reconciliation scope does not match the independently pinned identity");
-  }
+  const scopeDigest = assertHostedAppSnapshotReconciliationScope(config);
   const now = dependencies.now ?? (() => new Date());
   const nowMs = dependencies.nowMs ?? Date.now;
   const startedAtMs = nowMs();
-  const registries = await readTenantRegistries(
-    dependencies.client,
-    config.organizationId,
-    config.projectKey
+  const { pass: stable, inventoryPasses } = await collectStableHostedAppSnapshotReconciliation(
+    config,
+    dependencies
   );
-  const aggregate = await reconcileHostedAppSnapshotRegistries(
-    registries,
-    (workspaceId) => new SupabaseAppSnapshotStore(
-      dependencies.client,
-      { organizationId: config.organizationId, projectKey: config.projectKey, workspaceId },
-      dependencies.projectRoot ?? process.cwd()
-    )
-  );
+  const { aggregate, retentionInventory } = stable;
+  if (!/^sha256:[0-9a-f]{64}$/.test(config.expectedUnreferencedInventoryDigest)) {
+    throw new Error("App snapshot reconciliation expected retention inventory digest is invalid");
+  }
   const checks: HostedAppSnapshotReconciliationReceipt["checks"] = [
     { name: "tenant_registry_scan", ok: true },
     { name: "pinned_scope_identity", ok: true },
@@ -130,18 +153,156 @@ export async function reconcileHostedAppSnapshots(
         aggregate.corruptSnapshots === 0 &&
         aggregate.unavailableSnapshots === 0
     },
+    { name: "stable_cross_store_inventory", ok: inventoryPasses >= 2 },
+    {
+      name: "exact_storage_inventory",
+      ok: retentionInventory.malformedStorageObjects === 0
+    },
+    {
+      name: "pinned_unreferenced_retention",
+      ok:
+        retentionInventory.unreferencedInventoryDigest ===
+        config.expectedUnreferencedInventoryDigest
+    },
     { name: "aggregate_only_receipt", ok: true }
   ];
   return {
-    schemaVersion: "hosted-app-snapshot-reconciliation/v1",
+    schemaVersion: "hosted-app-snapshot-reconciliation/v2",
     checkedAt: now().toISOString(),
     durationMs: Math.max(0, nowMs() - startedAtMs),
     scopeDigest,
+    inventoryPasses,
+    inventoryGeneration: stable.generationAfter,
+    inventoryGenerationDigest: hostedAppSnapshotInventoryGenerationDigest(
+      scopeDigest,
+      stable.generationAfter
+    ),
     ...aggregate,
+    ...retentionInventory,
     healthy:
       aggregate.healthy &&
-      (aggregate.detachedInstallations > 0 || config.allowEmptyInventory),
+      (aggregate.detachedInstallations > 0 || config.allowEmptyInventory) &&
+      retentionInventory.malformedStorageObjects === 0 &&
+      retentionInventory.unreferencedInventoryDigest ===
+        config.expectedUnreferencedInventoryDigest,
     checks
+  };
+}
+
+async function collectStableHostedAppSnapshotReconciliation(
+  config: { organizationId: string; projectKey: string },
+  dependencies: { client: SupabaseClient; projectRoot?: string }
+): Promise<{ pass: HostedAppSnapshotReconciliationPass; inventoryPasses: number }> {
+  let previous: HostedAppSnapshotReconciliationPass | undefined;
+  let inventoryPasses = 0;
+  for (inventoryPasses = 1; inventoryPasses <= MAX_INVENTORY_STABILITY_PASSES; inventoryPasses += 1) {
+    const current = await collectHostedAppSnapshotReconciliationPass(config, dependencies);
+    if (
+      current.generationBefore === current.generationAfter &&
+      previous !== undefined &&
+      previous.generationBefore === previous.generationAfter &&
+      previous.generationAfter === current.generationAfter &&
+      previous.stabilityDigest === current.stabilityDigest
+    ) {
+      return { pass: current, inventoryPasses };
+    }
+    previous = current;
+  }
+  throw new Error("Hosted App snapshot inventory changed throughout the bounded stability window");
+}
+
+async function collectHostedAppSnapshotReconciliationPass(
+  config: { organizationId: string; projectKey: string },
+  dependencies: { client: SupabaseClient; projectRoot?: string }
+): Promise<HostedAppSnapshotReconciliationPass> {
+  const generationBefore = await readHostedAppSnapshotInventoryGeneration(
+    dependencies.client,
+    config
+  );
+  const registries = await readTenantRegistries(
+    dependencies.client,
+    config.organizationId,
+    config.projectKey
+  );
+  const aggregate = await reconcileHostedAppSnapshotRegistries(
+    registries,
+    (workspaceId) => new SupabaseAppSnapshotStore(
+      dependencies.client,
+      { organizationId: config.organizationId, projectKey: config.projectKey, workspaceId },
+      dependencies.projectRoot ?? process.cwd()
+    )
+  );
+  const retentionInventory = await inspectHostedAppSnapshotRetentionInventory(
+    registries,
+    dependencies.client,
+    config
+  );
+  const generationAfter = await readHostedAppSnapshotInventoryGeneration(
+    dependencies.client,
+    config
+  );
+  return {
+    aggregate,
+    retentionInventory,
+    generationBefore,
+    generationAfter,
+    stabilityDigest: canonicalAppDigest({
+      generation: generationAfter,
+      registries,
+      aggregate,
+      retentionInventory
+    })
+  };
+}
+
+async function readHostedAppSnapshotInventoryGeneration(
+  client: SupabaseClient,
+  scope: { organizationId: string; projectKey: string }
+): Promise<number> {
+  const { data, error } = await client.rpc(
+    "loopgraph_app_snapshot_inventory_generation_get",
+    {
+      p_organization_id: scope.organizationId,
+      p_project_key: scope.projectKey
+    }
+  );
+  if (error) throw new Error("Hosted App snapshot inventory generation is unavailable");
+  const generation = typeof data === "string" && /^\d+$/.test(data) ? Number(data) : data;
+  if (!Number.isSafeInteger(generation) || Number(generation) < 0) {
+    throw new Error("Hosted App snapshot inventory generation is invalid");
+  }
+  return Number(generation);
+}
+
+export async function inspectHostedAppSnapshotRetentionInventory(
+  registries: AppInstallationRegistry[],
+  client: SupabaseClient,
+  scope: { organizationId: string; projectKey: string }
+): Promise<HostedAppSnapshotRetentionInventory> {
+  const expectedObjectKeyDigests = new Set<string>();
+  for (const registry of registries) {
+    for (const installation of registry.installations) {
+      if (!installation.derivation?.detachedAt) continue;
+      const descriptor = detachedAppSnapshotDescriptor(registry, installation);
+      if (!descriptor) continue;
+      expectedObjectKeyDigests.add(canonicalAppDigest({
+        objectKey: hostedAppSnapshotObjectKey({
+          ...scope,
+          workspaceId: registry.workspaceId
+        }, descriptor)
+      }));
+    }
+  }
+  const inventory = await inventoryHostedAppSnapshotObjects(client, scope);
+  const unreferenced = inventory.objectKeyDigests
+    .filter((digest) => !expectedObjectKeyDigests.has(digest))
+    .sort();
+  return {
+    storageObjects: inventory.objectKeyDigests.length,
+    referencedStorageObjects: inventory.objectKeyDigests.length - unreferenced.length,
+    unreferencedSnapshots: unreferenced.length,
+    malformedStorageObjects: inventory.malformedObjects,
+    unreferencedInventoryDigest: canonicalAppDigest({ objectKeyDigests: unreferenced })
   };
 }
 
@@ -162,6 +323,32 @@ export function hostedAppSnapshotReconciliationScopeDigest(config: {
     organizationId: config.organizationId,
     projectKey: config.projectKey
   });
+}
+
+export function assertHostedAppSnapshotReconciliationScope(config: {
+  supabaseUrl: string;
+  organizationId: string;
+  projectKey: string;
+  expectedScopeDigest: string;
+}): string {
+  const scopeDigest = hostedAppSnapshotReconciliationScopeDigest(config);
+  if (!/^sha256:[0-9a-f]{64}$/.test(config.expectedScopeDigest)) {
+    throw new Error("App snapshot reconciliation expected scope digest is invalid");
+  }
+  if (scopeDigest !== config.expectedScopeDigest) {
+    throw new Error("App snapshot reconciliation scope does not match the independently pinned identity");
+  }
+  return scopeDigest;
+}
+
+export function hostedAppSnapshotInventoryGenerationDigest(
+  scopeDigest: string,
+  generation: number
+): string {
+  if (!/^sha256:[0-9a-f]{64}$/.test(scopeDigest) || !Number.isSafeInteger(generation) || generation < 0) {
+    throw new Error("App snapshot inventory generation identity is invalid");
+  }
+  return canonicalAppDigest({ scopeDigest, generation });
 }
 
 async function readTenantRegistries(
@@ -224,24 +411,52 @@ async function main(): Promise<void> {
     })}\n`);
     return;
   }
+  const expectedScopeDigest = required("LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST");
+  const scopeDigest = assertHostedAppSnapshotReconciliationScope({
+    supabaseUrl,
+    organizationId,
+    projectKey,
+    expectedScopeDigest
+  });
   const serviceRole = await readProjectedSecretFile(
     required("LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE"),
     "LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE"
   );
+  const client = createClient(supabaseUrl, serviceRole, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
+  });
+  if (process.argv.includes("--print-unreferenced-inventory-digest")) {
+    const { pass, inventoryPasses } = await collectStableHostedAppSnapshotReconciliation(
+      { organizationId, projectKey },
+      { client }
+    );
+    const inventory = pass.retentionInventory;
+    process.stdout.write(`${JSON.stringify({
+      inventoryPasses,
+      inventoryGeneration: pass.generationAfter,
+      inventoryGenerationDigest: hostedAppSnapshotInventoryGenerationDigest(
+        scopeDigest,
+        pass.generationAfter
+      ),
+      unreferencedSnapshots: inventory.unreferencedSnapshots,
+      malformedStorageObjects: inventory.malformedStorageObjects,
+      unreferencedInventoryDigest: inventory.unreferencedInventoryDigest
+    })}\n`);
+    return;
+  }
   const receipt = await reconcileHostedAppSnapshots({
     supabaseUrl,
     organizationId,
     projectKey,
-    expectedScopeDigest: required("LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST"),
+    expectedScopeDigest,
+    expectedUnreferencedInventoryDigest: required(
+      "LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST"
+    ),
     allowEmptyInventory: exactBoolean(
       required("LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY"),
       "LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY"
     )
-  }, {
-    client: createClient(supabaseUrl, serviceRole, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
-    })
-  });
+  }, { client });
   process.stdout.write(`${JSON.stringify(receipt)}\n`);
   if (!receipt.healthy) process.exitCode = 1;
 }
