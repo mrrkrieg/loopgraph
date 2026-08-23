@@ -163,6 +163,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   checkpoint, emits `audit-drain/v5`, and the v13 production manifest rechecks both distinct origins,
   tenant/project, freshness, ten exact controls/statuses, bounded rate policy, family revocation,
   and the full receipt digest before the prebuilt deployment can be promoted.
+- The separate CLI administrator staging validator now proves the deployed MFA boundary with one
+  AAL1 denial and one AAL2 exact-session revocation. It confirms the disposable session remains
+  revocable after denial, projects the committed revocation through the token-free inventory, denies
+  the revoked CLI token, and finds the exact correlation/target/reason digest in the verified audit
+  chain. Its output excludes browser sessions, user identities, CLI tokens, and the target session ID.
 - Hosted readiness and protected Prometheus metrics now consume a tenant/project-scoped,
   service-role-only CLI security projection. It separates active, refresh-required, expired, and
   revoked sessions; reports recent refresh replay, impossible unrevoked replay families, pending
@@ -294,9 +299,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    rejection, exact signed staging, and audit presence are already part of the executable marketplace
    gate. The CLI-session matrix, exact workflow validator, fourth retained audit checkpoint, and v13
    promotion binding are implemented; the environment-specific receipt, live issuer propagation,
-   live MFA administrator-control validation, release revocation proof, migration application, and real alert
-   delivery remain external. The aggregate CLI security projection and v2 SLO/runbook contract are
-   implemented in the repository.
+   first live MFA administrator-control receipt, its release-evidence binding, release revocation
+   proof, migration application, and real alert delivery remain external. The aggregate CLI security
+   projection, v2 SLO/runbook contract, and bounded MFA staging validator are implemented in the
+   repository.
 7. Configure the protected App evidence-health staging workload identities and run
    `validate:app-evidence-health-staging` against each deployed environment. The executable gate is
    present; only the first deployment-specific receipt remains external. The gate now runs the
