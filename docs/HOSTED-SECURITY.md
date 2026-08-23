@@ -16,6 +16,10 @@ users, organizations, and machine workers must not share an implicit administrat
   new key ID or cached-key signature mismatch. Concurrent refreshes within one runtime share one
   fetch, malformed or oversized key sets fail closed, redirects are rejected, and unknown key IDs
   are refresh-throttled.
+- Browser-authorized CLI refresh tokens rotate as one database-owned family. Prior generations are
+  retained only as private expiry-bounded digests; reuse atomically revokes the current family,
+  appends one digest-free tenant audit event, and is visible to an administrator without exposing
+  token hashes.
 - Organization access comes from `organization_memberships`, never editable user metadata.
 - Roles are monotonic: `viewer`, `operator`, `admin`, and `owner`.
 - Request-bound Design Studio reads and writes use the user's cookie-bound Supabase client.

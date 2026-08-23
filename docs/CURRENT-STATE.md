@@ -149,6 +149,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Hermes MCP and managed CLI runners can use the hosted marketplace through short-lived ambient OIDC workload identity. The API requires tenant/project claims, a durable `marketplace.consume` grant, fresh replay metadata, rate limits, and organization visibility; it proxies one exact private archive without exposing service credentials or reusable object keys. The package re-verifies and atomically stages the release before invoking the existing app tools.
 - Interactive terminals can use browser-approved device authorization without receiving a workload identity or Supabase cookie. Device/user codes and access/refresh credentials are stored only as hashes server-side; access lasts 15 minutes, refresh rotates, membership is checked on every request, the only grant is `marketplace.consume`, and the local credential profile is atomic, current-user-only, and never printed by status output.
 - Hosted admins and owners have a paged, token-free human CLI session inventory. MFA-gated emergency controls revoke one device, one user's sessions, or every organization session in the exact tenant/project scope, while the revocation and immutable reason-digest audit event commit atomically.
+- Human CLI refresh rotation now retains prior generations only as private, expiry-bounded SHA-256
+  digests. Reuse of any replaced generation locks and revokes the current session family, records one
+  digest-free tenant audit event, appears in the safe admin inventory, and removes the rejected local
+  profile. Random invalid tokens remain indistinguishable and generate no audit amplification.
 - Production promotion now compiles staging readiness, hosted-marketplace isolation, snapshot-consistent recovery, and independently acknowledged audit-retention receipts into one content-bound manifest. The workflow attests that exact manifest with GitHub OIDC, reconstructs it in the protected production job, verifies the upstream digest and provenance, and only then promotes the same prebuilt deployment. Receipt freshness is rechecked against the actual promotion time; deployment origin, tenant/project, database identity, marketplace artifact, exact audit sequence/hash checkpoints, acknowledgement digest, and restored-table fingerprints all fail closed.
 - Hosted App snapshot activation now has a dedicated protected staging gate. It proves the real
   bucket is private and bounded, exercises authenticated read/insert/update/delete denial, replays
@@ -267,9 +271,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 6. Validate issuer rotation against the real identity provider, device-code and request rate-limit saturation, refresh-token replay,
    cross-replica session/cache behavior, membership removal, and release revocation in staging.
    The verifier now handles new-`kid` and same-`kid` rotation immediately with a deduplicated,
-   throttled, fail-closed JWKS refresh. Durable workload grant revocation, cross-tenant denial,
-   replay rejection, exact signed staging, and audit presence are already part of the executable
-   marketplace gate; only a live provider/replica receipt can prove deployment propagation.
+   throttled, fail-closed JWKS refresh. Refresh-token reuse now revokes its current family and enters
+   the audit chain atomically. Durable workload grant revocation, cross-tenant denial, request replay
+   rejection, exact signed staging, and audit presence are already part of the executable marketplace
+   gate; only live provider/replica receipts can prove deployment propagation and concurrent refresh.
 7. Configure the protected App evidence-health staging workload identities and run
    `validate:app-evidence-health-staging` against each deployed environment. The executable gate is
    present; only the first deployment-specific receipt remains external. The gate now runs the

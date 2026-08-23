@@ -33,6 +33,7 @@ export const RECOVERY_TABLES = [
   "cli_device_issuance_rate_windows",
   "cli_device_decision_rate_windows",
   "cli_access_sessions",
+  "cli_refresh_token_history",
   "workload_principals",
   "workload_capability_grants",
   "workload_identity_audit_events",
