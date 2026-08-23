@@ -10,6 +10,7 @@ type WorkflowStep = {
 };
 
 type WorkflowJob = {
+  if?: string;
   needs?: string | string[];
   environment?: string;
   permissions?: Record<string, string>;
@@ -22,12 +23,16 @@ describe("staging release workflow contract", () => {
     const workflow = parse(source) as { jobs: Record<string, WorkflowJob> };
     const jobs = workflow.jobs;
 
+    expect(jobs.verify.if).toBe("github.ref == 'refs/heads/loopgraph/canvas-first'");
+
     expect(jobs.marketplace.environment).toBe("marketplace-staging");
+    expect(jobs["app-snapshots"].environment).toBe("app-snapshot-staging");
     expect(jobs.recovery.environment).toBe("recovery-staging");
     expect(jobs["audit-retention"].environment).toBe("audit-retention-staging");
     expect(jobs.evidence.environment).toBe("release-evidence");
     expect(jobs.promote.environment).toBe("production");
     expect(asNeeds(jobs.evidence.needs)).toEqual([
+      "app-snapshots",
       "audit-retention",
       "marketplace",
       "recovery",
@@ -53,12 +58,13 @@ describe("staging release workflow contract", () => {
     expect(promoteIndex).toBeGreaterThan(attestIndex);
     expect(jobs.promote.permissions).toMatchObject({ attestations: "read" });
 
-    for (const jobName of ["marketplace", "recovery", "audit-retention"] as const) {
+    for (const jobName of ["marketplace", "app-snapshots", "recovery", "audit-retention"] as const) {
       const jobSource = JSON.stringify(jobs[jobName]);
       expect(jobSource).not.toContain("secrets.LOOPGRAPH_");
     }
     expect(source).toContain("npm run --silent validate:staging > staging-validation-receipt.json");
     expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
+    expect(source).toContain("npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json");
     expect(source).toContain("npm run --silent rehearse:restore > recovery-rehearsal-receipt.json");
     expect(source).toContain("npm run --silent audit:drain > audit-retention-receipt.json");
     const auditDrainStep = (jobs["audit-retention"].steps ?? []).find(
@@ -88,8 +94,25 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS:
         "${{ vars.LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS }}"
     });
+    const snapshotValidationStep = (jobs["app-snapshots"].steps ?? []).find(
+      (step) => step.run?.includes("validate:app-snapshots-staging")
+    );
+    expect(asNeeds(jobs["app-snapshots"].needs)).toEqual(["marketplace", "staging"]);
+    expect(snapshotValidationStep?.env).toMatchObject({
+      LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}",
+      LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY:
+        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY }}",
+      LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE }}",
+      LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE }}",
+      LOOPGRAPH_STAGING_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}",
+      LOOPGRAPH_STAGING_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+    });
     expect(source.match(/LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_RELEASE_STORAGE_URL/g)).toHaveLength(2);
   });
 });
 

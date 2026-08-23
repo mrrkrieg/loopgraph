@@ -77,3 +77,22 @@ access-review procedures. At minimum:
 Standard uploads are deliberately bounded to 100 MiB. Large App distributions should use an
 external artifact registry or a future resumable-upload adapter rather than raising the limit
 without memory, timeout, and recovery analysis.
+
+## Staging release proof
+
+`npm run validate:app-snapshots-staging` exercises the real protected bucket before production
+promotion. It uses a unique workspace namespace and two empty runtime roots to prove:
+
+- the bucket is private, JSON-only, and capped at 100 MiB;
+- an authenticated non-service session cannot download, insert, replace, or delete the archive;
+- repeating the same upload preserves one first-writer object;
+- a second replica recovers the exact artifact and full signed file-inventory digests; and
+- the service-only probe is removed after validation.
+
+The protected runner receives the Supabase service-role key only through
+`LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE`, an absolute non-symlink regular file with mode
+`0600`. It reuses the short-lived allowed-user session bundle from the hosted user-boundary gate.
+The receipt contains the Storage origin, tenant/project, content digests, bounded check summaries,
+and timestamps only. It contains no object key, service credential, session, archive bytes, or App
+configuration. Production evidence compilation requires this exact fresh receipt and refuses a
+different Storage origin or incomplete control set.

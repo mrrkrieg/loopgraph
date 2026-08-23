@@ -449,6 +449,14 @@ and observability identities to prove exact signed delivery, isolation,
 revocation, replay rejection, and audit evidence before promotion. It emits a
 secret-free JSON receipt; it never accepts token text in configuration.
 
+Detached private Apps have a separate hosted release gate:
+`npm run validate:app-snapshots-staging`. On a protected runner it creates one unique
+service-owned archive, proves an authenticated non-service session cannot download,
+insert, replace, or delete it, repeats the immutable upload, recovers the exact signed
+LoopPack through a second empty replica root, and then removes the probe. Its secret-free
+receipt is content-bound into the production promotion manifest; the service-role key is
+accepted only through a private `0600` file and is never copied into the receipt or logs.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

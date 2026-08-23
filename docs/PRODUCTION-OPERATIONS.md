@@ -6,11 +6,21 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 
 - `ops/slo.yaml` is the versioned SLO and alert contract. Route its metrics to an alerting system with paging ownership; the file is not an alert delivery system by itself.
 - `.github/workflows/staging-release.yml` builds once, deploys the prebuilt artifact to staging, validates it, and only promotes that verified deployment after protected-environment approval.
+  The credential-bearing workflow chain runs only from the protected default branch
+  `loopgraph/canvas-first`; environment deployment rules must enforce the same branch.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
 - `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
+- `npm run validate:app-snapshots-staging` is the detached-App archive gate. It proves the private
+  bucket contract, authenticated client denial for read/insert/update/delete, first-writer
+  immutability, exact recovery through a second replica root, and verified cleanup. The service-role
+  key is read only from a private projected file; its receipt contains content identities, not the
+  credential or object key.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's five receipts to one source commit, deployment, tenant/project, database identity, and exact marketplace artifact. `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any substituted, stale, or mixed receipt.
+- `npm run release:evidence:build` binds the current run's six receipts to one source commit,
+  deployment, Storage origin, tenant/project, database identity, and exact marketplace artifact.
+  `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any
+  substituted, stale, or mixed receipt.
 - App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
   snapshot exports aggregate pending, interrupted, stale, affected-workspace, and oldest-age
   metrics without exposing App or installation identifiers. The default stale threshold is 900
@@ -63,8 +73,9 @@ invokes the provider handler. A request older than the configured threshold is s
 
 ## Release evidence
 
-The protected workflow stores the staging, marketplace, recovery, and audit-retention receipts as
-separate artifacts, compiles `loopgraph-production-promotion-evidence/v2`, and creates a GitHub OIDC
+The protected workflow stores the staging, App action, marketplace, App snapshot, recovery, and
+audit-retention receipts as separate artifacts, compiles
+`loopgraph-production-promotion-evidence/v3`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured
@@ -97,6 +108,16 @@ The staging identity administrator prepares four principals before approving the
 The token file variables are absolute paths on an isolated, ephemeral self-hosted runner. Files must
 be regular, non-symlink paths with mode `0600`; the gate rejects group/world-readable tokens. Rotate
 all four identities after the exercise and preserve the provider-side issuance/revocation audit record.
+
+## App snapshot staging boundary
+
+The `app-snapshot-staging` environment runs separately from marketplace validation. Project the
+service-role key to the isolated runner as an absolute mode-`0600` non-symlink file referenced by
+`LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE`; do not store the key text in a GitHub variable,
+command, artifact, or log. The environment also receives the public Supabase origin/publishable key
+and the allowed short-lived user-session file. Rotate the service credential or destroy the
+ephemeral runner projection after the gate. The emitted Storage origin is non-secret and is carried
+forward as a protected job output so production reconstruction cannot substitute another project.
 
 ## Hosted user-boundary staging matrix
 

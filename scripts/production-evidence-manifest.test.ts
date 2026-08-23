@@ -18,6 +18,7 @@ import {
 const organizationId = "123e4567-e89b-42d3-a456-426614174000";
 const generatedAt = new Date("2026-08-17T02:00:00.000Z");
 const deploymentOrigin = "https://staging.loopgraph.test";
+const storageOrigin = "https://snapshot-staging.supabase.co";
 const databaseIdentityDigest = `sha256:${"d".repeat(64)}`;
 const auditRetentionKeyId = "retention_key_1";
 const auditRetentionKeys = generateKeyPairSync("ed25519");
@@ -37,6 +38,7 @@ const config: ProductionEvidenceConfig = {
   workflowRunId: "123456789",
   workflowRunAttempt: 1,
   deploymentOrigin,
+  storageOrigin,
   organizationId,
   projectKey: "main",
   databaseIdentityDigest,
@@ -48,12 +50,12 @@ const config: ProductionEvidenceConfig = {
 };
 
 describe("production promotion evidence manifest", () => {
-  it("binds the exact release to staging, marketplace, recovery, and external audit evidence", () => {
+  it("binds the exact release to staging, marketplace, App snapshots, recovery, and external audit evidence", () => {
     const receipts = releaseReceipts();
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v2",
+      schemaVersion: "loopgraph-production-promotion-evidence/v3",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -88,6 +90,15 @@ describe("production promotion evidence manifest", () => {
           }
         },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
+        appSnapshots: {
+          summary: {
+            storageOrigin,
+            checks: 8,
+            snapshotIdentityDigest: `sha256:${"1".repeat(64)}`,
+            artifactDigest: `sha256:${"2".repeat(64)}`,
+            filesDigest: `sha256:${"3".repeat(64)}`
+          }
+        },
         recovery: { summary: { criticalTables: RECOVERY_TABLES.length } },
         auditRetention: { summary: { throughSequence: 50 } }
       }
@@ -111,6 +122,21 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(receipts, config))
       .toThrow(/exact promoted deployment origin/i);
+  });
+
+  it("rejects snapshot evidence from another Storage origin or with a missing denial control", () => {
+    const wrongOrigin = releaseReceipts();
+    wrongOrigin.appSnapshots = {
+      ...(wrongOrigin.appSnapshots as Record<string, unknown>),
+      targetOrigin: "https://other.supabase.co"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongOrigin, config))
+      .toThrow(/exact protected Storage origin/i);
+
+    const missingControl = releaseReceipts();
+    const snapshot = missingControl.appSnapshots as { checks: Array<Record<string, unknown>> };
+    missingControl.appSnapshots = { ...snapshot, checks: snapshot.checks.slice(1) };
+    expect(() => buildProductionEvidenceManifest(missingControl, config)).toThrow();
   });
 
   it("rejects an exactly-once proof built from another source commit", () => {
@@ -273,6 +299,7 @@ function withoutGeneratedAt(value: ProductionEvidenceConfig) {
     workflowRunId: value.workflowRunId,
     workflowRunAttempt: value.workflowRunAttempt,
     deploymentOrigin: value.deploymentOrigin,
+    storageOrigin: value.storageOrigin,
     organizationId: value.organizationId,
     projectKey: value.projectKey,
     databaseIdentityDigest: value.databaseIdentityDigest,
@@ -374,6 +401,27 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "replay_denial",
         "independent_audit_evidence"
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
+    },
+    appSnapshots: {
+      schemaVersion: "hosted-app-snapshot-staging-validation/v1",
+      targetOrigin: storageOrigin,
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 4_000,
+      snapshotIdentityDigest: `sha256:${"1".repeat(64)}`,
+      artifactDigest: `sha256:${"2".repeat(64)}`,
+      filesDigest: `sha256:${"3".repeat(64)}`,
+      checks: [
+        "private_bounded_bucket",
+        "authenticated_download_denial",
+        "authenticated_insert_denial",
+        "authenticated_update_denial",
+        "authenticated_delete_denial",
+        "immutable_first_writer",
+        "cross_replica_exact_recovery",
+        "cleanup_verified"
+      ].map((name) => ({ name, ok: true, detail: `${name} passed` }))
     },
     recovery: {
       schemaVersion: "backup-restore-rehearsal/v2",

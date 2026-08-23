@@ -86,6 +86,32 @@ const marketplaceReceiptSchema = z.object({
   }).strict()).length(7)
 }).strict();
 
+const appSnapshotReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-app-snapshot-staging-validation/v1"),
+  targetOrigin: originSchema,
+  organizationId: z.string().uuid(),
+  projectKey: projectKeySchema,
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  snapshotIdentityDigest: digestSchema,
+  artifactDigest: digestSchema,
+  filesDigest: digestSchema,
+  checks: z.array(z.object({
+    name: z.enum([
+      "private_bounded_bucket",
+      "authenticated_download_denial",
+      "authenticated_insert_denial",
+      "authenticated_update_denial",
+      "authenticated_delete_denial",
+      "immutable_first_writer",
+      "cross_replica_exact_recovery",
+      "cleanup_verified"
+    ]),
+    ok: z.literal(true),
+    detail: z.string().min(1).max(2048)
+  }).strict()).length(8)
+}).strict();
+
 const recoveryReceiptSchema = z.object({
   schemaVersion: z.literal("backup-restore-rehearsal/v2"),
   startedAt: z.string().datetime({ offset: true }),
@@ -126,7 +152,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v2"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v3"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -153,6 +179,7 @@ export const productionEvidenceManifestSchema = z.object({
     staging: evidenceDescriptorSchema,
     appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
+    appSnapshots: evidenceDescriptorSchema,
     recovery: evidenceDescriptorSchema,
     auditRetention: evidenceDescriptorSchema
   }).strict(),
@@ -165,6 +192,7 @@ export type ProductionEvidenceReceipts = {
   staging: unknown;
   appActionExactlyOnce: unknown;
   marketplace: unknown;
+  appSnapshots: unknown;
   recovery: unknown;
   auditRetention: unknown;
 };
@@ -175,6 +203,7 @@ export type ProductionEvidenceConfig = {
   workflowRunId: string;
   workflowRunAttempt: number;
   deploymentOrigin: string;
+  storageOrigin: string;
   organizationId: string;
   projectKey: string;
   databaseIdentityDigest: string;
@@ -193,6 +222,7 @@ export function buildProductionEvidenceManifest(
   const staging = stagingReceiptSchema.parse(receipts.staging);
   const appActionExactlyOnce = verifyAppActionExactlyOnceProof(receipts.appActionExactlyOnce);
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
+  const appSnapshots = appSnapshotReceiptSchema.parse(receipts.appSnapshots);
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
   const auditRetention = auditDrainReceiptV3Schema.parse(receipts.auditRetention);
   validateConfig(config);
@@ -205,6 +235,7 @@ export function buildProductionEvidenceManifest(
     ["staging validation", staging.checkedAt],
     ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
+    ["App snapshot validation", appSnapshots.checkedAt],
     ["recovery rehearsal", recovery.completedAt],
     ["audit retention", auditRetention.completedAt]
   ] as const) {
@@ -218,15 +249,20 @@ export function buildProductionEvidenceManifest(
   ) {
     throw new Error("Release receipts do not belong to the exact promoted deployment origin");
   }
+  if (appSnapshots.targetOrigin !== trustedOrigin(config.storageOrigin, "Release Storage origin")) {
+    throw new Error("App snapshot evidence does not belong to the exact protected Storage origin");
+  }
   if (appActionExactlyOnce.sourceCommitSha !== config.commitSha) {
     throw new Error("App action exactly-once proof does not belong to the promoted source commit");
   }
   if (
     staging.organizationId !== config.organizationId ||
     marketplace.organizationId !== config.organizationId ||
+    appSnapshots.organizationId !== config.organizationId ||
     auditRetention.organizationId !== config.organizationId ||
     staging.projectKey !== config.projectKey ||
     marketplace.projectKey !== config.projectKey ||
+    appSnapshots.projectKey !== config.projectKey ||
     auditRetention.projectKey !== config.projectKey
   ) {
     throw new Error("Release receipts do not belong to the exact tenant and project scope");
@@ -284,6 +320,20 @@ export function buildProductionEvidenceManifest(
       "independent_audit_evidence"
     ],
     "Marketplace validation"
+  );
+  requireExactNames(
+    appSnapshots.checks.map((check) => check.name),
+    [
+      "private_bounded_bucket",
+      "authenticated_download_denial",
+      "authenticated_insert_denial",
+      "authenticated_update_denial",
+      "authenticated_delete_denial",
+      "immutable_first_writer",
+      "cross_replica_exact_recovery",
+      "cleanup_verified"
+    ],
+    "App snapshot validation"
   );
   requireExactNames(
     recovery.criticalTables.map((table) => table.table),
@@ -394,6 +444,13 @@ export function buildProductionEvidenceManifest(
       auditHeadHash: marketplace.auditEvidence.headHash,
       artifactDigest: marketplace.app.artifactDigest
     }),
+    appSnapshots: descriptor(appSnapshots, appSnapshots.checkedAt, {
+      storageOrigin: appSnapshots.targetOrigin,
+      checks: appSnapshots.checks.length,
+      snapshotIdentityDigest: appSnapshots.snapshotIdentityDigest,
+      artifactDigest: appSnapshots.artifactDigest,
+      filesDigest: appSnapshots.filesDigest
+    }),
     recovery: descriptor(recovery, recovery.completedAt, {
       sourceIdentityDigest: recovery.sourceIdentityDigest,
       criticalTables: recovery.criticalTables.length,
@@ -414,7 +471,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v2",
+    schemaVersion: "loopgraph-production-promotion-evidence/v3",
     release,
     scope,
     evidence,
@@ -440,6 +497,7 @@ export function verifyProductionEvidenceManifest(input: {
     staging: stagingReceiptSchema.parse(input.receipts.staging),
     appActionExactlyOnce: verifyAppActionExactlyOnceProof(input.receipts.appActionExactlyOnce),
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
+    appSnapshots: appSnapshotReceiptSchema.parse(input.receipts.appSnapshots),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
     auditRetention: auditDrainReceiptV3Schema.parse(input.receipts.auditRetention)
   };
@@ -447,6 +505,7 @@ export function verifyProductionEvidenceManifest(input: {
     ["staging validation", receiptsAtPromotion.staging.checkedAt],
     ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
+    ["App snapshot validation", receiptsAtPromotion.appSnapshots.checkedAt],
     ["recovery rehearsal", receiptsAtPromotion.recovery.completedAt],
     ["audit retention", receiptsAtPromotion.auditRetention.completedAt]
   ] as const) {
@@ -563,6 +622,7 @@ async function main() {
     staging: await readJsonReceipt("LOOPGRAPH_STAGING_RECEIPT_FILE"),
     appActionExactlyOnce: await readJsonReceipt("LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE"),
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
+    appSnapshots: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE"),
     recovery: await readJsonReceipt("LOOPGRAPH_RECOVERY_RECEIPT_FILE"),
     auditRetention: await readJsonReceipt("LOOPGRAPH_AUDIT_RECEIPT_FILE")
   };
@@ -572,6 +632,7 @@ async function main() {
     workflowRunId: required("GITHUB_RUN_ID"),
     workflowRunAttempt: positiveInteger("GITHUB_RUN_ATTEMPT"),
     deploymentOrigin: required("LOOPGRAPH_RELEASE_DEPLOYMENT_URL"),
+    storageOrigin: required("LOOPGRAPH_RELEASE_STORAGE_URL"),
     organizationId: required("LOOPGRAPH_RELEASE_ORGANIZATION_ID"),
     projectKey: required("LOOPGRAPH_RELEASE_PROJECT_KEY"),
     databaseIdentityDigest: required("LOOPGRAPH_RELEASE_DATABASE_IDENTITY_DIGEST"),
