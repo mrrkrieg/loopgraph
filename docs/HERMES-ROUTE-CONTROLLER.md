@@ -83,6 +83,8 @@ Check whether the stored receipt still matches the active Loopgraph catalog:
 loopgraph hermes webhooks activation-status --project .
 ```
 
+Trusted Hermes administration turns can inspect the same plan and status through `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status`. Those tools are read-only and are absent from the isolated webhook-router and lifecycle-router MCP profiles. The mutating activation operation remains CLI/deployment-only so an incoming event can never change its own route or request a controller credential.
+
 `ready=false` is expected while a provider connection or administrator confirmation is pending. It grants no execution authority. Provider writes remain controlled by connector capabilities, action fingerprints, approvals, and the normal Loopgraph promotion gates.
 
 ## Controller implementation requirements

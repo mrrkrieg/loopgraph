@@ -62,6 +62,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Aligned schedules create idempotent, leased measurement jobs; trusted Hermes collectors return evidence-qualified results or durable failures.
 - Complete baseline/current windows evaluate outcomes automatically only after required guardrails arrive.
 - Connection reconciliation checks capabilities, scopes, health freshness, Hermes route manifests, and overdue measurements, then triggers the controller.
+- Connection reconciliation now distinguishes a synchronized local route manifest from an actually applied Hermes route. Provider routing remains blocked when the controller receipt is missing or stale, or when any exact route is still awaiting its connection, provider confirmation, signature verifier, transformer, or subscription. The Event Routing UI shows planned-only, pending, and exact applied route states, while trusted Hermes admin turns can read the same activation plan/status without receiving mutation authority.
 - Outcome evaluation compares baselines and post-loop windows without inventing missing measurements.
 - The value ledger subtracts review, rework, supervision, escalation, and governance cost.
 - Value proof additionally subtracts connector operations, ongoing supervision, and organizational-change time, and remains explicitly unproven without observed evidence and those cost inputs.

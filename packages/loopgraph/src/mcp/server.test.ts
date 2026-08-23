@@ -359,11 +359,13 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_plan" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_sync" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_doctor" }),
-          expect.objectContaining({ name: "loopgraph_hermes_webhooks_test" })
+          expect.objectContaining({ name: "loopgraph_hermes_webhooks_test" }),
+          expect.objectContaining({ name: "loopgraph_hermes_webhooks_prepare" }),
+          expect.objectContaining({ name: "loopgraph_hermes_webhooks_activation_status" })
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(152);
+    expect(listLoopgraphMcpTools()).toHaveLength(154);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
@@ -525,7 +527,9 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_routing_evaluation_run",
       "loopgraph_hermes_webhooks_plan",
       "loopgraph_hermes_webhooks_sync",
-      "loopgraph_hermes_webhooks_test"
+      "loopgraph_hermes_webhooks_test",
+      "loopgraph_hermes_webhooks_prepare",
+      "loopgraph_hermes_webhooks_activation_status"
     ]) {
       await expectMcpToolDenied({
         projectRoot,

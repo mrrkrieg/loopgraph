@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { z } from "zod";
 import {
   HERMES_ROUTE_ACTIVATION_PLAN_SCHEMA_VERSION,
   HERMES_ROUTE_ACTIVATION_RECORD_SCHEMA_VERSION,
@@ -26,6 +27,64 @@ import { getLoopgraphRoot } from "./storage-resolver";
 import type { WorkloadTokenProvider } from "./workload-token-provider";
 
 export const HERMES_ROUTE_ACTIVATION_FILE = "hermes-route-activation.json" as const;
+
+export const hermesRouteActivationPrepareInputSchema = z.object({
+  projectRoot: z.string().optional()
+}).default({});
+
+export const hermesRouteActivationStatusInputSchema = z.object({
+  projectRoot: z.string().optional()
+}).default({});
+
+export const LOOPGRAPH_HERMES_ROUTE_ACTIVATION_TOOL_NAMES = [
+  "loopgraph_hermes_webhooks_prepare",
+  "loopgraph_hermes_webhooks_activation_status"
+] as const;
+
+export type LoopgraphHermesRouteActivationToolName =
+  (typeof LOOPGRAPH_HERMES_ROUTE_ACTIVATION_TOOL_NAMES)[number];
+
+export const loopgraphHermesRouteActivationToolDefinitions = [
+  {
+    name: "loopgraph_hermes_webhooks_prepare",
+    description: "Prepare the exact secret-free Hermes shadow-route controller contract and confirmation digest.",
+    readOnly: true,
+    idempotent: true
+  },
+  {
+    name: "loopgraph_hermes_webhooks_activation_status",
+    description: "Read whether the last Hermes route-controller receipt is current and every provider route is ready.",
+    readOnly: true,
+    idempotent: true
+  }
+] satisfies Array<{
+  name: LoopgraphHermesRouteActivationToolName;
+  description: string;
+  readOnly: boolean;
+  idempotent: boolean;
+}>;
+
+export async function callLoopgraphHermesRouteActivationTool(
+  name: LoopgraphHermesRouteActivationToolName,
+  input: unknown,
+  options: { projectRoot?: string; now?: Date } = {}
+) {
+  if (name === "loopgraph_hermes_webhooks_prepare") {
+    const parsed = hermesRouteActivationPrepareInputSchema.parse(input);
+    return prepareHermesRouteActivation({
+      projectRoot: parsed.projectRoot ?? options.projectRoot,
+      now: options.now
+    });
+  }
+  if (name === "loopgraph_hermes_webhooks_activation_status") {
+    const parsed = hermesRouteActivationStatusInputSchema.parse(input);
+    return getHermesRouteActivationStatus({
+      projectRoot: parsed.projectRoot ?? options.projectRoot,
+      now: options.now
+    });
+  }
+  throw new Error(`Unknown Loopgraph Hermes route activation tool: ${String(name)}`);
+}
 
 export type PrepareHermesRouteActivationInput = {
   projectRoot?: string;
@@ -447,11 +506,66 @@ export function activationRecordPath(projectRoot: string): string {
 
 async function readActivationRecord(projectRoot: string): Promise<HermesRouteActivationRecord | null> {
   try {
-    return hermesRouteActivationRecordSchema.parse(JSON.parse(await readFile(activationRecordPath(projectRoot), "utf8")));
+    const record = hermesRouteActivationRecordSchema.parse(JSON.parse(await readFile(activationRecordPath(projectRoot), "utf8")));
+    verifyStoredActivationRecord(record);
+    return record;
   } catch (error) {
     if (isFileNotFound(error)) return null;
     throw new HermesRouteActivationError("activation_record_invalid", "Stored Hermes route activation receipt is invalid");
   }
+}
+
+function verifyStoredActivationRecord(record: HermesRouteActivationRecord): void {
+  const receipt = record.receipt;
+  const plan = record.plan;
+  if (
+    receipt.projectRootHash !== plan.projectRootHash ||
+    receipt.catalogVersion !== plan.catalogVersion ||
+    receipt.manifestDigest !== plan.manifestDigest ||
+    receipt.planDigest !== plan.planDigest
+  ) {
+    throw new Error("Stored Hermes route receipt changed its activation-plan scope");
+  }
+  const desiredById = new Map(plan.routes.map((route) => [route.routeId, route]));
+  const receivedById = new Map(receipt.routes.map((route) => [route.routeId, route]));
+  if (desiredById.size !== receivedById.size) {
+    throw new Error("Stored Hermes route receipt changed its route set");
+  }
+  for (const [routeId, desired] of desiredById) {
+    const actual = receivedById.get(routeId);
+    if (!actual || actual.routeName !== desired.routeName) {
+      throw new Error(`Stored Hermes route receipt omitted or renamed ${desired.routeName}`);
+    }
+    if (
+      actual.appliedConfigDigest !== desired.configDigest ||
+      actual.profileId !== desired.profileId ||
+      contentHash(actual.skills) !== contentHash(desired.skills) ||
+      contentHash(actual.restrictedMcpTools) !== contentHash(desired.restrictedMcpTools) ||
+      actual.transformerId !== desired.transformation.transformerId
+    ) {
+      throw new Error(`Stored Hermes route receipt changed the exact contract for ${desired.routeName}`);
+    }
+    if (actual.routeUrl) assertSafeRouteUrl(actual.routeUrl);
+    if (actual.state === "shadow" && !actual.signatureVerificationConfigured) {
+      throw new Error(`Stored Hermes route ${desired.routeName} lacks signature verification`);
+    }
+    if (
+      desired.subscription.required &&
+      desired.subscription.connectionIds.length === 0 &&
+      actual.subscriptionState === "active"
+    ) {
+      throw new Error(`Stored Hermes route ${desired.routeName} claims an unbound active subscription`);
+    }
+  }
+  const derivedReady = receipt.routes.every((route) =>
+    route.state === "shadow" &&
+    route.signatureVerificationConfigured &&
+    ["active", "not_applicable"].includes(route.subscriptionState)
+  );
+  if (record.ready !== derivedReady) {
+    throw new Error("Stored Hermes route readiness does not match its route receipts");
+  }
+  assertSecretFree(record, "stored Hermes route activation record");
 }
 
 async function writeActivationRecord(projectRoot: string, record: HermesRouteActivationRecord): Promise<void> {

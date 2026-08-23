@@ -10,6 +10,7 @@ import type {
   RoutingCorrection
 } from "../core";
 import { planHermesWebhookRoutes, type HermesWebhookPlanResult } from "./hermes-webhooks";
+import { getHermesRouteActivationStatus, type HermesRouteActivationStatus } from "./hermes-route-activation";
 import { listLoopgraphLifecycleDeliveries, type LoopgraphLifecycleDelivery } from "./lifecycle-events";
 import {
   loopgraph_events_get,
@@ -221,6 +222,13 @@ export type EventRoutingOperationsReadModel = {
     routeCount: number;
     eventFamilyCount: number;
     warnings: string[];
+    activation: {
+      exists: boolean;
+      current: boolean;
+      ready: boolean;
+      planDigest?: string;
+      routes: HermesRouteActivationStatus["routeStates"];
+    };
     routes: Array<{
       routeName: string;
       sourcePattern: string;
@@ -248,7 +256,8 @@ export async function loadEventRoutingOperations(
     evaluations,
     corrections,
     lifecycleDeliveries,
-    webhookPlan
+    webhookPlan,
+    webhookActivation
   ] = await Promise.all([
     loopgraph_routing_catalog_get(
       { projectRoot },
@@ -274,7 +283,8 @@ export async function loadEventRoutingOperations(
     loopgraph_routing_evaluations_get({ projectRoot, limit }, { store }),
     store.listRoutingCorrections(),
     listLoopgraphLifecycleDeliveries(projectRoot),
-    safeWebhookPlan(projectRoot, input.now)
+    safeWebhookPlan(projectRoot, input.now),
+    safeWebhookActivation(projectRoot, input.now)
   ]);
 
   const catalogByLoopId = new Map(catalog.routingCards.map((card) => [card.loopId, card]));
@@ -356,7 +366,7 @@ export async function loadEventRoutingOperations(
       failedEvaluationCount,
       catalogLoopCount: routingCatalog.length,
       hermesRouteCount: webhookPlan.summary.routeCount,
-      warningCount: webhookPlan.warnings.length
+      warningCount: webhookPlan.warnings.length + webhookActivation.warnings.length
     },
     rows,
     problemInbox,
@@ -364,7 +374,14 @@ export async function loadEventRoutingOperations(
     webhookHealth: {
       routeCount: webhookPlan.summary.routeCount,
       eventFamilyCount: webhookPlan.summary.eventFamilyCount,
-      warnings: webhookPlan.warnings,
+      warnings: [...webhookPlan.warnings, ...webhookActivation.warnings],
+      activation: {
+        exists: webhookActivation.exists,
+        current: webhookActivation.current,
+        ready: webhookActivation.ready,
+        ...(webhookActivation.planDigest ? { planDigest: webhookActivation.planDigest } : {}),
+        routes: webhookActivation.routeStates
+      },
       routes: webhookPlan.routes.map((route) => ({
         routeName: route.routeName,
         sourcePattern: route.sourcePattern,
@@ -797,6 +814,24 @@ async function safeWebhookPlan(projectRoot: string, now?: Date): Promise<HermesW
       routes: [],
       warnings: ["Hermes webhook route plan is unavailable for the current routing catalog."],
       nextActions: []
+    };
+  }
+}
+
+async function safeWebhookActivation(projectRoot: string, now?: Date): Promise<HermesRouteActivationStatus> {
+  try {
+    return await getHermesRouteActivationStatus({ projectRoot, now });
+  } catch {
+    return {
+      projectRoot,
+      recordPath: path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
+      checkedAt: (now ?? new Date()).toISOString(),
+      exists: true,
+      current: false,
+      ready: false,
+      routeStates: [],
+      warnings: ["The stored Hermes route activation receipt is invalid."],
+      nextActions: ["Apply the current confirmed route plan again through the Hermes Route Controller."]
     };
   }
 }

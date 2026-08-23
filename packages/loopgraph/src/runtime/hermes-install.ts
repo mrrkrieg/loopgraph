@@ -15,6 +15,8 @@ import {
   HERMES_DESIGN_TASK_SCHEMA_VERSION,
   HERMES_AGENT_INSTANCE_SCHEMA_VERSION,
   HERMES_EXECUTION_EVENT_SCHEMA_VERSION,
+  HERMES_ROUTE_ACTIVATION_PLAN_SCHEMA_VERSION,
+  HERMES_ROUTE_CONTROLLER_RECEIPT_SCHEMA_VERSION,
   LOOP_CONTROLLER_POLICY_SCHEMA_VERSION,
   LOOP_CONTROLLER_RUN_SCHEMA_VERSION,
   LOOP_OPPORTUNITY_SCHEMA_VERSION,
@@ -51,6 +53,7 @@ import { LOOPGRAPH_DESIGN_TOOL_NAMES } from "./design-tools";
 import { LOOPGRAPH_DISCOVERY_TOOL_NAMES } from "./discovery-tools";
 import { LOOPGRAPH_HERMES_DESIGN_TOOL_NAMES } from "./hermes-design-tools";
 import { LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES } from "./hermes-webhooks";
+import { LOOPGRAPH_HERMES_ROUTE_ACTIVATION_TOOL_NAMES } from "./hermes-route-activation";
 import { LOOPGRAPH_HERMES_OPERATIONS_TOOL_NAMES } from "./hermes-operations-tools";
 import { LOOPGRAPH_OPPORTUNITY_TOOL_NAMES } from "./loop-opportunity-tools";
 import { LOOPGRAPH_ROUTE_JOB_WORKER_TOOL_NAMES } from "./route-job-worker-tools";
@@ -67,10 +70,10 @@ import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 import { LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 
-export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha11" as const;
+export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha12" as const;
 export const HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION = "hermes-loopgraph-activation/v1alpha1" as const;
-export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.10.0" as const;
-export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha8" as const;
+export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.11.0" as const;
+export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha9" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha8" as const;
 export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha1" as const;
 export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
@@ -102,7 +105,9 @@ export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   observedOutcome: OBSERVED_OUTCOME_SCHEMA_VERSION,
   valueLedgerEntry: VALUE_LEDGER_ENTRY_SCHEMA_VERSION,
   loopControllerPolicy: LOOP_CONTROLLER_POLICY_SCHEMA_VERSION,
-  loopControllerRun: LOOP_CONTROLLER_RUN_SCHEMA_VERSION
+  loopControllerRun: LOOP_CONTROLLER_RUN_SCHEMA_VERSION,
+  hermesRouteActivationPlan: HERMES_ROUTE_ACTIVATION_PLAN_SCHEMA_VERSION,
+  hermesRouteControllerReceipt: HERMES_ROUTE_CONTROLLER_RECEIPT_SCHEMA_VERSION
 } as const;
 export const HERMES_LOOPGRAPH_MCP_TOOL_NAMES = [
   ...LOOPGRAPH_WORKSPACE_TOOL_NAMES,
@@ -123,6 +128,7 @@ export const HERMES_LOOPGRAPH_MCP_TOOL_NAMES = [
   ...LOOPGRAPH_ROUTING_OPS_TOOL_NAMES,
   ...LOOPGRAPH_ROUTING_EVALUATION_TOOL_NAMES,
   ...LOOPGRAPH_HERMES_WEBHOOK_TOOL_NAMES,
+  ...LOOPGRAPH_HERMES_ROUTE_ACTIVATION_TOOL_NAMES,
   ...LOOPGRAPH_HERMES_OPERATIONS_TOOL_NAMES,
   ...LOOPGRAPH_APP_TOOL_NAMES
 ] as const;
@@ -1126,6 +1132,9 @@ Use this skill when the user says "start", "start Loopgraph", "/loopgraph start"
 24. Call \`loopgraph_hermes_webhooks_sync\` only after the user explicitly asks to write or refresh the project-local Hermes route manifest; it writes non-secret route metadata only.
 25. Call \`loopgraph_hermes_webhooks_doctor\` after sync or when the user asks whether Hermes route metadata is current.
 26. Call \`loopgraph_hermes_webhooks_test\` with a synthetic or redacted normalized fixture when the user asks to test whether a provider event would terminate at Hermes and route correctly in local shadow mode.
+26a. Call \`loopgraph_hermes_webhooks_prepare\` only after the route manifest is current and fixture rehearsal passes. Explain the exact profile, restricted tools, transformer, connections, shadow-only policy, and confirmation digest. This read-only tool does not activate a route.
+26b. Call \`loopgraph_hermes_webhooks_activation_status\` before claiming provider event intake is ready or before recommending App promotion. A local manifest without a current Hermes controller receipt is not an active route.
+26c. Route activation itself remains an accountable CLI/deployment operation using a projected workload token. Never request the token in chat, expose it through MCP, or invoke activation from a webhook-router or lifecycle-router turn.
 27. Call \`loopgraph_graph_get\` after materialization and show the user the Hermes Brain -> Department -> Loop graph projection; tell the user they can run \`loopgraph start --project ${projectRoot}\` to operate the local supervisor and graph together; call \`loopgraph_loops_list\` when the user wants the registered loop inventory.
 28. Use \`loopgraph_runs_get\` when the user wants local run history, a review-ready run summary, or previously prepared action fingerprints.
 29. Before claiming a loop can run locally, call \`loopgraph_loops_validate\` for that registered \`loopId\`.

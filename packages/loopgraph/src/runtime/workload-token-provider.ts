@@ -17,7 +17,8 @@ export class ProjectedFileWorkloadTokenProvider implements WorkloadTokenProvider
     }
   }
 
-  async getToken(): Promise<string> {
+  async getToken(_input?: WorkloadTokenRequest): Promise<string> {
+    void _input;
     let handle;
     try {
       handle = await open(this.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);

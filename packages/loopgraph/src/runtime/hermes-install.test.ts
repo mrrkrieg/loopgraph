@@ -281,6 +281,9 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_hermes_webhooks_sync");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_doctor");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_test");
+    expect(designSkill).toContain("loopgraph_hermes_webhooks_prepare");
+    expect(designSkill).toContain("loopgraph_hermes_webhooks_activation_status");
+    expect(designSkill).toContain("Never request the token in chat");
     expect(designSkill).toContain("only after the user explicitly asks to write or refresh");
     expect(designSkill).toContain("Do not point provider webhooks directly at Loopgraph");
     expect(designSkill).toContain("loopgraph_loops_list");

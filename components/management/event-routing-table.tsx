@@ -580,17 +580,27 @@ function WebhookHealth({ model }: { model: EventRoutingOperationsReadModel }) {
   return (
     <div className="rounded-lg border border-line bg-white p-4">
       <div className="font-semibold">Hermes webhook routes</div>
-      <p className="mt-1 text-xs leading-5 text-ink/55">Non-secret route plan derived from materialized routing contracts.</p>
+      <p className="mt-1 text-xs leading-5 text-ink/55">Planned contracts plus the last exact, secret-free Hermes controller receipt.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink/55">
+        <StatusPill>{model.webhookHealth.activation.ready ? "Hermes ready" : model.webhookHealth.activation.current ? "Hermes pending" : "Not applied"}</StatusPill>
+        {model.webhookHealth.activation.planDigest ? <span>plan {model.webhookHealth.activation.planDigest}</span> : null}
+      </div>
       <div className="mt-3 space-y-2">
         {model.webhookHealth.routes.length === 0 ? (
           <p className="text-sm text-ink/55">No Hermes route families are required yet.</p>
-        ) : model.webhookHealth.routes.slice(0, 5).map((route) => (
-          <div key={route.routeName} className="rounded-md border border-line bg-paper p-3 text-sm">
-            <div className="font-medium">{route.routeName}</div>
-            <div className="mt-1 text-xs text-ink/55">{route.sourcePattern} · deliver {route.deliveryMode}</div>
-            <div className="mt-2 text-[11px] leading-5 text-ink/45">{route.eventTypePatterns.join(", ")}</div>
-          </div>
-        ))}
+        ) : model.webhookHealth.routes.slice(0, 5).map((route) => {
+          const applied = model.webhookHealth.activation.routes.find((candidate) => candidate.routeName === route.routeName);
+          return (
+            <div key={route.routeName} className="rounded-md border border-line bg-paper p-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-medium">{route.routeName}</div>
+                <StatusPill>{applied ? `${applied.state} · ${applied.subscriptionState}` : "planned only"}</StatusPill>
+              </div>
+              <div className="mt-1 text-xs text-ink/55">{route.sourcePattern} · deliver {route.deliveryMode}</div>
+              <div className="mt-2 text-[11px] leading-5 text-ink/45">{route.eventTypePatterns.join(", ")}</div>
+            </div>
+          );
+        })}
         {model.webhookHealth.warnings.slice(0, 3).map((warning) => (
           <div key={warning} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
             {warning}

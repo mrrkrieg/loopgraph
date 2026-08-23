@@ -128,6 +128,12 @@ describe("Hermes route activation", () => {
     }
     const statusResult = await getHermesRouteActivationStatus({ projectRoot, now });
     expect(statusResult).toMatchObject({ exists: true, current: true, ready: true });
+
+    const tampered = JSON.parse(serialized) as { receipt: { routes: Array<{ restrictedMcpTools: string[] }> } };
+    tampered.receipt.routes[0]!.restrictedMcpTools = ["loopgraph_graph_get"];
+    await writeFile(activationRecordPath(projectRoot), `${JSON.stringify(tampered, null, 2)}\n`);
+    await expect(getHermesRouteActivationStatus({ projectRoot, now }))
+      .rejects.toMatchObject({ code: "activation_record_invalid" });
   });
 
   it("refuses stale confirmation and receipts that weaken the requested route contract", async () => {

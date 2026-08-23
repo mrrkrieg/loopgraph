@@ -198,6 +198,8 @@ npm run loopgraph -- hermes webhooks activation-status --project .
 
 The first command returns the digest to confirm. Activation accepts only a short-lived workload token from an absolute, user-only file. Hermes retains provider credentials and signing material; Loopgraph persists only a secret-free receipt proving the exact profile, skill, tool boundary, transformer, signature state, and provider subscription state. The v1 protocol can add or update shadow routes but cannot delete routes or enable live execution. See [Hermes Route Controller contract](./HERMES-ROUTE-CONTROLLER.md).
 
+Hermes can call the read-only `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status` admin tools to explain this state. It never receives the mutating controller call or token. Connection reconciliation and the Event Routing screen treat a local manifest without a current controller receipt as planned-only, not ready event intake.
+
 ## 8. Rehearse an event before live webhooks
 
 Use a generated fixture or a redacted normalized event:
