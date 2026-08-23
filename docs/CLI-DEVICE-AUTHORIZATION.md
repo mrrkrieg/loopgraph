@@ -144,4 +144,5 @@ affected by this human-session control.
 Before production, validate device-code issuance saturation, concurrent polling,
 refresh-token replay and family revocation, cross-replica rotation, clock skew, membership removal,
 single/user/organization revocation, MFA enforcement, and audit-retention export
-against the real staging database.
+against the real staging database. The executable human-session portion is
+`npm run validate:cli-session-staging`; see [Hosted CLI session staging gate](./HOSTED-CLI-SESSION-STAGING-GATE.md).

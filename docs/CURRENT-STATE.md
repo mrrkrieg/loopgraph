@@ -153,6 +153,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   digests. Reuse of any replaced generation locks and revokes the current session family, records one
   digest-free tenant audit event, appears in the safe admin inventory, and removes the rejected local
   profile. Random invalid tokens remain indistinguishable and generate no audit amplification.
+- Human CLI deployment behavior now has an executable two-replica staging drill. It proves the fixed
+  device-issuance ceiling, polling slowdown, two cross-replica refresh rotations, stale metadata
+  denial, suspended membership, pre-revoked session denial, a bounded shared request-rate window,
+  prior-generation family revocation, and the exact accepted request in the verified audit chain.
+  Returned credentials remain process-local; the receipt is aggregate and secret-free.
 - Production promotion now compiles staging readiness, hosted-marketplace isolation, snapshot-consistent recovery, and independently acknowledged audit-retention receipts into one content-bound manifest. The workflow attests that exact manifest with GitHub OIDC, reconstructs it in the protected production job, verifies the upstream digest and provenance, and only then promotes the same prebuilt deployment. Receipt freshness is rechecked against the actual promotion time; deployment origin, tenant/project, database identity, marketplace artifact, exact audit sequence/hash checkpoints, acknowledgement digest, and restored-table fingerprints all fail closed.
 - Hosted App snapshot activation now has a dedicated protected staging gate. It proves the real
   bucket is private and bounded, exercises authenticated read/insert/update/delete denial, replays
@@ -274,7 +279,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    throttled, fail-closed JWKS refresh. Refresh-token reuse now revokes its current family and enters
    the audit chain atomically. Durable workload grant revocation, cross-tenant denial, request replay
    rejection, exact signed staging, and audit presence are already part of the executable marketplace
-   gate; only live provider/replica receipts can prove deployment propagation and concurrent refresh.
+   gate. The CLI-session matrix is now an executable isolated staging drill; the environment-specific
+   receipt, live issuer propagation, MFA administrator controls, and release revocation proof remain
+   external.
 7. Configure the protected App evidence-health staging workload identities and run
    `validate:app-evidence-health-staging` against each deployed environment. The executable gate is
    present; only the first deployment-specific receipt remains external. The gate now runs the
@@ -314,3 +321,4 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Company Blueprints](./COMPANY-BLUEPRINTS.md)
 - [Hosted marketplace access for Hermes and CLI](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md)
 - [Interactive CLI device authorization](./CLI-DEVICE-AUTHORIZATION.md)
+- [Hosted CLI session staging gate](./HOSTED-CLI-SESSION-STAGING-GATE.md)

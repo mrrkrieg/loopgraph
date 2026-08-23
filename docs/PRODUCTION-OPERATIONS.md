@@ -24,6 +24,11 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
 - `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging, marketplace, and App evidence-health receipts and proves all three exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
+- `npm run validate:cli-session-staging` is the isolated human-session drill. Through two replica
+  origins it saturates device issuance and one small request window, proves polling slowdown,
+  cross-replica refresh rotation, refresh-family replay revocation, stale-clock denial, suspended
+  membership, explicit session revocation, and exact audit presence. It consumes only pre-provisioned
+  disposable sessions and never serializes a returned token.
 - `npm run validate:app-snapshots-staging` is the detached-App archive gate. It proves the private
   bucket contract, authenticated client denial for read/insert/update/delete, first-writer
   immutability, exact recovery through a second replica root, and verified cleanup. The service-role
