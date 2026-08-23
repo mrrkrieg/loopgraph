@@ -7,11 +7,11 @@ sessions at different authentication assurance levels, and one disposable CLI se
 The gate proves all of the following against the deployed application and shared database:
 
 1. an authenticated administrator at AAL1 receives `step_up_required` when attempting revocation;
-2. the disposable CLI session remains revocable after that denied request;
-3. an administrator at AAL2 revokes exactly that one session;
-4. the safe inventory immediately projects the target as revoked;
-5. the target access token is denied at the marketplace boundary; and
-6. the verified tenant audit chain contains the exact correlation ID, target, scope, revoked count,
+2. an administrator at AAL2 still revokes exactly that one session, proving the denied request did
+   not mutate it;
+3. the safe inventory immediately projects the target as revoked;
+4. the target access token is denied at the marketplace boundary; and
+5. the verified tenant audit chain contains the exact correlation ID, target, scope, revoked count,
    and fixed synthetic-reason digest committed by the revocation transaction.
 
 ## Isolated staging preparation
@@ -58,7 +58,7 @@ provider data, or performs provider writes. Do not run it against production or 
 session.
 
 The `hosted-cli-admin-staging-validation/v1` receipt contains the deployment origin, tenant/project,
-six named checks, aggregate controls, the revoked count, and the audit correlation/checkpoint. It
+five named checks, aggregate controls, the revoked count, and the audit correlation/checkpoint. It
 excludes browser cookies, Supabase tokens, CLI tokens, session and user identities, and reason text.
 The protected release workflow must validate and retain this receipt before it can become production
 promotion evidence.

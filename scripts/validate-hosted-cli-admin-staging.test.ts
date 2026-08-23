@@ -136,7 +136,6 @@ describe("hosted CLI administrator staging gate", () => {
     });
     expect(receipt.checks.map((check) => check.name)).toEqual([
       "aal1_step_up_denial",
-      "pre_revocation_inventory",
       "aal2_exact_session_revocation",
       "post_revocation_inventory",
       "revoked_cli_access_denial",

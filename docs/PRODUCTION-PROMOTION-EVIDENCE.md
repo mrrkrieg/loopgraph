@@ -49,6 +49,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | `app-action-exactly-once-proof/v1` | Exact source commit, real Broker prepare/commit/idempotency/reconcile code, a simulated lost App terminal write, receipt-only recovery, one replay, one provider-fixture invocation, and an explicit no-network/no-credential boundary |
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
 | `hosted-cli-session-staging-validation/v1` | Exact primary deployment, distinct replica, tenant/project, bounded device issuance and polling, cross-replica refresh rotation, stale-request denial, suspended/revoked-session denial, shared rate saturation, refresh replay family revocation, and the pinned audit checkpoint containing the accepted CLI request |
+| `hosted-cli-admin-staging-validation/v1` | Exact deployment and tenant/project, AAL1 step-up denial, AAL2 exact-session revocation, bounded post-revocation inventory, revoked-token denial, and the pinned atomic revocation audit checkpoint and correlation ID |
 | `hosted-app-evidence-health-staging-validation/v3` | Exact deployment and tenant/project, separate schedule/observability workload boundaries, unauthenticated and cross-tenant denial, replay rejection, fresh aggregate-only App evidence status, complete fleet-count invariants, exact protected-metric parity, all six fixed classifier outcomes, and a pinned audit checkpoint containing the accepted schedule request |
 | `hosted-app-snapshot-fence-probe/v1` | Pinned Storage origin and organization scope, real registry insert/update/delete plus private Storage upload/non-upserting replacement/delete generation advances, verified authority/generation cleanup, and an aggregate-only status surface |
 | `hosted-learning-entity-staging-validation/v1` | Pinned Supabase origin and organization scope, one-winner distributed measurement claims, stale-lease rejection, cross-replica finalization, immutable metric/outcome/value conflicts, cross-replica entity visibility, single-owner provider aliases, and nonce-authorized exact cleanup |
@@ -56,11 +57,11 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | `hosted-app-snapshot-restore-rehearsal/v1` | Exact validated source and separately reviewed restore origins, tenant/project, source export, first-writer restore, clean-target exact load, source preservation during target cleanup, exact probe cleanup, and the same artifact/file payload exercised by the isolation gate |
 | `hosted-app-snapshot-reconciliation/v3` | Exact validated Storage origin and tenant/project scope digest, live service-only attestation of the full unconditional row-level trigger event masks plus independently pinned function bodies, owners, search paths, and execute capabilities, fixed control set, explicit empty-inventory policy, two identical full registry-plus-Storage passes within a bounded stability window, the same trigger-maintained mutation generation before/after and across those passes, complete current detached-installation scan, exact signed-archive verification, reverse Storage inventory, zero malformed objects, and an independently pinned opaque digest for intentionally retained unreferenced archives |
 | `backup-restore-rehearsal/v2` | Protected source database identity digest, distinct disposable target, matching PostgreSQL versions, exact row-count/SHA-256 fingerprints for every application table, restored audit integrity, and evidence-family counts |
-| `audit-drain/v5` | Exact staging origin and tenant, retained audit head, exact staging, marketplace, App evidence-health, and CLI-session sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
+| `audit-drain/v6` | Exact staging origin and tenant, retained audit head, exact staging, marketplace, App evidence-health, CLI-session, and CLI-administrator sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
 
 All receipt timestamps must fit the configured release window both when the manifest is built and
 when production promotion is approved. The audit-retention receipt must prove the exact sequence and
-hash of the staging, marketplace, App evidence-health, and CLI-session audit checkpoints, and all four checkpoints must fall inside the
+hash of the staging, marketplace, App evidence-health, CLI-session, and CLI-administrator audit checkpoints, and all five checkpoints must fall inside the
 externally acknowledged retained range. The recovery source must match the database identity
 approved inside the protected recovery environment. A missing, stale, duplicated, cross-tenant, or
 cross-deployment receipt fails the compiler.
@@ -80,7 +81,7 @@ environment, then against independently configured release-evidence/production v
 therefore cannot silently bless newly orphaned archives. Malformed Storage objects always fail and
 are never covered by the retention digest. No release receipt contains object keys or archive paths.
 
-The resulting `loopgraph-production-promotion-evidence/v13` manifest records the repository, commit,
+The resulting `loopgraph-production-promotion-evidence/v14` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
 marketplace release, active mutation-probe and learning/entity probe scopes, approved unreferenced-snapshot inventory digest,
 trusted retention key ID and
@@ -90,7 +91,7 @@ verifies the receiver acknowledgement against that protected Ed25519 trust ancho
 contain workload tokens, database URLs, passwords, provider payloads, or private signing material.
 
 GitHub's provenance action attests the exact manifest file with workflow OIDC. The production job
-downloads the current run's immutable artifacts, rebuilds and compares the manifest from the twelve
+downloads the current run's immutable artifacts, rebuilds and compares the manifest from the thirteen
 receipts, checks the upstream evidence-set digest, verifies the GitHub attestation, and only
 then calls `vercel promote` for the same deployment URL.
 

@@ -61,7 +61,6 @@ export type HostedCliAdminStagingReceipt = {
   checks: Array<{
     name:
       | "aal1_step_up_denial"
-      | "pre_revocation_inventory"
       | "aal2_exact_session_revocation"
       | "post_revocation_inventory"
       | "revoked_cli_access_denial"
@@ -114,22 +113,6 @@ export async function validateHostedCliAdminStaging(
     detail: "An authenticated administrator without MFA step-up cannot revoke a CLI session."
   });
 
-  const before = await readInventory({
-    baseUrl,
-    fetcher,
-    cookie: credentials.aal2AdminCookie
-  });
-  const beforeTarget = findTargetSession(before.body, config.targetSessionId);
-  if (beforeTarget.status !== "active" && beforeTarget.status !== "refresh_required") {
-    throw new Error("CLI administrator staging target was not revocable after the AAL1 denial");
-  }
-  checks.push({
-    name: "pre_revocation_inventory",
-    ok: true,
-    status: before.status,
-    detail: "The bounded administrator inventory confirms the disposable target remained revocable."
-  });
-
   const revoked = await revokeSession({
     baseUrl,
     fetcher,
@@ -138,6 +121,9 @@ export async function validateHostedCliAdminStaging(
   });
   expectStatus(revoked.status, [200], "AAL2 CLI administrator revocation");
   const revocation = parseRevocationReceipt(revoked.body);
+  if (revocation.revokedCount !== 1) {
+    throw new Error("CLI administrator staging AAL1 denial did not preserve the exact revocable target");
+  }
   checks.push({
     name: "aal2_exact_session_revocation",
     ok: true,

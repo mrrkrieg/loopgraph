@@ -160,13 +160,13 @@ const releaseAuditCheckpointSetV4Schema = z.array(releaseAuditCheckpointV4Schema
     }
   });
 
-export const releaseAuditCheckpointSchema = z.object({
+const releaseAuditCheckpointV5Schema = z.object({
   name: z.enum(["staging", "marketplace", "app_evidence_health", "cli_sessions"]),
   sequence: safeInteger,
   hash: hashSchema
 }).strict();
 
-export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSchema)
+const releaseAuditCheckpointSetV5Schema = z.array(releaseAuditCheckpointV5Schema)
   .length(4)
   .superRefine((checkpoints, context) => {
     const names = checkpoints.map((checkpoint) => checkpoint.name);
@@ -180,6 +180,37 @@ export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSch
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Release audit checkpoints must contain staging, marketplace, App evidence health, and CLI sessions exactly once"
+      });
+    }
+  });
+
+export const releaseAuditCheckpointSchema = z.object({
+  name: z.enum([
+    "staging",
+    "marketplace",
+    "app_evidence_health",
+    "cli_sessions",
+    "cli_admin"
+  ]),
+  sequence: safeInteger,
+  hash: hashSchema
+}).strict();
+
+export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSchema)
+  .length(5)
+  .superRefine((checkpoints, context) => {
+    const names = checkpoints.map((checkpoint) => checkpoint.name);
+    if (
+      new Set(names).size !== names.length ||
+      !names.includes("staging") ||
+      !names.includes("marketplace") ||
+      !names.includes("app_evidence_health") ||
+      !names.includes("cli_sessions") ||
+      !names.includes("cli_admin")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Release audit checkpoints must contain staging, marketplace, App evidence health, CLI sessions, and CLI administrator MFA exactly once"
       });
     }
   });
@@ -204,6 +235,12 @@ export const auditDrainReceiptV4Schema = z.object({
 export const auditDrainReceiptV5Schema = z.object({
   schemaVersion: z.literal("audit-drain/v5"),
   ...auditDrainReceiptFields,
+  verifiedReleaseCheckpoints: releaseAuditCheckpointSetV5Schema
+}).strict();
+
+export const auditDrainReceiptV6Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v6"),
+  ...auditDrainReceiptFields,
   verifiedReleaseCheckpoints: releaseAuditCheckpointSetSchema
 }).strict();
 
@@ -211,7 +248,8 @@ export const auditDrainReceiptSchema = z.discriminatedUnion("schemaVersion", [
   auditDrainReceiptV2Schema,
   auditDrainReceiptV3Schema,
   auditDrainReceiptV4Schema,
-  auditDrainReceiptV5Schema
+  auditDrainReceiptV5Schema,
+  auditDrainReceiptV6Schema
 ]);
 
 export type AuditEvent = z.infer<typeof auditEventSchema>;

@@ -42,6 +42,7 @@ describe("staging release workflow contract", () => {
     expect(jobs.marketplace.environment).toBe("marketplace-staging");
     expect(jobs["app-evidence-health"].environment).toBe("app-evidence-health-staging");
     expect(jobs["cli-sessions"].environment).toBe("cli-session-staging");
+    expect(jobs["cli-admin"].environment).toBe("cli-admin-staging");
     expect(jobs["app-snapshots"].environment).toBe("app-snapshot-staging");
     expect(jobs["learning-entities"].environment).toBe("learning-entity-staging");
     expect(jobs["app-snapshot-recovery"].environment).toBe("app-snapshot-recovery");
@@ -56,6 +57,7 @@ describe("staging release workflow contract", () => {
       "app-snapshot-recovery",
       "app-snapshots",
       "audit-retention",
+      "cli-admin",
       "cli-sessions",
       "learning-entities",
       "marketplace",
@@ -100,6 +102,7 @@ describe("staging release workflow contract", () => {
     for (const jobName of [
       "marketplace",
       "app-evidence-health",
+      "cli-admin",
       "cli-sessions",
       "learning-entities",
       "app-snapshots",
@@ -114,6 +117,7 @@ describe("staging release workflow contract", () => {
     expect(source).toContain("npm run --silent validate:staging > staging-validation-receipt.json");
     expect(source).toContain("npm run --silent validate:app-evidence-health-staging > app-evidence-health-staging-receipt.json");
     expect(source).toContain("npm run --silent validate:cli-session-staging > cli-session-staging-receipt.json");
+    expect(source).toContain("npm run --silent validate:cli-admin-staging > cli-admin-staging-receipt.json");
     expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
     expect(source).toContain("npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json");
     expect(source).toContain("npm run --silent probe:app-snapshot-fence > app-snapshot-fence-probe-receipt.json");
@@ -133,10 +137,13 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE:
         "${{ github.workspace }}/release-checkpoints/app-evidence-health-staging-receipt.json",
       LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE:
-        "${{ github.workspace }}/release-checkpoints/cli-session-staging-receipt.json"
+        "${{ github.workspace }}/release-checkpoints/cli-session-staging-receipt.json",
+      LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE:
+        "${{ github.workspace }}/release-checkpoints/cli-admin-staging-receipt.json"
     });
     expect(asNeeds(jobs["audit-retention"].needs)).toEqual([
       "app-evidence-health",
+      "cli-admin",
       "cli-sessions",
       "marketplace",
       "staging"
@@ -199,6 +206,32 @@ describe("staging release workflow contract", () => {
     });
     expect(source).toContain('value.schemaVersion!=="hosted-cli-session-staging-validation/v1"');
     expect(source).toContain("value.controls?.disposableSessionRevoked!==true");
+    const cliAdminStep = (jobs["cli-admin"].steps ?? []).find(
+      (step) => step.run?.includes("validate:cli-admin-staging")
+    );
+    expect(asNeeds(jobs["cli-admin"].needs)).toEqual(["marketplace", "staging"]);
+    expect(cliAdminStep?.env).toEqual({
+      LOOPGRAPH_STAGING_CLI_ADMIN_URL: "${{ needs.staging.outputs.deployment_url }}",
+      LOOPGRAPH_STAGING_CLI_ADMIN_ORGANIZATION_ID:
+        "${{ needs.marketplace.outputs.organization_id }}",
+      LOOPGRAPH_STAGING_CLI_ADMIN_PROJECT_KEY:
+        "${{ needs.marketplace.outputs.project_key }}",
+      LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_SESSION_ID:
+        "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_SESSION_ID }}",
+      LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}",
+      LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY:
+        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY }}",
+      LOOPGRAPH_STAGING_CLI_ADMIN_AAL1_SESSION_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_AAL1_SESSION_FILE }}",
+      LOOPGRAPH_STAGING_CLI_ADMIN_AAL2_SESSION_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_AAL2_SESSION_FILE }}",
+      LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_ACCESS_TOKEN_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_ACCESS_TOKEN_FILE }}",
+      LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+    });
+    expect(source).toContain('value.schemaVersion!=="hosted-cli-admin-staging-validation/v1"');
+    expect(source).toContain("value.revocation?.correlationId!==audit?.correlationId");
     const snapshotValidationStep = (jobs["app-snapshots"].steps ?? []).find(
       (step) => step.run?.includes("validate:app-snapshots-staging")
     );
@@ -298,8 +331,10 @@ describe("staging release workflow contract", () => {
     expect(source.match(/LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_CLI_SESSION_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_CLI_ADMIN_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/name: app-evidence-health-staging-evidence/g)).toHaveLength(4);
     expect(source.match(/name: cli-session-staging-evidence/g)).toHaveLength(4);
+    expect(source.match(/name: cli-admin-staging-evidence/g)).toHaveLength(4);
     expect(source.match(/name: learning-entity-staging-evidence/g)).toHaveLength(3);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE/g)).toHaveLength(2);

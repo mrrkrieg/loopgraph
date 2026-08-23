@@ -20,7 +20,7 @@ const projectKey = "main";
 const zeroHash = "0".repeat(64);
 
 describe("audit retention protocol", () => {
-  it("keeps historical v4 receipts readable while v5 requires the CLI checkpoint", () => {
+  it("keeps historical v4/v5 receipts readable while v6 requires the CLI administrator checkpoint", () => {
     const fields = {
       organizationId,
       projectKey,
@@ -59,6 +59,23 @@ describe("audit retention protocol", () => {
         { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) }
       ]
     }).schemaVersion).toBe("audit-drain/v5");
+    expect(() => auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v6",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) }
+      ]
+    })).toThrow();
+    expect(auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v6",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) },
+        { name: "cli_admin", sequence: 4, hash: "4".repeat(64) }
+      ]
+    }).schemaVersion).toBe("audit-drain/v6");
   });
 
   it("validates tenant event links against one verified export checkpoint", () => {

@@ -61,7 +61,8 @@ describe("workload-authenticated audit retention drain", () => {
         { name: "staging", sequence: 2, hash: second.event_hash },
         { name: "marketplace", sequence: 3, hash: third.event_hash },
         { name: "app_evidence_health", sequence: 3, hash: third.event_hash },
-        { name: "cli_sessions", sequence: 3, hash: third.event_hash }
+        { name: "cli_sessions", sequence: 3, hash: third.event_hash },
+        { name: "cli_admin", sequence: 3, hash: third.event_hash }
       ]
     }, {
       source: async () => "source.token.signature",
@@ -73,7 +74,7 @@ describe("workload-authenticated audit retention drain", () => {
     });
 
     expect(receipt).toMatchObject({
-      schemaVersion: "audit-drain/v5",
+      schemaVersion: "audit-drain/v6",
       fromSequence: 0,
       throughSequence: 3,
       eventCount: 3,
@@ -83,7 +84,8 @@ describe("workload-authenticated audit retention drain", () => {
         { name: "staging", sequence: 2, hash: second.event_hash },
         { name: "marketplace", sequence: 3, hash: third.event_hash },
         { name: "app_evidence_health", sequence: 3, hash: third.event_hash },
-        { name: "cli_sessions", sequence: 3, hash: third.event_hash }
+        { name: "cli_sessions", sequence: 3, hash: third.event_hash },
+        { name: "cli_admin", sequence: 3, hash: third.event_hash }
       ]
     });
     expect(receivedBatches[1]?.previousReceiptDigest).toBe(
@@ -115,7 +117,8 @@ describe("workload-authenticated audit retention drain", () => {
         { name: "staging", sequence: 1, hash: broken.event_hash },
         { name: "marketplace", sequence: 1, hash: broken.event_hash },
         { name: "app_evidence_health", sequence: 1, hash: broken.event_hash },
-        { name: "cli_sessions", sequence: 1, hash: broken.event_hash }
+        { name: "cli_sessions", sequence: 1, hash: broken.event_hash },
+        { name: "cli_admin", sequence: 1, hash: broken.event_hash }
       ]
     }, {
       source: async () => "source.token.signature",
@@ -159,7 +162,8 @@ describe("workload-authenticated audit retention drain", () => {
         { name: "staging", sequence: 1, hash: first.event_hash },
         { name: "marketplace", sequence: 2, hash: second.event_hash },
         { name: "app_evidence_health", sequence: 2, hash: second.event_hash },
-        { name: "cli_sessions", sequence: 2, hash: second.event_hash }
+        { name: "cli_sessions", sequence: 2, hash: second.event_hash },
+        { name: "cli_admin", sequence: 2, hash: second.event_hash }
       ]
     }, {
       source: async () => "source.token.signature",
@@ -201,7 +205,8 @@ describe("workload-authenticated audit retention drain", () => {
         { name: "staging", sequence: 1, hash: "f".repeat(64) },
         { name: "marketplace", sequence: 2, hash: second.event_hash },
         { name: "app_evidence_health", sequence: 2, hash: second.event_hash },
-        { name: "cli_sessions", sequence: 2, hash: second.event_hash }
+        { name: "cli_sessions", sequence: 2, hash: second.event_hash },
+        { name: "cli_admin", sequence: 2, hash: second.event_hash }
       ]
     }, {
       source: async () => "source.token.signature",

@@ -176,6 +176,44 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  cli-admin:
+    needs: [staging, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: cli-admin-staging
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:cli-admin-staging > cli-admin-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_CLI_ADMIN_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_SESSION_ID: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_SESSION_ID }}"
+          LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
+          LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_AAL1_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_AAL1_SESSION_FILE }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_AAL2_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_AAL2_SESSION_FILE }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_ACCESS_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_ACCESS_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("cli-admin-staging-receipt.json","utf8"));const names=["aal1_step_up_denial","aal2_exact_session_revocation","post_revocation_inventory","revoked_cli_access_denial","independent_audit_evidence"];const statuses=[403,200,200,401,200];const controls=value.controls;const audit=value.auditEvidence;const correlation=/^cli_session_revoke_[0-9a-f-]{36}$/i;const head=/^[a-f0-9]{64}$/;if(value.schemaVersion!=="hosted-cli-admin-staging-validation/v1"||value.targetOrigin!==new URL(process.env.TARGET_ORIGIN).origin||value.organizationId!==process.env.ORGANIZATION_ID||value.projectKey!==process.env.PROJECT_KEY||controls?.aal1Denied!==true||controls?.aal2Required!==true||controls?.exactSessionScope!==true||controls?.atomicAuditReceipt!==true||controls?.disposableSessionRevoked!==true||value.revocation?.revokedCount!==1||!correlation.test(value.revocation?.correlationId)||value.revocation?.correlationId!==audit?.correlationId||!Number.isSafeInteger(audit?.afterSequence)||!Number.isSafeInteger(audit?.throughSequence)||audit.afterSequence>audit.throughSequence||!head.test(audit?.headHash)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true||value.checks[index]?.status!==statuses[index]))process.exit(1);'
+        env:
+          TARGET_ORIGIN: "${{ needs.staging.outputs.deployment_url }}"
+          ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-admin-staging-evidence
+          path: cli-admin-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
   app-snapshots:
     needs: [staging, marketplace]
     runs-on: [self-hosted, loopgraph-staging]
@@ -345,7 +383,7 @@ jobs:
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("recovery-rehearsal-receipt.json","utf8"));if(!/^sha256:[a-f0-9]{64}$/.test(value.sourceIdentityDigest))process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`source_identity_digest=${value.sourceIdentityDigest}\n`);'
 
   audit-retention:
-    needs: [staging, marketplace, app-evidence-health, cli-sessions]
+    needs: [staging, marketplace, app-evidence-health, cli-sessions, cli-admin]
     runs-on: [self-hosted, loopgraph-staging]
     environment: audit-retention-staging
     steps:
@@ -368,6 +406,10 @@ jobs:
         with:
           name: cli-session-staging-evidence
           path: release-checkpoints
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-admin-staging-evidence
+          path: release-checkpoints
       - run: npm run --silent audit:drain > audit-retention-receipt.json
         env:
           LOOPGRAPH_AUDIT_SOURCE_URL: "${{ needs.staging.outputs.deployment_url }}"
@@ -387,6 +429,7 @@ jobs:
           LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/marketplace-validation-receipt.json"
           LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/app-evidence-health-staging-receipt.json"
           LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/cli-session-staging-receipt.json"
+          LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/cli-admin-staging-receipt.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: audit-retention-receipt
@@ -395,7 +438,7 @@ jobs:
           retention-days: 90
 
   evidence:
-    needs: [staging, marketplace, app-evidence-health, cli-sessions, learning-entities, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
+    needs: [staging, marketplace, app-evidence-health, cli-sessions, cli-admin, learning-entities, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
     runs-on: ubuntu-latest
     environment: release-evidence
     permissions:
@@ -434,6 +477,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: cli-admin-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: recovery-rehearsal-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -463,6 +510,7 @@ jobs:
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-evidence-health-staging-receipt.json"
           LOOPGRAPH_CLI_SESSION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-session-staging-receipt.json"
+          LOOPGRAPH_CLI_ADMIN_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-admin-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
           LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
@@ -526,6 +574,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: cli-admin-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: recovery-rehearsal-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -559,6 +611,7 @@ jobs:
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-evidence-health-staging-receipt.json"
           LOOPGRAPH_CLI_SESSION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-session-staging-receipt.json"
+          LOOPGRAPH_CLI_ADMIN_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-admin-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
           LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
