@@ -96,3 +96,19 @@ The receipt contains the Storage origin, tenant/project, content digests, bounde
 and timestamps only. It contains no object key, service credential, session, archive bytes, or App
 configuration. Production evidence compilation requires this exact fresh receipt and refuses a
 different Storage origin or incomplete control set.
+
+## Cross-origin restore rehearsal
+
+`npm run rehearse:app-snapshot-restore` closes the external-byte recovery gap that a PostgreSQL
+dump cannot prove. The protected job uses separate source and isolated-target service identities,
+requires an explicit target-origin binding, and refuses to run when both URLs resolve to the same
+HTTPS origin. It creates one random content-bound probe in the source bucket, exports the exact
+verified archive, restores it with `upsert: false`, and loads it through an empty target runtime.
+
+The target probe is removed first. The job then re-verifies that the source archive is unchanged,
+removes the source probe, and confirms both exact objects are gone. It never lists tenant objects,
+accepts an object key from input, or copies an existing customer archive. The secret-free
+`hosted-app-snapshot-restore-rehearsal/v1` receipt binds source and restore origins, tenant/project,
+archive size, artifact/file identities, fixed checks, and timestamps. Production evidence requires
+that its source equal the validated snapshot origin and that its restored payload equal the App
+payload exercised by the staging isolation gate.

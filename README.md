@@ -457,6 +457,14 @@ LoopPack through a second empty replica root, and then removes the probe. Its se
 receipt is content-bound into the production promotion manifest; the service-role key is
 accepted only through a private `0600` file and is never copied into the receipt or logs.
 
+Production recovery adds a distinct cross-origin gate:
+`npm run rehearse:app-snapshot-restore`. It exports one exact generated archive from the
+validated source bucket, restores it with first-writer semantics into a separately protected
+Supabase project, loads the signed LoopPack through an empty target runtime, proves target cleanup
+does not affect the source, and then removes only the fresh probe. Separate source and target
+service roles are accepted only through private `0600` files. Production promotion requires the
+fresh receipt and binds both reviewed Storage origins plus the exact artifact and file digests.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

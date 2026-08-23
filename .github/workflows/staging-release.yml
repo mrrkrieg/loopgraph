@@ -134,6 +134,37 @@ jobs:
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-staging-receipt.json","utf8"));const origin=new URL(value.targetOrigin);if(value.schemaVersion!=="hosted-app-snapshot-staging-validation/v1"||origin.protocol!=="https:"||origin.pathname!=="/"||origin.username||origin.password||origin.search||origin.hash||value.checks?.length!==8)process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`storage_origin=${origin.origin}\n`);'
 
+  app-snapshot-recovery:
+    needs: [app-snapshots, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: app-snapshot-recovery
+    outputs:
+      restore_origin: ${{ steps.receipt.outputs.restore_origin }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent rehearse:app-snapshot-restore > app-snapshot-recovery-receipt.json
+        env:
+          LOOPGRAPH_CONFIRM_ISOLATED_APP_SNAPSHOT_RESTORE: "yes"
+          LOOPGRAPH_APP_SNAPSHOT_BACKUP_SOURCE_URL: "${{ needs.app-snapshots.outputs.storage_origin }}"
+          LOOPGRAPH_APP_SNAPSHOT_BACKUP_SOURCE_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_BACKUP_SOURCE_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_APP_SNAPSHOT_RESTORE_TARGET_URL: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RESTORE_TARGET_URL }}"
+          LOOPGRAPH_APP_SNAPSHOT_RESTORE_TARGET_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RESTORE_TARGET_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RESTORE_ORIGIN: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RESTORE_ORIGIN }}"
+          LOOPGRAPH_APP_SNAPSHOT_RESTORE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_APP_SNAPSHOT_RESTORE_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-snapshot-recovery-evidence
+          path: app-snapshot-recovery-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+      - id: receipt
+        run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-recovery-receipt.json","utf8"));const source=new URL(value.sourceOrigin);const restore=new URL(value.restoreOrigin);if(value.schemaVersion!=="hosted-app-snapshot-restore-rehearsal/v1"||source.origin===restore.origin||restore.protocol!=="https:"||restore.pathname!=="/"||restore.username||restore.password||restore.search||restore.hash||value.checks?.length!==6)process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`restore_origin=${restore.origin}\n`);'
+
   recovery:
     needs: staging
     runs-on: [self-hosted, loopgraph-staging]
@@ -200,7 +231,7 @@ jobs:
           retention-days: 90
 
   evidence:
-    needs: [staging, marketplace, app-snapshots, recovery, audit-retention]
+    needs: [staging, marketplace, app-snapshots, app-snapshot-recovery, recovery, audit-retention]
     runs-on: ubuntu-latest
     environment: release-evidence
     permissions:
@@ -212,6 +243,7 @@ jobs:
       organization_id: ${{ needs.marketplace.outputs.organization_id }}
       project_key: ${{ needs.marketplace.outputs.project_key }}
       storage_origin: ${{ needs.app-snapshots.outputs.storage_origin }}
+      snapshot_restore_origin: ${{ needs.app-snapshot-recovery.outputs.restore_origin }}
       database_identity_digest: ${{ needs.recovery.outputs.source_identity_digest }}
       app_id: ${{ needs.marketplace.outputs.app_id }}
       app_version: ${{ needs.marketplace.outputs.app_version }}
@@ -235,6 +267,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@v4
         with:
+          name: app-snapshot-recovery-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@v4
+        with:
           name: audit-retention-receipt
           path: release-evidence
       - run: npm run --silent release:evidence:build > release-evidence/production-evidence-manifest.json
@@ -243,10 +279,12 @@ jobs:
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
+          LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
           LOOPGRAPH_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/recovery-rehearsal-receipt.json"
           LOOPGRAPH_AUDIT_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/audit-retention-receipt.json"
           LOOPGRAPH_RELEASE_DEPLOYMENT_URL: "${{ needs.staging.outputs.deployment_url }}"
           LOOPGRAPH_RELEASE_STORAGE_URL: "${{ needs.app-snapshots.outputs.storage_origin }}"
+          LOOPGRAPH_RELEASE_SNAPSHOT_RESTORE_URL: "${{ needs.app-snapshot-recovery.outputs.restore_origin }}"
           LOOPGRAPH_RELEASE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
           LOOPGRAPH_RELEASE_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
           LOOPGRAPH_RELEASE_DATABASE_IDENTITY_DIGEST: "${{ needs.recovery.outputs.source_identity_digest }}"
@@ -296,6 +334,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@v4
         with:
+          name: app-snapshot-recovery-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@v4
+        with:
           name: audit-retention-receipt
           path: release-evidence
       - uses: actions/download-artifact@v4
@@ -308,10 +350,12 @@ jobs:
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
+          LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
           LOOPGRAPH_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/recovery-rehearsal-receipt.json"
           LOOPGRAPH_AUDIT_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/audit-retention-receipt.json"
           LOOPGRAPH_RELEASE_DEPLOYMENT_URL: "${{ needs.staging.outputs.deployment_url }}"
           LOOPGRAPH_RELEASE_STORAGE_URL: "${{ needs.evidence.outputs.storage_origin }}"
+          LOOPGRAPH_RELEASE_SNAPSHOT_RESTORE_URL: "${{ needs.evidence.outputs.snapshot_restore_origin }}"
           LOOPGRAPH_RELEASE_ORGANIZATION_ID: "${{ needs.evidence.outputs.organization_id }}"
           LOOPGRAPH_RELEASE_PROJECT_KEY: "${{ needs.evidence.outputs.project_key }}"
           LOOPGRAPH_RELEASE_DATABASE_IDENTITY_DIGEST: "${{ needs.evidence.outputs.database_identity_digest }}"

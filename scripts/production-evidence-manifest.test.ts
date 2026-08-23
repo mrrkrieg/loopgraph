@@ -19,6 +19,7 @@ const organizationId = "123e4567-e89b-42d3-a456-426614174000";
 const generatedAt = new Date("2026-08-17T02:00:00.000Z");
 const deploymentOrigin = "https://staging.loopgraph.test";
 const storageOrigin = "https://snapshot-staging.supabase.co";
+const snapshotRestoreOrigin = "https://snapshot-restore.supabase.co";
 const databaseIdentityDigest = `sha256:${"d".repeat(64)}`;
 const auditRetentionKeyId = "retention_key_1";
 const auditRetentionKeys = generateKeyPairSync("ed25519");
@@ -39,6 +40,7 @@ const config: ProductionEvidenceConfig = {
   workflowRunAttempt: 1,
   deploymentOrigin,
   storageOrigin,
+  snapshotRestoreOrigin,
   organizationId,
   projectKey: "main",
   databaseIdentityDigest,
@@ -55,7 +57,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v3",
+      schemaVersion: "loopgraph-production-promotion-evidence/v4",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -99,6 +101,17 @@ describe("production promotion evidence manifest", () => {
             filesDigest: `sha256:${"3".repeat(64)}`
           }
         },
+        appSnapshotRecovery: {
+          summary: {
+            sourceOrigin: storageOrigin,
+            restoreOrigin: snapshotRestoreOrigin,
+            checks: 6,
+            archiveSizeBytes: 4_096,
+            snapshotIdentityDigest: `sha256:${"4".repeat(64)}`,
+            artifactDigest: `sha256:${"2".repeat(64)}`,
+            filesDigest: `sha256:${"3".repeat(64)}`
+          }
+        },
         recovery: { summary: { criticalTables: RECOVERY_TABLES.length } },
         auditRetention: { summary: { throughSequence: 50 } }
       }
@@ -137,6 +150,29 @@ describe("production promotion evidence manifest", () => {
     const snapshot = missingControl.appSnapshots as { checks: Array<Record<string, unknown>> };
     missingControl.appSnapshots = { ...snapshot, checks: snapshot.checks.slice(1) };
     expect(() => buildProductionEvidenceManifest(missingControl, config)).toThrow();
+  });
+
+  it("rejects snapshot recovery evidence for another source, target, or incomplete restore proof", () => {
+    const wrongSource = releaseReceipts();
+    wrongSource.appSnapshotRecovery = {
+      ...(wrongSource.appSnapshotRecovery as Record<string, unknown>),
+      sourceOrigin: "https://other-source.supabase.co"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongSource, config))
+      .toThrow(/protected source.*isolated restore origin/i);
+
+    const wrongTarget = releaseReceipts();
+    wrongTarget.appSnapshotRecovery = {
+      ...(wrongTarget.appSnapshotRecovery as Record<string, unknown>),
+      restoreOrigin: "https://other-restore.supabase.co"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongTarget, config))
+      .toThrow(/protected source.*isolated restore origin/i);
+
+    const incomplete = releaseReceipts();
+    const recovery = incomplete.appSnapshotRecovery as { checks: Array<Record<string, unknown>> };
+    incomplete.appSnapshotRecovery = { ...recovery, checks: recovery.checks.slice(1) };
+    expect(() => buildProductionEvidenceManifest(incomplete, config)).toThrow();
   });
 
   it("rejects an exactly-once proof built from another source commit", () => {
@@ -300,6 +336,7 @@ function withoutGeneratedAt(value: ProductionEvidenceConfig) {
     workflowRunAttempt: value.workflowRunAttempt,
     deploymentOrigin: value.deploymentOrigin,
     storageOrigin: value.storageOrigin,
+    snapshotRestoreOrigin: value.snapshotRestoreOrigin,
     organizationId: value.organizationId,
     projectKey: value.projectKey,
     databaseIdentityDigest: value.databaseIdentityDigest,
@@ -420,6 +457,28 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "authenticated_delete_denial",
         "immutable_first_writer",
         "cross_replica_exact_recovery",
+        "cleanup_verified"
+      ].map((name) => ({ name, ok: true, detail: `${name} passed` }))
+    },
+    appSnapshotRecovery: {
+      schemaVersion: "hosted-app-snapshot-restore-rehearsal/v1",
+      sourceOrigin: storageOrigin,
+      restoreOrigin: snapshotRestoreOrigin,
+      organizationId,
+      projectKey: "main",
+      startedAt: "2026-08-17T01:20:00.000Z",
+      completedAt: checkedAt,
+      durationMs: 10_000,
+      archiveSizeBytes: 4_096,
+      snapshotIdentityDigest: `sha256:${"4".repeat(64)}`,
+      artifactDigest: `sha256:${"2".repeat(64)}`,
+      filesDigest: `sha256:${"3".repeat(64)}`,
+      checks: [
+        "separate_private_bounded_buckets",
+        "source_archive_exported",
+        "target_first_writer_restore",
+        "isolated_target_exact_load",
+        "source_preserved_after_target_cleanup",
         "cleanup_verified"
       ].map((name) => ({ name, ok: true, detail: `${name} passed` }))
     },

@@ -112,6 +112,33 @@ const appSnapshotReceiptSchema = z.object({
   }).strict()).length(8)
 }).strict();
 
+const appSnapshotRecoveryReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-app-snapshot-restore-rehearsal/v1"),
+  sourceOrigin: originSchema,
+  restoreOrigin: originSchema,
+  organizationId: z.string().uuid(),
+  projectKey: projectKeySchema,
+  startedAt: z.string().datetime({ offset: true }),
+  completedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  archiveSizeBytes: z.number().int().positive().max(100 * 1024 * 1024),
+  snapshotIdentityDigest: digestSchema,
+  artifactDigest: digestSchema,
+  filesDigest: digestSchema,
+  checks: z.array(z.object({
+    name: z.enum([
+      "separate_private_bounded_buckets",
+      "source_archive_exported",
+      "target_first_writer_restore",
+      "isolated_target_exact_load",
+      "source_preserved_after_target_cleanup",
+      "cleanup_verified"
+    ]),
+    ok: z.literal(true),
+    detail: z.string().min(1).max(2048)
+  }).strict()).length(6)
+}).strict();
+
 const recoveryReceiptSchema = z.object({
   schemaVersion: z.literal("backup-restore-rehearsal/v2"),
   startedAt: z.string().datetime({ offset: true }),
@@ -152,7 +179,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v3"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v4"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -180,6 +207,7 @@ export const productionEvidenceManifestSchema = z.object({
     appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
     appSnapshots: evidenceDescriptorSchema,
+    appSnapshotRecovery: evidenceDescriptorSchema,
     recovery: evidenceDescriptorSchema,
     auditRetention: evidenceDescriptorSchema
   }).strict(),
@@ -193,6 +221,7 @@ export type ProductionEvidenceReceipts = {
   appActionExactlyOnce: unknown;
   marketplace: unknown;
   appSnapshots: unknown;
+  appSnapshotRecovery: unknown;
   recovery: unknown;
   auditRetention: unknown;
 };
@@ -204,6 +233,7 @@ export type ProductionEvidenceConfig = {
   workflowRunAttempt: number;
   deploymentOrigin: string;
   storageOrigin: string;
+  snapshotRestoreOrigin: string;
   organizationId: string;
   projectKey: string;
   databaseIdentityDigest: string;
@@ -223,6 +253,7 @@ export function buildProductionEvidenceManifest(
   const appActionExactlyOnce = verifyAppActionExactlyOnceProof(receipts.appActionExactlyOnce);
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
   const appSnapshots = appSnapshotReceiptSchema.parse(receipts.appSnapshots);
+  const appSnapshotRecovery = appSnapshotRecoveryReceiptSchema.parse(receipts.appSnapshotRecovery);
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
   const auditRetention = auditDrainReceiptV3Schema.parse(receipts.auditRetention);
   validateConfig(config);
@@ -236,6 +267,7 @@ export function buildProductionEvidenceManifest(
     ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
     ["App snapshot validation", appSnapshots.checkedAt],
+    ["App snapshot recovery rehearsal", appSnapshotRecovery.completedAt],
     ["recovery rehearsal", recovery.completedAt],
     ["audit retention", auditRetention.completedAt]
   ] as const) {
@@ -252,6 +284,25 @@ export function buildProductionEvidenceManifest(
   if (appSnapshots.targetOrigin !== trustedOrigin(config.storageOrigin, "Release Storage origin")) {
     throw new Error("App snapshot evidence does not belong to the exact protected Storage origin");
   }
+  if (
+    appSnapshotRecovery.sourceOrigin !== appSnapshots.targetOrigin ||
+    appSnapshotRecovery.restoreOrigin !== trustedOrigin(
+      config.snapshotRestoreOrigin,
+      "Release snapshot restore origin"
+    ) ||
+    appSnapshotRecovery.sourceOrigin === appSnapshotRecovery.restoreOrigin
+  ) {
+    throw new Error("App snapshot recovery evidence does not bind the protected source to the isolated restore origin");
+  }
+  if (
+    appSnapshotRecovery.artifactDigest !== appSnapshots.artifactDigest ||
+    appSnapshotRecovery.filesDigest !== appSnapshots.filesDigest
+  ) {
+    throw new Error("App snapshot recovery evidence did not restore the exact validated App payload");
+  }
+  if (Date.parse(appSnapshotRecovery.completedAt) < Date.parse(appSnapshotRecovery.startedAt)) {
+    throw new Error("App snapshot recovery evidence completed before it started");
+  }
   if (appActionExactlyOnce.sourceCommitSha !== config.commitSha) {
     throw new Error("App action exactly-once proof does not belong to the promoted source commit");
   }
@@ -259,10 +310,12 @@ export function buildProductionEvidenceManifest(
     staging.organizationId !== config.organizationId ||
     marketplace.organizationId !== config.organizationId ||
     appSnapshots.organizationId !== config.organizationId ||
+    appSnapshotRecovery.organizationId !== config.organizationId ||
     auditRetention.organizationId !== config.organizationId ||
     staging.projectKey !== config.projectKey ||
     marketplace.projectKey !== config.projectKey ||
     appSnapshots.projectKey !== config.projectKey ||
+    appSnapshotRecovery.projectKey !== config.projectKey ||
     auditRetention.projectKey !== config.projectKey
   ) {
     throw new Error("Release receipts do not belong to the exact tenant and project scope");
@@ -334,6 +387,18 @@ export function buildProductionEvidenceManifest(
       "cleanup_verified"
     ],
     "App snapshot validation"
+  );
+  requireExactNames(
+    appSnapshotRecovery.checks.map((check) => check.name),
+    [
+      "separate_private_bounded_buckets",
+      "source_archive_exported",
+      "target_first_writer_restore",
+      "isolated_target_exact_load",
+      "source_preserved_after_target_cleanup",
+      "cleanup_verified"
+    ],
+    "App snapshot recovery rehearsal"
   );
   requireExactNames(
     recovery.criticalTables.map((table) => table.table),
@@ -451,6 +516,15 @@ export function buildProductionEvidenceManifest(
       artifactDigest: appSnapshots.artifactDigest,
       filesDigest: appSnapshots.filesDigest
     }),
+    appSnapshotRecovery: descriptor(appSnapshotRecovery, appSnapshotRecovery.completedAt, {
+      sourceOrigin: appSnapshotRecovery.sourceOrigin,
+      restoreOrigin: appSnapshotRecovery.restoreOrigin,
+      checks: appSnapshotRecovery.checks.length,
+      archiveSizeBytes: appSnapshotRecovery.archiveSizeBytes,
+      snapshotIdentityDigest: appSnapshotRecovery.snapshotIdentityDigest,
+      artifactDigest: appSnapshotRecovery.artifactDigest,
+      filesDigest: appSnapshotRecovery.filesDigest
+    }),
     recovery: descriptor(recovery, recovery.completedAt, {
       sourceIdentityDigest: recovery.sourceIdentityDigest,
       criticalTables: recovery.criticalTables.length,
@@ -471,7 +545,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v3",
+    schemaVersion: "loopgraph-production-promotion-evidence/v4",
     release,
     scope,
     evidence,
@@ -498,6 +572,7 @@ export function verifyProductionEvidenceManifest(input: {
     appActionExactlyOnce: verifyAppActionExactlyOnceProof(input.receipts.appActionExactlyOnce),
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
     appSnapshots: appSnapshotReceiptSchema.parse(input.receipts.appSnapshots),
+    appSnapshotRecovery: appSnapshotRecoveryReceiptSchema.parse(input.receipts.appSnapshotRecovery),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
     auditRetention: auditDrainReceiptV3Schema.parse(input.receipts.auditRetention)
   };
@@ -506,6 +581,7 @@ export function verifyProductionEvidenceManifest(input: {
     ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
     ["App snapshot validation", receiptsAtPromotion.appSnapshots.checkedAt],
+    ["App snapshot recovery rehearsal", receiptsAtPromotion.appSnapshotRecovery.completedAt],
     ["recovery rehearsal", receiptsAtPromotion.recovery.completedAt],
     ["audit retention", receiptsAtPromotion.auditRetention.completedAt]
   ] as const) {
@@ -623,6 +699,7 @@ async function main() {
     appActionExactlyOnce: await readJsonReceipt("LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE"),
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
     appSnapshots: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE"),
+    appSnapshotRecovery: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE"),
     recovery: await readJsonReceipt("LOOPGRAPH_RECOVERY_RECEIPT_FILE"),
     auditRetention: await readJsonReceipt("LOOPGRAPH_AUDIT_RECEIPT_FILE")
   };
@@ -633,6 +710,7 @@ async function main() {
     workflowRunAttempt: positiveInteger("GITHUB_RUN_ATTEMPT"),
     deploymentOrigin: required("LOOPGRAPH_RELEASE_DEPLOYMENT_URL"),
     storageOrigin: required("LOOPGRAPH_RELEASE_STORAGE_URL"),
+    snapshotRestoreOrigin: required("LOOPGRAPH_RELEASE_SNAPSHOT_RESTORE_URL"),
     organizationId: required("LOOPGRAPH_RELEASE_ORGANIZATION_ID"),
     projectKey: required("LOOPGRAPH_RELEASE_PROJECT_KEY"),
     databaseIdentityDigest: required("LOOPGRAPH_RELEASE_DATABASE_IDENTITY_DIGEST"),

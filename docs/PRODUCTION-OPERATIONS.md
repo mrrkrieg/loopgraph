@@ -16,9 +16,13 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   immutability, exact recovery through a second replica root, and verified cleanup. The service-role
   key is read only from a private projected file; its receipt contains content identities, not the
   credential or object key.
+- `npm run rehearse:app-snapshot-restore` proves that one exact signed App archive can cross from
+  the validated source project into a separately protected disposable Storage project, load through
+  an empty runtime, preserve the source during target cleanup, and clean only its random probe.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's six receipts to one source commit,
-  deployment, Storage origin, tenant/project, database identity, and exact marketplace artifact.
+- `npm run release:evidence:build` binds the current run's seven receipts to one source commit,
+  deployment, source and restore Storage origins, tenant/project, database identity, and exact
+  marketplace artifact.
   `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any
   substituted, stale, or mixed receipt.
 - App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
@@ -73,9 +77,9 @@ invokes the provider handler. A request older than the configured threshold is s
 
 ## Release evidence
 
-The protected workflow stores the staging, App action, marketplace, App snapshot, recovery, and
-audit-retention receipts as separate artifacts, compiles
-`loopgraph-production-promotion-evidence/v3`, and creates a GitHub OIDC
+The protected workflow stores the staging, App action, marketplace, App snapshot isolation,
+App snapshot recovery, database recovery, and audit-retention receipts as separate artifacts, compiles
+`loopgraph-production-promotion-evidence/v4`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured
@@ -118,6 +122,19 @@ command, artifact, or log. The environment also receives the public Supabase ori
 and the allowed short-lived user-session file. Rotate the service credential or destroy the
 ephemeral runner projection after the gate. The emitted Storage origin is non-secret and is carried
 forward as a protected job output so production reconstruction cannot substitute another project.
+
+## App snapshot recovery boundary
+
+The `app-snapshot-recovery` environment must use a different Supabase project from the source.
+Project separate source and target service-role credentials as absolute mode-`0600` non-symlink
+files. Set `LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RESTORE_ORIGIN` to the reviewed target HTTPS origin and
+restrict the environment to the protected default branch. The workflow supplies the validated
+source origin and tenant/project from earlier jobs rather than duplicating them as editable values.
+
+The gate sets `LOOPGRAPH_CONFIRM_ISOLATED_APP_SNAPSHOT_RESTORE=yes`, creates one random probe, and
+never enumerates or restores a customer object. It removes the target probe first, proves the source
+still verifies, then removes the source probe. Rotate both projected identities after the exercise.
+The receipt contains origins and digests but no credential, object key, archive bytes, or App config.
 
 ## Hosted user-boundary staging matrix
 
@@ -186,11 +203,12 @@ digest, and each table's exact row-count/SHA-256 fingerprint; the promotion mani
 them without exposing either credential-bearing database URL.
 
 The database dump contains marketplace metadata, signatures, and artifact identities, but external
-artifact bytes deliberately live outside PostgreSQL. Therefore the receipt marks those bytes as
-unverified. Deploy the restored database in an isolated rehearsal environment and run
-`npm run validate:marketplace-staging` against that environment before treating the recovery exercise
-as production-complete. Preserve both receipts together, measure RTO/RPO, investigate unexpected
-size or timing changes, then destroy the disposable database and deployment after evidence is retained.
+artifact bytes deliberately live outside PostgreSQL. Therefore the database receipt marks those
+bytes as unverified. Run `npm run validate:marketplace-staging` for marketplace artifacts and
+`npm run rehearse:app-snapshot-restore` for detached-App archives before treating recovery as
+production-complete. Preserve all receipts together, measure RTO/RPO, investigate unexpected size
+or timing changes, then destroy the disposable database, Storage target, and deployment after
+evidence is retained.
 
 ## Provider boundary
 

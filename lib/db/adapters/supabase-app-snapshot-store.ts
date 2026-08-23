@@ -25,7 +25,7 @@ export const MAX_HOSTED_APP_SNAPSHOT_BYTES = 100 * 1024 * 1024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SCOPE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,159}$/;
 
-type Scope = {
+export type HostedAppSnapshotScope = {
   organizationId: string;
   projectKey: string;
   workspaceId: string;
@@ -44,12 +44,10 @@ export class SupabaseAppSnapshotStore implements AppSnapshotStore {
 
   constructor(
     private readonly supabase: SupabaseClient,
-    private readonly scope: Scope,
+    private readonly scope: HostedAppSnapshotScope,
     projectRoot: string
   ) {
-    if (!UUID_PATTERN.test(scope.organizationId)) throw new Error("App snapshot store organization ID must be a UUID");
-    if (!SCOPE_ID_PATTERN.test(scope.projectKey) || scope.projectKey.length > 64) throw new Error("App snapshot store project key is invalid");
-    if (!SCOPE_ID_PATTERN.test(scope.workspaceId)) throw new Error("App snapshot store workspace ID is invalid");
+    assertHostedAppSnapshotScope(scope);
     this.projectRoot = path.resolve(projectRoot);
   }
 
@@ -57,7 +55,7 @@ export class SupabaseAppSnapshotStore implements AppSnapshotStore {
     const parsed = appSnapshotDescriptor(descriptor);
     const { data, error } = await this.supabase.storage
       .from(HOSTED_APP_SNAPSHOT_BUCKET)
-      .list(this.logicalObjectPrefix(parsed), { limit: 1 });
+      .list(hostedAppSnapshotLogicalPrefix(this.scope, parsed), { limit: 1 });
     if (error) throw new Error("Hosted App snapshot store could not check immutable object identity");
     return (data ?? []).length > 0;
   }
@@ -81,7 +79,7 @@ export class SupabaseAppSnapshotStore implements AppSnapshotStore {
       assertArchiveSize(bytes.byteLength);
       const { error } = await this.supabase.storage
         .from(HOSTED_APP_SNAPSHOT_BUCKET)
-        .upload(this.objectKey(descriptor), bytes, {
+        .upload(hostedAppSnapshotObjectKey(this.scope, descriptor), bytes, {
           contentType: HOSTED_APP_SNAPSHOT_MEDIA_TYPE,
           cacheControl: "0",
           upsert: false
@@ -151,7 +149,7 @@ export class SupabaseAppSnapshotStore implements AppSnapshotStore {
   ): Promise<LoopPackLoadResult> {
     const { data, error } = await this.supabase.storage
       .from(HOSTED_APP_SNAPSHOT_BUCKET)
-      .download(this.objectKey(descriptor));
+      .download(hostedAppSnapshotObjectKey(this.scope, descriptor));
     if (error || !data) throw new Error("Hosted App snapshot is unavailable");
     const bytes = new Uint8Array(await data.arrayBuffer());
     assertArchiveSize(bytes.byteLength);
@@ -171,25 +169,31 @@ export class SupabaseAppSnapshotStore implements AppSnapshotStore {
     return loaded;
   }
 
-  private objectKey(descriptor: AppSnapshotDescriptor): string {
-    const artifact = descriptor.artifactDigest.slice("sha256:".length);
-    const files = descriptor.filesDigest.slice("sha256:".length);
-    return [
-      this.logicalObjectPrefix(descriptor),
-      artifact,
-      `${files}.loopgraph-pack.json`
-    ].join("/");
-  }
+}
 
-  private logicalObjectPrefix(descriptor: AppSnapshotDescriptor): string {
-    const logicalPath = canonicalAppDigest({ snapshotPath: descriptor.snapshotPath }).slice("sha256:".length);
-    return [
-      this.scope.organizationId,
-      this.scope.projectKey,
-      this.scope.workspaceId,
-      logicalPath
-    ].join("/");
-  }
+export function hostedAppSnapshotObjectKey(
+  scope: HostedAppSnapshotScope,
+  descriptor: AppSnapshotDescriptor
+): string {
+  const parsed = appSnapshotDescriptor(descriptor);
+  assertHostedAppSnapshotScope(scope);
+  const artifact = parsed.artifactDigest.slice("sha256:".length);
+  const files = parsed.filesDigest.slice("sha256:".length);
+  return [
+    hostedAppSnapshotLogicalPrefix(scope, parsed),
+    artifact,
+    `${files}.loopgraph-pack.json`
+  ].join("/");
+}
+
+export function hostedAppSnapshotLogicalPrefix(
+  scope: HostedAppSnapshotScope,
+  descriptor: AppSnapshotDescriptor
+): string {
+  const parsed = appSnapshotDescriptor(descriptor);
+  assertHostedAppSnapshotScope(scope);
+  const logicalPath = canonicalAppDigest({ snapshotPath: parsed.snapshotPath }).slice("sha256:".length);
+  return [scope.organizationId, scope.projectKey, scope.workspaceId, logicalPath].join("/");
 }
 
 export function isSupabaseAppSnapshotStoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -217,6 +221,18 @@ function assertLoadedSnapshot(loaded: LoopPackLoadResult, descriptor: AppSnapsho
     appSnapshotFilesDigest(loaded) !== descriptor.filesDigest
   ) {
     throw new Error("Hosted App snapshot no longer matches its immutable artifact identity");
+  }
+}
+
+function assertHostedAppSnapshotScope(scope: HostedAppSnapshotScope): void {
+  if (!UUID_PATTERN.test(scope.organizationId)) {
+    throw new Error("App snapshot store organization ID must be a UUID");
+  }
+  if (!SCOPE_ID_PATTERN.test(scope.projectKey) || scope.projectKey.length > 64) {
+    throw new Error("App snapshot store project key is invalid");
+  }
+  if (!SCOPE_ID_PATTERN.test(scope.workspaceId)) {
+    throw new Error("App snapshot store workspace ID is invalid");
   }
 }
 
