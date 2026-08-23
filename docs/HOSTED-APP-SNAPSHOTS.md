@@ -107,6 +107,14 @@ same generation. The gate allows at most four passes
 and fails closed under continuous mutation; a single offset-paginated traversal is never release
 evidence.
 
+Before reading any inventory, reconciliation calls a service-role-only live attestation RPC. The
+RPC inspects PostgreSQL catalogs and returns only five booleans: whether both exact triggers are
+enabled, whether the generation reader remains hardened and service-role-only, and whether all four
+mutation functions remain hardened and trigger-only. A missing, disabled, replaced, or overexposed
+fence aborts reconciliation before it can produce a healthy receipt. The receipt binds
+that exact all-true status to the protected scope as an opaque digest; it does not expose catalog
+rows, function definitions, role grants, tenant identifiers, or object paths.
+
 The scheduled `Hosted App snapshot reconciliation` workflow runs on the protected self-hosted
 runner. Its service-role credential is supplied only as an absolute, non-symlink, mode-`0600`
 projected file. It is schedule-only, runs only from the protected `loopgraph/canvas-first` ref,

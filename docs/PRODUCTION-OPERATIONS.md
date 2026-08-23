@@ -34,7 +34,9 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   an empty runtime, preserve the source during target cleanup, and clean only its random probe.
 - `npm run reconcile:app-snapshots` verifies every current detached installation through the signed
   archive loader for the exact Storage origin and tenant/project proven by the preceding gates. It
-  also inventories Storage back to current registry authority. The protected environment pins that
+  first attests from live PostgreSQL catalogs that both exact mutation triggers are installed and
+  enabled and that the generation reader remains service-role-only. It also inventories Storage
+  back to current registry authority. The protected environment pins that
   scope and the reviewed unreferenced-archive digest independently and requires an explicit
   empty-inventory policy. Two identical full passes are required, and persistent mutation exhausts a
   bounded retry window. Each pass is fenced by the same durable generation before the registry
@@ -102,7 +104,7 @@ invokes the provider handler. A request older than the configured threshold is s
 
 The protected workflow stores the staging, App action, marketplace, App snapshot isolation,
 App snapshot recovery, App snapshot reconciliation, database recovery, and audit-retention receipts
-as separate artifacts, compiles `loopgraph-production-promotion-evidence/v6`, and creates a GitHub OIDC
+as separate artifacts, compiles `loopgraph-production-promotion-evidence/v7`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured

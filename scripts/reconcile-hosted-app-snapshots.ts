@@ -27,10 +27,11 @@ const MAX_INVENTORY_STABILITY_PASSES = 4;
 type RegistryRow = { workspace_id: unknown; registry_payload: unknown };
 
 export type HostedAppSnapshotReconciliationReceipt = AppSnapshotReconciliationResult & {
-  schemaVersion: "hosted-app-snapshot-reconciliation/v2";
+  schemaVersion: "hosted-app-snapshot-reconciliation/v3";
   checkedAt: string;
   durationMs: number;
   scopeDigest: string;
+  inventoryFenceDigest: string;
   inventoryPasses: number;
   inventoryGeneration: number;
   inventoryGenerationDigest: string;
@@ -44,6 +45,7 @@ export type HostedAppSnapshotReconciliationReceipt = AppSnapshotReconciliationRe
     name:
       | "tenant_registry_scan"
       | "pinned_scope_identity"
+      | "live_mutation_fence"
       | "non_empty_inventory_policy"
       | "durable_descriptor_authority"
       | "exact_archive_verification"
@@ -130,6 +132,10 @@ export async function reconcileHostedAppSnapshots(
   const now = dependencies.now ?? (() => new Date());
   const nowMs = dependencies.nowMs ?? Date.now;
   const startedAtMs = nowMs();
+  const inventoryFenceDigest = await attestHostedAppSnapshotInventoryFence(
+    dependencies.client,
+    scopeDigest
+  );
   const { pass: stable, inventoryPasses } = await collectStableHostedAppSnapshotReconciliation(
     config,
     dependencies
@@ -141,6 +147,7 @@ export async function reconcileHostedAppSnapshots(
   const checks: HostedAppSnapshotReconciliationReceipt["checks"] = [
     { name: "tenant_registry_scan", ok: true },
     { name: "pinned_scope_identity", ok: true },
+    { name: "live_mutation_fence", ok: true },
     {
       name: "non_empty_inventory_policy",
       ok: aggregate.detachedInstallations > 0 || config.allowEmptyInventory
@@ -167,10 +174,11 @@ export async function reconcileHostedAppSnapshots(
     { name: "aggregate_only_receipt", ok: true }
   ];
   return {
-    schemaVersion: "hosted-app-snapshot-reconciliation/v2",
+    schemaVersion: "hosted-app-snapshot-reconciliation/v3",
     checkedAt: now().toISOString(),
     durationMs: Math.max(0, nowMs() - startedAtMs),
     scopeDigest,
+    inventoryFenceDigest,
     inventoryPasses,
     inventoryGeneration: stable.generationAfter,
     inventoryGenerationDigest: hostedAppSnapshotInventoryGenerationDigest(
@@ -187,6 +195,44 @@ export async function reconcileHostedAppSnapshots(
         config.expectedUnreferencedInventoryDigest,
     checks
   };
+}
+
+export async function attestHostedAppSnapshotInventoryFence(
+  client: SupabaseClient,
+  scopeDigest: string
+): Promise<string> {
+  if (!/^sha256:[0-9a-f]{64}$/.test(scopeDigest)) {
+    throw new Error("Hosted App snapshot mutation fence scope is invalid");
+  }
+  const { data, error } = await client.rpc(
+    "loopgraph_app_snapshot_inventory_fence_status_get"
+  );
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Hosted App snapshot mutation fence attestation is unavailable");
+  }
+  const status = data as Record<string, unknown>;
+  const keys = Object.keys(status).sort();
+  const expectedKeys = [
+    "generationReaderServiceOnly",
+    "mutationFunctionsHardened",
+    "mutationFunctionsTriggerOnly",
+    "registryTriggerEnabled",
+    "schemaVersion",
+    "storageTriggerEnabled"
+  ];
+  if (
+    keys.length !== expectedKeys.length ||
+    expectedKeys.some((key, index) => keys[index] !== key) ||
+    status.schemaVersion !== "hosted-app-snapshot-inventory-fence/v1" ||
+    status.storageTriggerEnabled !== true ||
+    status.registryTriggerEnabled !== true ||
+    status.generationReaderServiceOnly !== true ||
+    status.mutationFunctionsTriggerOnly !== true ||
+    status.mutationFunctionsHardened !== true
+  ) {
+    throw new Error("Hosted App snapshot mutation fence is not fully enabled");
+  }
+  return canonicalAppDigest({ scopeDigest, status });
 }
 
 async function collectStableHostedAppSnapshotReconciliation(
@@ -426,6 +472,7 @@ async function main(): Promise<void> {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false }
   });
   if (process.argv.includes("--print-unreferenced-inventory-digest")) {
+    const inventoryFenceDigest = await attestHostedAppSnapshotInventoryFence(client, scopeDigest);
     const { pass, inventoryPasses } = await collectStableHostedAppSnapshotReconciliation(
       { organizationId, projectKey },
       { client }
@@ -433,6 +480,7 @@ async function main(): Promise<void> {
     const inventory = pass.retentionInventory;
     process.stdout.write(`${JSON.stringify({
       inventoryPasses,
+      inventoryFenceDigest,
       inventoryGeneration: pass.generationAfter,
       inventoryGenerationDigest: hostedAppSnapshotInventoryGenerationDigest(
         scopeDigest,

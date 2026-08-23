@@ -141,10 +141,11 @@ const appSnapshotRecoveryReceiptSchema = z.object({
 }).strict();
 
 const appSnapshotReconciliationReceiptSchema = z.object({
-  schemaVersion: z.literal("hosted-app-snapshot-reconciliation/v2"),
+  schemaVersion: z.literal("hosted-app-snapshot-reconciliation/v3"),
   checkedAt: z.string().datetime({ offset: true }),
   durationMs: safeInteger,
   scopeDigest: digestSchema,
+  inventoryFenceDigest: digestSchema,
   inventoryPasses: z.number().int().min(2).max(4),
   inventoryGeneration: safeInteger,
   inventoryGenerationDigest: digestSchema,
@@ -165,6 +166,7 @@ const appSnapshotReconciliationReceiptSchema = z.object({
     name: z.enum([
       "tenant_registry_scan",
       "pinned_scope_identity",
+      "live_mutation_fence",
       "non_empty_inventory_policy",
       "durable_descriptor_authority",
       "exact_archive_verification",
@@ -174,7 +176,7 @@ const appSnapshotReconciliationReceiptSchema = z.object({
       "aggregate_only_receipt"
     ]),
     ok: z.literal(true)
-  }).strict()).length(9)
+  }).strict()).length(10)
 }).strict().superRefine((receipt, context) => {
   if (receipt.verifiedSnapshots !== receipt.detachedInstallations) {
     context.addIssue({
@@ -195,6 +197,25 @@ const appSnapshotReconciliationReceiptSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["referencedStorageObjects"],
       message: "Referenced Storage objects cannot exceed verified detached App snapshots"
+    });
+  }
+  if (
+    receipt.inventoryFenceDigest !== canonicalAppDigest({
+      scopeDigest: receipt.scopeDigest,
+      status: {
+        schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
+        storageTriggerEnabled: true,
+        registryTriggerEnabled: true,
+        generationReaderServiceOnly: true,
+        mutationFunctionsTriggerOnly: true,
+        mutationFunctionsHardened: true
+      }
+    })
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["inventoryFenceDigest"],
+      message: "App snapshot inventory fence digest must bind the exact live attestation"
     });
   }
   if (
@@ -251,7 +272,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v6"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v7"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -502,6 +523,7 @@ export function buildProductionEvidenceManifest(
     [
       "tenant_registry_scan",
       "pinned_scope_identity",
+      "live_mutation_fence",
       "non_empty_inventory_policy",
       "durable_descriptor_authority",
       "exact_archive_verification",
@@ -645,6 +667,7 @@ export function buildProductionEvidenceManifest(
       appSnapshotReconciliation.checkedAt,
       {
         scopeDigest: appSnapshotReconciliation.scopeDigest,
+        inventoryFenceDigest: appSnapshotReconciliation.inventoryFenceDigest,
         checks: appSnapshotReconciliation.checks.length,
         inventoryPasses: appSnapshotReconciliation.inventoryPasses,
         inventoryGeneration: appSnapshotReconciliation.inventoryGeneration,
@@ -684,7 +707,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v6",
+    schemaVersion: "loopgraph-production-promotion-evidence/v7",
     release,
     scope,
     evidence,

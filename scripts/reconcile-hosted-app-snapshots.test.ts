@@ -36,10 +36,11 @@ describe("hosted App snapshot reconciliation", () => {
     });
 
     expect(receipt).toEqual({
-      schemaVersion: "hosted-app-snapshot-reconciliation/v2",
+      schemaVersion: "hosted-app-snapshot-reconciliation/v3",
       checkedAt: "2026-08-22T20:00:00.000Z",
       durationMs: 25,
       scopeDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+      inventoryFenceDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       inventoryPasses: 2,
       inventoryGeneration: 0,
       inventoryGenerationDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
@@ -59,6 +60,7 @@ describe("hosted App snapshot reconciliation", () => {
       checks: [
         { name: "tenant_registry_scan", ok: true },
         { name: "pinned_scope_identity", ok: true },
+        { name: "live_mutation_fence", ok: true },
         { name: "non_empty_inventory_policy", ok: true },
         { name: "durable_descriptor_authority", ok: true },
         { name: "exact_archive_verification", ok: true },
@@ -98,6 +100,30 @@ describe("hosted App snapshot reconciliation", () => {
       supabaseUrl: "https://wrong-project.supabase.co",
       expectedScopeDigest: config.expectedScopeDigest
     })).toThrow(/pinned identity/);
+  });
+
+  it("fails closed when either live mutation trigger or the service-only reader is unavailable", async () => {
+    for (const status of [
+      { storageTriggerEnabled: false, registryTriggerEnabled: true, generationReaderServiceOnly: true },
+      { storageTriggerEnabled: true, registryTriggerEnabled: false, generationReaderServiceOnly: true },
+      { storageTriggerEnabled: true, registryTriggerEnabled: true, generationReaderServiceOnly: false },
+      {
+        storageTriggerEnabled: true,
+        registryTriggerEnabled: true,
+        generationReaderServiceOnly: true,
+        mutationFunctionsTriggerOnly: false
+      },
+      {
+        storageTriggerEnabled: true,
+        registryTriggerEnabled: true,
+        generationReaderServiceOnly: true,
+        mutationFunctionsHardened: false
+      }
+    ]) {
+      await expect(reconcileHostedAppSnapshots(config, {
+        client: registryClient([], [], { fenceStatus: status })
+      })).rejects.toThrow(/mutation fence is not fully enabled/i);
+    }
   });
 
   it("rejects a drifted scope and requires an explicit empty-inventory policy", async () => {
@@ -283,6 +309,13 @@ function registryClient(
   hooks: {
     onRegistryRead?: (bumpGeneration: () => void) => void;
     onList?: (prefix: string, offset: number, bumpGeneration: () => void) => void;
+    fenceStatus?: {
+      storageTriggerEnabled: boolean;
+      registryTriggerEnabled: boolean;
+      generationReaderServiceOnly: boolean;
+      mutationFunctionsTriggerOnly?: boolean;
+      mutationFunctionsHardened?: boolean;
+    };
   } = {}
 ): SupabaseClient {
   let generation = objectKeys.length;
@@ -298,7 +331,20 @@ function registryClient(
   };
   return {
     from: () => builder,
-    rpc: async () => ({ data: generation, error: null }),
+    rpc: async (name: string) => name === "loopgraph_app_snapshot_inventory_fence_status_get"
+      ? {
+          data: {
+            schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
+            storageTriggerEnabled: true,
+            registryTriggerEnabled: true,
+            generationReaderServiceOnly: true,
+            mutationFunctionsTriggerOnly: true,
+            mutationFunctionsHardened: true,
+            ...hooks.fenceStatus
+          },
+          error: null
+        }
+      : ({ data: generation, error: null }),
     storage: {
       from: () => ({
         list: async (prefix: string, options?: { limit?: number; offset?: number }) => {

@@ -59,7 +59,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v6",
+      schemaVersion: "loopgraph-production-promotion-evidence/v7",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -126,7 +126,22 @@ describe("production promotion evidence manifest", () => {
               organizationId,
               projectKey: "main"
             }),
-            checks: 9,
+            checks: 10,
+            inventoryFenceDigest: canonicalAppDigest({
+              scopeDigest: canonicalAppDigest({
+                origin: storageOrigin,
+                organizationId,
+                projectKey: "main"
+              }),
+              status: {
+                schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
+                storageTriggerEnabled: true,
+                registryTriggerEnabled: true,
+                generationReaderServiceOnly: true,
+                mutationFunctionsTriggerOnly: true,
+                mutationFunctionsHardened: true
+              }
+            }),
             inventoryPasses: 2,
             inventoryGeneration: 3,
             inventoryGenerationDigest: canonicalAppDigest({
@@ -221,6 +236,17 @@ describe("production promotion evidence manifest", () => {
     wrongScope.appSnapshotReconciliation = {
       ...(wrongScope.appSnapshotReconciliation as Record<string, unknown>),
       scopeDigest: wrongScopeDigest,
+      inventoryFenceDigest: canonicalAppDigest({
+        scopeDigest: wrongScopeDigest,
+        status: {
+          schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
+          storageTriggerEnabled: true,
+          registryTriggerEnabled: true,
+          generationReaderServiceOnly: true,
+          mutationFunctionsTriggerOnly: true,
+          mutationFunctionsHardened: true
+        }
+      }),
       inventoryGenerationDigest: canonicalAppDigest({
         scopeDigest: wrongScopeDigest,
         generation: 3
@@ -228,6 +254,14 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(wrongScope, config))
       .toThrow(/protected Storage and tenant scope/i);
+
+    const unattestedFence = releaseReceipts();
+    unattestedFence.appSnapshotReconciliation = {
+      ...(unattestedFence.appSnapshotReconciliation as Record<string, unknown>),
+      inventoryFenceDigest: `sha256:${"0".repeat(64)}`
+    };
+    expect(() => buildProductionEvidenceManifest(unattestedFence, config))
+      .toThrow(/fence digest/i);
 
     const missing = releaseReceipts();
     missing.appSnapshotReconciliation = {
@@ -581,13 +615,28 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       ].map((name) => ({ name, ok: true, detail: `${name} passed` }))
     },
     appSnapshotReconciliation: {
-      schemaVersion: "hosted-app-snapshot-reconciliation/v2",
+      schemaVersion: "hosted-app-snapshot-reconciliation/v3",
       checkedAt,
       durationMs: 8_000,
       scopeDigest: canonicalAppDigest({
         origin: storageOrigin,
         organizationId,
         projectKey: "main"
+      }),
+      inventoryFenceDigest: canonicalAppDigest({
+        scopeDigest: canonicalAppDigest({
+          origin: storageOrigin,
+          organizationId,
+          projectKey: "main"
+        }),
+        status: {
+          schemaVersion: "hosted-app-snapshot-inventory-fence/v1",
+          storageTriggerEnabled: true,
+          registryTriggerEnabled: true,
+          generationReaderServiceOnly: true,
+          mutationFunctionsTriggerOnly: true,
+          mutationFunctionsHardened: true
+        }
       }),
       inventoryPasses: 2,
       inventoryGeneration: 3,
@@ -615,6 +664,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       checks: [
         "tenant_registry_scan",
         "pinned_scope_identity",
+        "live_mutation_fence",
         "non_empty_inventory_policy",
         "durable_descriptor_authority",
         "exact_archive_verification",

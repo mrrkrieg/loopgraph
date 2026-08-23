@@ -467,14 +467,15 @@ fresh receipt and binds both reviewed Storage origins plus the exact artifact an
 
 Production promotion also requires `npm run reconcile:app-snapshots` against the exact validated
 Storage origin and tenant/project. The protected gate verifies every currently detached App through
-the signed archive loader, rejects missing, corrupt, untracked, or unavailable recovery authority,
+the signed archive loader, first attests that both live database mutation triggers are installed and
+enabled, rejects missing, corrupt, untracked, or unavailable recovery authority,
 inventories Storage back to current registry authority, rejects malformed objects, and requires an
 independently reviewed digest for any intentionally retained unreferenced archives. It repeats the
 full registry-plus-Storage pass until two consecutive content digests match and fails closed under
 continuous mutation. Registry and Storage triggers maintain one tenant/project generation that is
 checked before the registry and after the final Storage page, so a committed authority mutation
-forces another scan. It contributes
-only aggregate counts plus opaque scope/retention digests to the promotion manifest and never deletes
+forces another scan. It contributes only aggregate counts plus opaque scope/fence/generation/retention
+digests to the promotion manifest and never deletes
 archives automatically.
 
 ## Department loop library

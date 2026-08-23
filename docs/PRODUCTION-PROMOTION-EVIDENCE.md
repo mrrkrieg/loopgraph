@@ -40,7 +40,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
 | `hosted-app-snapshot-staging-validation/v1` | Exact Supabase Storage origin and tenant/project, private bounded bucket, authenticated read/insert/update/delete denial, first-writer immutability, content-bound recovery through a second replica root, and verified probe cleanup |
 | `hosted-app-snapshot-restore-rehearsal/v1` | Exact validated source and separately reviewed restore origins, tenant/project, source export, first-writer restore, clean-target exact load, source preservation during target cleanup, exact probe cleanup, and the same artifact/file payload exercised by the isolation gate |
-| `hosted-app-snapshot-reconciliation/v2` | Exact validated Storage origin and tenant/project scope digest, fixed control set, explicit empty-inventory policy, two identical full registry-plus-Storage passes within a bounded stability window, the same trigger-maintained mutation generation before/after and across those passes, complete current detached-installation scan, exact signed-archive verification, reverse Storage inventory, zero malformed objects, and an independently pinned opaque digest for intentionally retained unreferenced archives |
+| `hosted-app-snapshot-reconciliation/v3` | Exact validated Storage origin and tenant/project scope digest, live service-only attestation that both mutation triggers are installed and enabled, fixed control set, explicit empty-inventory policy, two identical full registry-plus-Storage passes within a bounded stability window, the same trigger-maintained mutation generation before/after and across those passes, complete current detached-installation scan, exact signed-archive verification, reverse Storage inventory, zero malformed objects, and an independently pinned opaque digest for intentionally retained unreferenced archives |
 | `backup-restore-rehearsal/v2` | Protected source database identity digest, distinct disposable target, matching PostgreSQL versions, exact row-count/SHA-256 fingerprints for every application table, restored audit integrity, and evidence-family counts |
 | `audit-drain/v3` | Exact staging origin and tenant, retained audit head, exact staging and marketplace sequence/hash proofs, receiver predecessor, Ed25519-signed external acknowledgement and its recomputed digest, and immutable-until deadline |
 
@@ -66,7 +66,7 @@ environment, then against independently configured release-evidence/production v
 therefore cannot silently bless newly orphaned archives. Malformed Storage objects always fail and
 are never covered by the retention digest. No release receipt contains object keys or archive paths.
 
-The resulting `loopgraph-production-promotion-evidence/v6` manifest records the repository, commit,
+The resulting `loopgraph-production-promotion-evidence/v7` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
 marketplace release, approved unreferenced-snapshot inventory digest, trusted retention key ID and
 public-key digest, canonical SHA-256 digest of each receipt, essential control summaries, and one
@@ -147,7 +147,8 @@ origins. Only the validated restore origin and secret-free receipt leave this en
 
 The workflow supplies the validated Storage origin and marketplace tenant/project as upstream job
 outputs. The job checks out the exact default-branch dispatch SHA, verifies every current detached
-installation, repeats the full registry-plus-Storage read until two consecutive content digests are
+installation, first attests through a service-role-only RPC that both exact database triggers are
+installed and enabled, and repeats the full registry-plus-Storage read until two consecutive content digests are
 identical, inventories the exact tenant/project Storage prefix, and emits only aggregate counts plus
 opaque scope/generation/retention digests. Database triggers increment the scoped generation in
 the same transaction as every committed registry-payload or private-bucket mutation, and the job

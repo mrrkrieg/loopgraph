@@ -125,12 +125,13 @@ rejects every malformed object, and binds the exact unreferenced archive set to 
 reviewed opaque digest. It requires two identical full registry-plus-Storage passes, fails under
 bounded continuous mutation, and fences each pass with a registry-and-Storage-trigger-maintained
 tenant/project mutation generation read before the registry and after the final Storage page. It
-never emits object keys and never deletes archives
+first proves from live PostgreSQL catalogs that both exact triggers are enabled and the generation
+reader remains service-role-only. It never emits object keys and never deletes archives
 automatically.
 
 The protected production release chain repeats that reconciliation for the exact Storage origin and
 tenant/project proven earlier in the same run. Its fresh, healthy aggregate receipt is a mandatory
-input to `loopgraph-production-promotion-evidence/v6`; a missing, stale, cross-scope, incomplete,
+input to `loopgraph-production-promotion-evidence/v7`; a missing, stale, cross-scope, incomplete,
 retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
 pinned in reconciliation, release-evidence, and production environments. The credential-bearing
 release workflow is accepted only as a

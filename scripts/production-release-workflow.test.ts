@@ -192,6 +192,9 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY:
         "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY }}"
     });
+    expect(source).toContain('value.schemaVersion!=="hosted-app-snapshot-reconciliation/v3"');
+    expect(source).toContain("value.checks?.length!==10");
+    expect(source).toContain("value.inventoryFenceDigest");
     expect(JSON.stringify(jobs["app-snapshot-reconciliation"])).toContain("persist-credentials");
     expect(JSON.stringify(jobs["app-snapshot-reconciliation"])).not.toMatch(/actions\/[a-z-]+@v\d/);
     expect(source.match(/LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM/g)).toHaveLength(2);
