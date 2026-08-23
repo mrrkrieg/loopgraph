@@ -3,6 +3,10 @@ import { open, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promis
 import os from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import {
+  appEvidenceRenewalPlanSchema,
+  type AppEvidenceRenewalPlan
+} from "../core";
 import { callLoopgraphAppTool } from "./app-tools";
 import { doctorHermesIntegration, setupHermesIntegration, type HermesInstallScope } from "./hermes-install";
 import { doctorHermesWebhookRoutes, syncHermesWebhookRoutes } from "./hermes-webhooks";
@@ -442,23 +446,43 @@ export async function runLocalSupervisorCycle(
     };
   });
 
-  await run("app_updates", "degraded", async () => {
+  await run("app_updates", "blocked", async () => {
     const status = await deps.callAppTool("loopgraph_app_install_status", { projectRoot }) as unknown;
     const installations = readInstallations(status);
-    const diffs = await Promise.all(installations.map(async (installationId) =>
-      deps.callAppTool("loopgraph_app_diff", { projectRoot, installationId }) as Promise<unknown>
-    ));
+    const [diffs, renewalPlanRaw] = await Promise.all([
+      Promise.all(installations.map(async (installationId) =>
+        deps.callAppTool("loopgraph_app_diff", { projectRoot, installationId }) as Promise<unknown>
+      )),
+      deps.callAppTool("loopgraph_apps_renewal_plan", { projectRoot, limit: 100 })
+    ]);
+    const renewalPlan = appEvidenceRenewalPlanSchema.parse(renewalPlanRaw);
     const updates = diffs.filter(hasUpdateAvailable).length;
+    const nextRenewal = renewalPlan.items.find((item) => item.priority !== "none");
     return {
       name: "app_updates",
-      health: "healthy",
+      health: appFleetHealth(renewalPlan),
       checkedAt,
-      summary: updates > 0
-        ? `${updates} installed app update${updates === 1 ? " is" : "s are"} available for review.`
-        : `${installations.length} installed app${installations.length === 1 ? " is" : "s are"} current.`,
+      summary: appFleetSummary(installations.length, updates, renewalPlan),
       details: {
         installedApps: installations.length,
-        updatesAvailable: updates
+        updatesAvailable: updates,
+        proofInvalid: renewalPlan.counts.invalid,
+        proofExpired: renewalPlan.counts.expired,
+        proofRenewSoon: renewalPlan.counts.renewSoon,
+        proofIncomplete: renewalPlan.counts.incomplete,
+        proofCurrent: renewalPlan.counts.current,
+        proofNotApplicable: renewalPlan.counts.notApplicable,
+        renewalMatches: renewalPlan.totalMatched,
+        renewalItemsReturned: renewalPlan.items.length,
+        renewalPlanTruncated: renewalPlan.items.length < renewalPlan.totalMatched,
+        ...(nextRenewal ? {
+          nextRenewalInstallationId: nextRenewal.installationId,
+          nextRenewalAppId: nextRenewal.appId,
+          nextRenewalStatus: nextRenewal.status,
+          nextRenewalActionKind: nextRenewal.nextAction.kind,
+          nextRenewalAction: nextRenewal.nextAction.summary,
+          ...(nextRenewal.validUntil ? { nextRenewalValidUntil: nextRenewal.validUntil } : {})
+        } : {})
       }
     };
   });
@@ -627,6 +651,17 @@ function recommendedActionsFor(components: LocalSupervisorComponentStatus[]): st
   if (appUpdates > 0) {
     actions.push("Review app graph, permission, and configuration changes before applying an update.");
   }
+  const appFleet = byName.get("app_updates");
+  const nextRenewalAction = typeof appFleet?.details.nextRenewalAction === "string"
+    ? appFleet.details.nextRenewalAction
+    : undefined;
+  if (Number(appFleet?.details.proofInvalid ?? 0) > 0) {
+    actions.push(`Ask Hermes to inspect and repair invalid App evidence before promotion. ${nextRenewalAction ?? "Open the fleet evidence renewal plan for the exact affected App."}`);
+  } else if (Number(appFleet?.details.proofExpired ?? 0) > 0) {
+    actions.push(`Ask Hermes to renew expired App proof before a higher rollout mode is considered. ${nextRenewalAction ?? "Run the fleet evidence renewal plan for the exact affected App."}`);
+  } else if (Number(appFleet?.details.proofRenewSoon ?? 0) > 0) {
+    actions.push(`Ask Hermes to schedule the next bounded App proof renewal. ${nextRenewalAction ?? "Run the fleet evidence renewal plan for the exact affected App."}`);
+  }
   for (const component of components.filter((item) => item.error)) {
     actions.push(`Inspect ${humanizeComponent(component.name).toLowerCase()} health; its last check failed without stopping unrelated services.`);
   }
@@ -734,7 +769,41 @@ function hasUpdateAvailable(value: unknown): boolean {
   return isRecord(value) && isRecord(value.updateAvailable);
 }
 
+function appFleetHealth(plan: AppEvidenceRenewalPlan): LocalSupervisorHealth {
+  if (plan.counts.invalid > 0) return "blocked";
+  if (plan.counts.expired > 0 || plan.counts.renewSoon > 0) return "degraded";
+  return "healthy";
+}
+
+function appFleetSummary(
+  installationCount: number,
+  updateCount: number,
+  plan: AppEvidenceRenewalPlan
+): string {
+  if (plan.counts.invalid > 0) {
+    return `${plan.counts.invalid} installed App evidence set${plan.counts.invalid === 1 ? " is" : "s are"} invalid and must be repaired before promotion.`;
+  }
+  if (plan.counts.expired > 0) {
+    return `${plan.counts.expired} installed App proof${plan.counts.expired === 1 ? " has" : "s have"} expired and must be renewed.`;
+  }
+  if (plan.counts.renewSoon > 0) {
+    return `${plan.counts.renewSoon} installed App proof${plan.counts.renewSoon === 1 ? " is" : "s are"} due for renewal soon.`;
+  }
+  if (plan.counts.incomplete > 0) {
+    const updateSummary = updateCount > 0
+      ? ` ${updateCount} App update${updateCount === 1 ? " is" : "s are"} also available for review.`
+      : "";
+    return `${installationCount} installed App${installationCount === 1 ? " is" : "s are"} current; ${plan.counts.incomplete} still need operating proof before higher maturity.${updateSummary}`;
+  }
+  if (updateCount > 0) {
+    return `${updateCount} installed App update${updateCount === 1 ? " is" : "s are"} available for review; evidence freshness is healthy.`;
+  }
+  if (installationCount === 0) return "No Apps are installed; update and evidence-renewal monitoring is ready.";
+  return `${installationCount} installed App${installationCount === 1 ? " is" : "s are"} current and evidence freshness is healthy.`;
+}
+
 function humanizeComponent(name: LocalSupervisorComponentName): string {
+  if (name === "app_updates") return "App fleet";
   return name.replace(/_/g, " ").replace(/^./, (value) => value.toUpperCase());
 }
 

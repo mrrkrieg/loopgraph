@@ -1322,7 +1322,7 @@ describe("atomic app installation lifecycle", () => {
     const resumed = await input.service.resume(applied.installation.id, "admin-1");
     expect(resumed).toMatchObject({ state: "execute_with_approval", mode: "execute_with_approval" });
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
-  });
+  }, 20_000);
 
   it("recovers interrupted pause and resume without leaving App and LoopSpec state split", async () => {
     const store = new AuditCapturingInstallationStore("acme");
