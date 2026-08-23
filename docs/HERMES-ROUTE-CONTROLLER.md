@@ -43,10 +43,11 @@ Loopgraph sends `hermes-route-controller-request/v1alpha1` to one configured rec
 - the Hermes profile, skill, and restricted MCP tools;
 - the reviewed transformer version;
 - the existing Hermes-managed connection IDs;
+- the App's required logical capabilities and exact installed connection bindings when the route belongs to an installed App;
 - shadow/log activation;
 - `destructiveChangesAllowed=false`.
 
-Hermes returns `hermes-route-controller-receipt/v1alpha1`. Loopgraph rejects the receipt unless its request, project, catalog, manifest, plan, route set, config digests, profiles, skills, tool lists, and transformers match exactly. A shadow route cannot claim readiness without signature verification. A provider route cannot claim an active subscription without a bound connection.
+Hermes returns `hermes-route-controller-receipt/v1alpha1`. Loopgraph rejects the receipt unless its request, project, catalog, manifest, plan, route set, config digests, profiles, skills, tool lists, and transformers match exactly. A shadow route cannot claim readiness without signature verification. A provider route cannot claim an active subscription without a bound connection, and a required provider route cannot use `not_applicable` to bypass subscription setup.
 
 The accepted receipt is written atomically to `.loopgraph/hermes-route-activation.json` with user-only permissions. URLs containing credentials, query parameters, or fragments and secret-shaped receipt content are rejected.
 
@@ -86,6 +87,8 @@ loopgraph hermes webhooks activation-status --project .
 Trusted Hermes administration turns can inspect the same plan and status through `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status`. Those tools are read-only and are absent from the isolated webhook-router and lifecycle-router MCP profiles. The mutating activation operation remains CLI/deployment-only so an incoming event can never change its own route or request a controller credential.
 
 `ready=false` is expected while a provider connection or administrator confirmation is pending. It grants no execution authority. Provider writes remain controlled by connector capabilities, action fingerprints, approvals, and the normal Loopgraph promotion gates.
+
+Installed App readiness uses this same receipt at Loop-ID granularity. Loopgraph matches the App's owned routed loops to the exact receipt routes. A provider-agnostic App route is specialized to the provider connection selected by its installation; another connected provider cannot silently claim the route. Business events emitted by Hermes or Loopgraph compile as authenticated internal routes with no provider subscription. Missing coverage, a stale plan, missing authentication verification, or any required non-active provider subscription blocks `connected` maturity and every App activation approval. A pending route for another App remains visible but does not block an otherwise complete App.
 
 ## Controller implementation requirements
 

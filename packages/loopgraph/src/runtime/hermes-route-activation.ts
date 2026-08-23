@@ -14,7 +14,9 @@ import {
   type HermesRouteActivationRecord,
   type HermesRouteActivationRoute,
   type HermesRouteControllerRequest,
-  type HermesRouteControllerReceipt
+  type HermesRouteControllerReceipt,
+  type ConnectorManifest,
+  type ConnectionInstance
 } from "../core";
 import { defaultConnectorManifests, readConnectionInstances } from "./connector-registry";
 import {
@@ -22,6 +24,8 @@ import {
   readHermesRoutesManifest,
   type HermesWebhookRoutePlanItem
 } from "./hermes-webhooks";
+import { appInstallationRegistrySchema } from "./app-installation-store";
+import { FileLoopSpecRegistryStore } from "./loop-spec-store";
 import { assertSecretFree, redactSensitiveString } from "./secret-redaction";
 import { getLoopgraphRoot } from "./storage-resolver";
 import type { WorkloadTokenProvider } from "./workload-token-provider";
@@ -109,9 +113,14 @@ export type HermesRouteActivationStatus = {
   planDigest?: string;
   currentPlanDigest?: string;
   routeStates: Array<{
+    routeId: string;
     routeName: string;
+    routeKind: HermesRouteActivationRoute["routeKind"];
+    loopIds: string[];
     state: HermesRouteControllerReceipt["routes"][number]["state"];
     subscriptionState: HermesRouteControllerReceipt["routes"][number]["subscriptionState"];
+    signatureVerificationConfigured: boolean;
+    ready: boolean;
   }>;
   warnings: string[];
   nextActions: string[];
@@ -136,35 +145,47 @@ export async function prepareHermesRouteActivation(
 
   const connections = await readConnectionInstances(projectRoot);
   const connectorManifests = defaultConnectorManifests();
+  const appConnectionBindingsByLoopId = await readAppConnectionBindingsByLoopId(projectRoot);
   const warnings = [...doctor.warnings];
-  const routes = doctor.plan.routes.map((route) => {
-    const connector = route.routeKind === "provider_event"
-      ? connectorManifests.find((candidate) => candidate.webhook?.sourcePatterns.some((pattern) =>
-        patternsOverlap(pattern, route.sourcePattern)
-      ))
-      : undefined;
-    if (route.routeKind === "provider_event" && !connector?.webhook?.transformVersion) {
+  const routes = doctor.plan.routes.flatMap((route) => {
+    if (route.routeKind !== "provider_event") {
+      return [activationRoute(route, {
+        transformerId: route.routeKind === "loopgraph_lifecycle"
+          ? "loopgraph-lifecycle-event-envelope/v1alpha1"
+          : route.sourcePattern === "hermes"
+            ? "hermes-business-event-envelope/v1alpha1"
+            : "loopgraph-business-event-envelope/v1alpha1",
+        connectionIds: []
+      })];
+    }
+    const candidates = connectorCandidatesForRoute(
+      route,
+      connectorManifests,
+      connections,
+      appConnectionBindingsByLoopId
+    );
+    if (candidates.length === 0) {
       throw new HermesRouteActivationError(
         "transformer_unresolved",
-        `No reviewed Hermes transformer contract is registered for source pattern ${route.sourcePattern}`
+        route.sourcePattern === "*"
+          ? `Wildcard Hermes route ${route.routeName} cannot be activated until a connected provider selects its reviewed transformer`
+          : `No reviewed Hermes transformer contract is registered for source pattern ${route.sourcePattern}`
       );
     }
-    const connectionIds = connector
-      ? connections
-        .filter((connection) => connection.manifestId === connector.id && connection.status !== "missing")
-        .map((connection) => connection.id)
-        .sort()
-      : [];
-    if (route.routeKind === "provider_event" && connectionIds.length === 0) {
-      warnings.push(`Route ${route.routeName} has no connected ${connector?.label ?? route.sourcePattern} installation; Hermes may prepare the route but must keep its subscription pending.`);
-    }
-    return activationRoute(route, {
-      transformerId: route.routeKind === "loopgraph_lifecycle"
-        ? "loopgraph-lifecycle-event-envelope/v1alpha1"
-        : connector!.webhook!.transformVersion,
-      connectionIds
+    return candidates.map(({ connector, connectionIds, loopIds }) => {
+      const scopedRoute = scopeRouteToLoops(route, loopIds);
+      const specialized = route.sourcePattern === "*"
+        ? specializeWildcardRoute(scopedRoute, connector.id, connector.webhook!.routeNameTemplate, connector.webhook!.sourcePatterns[0]!)
+        : scopedRoute;
+      if (connectionIds.length === 0) {
+        warnings.push(`Route ${specialized.routeName} has no connected ${connector.label} installation; Hermes may prepare the route but must keep its subscription pending.`);
+      }
+      return activationRoute(specialized, {
+        transformerId: connector.webhook!.transformVersion,
+        connectionIds
+      });
     });
-  });
+  }).sort((left, right) => left.routeName.localeCompare(right.routeName));
   const manifestDigest = contentHash(manifest);
   const planIdentity = {
     projectRootHash: manifest.projectRootHash,
@@ -212,11 +233,11 @@ export async function activateHermesRoutes(
   });
   const receipt = await controller.reconcile(request);
   verifyControllerReceipt(request, receipt);
-  const ready = receipt.routes.every((route) =>
-    route.state === "shadow" &&
-    route.signatureVerificationConfigured &&
-    ["active", "not_applicable"].includes(route.subscriptionState)
-  );
+  const desiredById = new Map(plan.routes.map((route) => [route.routeId, route]));
+  const ready = receipt.routes.every((route) => {
+    const desired = desiredById.get(route.routeId);
+    return Boolean(desired && routeReceiptReady(desired, route));
+  });
   const record = hermesRouteActivationRecordSchema.parse({
     schemaVersion: HERMES_ROUTE_ACTIVATION_RECORD_SCHEMA_VERSION,
     activatedAt: now.toISOString(),
@@ -275,11 +296,19 @@ export async function getHermesRouteActivationStatus(
     ready,
     planDigest: record.plan.planDigest,
     currentPlanDigest: currentPlan?.planDigest,
-    routeStates: record.receipt.routes.map((route) => ({
-      routeName: route.routeName,
-      state: route.state,
-      subscriptionState: route.subscriptionState
-    })),
+    routeStates: record.receipt.routes.map((route) => {
+      const desired = record.plan.routes.find((candidate) => candidate.routeId === route.routeId)!;
+      return {
+        routeId: route.routeId,
+        routeName: route.routeName,
+        routeKind: desired.routeKind,
+        loopIds: desired.loopIds,
+        state: route.state,
+        subscriptionState: route.subscriptionState,
+        signatureVerificationConfigured: route.signatureVerificationConfigured,
+        ready: routeReceiptReady(desired, route)
+      };
+    }),
     warnings: [...new Set(warnings)].sort(),
     nextActions: ready
       ? ["Hermes routes match the current Loopgraph plan and remain in shadow/log mode."]
@@ -363,6 +392,7 @@ function activationRoute(
     eventTypePatterns: route.eventTypePatterns,
     subjectTypes: route.subjectTypes,
     loopIds: route.loopIds,
+    requiredCapabilities: route.requiredConnections,
     profileId: route.routeKind === "loopgraph_lifecycle"
       ? "loopgraph_lifecycle_router" as const
       : "loopgraph_webhook_router" as const,
@@ -383,9 +413,9 @@ function activationRoute(
     },
     subscription: {
       owner: "hermes" as const,
-      policy: route.routeKind === "loopgraph_lifecycle"
-        ? "notification_only" as const
-        : "configure_if_connected" as const,
+      policy: route.routeKind === "provider_event"
+        ? "configure_if_connected" as const
+        : "notification_only" as const,
       connectionIds: input.connectionIds,
       required: route.routeKind === "provider_event"
     },
@@ -394,6 +424,128 @@ function activationRoute(
   return {
     ...routeIdentity,
     configDigest: contentHash(routeIdentity)
+  };
+}
+
+function connectorCandidatesForRoute(
+  route: HermesWebhookRoutePlanItem,
+  manifests: ConnectorManifest[],
+  connections: ConnectionInstance[],
+  bindingsByLoopId: ReadonlyMap<string, ReadonlySet<string>>
+): Array<{ connector: ConnectorManifest; connectionIds: string[]; loopIds: string[] }> {
+  const usableConnections = connections.filter((connection) => connection.status !== "missing");
+  const matched = route.sourcePattern === "*"
+    ? manifests.filter((connector) =>
+        connector.webhook && usableConnections.some((connection) => connection.manifestId === connector.id))
+    : manifests.filter((connector) => connector.webhook?.sourcePatterns.some((pattern) =>
+        patternsOverlap(pattern, route.sourcePattern)));
+  const candidates = matched
+    .filter((connector) => connector.webhook)
+    .map((connector) => {
+      const connectorConnections = usableConnections.filter((connection) => connection.manifestId === connector.id);
+      const loopIds = route.loopIds.filter((loopId) => {
+        const bindings = bindingsByLoopId.get(loopId);
+        return bindings === undefined || connectorConnections.some((connection) => bindings.has(connection.id));
+      });
+      const hasUnboundLoop = loopIds.some((loopId) => !bindingsByLoopId.has(loopId));
+      const connectionIds = connectorConnections
+        .filter((connection) => hasUnboundLoop || loopIds.some((loopId) => bindingsByLoopId.get(loopId)?.has(connection.id)))
+        .map((connection) => connection.id)
+        .sort();
+      return { connector, connectionIds, loopIds };
+    })
+    .filter((candidate) => candidate.loopIds.length > 0)
+    .sort((left, right) => left.connector.id.localeCompare(right.connector.id));
+  const coveredLoopIds = new Set(candidates.flatMap((candidate) => candidate.loopIds));
+  const missingAppLoopIds = route.loopIds.filter((loopId) =>
+    bindingsByLoopId.has(loopId) && !coveredLoopIds.has(loopId));
+  if (missingAppLoopIds.length > 0) {
+    throw new HermesRouteActivationError(
+      "app_route_binding_unresolved",
+      `Hermes route ${route.routeName} has no reviewed connected transformer for App loop(s): ${missingAppLoopIds.join(", ")}`
+    );
+  }
+  return candidates;
+}
+
+async function readAppConnectionBindingsByLoopId(projectRoot: string): Promise<Map<string, Set<string>>> {
+  const registryPath = path.join(getLoopgraphRoot(projectRoot), "apps", "installations.json");
+  let registry: z.infer<typeof appInstallationRegistrySchema>;
+  try {
+    registry = appInstallationRegistrySchema.parse(JSON.parse(await readFile(registryPath, "utf8")));
+  } catch (error) {
+    if (isFileNotFound(error)) return new Map();
+    throw new HermesRouteActivationError(
+      "app_installation_registry_invalid",
+      "Hermes route activation cannot trust the App installation registry"
+    );
+  }
+
+  const loopSpecStore = new FileLoopSpecRegistryStore(projectRoot);
+  const [{ workspace }, activeArtifacts] = await Promise.all([
+    loopSpecStore.getWorkspace(projectRoot),
+    loopSpecStore.listActiveLoopSpecs(projectRoot)
+  ]);
+  const artifactByLoopId = new Map(activeArtifacts.map((artifact) => [artifact.loopId, artifact]));
+  const bindingsByLoopId = new Map<string, Set<string>>();
+  for (const installation of registry.installations) {
+    const installationSegment = `${path.sep}installations${path.sep}${installation.id}${path.sep}`;
+    const loopIds = workspace.registeredSpecs
+      .filter((entry) => path.resolve(workspace.projectRoot, entry.path).includes(installationSegment))
+      .map((entry) => entry.id);
+    for (const loopId of loopIds) {
+      const requiredCapabilities = artifactByLoopId.get(loopId)?.spec.routing?.requiredConnections ?? [];
+      const connectionIds = new Set(requiredCapabilities.flatMap((capability) => {
+        const direct = installation.connectionBindings[capability];
+        const operation = installation.operationBindings[capability]?.connectionId;
+        return [...(direct ? [direct] : []), ...(operation ? [operation] : [])];
+      }));
+      const current = bindingsByLoopId.get(loopId) ?? new Set<string>();
+      for (const connectionId of connectionIds) current.add(connectionId);
+      bindingsByLoopId.set(loopId, current);
+    }
+  }
+  return bindingsByLoopId;
+}
+
+function scopeRouteToLoops(
+  route: HermesWebhookRoutePlanItem,
+  loopIds: string[]
+): HermesWebhookRoutePlanItem {
+  if (loopIds.length === route.loopIds.length && loopIds.every((loopId, index) => loopId === route.loopIds[index])) {
+    return route;
+  }
+  const selected = new Set(loopIds);
+  const requiredConnections = route.requiredConnectionsByLoopId
+    ? [...new Set(Object.entries(route.requiredConnectionsByLoopId)
+        .filter(([loopId]) => selected.has(loopId))
+        .flatMap(([, capabilities]) => capabilities))].sort()
+    : route.requiredConnections;
+  return { ...route, loopIds, requiredConnections };
+}
+
+function specializeWildcardRoute(
+  route: HermesWebhookRoutePlanItem,
+  connectorId: string,
+  routeNameTemplate: string,
+  sourcePattern: string
+): HermesWebhookRoutePlanItem {
+  const routeIdentity = {
+    logicalRouteId: route.routeId,
+    connectorId,
+    sourcePattern,
+    eventTypePatterns: route.eventTypePatterns,
+    loopIds: route.loopIds
+  };
+  return {
+    ...route,
+    routeName: `${routeNameTemplate}-${contentHash(routeIdentity)}`,
+    routeId: `hermes_route_${contentHash(routeIdentity)}`,
+    sourcePattern,
+    filters: [
+      `Accept provider events from ${sourcePattern} through the reviewed ${connectorId} transformer.`,
+      ...route.filters
+    ]
   };
 }
 
@@ -450,6 +602,9 @@ function verifyControllerReceipt(
       actual.subscriptionState === "active"
     ) {
       throw new HermesRouteActivationError("controller_receipt_connection_mismatch", `Hermes route ${desired.routeName} claimed an active subscription without a bound connection`);
+    }
+    if (desired.subscription.required && actual.subscriptionState === "not_applicable") {
+      throw new HermesRouteActivationError("controller_receipt_subscription_mismatch", `Hermes route ${desired.routeName} requires an active provider subscription`);
     }
     if (actual.state === "shadow" && !actual.signatureVerificationConfigured) {
       throw new HermesRouteActivationError("signature_verification_missing", `Hermes route ${desired.routeName} entered shadow state without signature verification`);
@@ -556,16 +711,29 @@ function verifyStoredActivationRecord(record: HermesRouteActivationRecord): void
     ) {
       throw new Error(`Stored Hermes route ${desired.routeName} claims an unbound active subscription`);
     }
+    if (desired.subscription.required && actual.subscriptionState === "not_applicable") {
+      throw new Error(`Stored Hermes route ${desired.routeName} requires an active provider subscription`);
+    }
   }
-  const derivedReady = receipt.routes.every((route) =>
-    route.state === "shadow" &&
-    route.signatureVerificationConfigured &&
-    ["active", "not_applicable"].includes(route.subscriptionState)
-  );
+  const derivedReady = receipt.routes.every((route) => {
+    const desired = desiredById.get(route.routeId);
+    return Boolean(desired && routeReceiptReady(desired, route));
+  });
   if (record.ready !== derivedReady) {
     throw new Error("Stored Hermes route readiness does not match its route receipts");
   }
   assertSecretFree(record, "stored Hermes route activation record");
+}
+
+function routeReceiptReady(
+  desired: HermesRouteActivationRoute,
+  actual: HermesRouteControllerReceipt["routes"][number]
+): boolean {
+  return actual.state === "shadow" &&
+    actual.signatureVerificationConfigured &&
+    (desired.subscription.required
+      ? actual.subscriptionState === "active"
+      : ["active", "not_applicable"].includes(actual.subscriptionState));
 }
 
 async function writeActivationRecord(projectRoot: string, record: HermesRouteActivationRecord): Promise<void> {

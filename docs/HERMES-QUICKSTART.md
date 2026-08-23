@@ -200,6 +200,8 @@ The first command returns the digest to confirm. Activation accepts only a short
 
 Hermes can call the read-only `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status` admin tools to explain this state. It never receives the mutating controller call or token. Connection reconciliation and the Event Routing screen treat a local manifest without a current controller receipt as planned-only, not ready event intake.
 
+Installed App onboarding enforces the same boundary. After conformance, the shared Hermes/browser/CLI journey first asks to synchronize a missing or stale local manifest, then prepares the exact controller plan when activation proof is absent. The App cannot reach `connected` maturity or create a shadow approval until every event route covering its owned Loop IDs has a current controller receipt and verified authentication, with every required provider subscription active. Provider-agnostic App routes bind to the exact provider connections selected during installation. Hermes- and Loopgraph-generated business events use authenticated internal routes without inventing provider subscriptions. A pending route owned only by another App does not block it.
+
 ## 8. Rehearse an event before live webhooks
 
 Use a generated fixture or a redacted normalized event:
