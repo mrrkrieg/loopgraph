@@ -230,6 +230,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   replacement triggers one bounded refresh; each verifier deduplicates concurrent loads, caps and
   validates key documents, rejects redirects and fetch failures, and throttles attacker-controlled
   misses.
+- Hosted marketplace release deprecation and revocation now cross an MFA-gated API and a separate
+  service-role RPC. The database rechecks active administrator ownership, permits only monotonic
+  lifecycle transitions, and commits the exact transition with a reason digest in the append-only
+  tenant audit chain. The older direct authenticated RPC path is revoked, so clients cannot bypass
+  the step-up and audit boundary.
 - Hosted routing state, route jobs, Hermes design tasks, and Hermes callback receipts use
   tenant/project-scoped Supabase stores. Active design-task creation is idempotent, and task plus
   callback updates use revision fencing so independent replicas cannot overwrite one another.
