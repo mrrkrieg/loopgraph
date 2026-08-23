@@ -152,6 +152,35 @@ jobs:
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-staging-receipt.json","utf8"));const origin=new URL(value.targetOrigin);if(value.schemaVersion!=="hosted-app-snapshot-staging-validation/v1"||origin.protocol!=="https:"||origin.pathname!=="/"||origin.username||origin.password||origin.search||origin.hash||value.checks?.length!==8)process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`storage_origin=${origin.origin}\n`);'
 
+  learning-entities:
+    needs: marketplace
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: learning-entity-staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:learning-entities-staging > learning-entity-staging-receipt.json
+        env:
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_ALLOW_MUTATION: "yes"
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("learning-entity-staging-receipt.json","utf8"));const names=["distributed_measurement_claim","stale_lease_rejected","cross_replica_job_finalization","metric_sample_immutable","observed_outcome_immutable","value_ledger_immutable","cross_replica_entity_visibility","provider_alias_single_owner","probe_scope_clean"];if(value.schemaVersion!=="hosted-learning-entity-staging-validation/v1"||value.healthy!==true||!/^sha256:[a-f0-9]{64}$/.test(value.scopeDigest)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: learning-entity-staging-evidence
+          path: learning-entity-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
   app-snapshot-recovery:
     needs: [app-snapshots, marketplace]
     runs-on: [self-hosted, loopgraph-staging]
@@ -289,7 +318,7 @@ jobs:
           retention-days: 90
 
   evidence:
-    needs: [staging, marketplace, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
+    needs: [staging, marketplace, learning-entities, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
     runs-on: ubuntu-latest
     environment: release-evidence
     permissions:
@@ -328,6 +357,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: learning-entity-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: app-snapshot-recovery-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -344,6 +377,7 @@ jobs:
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
+          LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-reconciliation-receipt.json"
@@ -405,6 +439,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: learning-entity-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: app-snapshot-recovery-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -425,6 +463,7 @@ jobs:
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
+          LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-reconciliation-receipt.json"

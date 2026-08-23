@@ -51,10 +51,10 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   Missing, corrupt, untracked, unavailable, malformed, retention-drifted,
   unstable, incomplete, cross-scope, or stale evidence blocks promotion.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's nine receipts to one source commit,
+- `npm run release:evidence:build` binds the current run's ten receipts to one source commit,
   deployment, source and restore Storage origins, tenant/project, database identity, exact
-  marketplace artifact, independently reviewed active mutation-probe scope, and retained-snapshot
-  inventory.
+  marketplace artifact, independently reviewed active mutation and learning/entity probe scopes,
+  and retained-snapshot inventory.
   `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any
   substituted, stale, or mixed receipt.
 - App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
@@ -110,9 +110,9 @@ invokes the provider handler. A request older than the configured threshold is s
 ## Release evidence
 
 The protected workflow stores the staging, App action, marketplace, active App snapshot
-mutation-fence, App snapshot isolation, App snapshot recovery, App snapshot reconciliation,
-database recovery, and audit-retention receipts as separate artifacts, compiles
-`loopgraph-production-promotion-evidence/v8`, and creates a GitHub OIDC
+mutation-fence, distributed learning/entity, App snapshot isolation, App snapshot recovery,
+App snapshot reconciliation, database recovery, and audit-retention receipts as separate artifacts,
+compiles `loopgraph-production-promotion-evidence/v9`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured

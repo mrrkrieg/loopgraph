@@ -131,9 +131,10 @@ and effective execute capabilities have not drifted. It never emits object keys 
 automatically.
 
 The protected production release chain first actively rehearses the exact deployed registry and
-Storage mutation fence in a random reserved staging scope, then repeats reconciliation for the exact
-Storage origin and tenant/project proven earlier in the same run. Both fresh, healthy aggregate
-receipts are mandatory inputs to `loopgraph-production-promotion-evidence/v8`; a missing, stale,
+Storage mutation fence and the distributed learning/entity stores in random reserved staging
+scopes, then repeats reconciliation for the exact Storage origin and tenant/project proven earlier
+in the same run. All fresh, healthy aggregate receipts are mandatory inputs to
+`loopgraph-production-promotion-evidence/v9`; a missing, stale,
 cross-scope, incomplete,
 retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
 pinned in reconciliation, release-evidence, and production environments. The credential-bearing

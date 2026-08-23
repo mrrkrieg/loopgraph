@@ -137,6 +137,30 @@ const appSnapshotFenceProbeReceiptSchema = z.object({
   }).strict()).length(appSnapshotFenceProbeCheckNames.length)
 }).strict();
 
+const learningEntityProbeCheckNames = [
+  "distributed_measurement_claim",
+  "stale_lease_rejected",
+  "cross_replica_job_finalization",
+  "metric_sample_immutable",
+  "observed_outcome_immutable",
+  "value_ledger_immutable",
+  "cross_replica_entity_visibility",
+  "provider_alias_single_owner",
+  "probe_scope_clean"
+] as const;
+
+const learningEntityProbeReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-learning-entity-staging-validation/v1"),
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  scopeDigest: digestSchema,
+  healthy: z.literal(true),
+  checks: z.array(z.object({
+    name: z.enum(learningEntityProbeCheckNames),
+    ok: z.literal(true)
+  }).strict()).length(learningEntityProbeCheckNames.length)
+}).strict();
+
 const appSnapshotRecoveryReceiptSchema = z.object({
   schemaVersion: z.literal("hosted-app-snapshot-restore-rehearsal/v1"),
   sourceOrigin: originSchema,
@@ -289,7 +313,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v8"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v9"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -313,6 +337,9 @@ export const productionEvidenceManifestSchema = z.object({
     appSnapshotFenceProbe: z.object({
       scopeDigest: digestSchema
     }).strict(),
+    learningEntityProbe: z.object({
+      scopeDigest: digestSchema
+    }).strict(),
     auditRetentionTrust: z.object({
       keyId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/),
       publicKeyDigest: digestSchema
@@ -323,6 +350,7 @@ export const productionEvidenceManifestSchema = z.object({
     appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
     appSnapshotFenceProbe: evidenceDescriptorSchema,
+    learningEntities: evidenceDescriptorSchema,
     appSnapshots: evidenceDescriptorSchema,
     appSnapshotRecovery: evidenceDescriptorSchema,
     appSnapshotReconciliation: evidenceDescriptorSchema,
@@ -339,6 +367,7 @@ export type ProductionEvidenceReceipts = {
   appActionExactlyOnce: unknown;
   marketplace: unknown;
   appSnapshotFenceProbe: unknown;
+  learningEntities: unknown;
   appSnapshots: unknown;
   appSnapshotRecovery: unknown;
   appSnapshotReconciliation: unknown;
@@ -376,6 +405,7 @@ export function buildProductionEvidenceManifest(
   const appSnapshotFenceProbe = appSnapshotFenceProbeReceiptSchema.parse(
     receipts.appSnapshotFenceProbe
   );
+  const learningEntities = learningEntityProbeReceiptSchema.parse(receipts.learningEntities);
   const appSnapshots = appSnapshotReceiptSchema.parse(receipts.appSnapshots);
   const appSnapshotRecovery = appSnapshotRecoveryReceiptSchema.parse(receipts.appSnapshotRecovery);
   const appSnapshotReconciliation = appSnapshotReconciliationReceiptSchema.parse(
@@ -394,6 +424,7 @@ export function buildProductionEvidenceManifest(
     ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
     ["App snapshot mutation fence probe", appSnapshotFenceProbe.checkedAt],
+    ["hosted learning and entity validation", learningEntities.checkedAt],
     ["App snapshot validation", appSnapshots.checkedAt],
     ["App snapshot recovery rehearsal", appSnapshotRecovery.completedAt],
     ["App snapshot reconciliation", appSnapshotReconciliation.checkedAt],
@@ -420,6 +451,14 @@ export function buildProductionEvidenceManifest(
   });
   if (appSnapshotFenceProbe.scopeDigest !== appSnapshotFenceProbeScopeDigest) {
     throw new Error("App snapshot mutation fence probe does not match the protected Storage and tenant scope");
+  }
+  const learningEntityProbeScopeDigest = canonicalAppDigest({
+    origin: appSnapshots.targetOrigin,
+    organizationId: config.organizationId.toLowerCase(),
+    probeNamespace: "learning_probe"
+  });
+  if (learningEntities.scopeDigest !== learningEntityProbeScopeDigest) {
+    throw new Error("Hosted learning and entity evidence does not match the protected Storage and tenant scope");
   }
   if (
     appSnapshotRecovery.sourceOrigin !== appSnapshots.targetOrigin ||
@@ -530,6 +569,11 @@ export function buildProductionEvidenceManifest(
     appSnapshotFenceProbe.checks.map((check) => check.name),
     [...appSnapshotFenceProbeCheckNames],
     "App snapshot mutation fence probe"
+  );
+  requireExactNames(
+    learningEntities.checks.map((check) => check.name),
+    [...learningEntityProbeCheckNames],
+    "Hosted learning and entity validation"
   );
   requireExactNames(
     appSnapshots.checks.map((check) => check.name),
@@ -648,6 +692,9 @@ export function buildProductionEvidenceManifest(
     appSnapshotFenceProbe: {
       scopeDigest: appSnapshotFenceProbeScopeDigest
     },
+    learningEntityProbe: {
+      scopeDigest: learningEntityProbeScopeDigest
+    },
     auditRetentionTrust: {
       keyId: config.auditRetentionKeyId,
       publicKeyDigest: sha256Digest(auditRetentionPublicKey.export({ type: "spki", format: "der" }))
@@ -692,6 +739,12 @@ export function buildProductionEvidenceManifest(
       scopeDigest: appSnapshotFenceProbe.scopeDigest,
       checks: appSnapshotFenceProbe.checks.length,
       healthy: appSnapshotFenceProbe.healthy
+    }),
+    learningEntities: descriptor(learningEntities, learningEntities.checkedAt, {
+      scopeDigest: learningEntities.scopeDigest,
+      checks: learningEntities.checks.length,
+      healthy: learningEntities.healthy,
+      durationMs: learningEntities.durationMs
     }),
     appSnapshots: descriptor(appSnapshots, appSnapshots.checkedAt, {
       storageOrigin: appSnapshots.targetOrigin,
@@ -754,7 +807,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v8",
+    schemaVersion: "loopgraph-production-promotion-evidence/v9",
     release,
     scope,
     evidence,
@@ -783,6 +836,7 @@ export function verifyProductionEvidenceManifest(input: {
     appSnapshotFenceProbe: appSnapshotFenceProbeReceiptSchema.parse(
       input.receipts.appSnapshotFenceProbe
     ),
+    learningEntities: learningEntityProbeReceiptSchema.parse(input.receipts.learningEntities),
     appSnapshots: appSnapshotReceiptSchema.parse(input.receipts.appSnapshots),
     appSnapshotRecovery: appSnapshotRecoveryReceiptSchema.parse(input.receipts.appSnapshotRecovery),
     appSnapshotReconciliation: appSnapshotReconciliationReceiptSchema.parse(
@@ -796,6 +850,7 @@ export function verifyProductionEvidenceManifest(input: {
     ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
     ["App snapshot mutation fence probe", receiptsAtPromotion.appSnapshotFenceProbe.checkedAt],
+    ["hosted learning and entity validation", receiptsAtPromotion.learningEntities.checkedAt],
     ["App snapshot validation", receiptsAtPromotion.appSnapshots.checkedAt],
     ["App snapshot recovery rehearsal", receiptsAtPromotion.appSnapshotRecovery.completedAt],
     ["App snapshot reconciliation", receiptsAtPromotion.appSnapshotReconciliation.checkedAt],
@@ -858,6 +913,13 @@ function validateConfig(config: ProductionEvidenceConfig) {
         origin: trustedOrigin(config.storageOrigin, "Release Storage origin"),
         organizationId: config.organizationId.toLowerCase(),
         probeNamespace: "fence_probe"
+      })
+    },
+    learningEntityProbe: {
+      scopeDigest: canonicalAppDigest({
+        origin: trustedOrigin(config.storageOrigin, "Release Storage origin"),
+        organizationId: config.organizationId.toLowerCase(),
+        probeNamespace: "learning_probe"
       })
     },
     auditRetentionTrust: {
@@ -928,6 +990,7 @@ async function main() {
     appSnapshotFenceProbe: await readJsonReceipt(
       "LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE"
     ),
+    learningEntities: await readJsonReceipt("LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE"),
     appSnapshots: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE"),
     appSnapshotRecovery: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE"),
     appSnapshotReconciliation: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE"),

@@ -93,9 +93,10 @@ are cached by resolved project namespace so two local projects do not share evid
 The executable [hosted learning and entity staging gate](./HOSTED-LEARNING-ENTITY-STAGING-GATE.md)
 actively exercises cross-client claims, stale-lease rejection, finalization visibility, all three
 immutable evidence types, provider-alias uniqueness, and nonce-authorized exact cleanup against a
-deployed staging database. Workflow activation is intentionally paired with making its receipt a
-mandatory signed promotion input. Applying the migrations and producing that environment-specific receipt remains an
-operator action. Database restore behavior stays part of the separate isolated recovery rehearsal;
+deployed staging database. The protected release workflow makes its exact nine-control receipt a
+mandatory, scope-bound input to both signed evidence compilation and production verification.
+Applying the migrations, configuring the protected environment, and producing that
+environment-specific receipt remain operator actions. Database restore behavior stays part of the separate isolated recovery rehearsal;
 neither missing receipt is a reason to fall back to replica-local files.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),

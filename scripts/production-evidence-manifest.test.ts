@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v8",
+      schemaVersion: "loopgraph-production-promotion-evidence/v9",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -76,6 +76,13 @@ describe("production promotion evidence manifest", () => {
             origin: storageOrigin,
             organizationId,
             probeNamespace: "fence_probe"
+          })
+        },
+        learningEntityProbe: {
+          scopeDigest: canonicalAppDigest({
+            origin: storageOrigin,
+            organizationId,
+            probeNamespace: "learning_probe"
           })
         }
       },
@@ -116,6 +123,18 @@ describe("production promotion evidence manifest", () => {
             }),
             checks: 8,
             healthy: true
+          }
+        },
+        learningEntities: {
+          summary: {
+            scopeDigest: canonicalAppDigest({
+              origin: storageOrigin,
+              organizationId,
+              probeNamespace: "learning_probe"
+            }),
+            checks: 9,
+            healthy: true,
+            durationMs: 3_000
           }
         },
         appSnapshots: {
@@ -183,6 +202,7 @@ describe("production promotion evidence manifest", () => {
         auditRetention: { summary: { throughSequence: 50 } }
       }
     });
+    expect(Object.keys(manifest.evidence)).toHaveLength(10);
     expect(manifest.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
 
     expect(verifyProductionEvidenceManifest({
@@ -238,6 +258,59 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(duplicatedControl, config))
       .toThrow(/omitted or duplicated/i);
+  });
+
+  it("rejects learning/entity evidence for another scope or with an inexact control set", () => {
+    const wrongScope = releaseReceipts();
+    wrongScope.learningEntities = {
+      ...(wrongScope.learningEntities as Record<string, unknown>),
+      scopeDigest: `sha256:${"f".repeat(64)}`
+    };
+    expect(() => buildProductionEvidenceManifest(wrongScope, config))
+      .toThrow(/learning and entity evidence.*protected Storage and tenant scope/i);
+
+    const duplicatedControl = releaseReceipts();
+    const receipt = duplicatedControl.learningEntities as {
+      checks: Array<Record<string, unknown>>;
+    };
+    duplicatedControl.learningEntities = {
+      ...receipt,
+      checks: [receipt.checks[0], ...receipt.checks.slice(0, -1)]
+    };
+    expect(() => buildProductionEvidenceManifest(duplicatedControl, config))
+      .toThrow(/omitted or duplicated/i);
+
+    const extraControl = releaseReceipts();
+    const extraReceipt = extraControl.learningEntities as {
+      checks: Array<Record<string, unknown>>;
+    };
+    extraControl.learningEntities = {
+      ...extraReceipt,
+      checks: [...extraReceipt.checks, { name: "unexpected", ok: true }]
+    };
+    expect(() => buildProductionEvidenceManifest(extraControl, config)).toThrow();
+  });
+
+  it("binds learning/entity evidence content and freshness into promotion", () => {
+    const baseline = releaseReceipts();
+    const baselineManifest = buildProductionEvidenceManifest(baseline, config);
+    const changed = releaseReceipts();
+    changed.learningEntities = {
+      ...(changed.learningEntities as Record<string, unknown>),
+      durationMs: 3_001
+    };
+    const changedManifest = buildProductionEvidenceManifest(changed, config);
+    expect(changedManifest.evidence.learningEntities.digest)
+      .not.toBe(baselineManifest.evidence.learningEntities.digest);
+    expect(changedManifest.evidenceSetDigest).not.toBe(baselineManifest.evidenceSetDigest);
+
+    const stale = releaseReceipts();
+    stale.learningEntities = {
+      ...(stale.learningEntities as Record<string, unknown>),
+      checkedAt: "2026-08-16T01:30:00.000Z"
+    };
+    expect(() => buildProductionEvidenceManifest(stale, config))
+      .toThrow(/hosted learning and entity validation.*evidence window/i);
   });
 
   it("rejects snapshot recovery evidence for another source, target, or incomplete restore proof", () => {
@@ -616,6 +689,28 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "storage_delete_advanced",
         "probe_authority_clean",
         "probe_generation_clean"
+      ].map((name) => ({ name, ok: true }))
+    },
+    learningEntities: {
+      schemaVersion: "hosted-learning-entity-staging-validation/v1",
+      checkedAt,
+      durationMs: 3_000,
+      scopeDigest: canonicalAppDigest({
+        origin: storageOrigin,
+        organizationId,
+        probeNamespace: "learning_probe"
+      }),
+      healthy: true,
+      checks: [
+        "distributed_measurement_claim",
+        "stale_lease_rejected",
+        "cross_replica_job_finalization",
+        "metric_sample_immutable",
+        "observed_outcome_immutable",
+        "value_ledger_immutable",
+        "cross_replica_entity_visibility",
+        "provider_alias_single_owner",
+        "probe_scope_clean"
       ].map((name) => ({ name, ok: true }))
     },
     appSnapshots: {
