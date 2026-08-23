@@ -41,7 +41,6 @@ describe("staging release workflow contract", () => {
 
     expect(jobs.marketplace.environment).toBe("marketplace-staging");
     expect(jobs["app-snapshots"].environment).toBe("app-snapshot-staging");
-    expect(jobs["learning-entities"].environment).toBe("learning-entity-staging");
     expect(jobs["app-snapshot-recovery"].environment).toBe("app-snapshot-recovery");
     expect(jobs["app-snapshot-reconciliation"].environment).toBe("app-snapshot-reconciliation");
     expect(jobs.recovery.environment).toBe("recovery-staging");
@@ -95,7 +94,6 @@ describe("staging release workflow contract", () => {
     for (const jobName of [
       "marketplace",
       "app-snapshots",
-      "learning-entities",
       "app-snapshot-recovery",
       "app-snapshot-reconciliation",
       "recovery",
@@ -108,7 +106,6 @@ describe("staging release workflow contract", () => {
     expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
     expect(source).toContain("npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json");
     expect(source).toContain("npm run --silent probe:app-snapshot-fence > app-snapshot-fence-probe-receipt.json");
-    expect(source).toContain("npm run --silent validate:learning-entities-staging > learning-entity-staging-receipt.json");
     expect(source).toContain("npm run --silent rehearse:app-snapshot-restore > app-snapshot-recovery-receipt.json");
     expect(source).toContain("npm run --silent reconcile:app-snapshots > app-snapshot-reconciliation-receipt.json");
     expect(source).toContain("npm run --silent rehearse:restore > recovery-rehearsal-receipt.json");
@@ -171,22 +168,6 @@ describe("staging release workflow contract", () => {
     });
     expect(source).toContain('value.schemaVersion!=="hosted-app-snapshot-fence-probe/v1"');
     expect(source).toContain("value.checks?.length!==names.length");
-    const learningEntityStep = (jobs["learning-entities"].steps ?? []).find(
-      (step) => step.run?.includes("validate:learning-entities-staging")
-    );
-    expect(asNeeds(jobs["learning-entities"].needs)).toEqual(["marketplace"]);
-    expect(learningEntityStep?.env).toEqual({
-      LOOPGRAPH_LEARNING_ENTITY_PROBE_ALLOW_MUTATION: "yes",
-      LOOPGRAPH_LEARNING_ENTITY_PROBE_SUPABASE_URL:
-        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}",
-      LOOPGRAPH_LEARNING_ENTITY_PROBE_SERVICE_ROLE_KEY_FILE:
-        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE }}",
-      LOOPGRAPH_LEARNING_ENTITY_PROBE_ORGANIZATION_ID:
-        "${{ needs.marketplace.outputs.organization_id }}",
-      LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST:
-        "${{ vars.LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST }}"
-    });
-    expect(source).toContain('value.schemaVersion!=="hosted-learning-entity-staging-validation/v1"');
     const snapshotRecoveryStep = (jobs["app-snapshot-recovery"].steps ?? []).find(
       (step) => step.run?.includes("rehearse:app-snapshot-restore")
     );

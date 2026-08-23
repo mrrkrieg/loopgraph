@@ -22,6 +22,7 @@ const config = {
   allowMutation: true
 };
 const suffix = "0123456789abcdef01234567";
+const probeToken = "a".repeat(64);
 
 describe("hosted learning and entity staging probe", () => {
   it("proves distributed claims, immutable evidence, alias ownership, and exact cleanup", async () => {
@@ -30,6 +31,7 @@ describe("hosted learning and entity staging probe", () => {
     const receipt = await validateHostedLearningEntitiesStaging(config, {
       clients: harness.clients,
       probeSuffix: () => suffix,
+      probeToken: () => probeToken,
       now: sequentialDates([
         "2026-08-23T04:00:00.000Z",
         "2026-08-23T04:00:01.000Z"
@@ -57,7 +59,9 @@ describe("hosted learning and entity staging probe", () => {
         { name: "probe_scope_clean", ok: true }
       ]
     });
-    expect(harness.cleanupCalls).toBe(2);
+    expect(harness.sweepCalls).toBe(1);
+    expect(harness.authorizeCalls).toBe(1);
+    expect(harness.cleanupCalls).toBe(1);
     expect(harness.isEmpty()).toBe(true);
     const serialized = JSON.stringify(receipt);
     expect(serialized).not.toContain(scope.supabaseUrl);
@@ -65,6 +69,7 @@ describe("hosted learning and entity staging probe", () => {
     expect(serialized).not.toContain(suffix);
     expect(serialized).not.toContain("lease-token");
     expect(serialized).not.toContain("probe_external");
+    expect(serialized).not.toContain(probeToken);
   });
 
   it("requires explicit mutation authority and an independently pinned scope", async () => {
@@ -78,6 +83,8 @@ describe("hosted learning and entity staging probe", () => {
     }, {
       clients: harness.clients
     })).rejects.toThrow(/pinned staging scope/i);
+    expect(harness.sweepCalls).toBe(0);
+    expect(harness.authorizeCalls).toBe(0);
     expect(harness.cleanupCalls).toBe(0);
   });
 
@@ -86,11 +93,14 @@ describe("hosted learning and entity staging probe", () => {
     await expect(validateHostedLearningEntitiesStaging(config, {
       clients: harness.clients,
       probeSuffix: () => suffix,
+      probeToken: () => probeToken,
       now: () => new Date("2026-08-23T04:00:00.000Z"),
       createEvidenceStore: harness.createEvidenceStore,
       createEntityStore: harness.createEntityStore
     })).rejects.toThrow(/synthetic outcome failure/i);
-    expect(harness.cleanupCalls).toBe(2);
+    expect(harness.sweepCalls).toBe(1);
+    expect(harness.authorizeCalls).toBe(1);
+    expect(harness.cleanupCalls).toBe(1);
     expect(harness.isEmpty()).toBe(true);
   });
 
@@ -102,6 +112,36 @@ describe("hosted learning and entity staging probe", () => {
       createEvidenceStore: harness.createEvidenceStore,
       createEntityStore: harness.createEntityStore
     })).rejects.toThrow(/identity is invalid/i);
+    expect(harness.sweepCalls).toBe(0);
+    expect(harness.authorizeCalls).toBe(0);
+    expect(harness.cleanupCalls).toBe(0);
+  });
+
+  it("rejects malformed cleanup authority before any privileged call", async () => {
+    const harness = probeHarness();
+    await expect(validateHostedLearningEntitiesStaging(config, {
+      clients: harness.clients,
+      probeSuffix: () => suffix,
+      probeToken: () => "not-a-token",
+      createEvidenceStore: harness.createEvidenceStore,
+      createEntityStore: harness.createEntityStore
+    })).rejects.toThrow(/authorization is invalid/i);
+    expect(harness.sweepCalls).toBe(0);
+    expect(harness.authorizeCalls).toBe(0);
+    expect(harness.cleanupCalls).toBe(0);
+  });
+
+  it("refuses a colliding nonempty scope instead of deleting it", async () => {
+    const harness = probeHarness({ rejectAuthorizationAsNonempty: true });
+    await expect(validateHostedLearningEntitiesStaging(config, {
+      clients: harness.clients,
+      probeSuffix: () => suffix,
+      probeToken: () => probeToken,
+      createEvidenceStore: harness.createEvidenceStore,
+      createEntityStore: harness.createEntityStore
+    })).rejects.toThrow(/authorization was unavailable/i);
+    expect(harness.sweepCalls).toBe(1);
+    expect(harness.authorizeCalls).toBe(1);
     expect(harness.cleanupCalls).toBe(0);
   });
 
@@ -113,6 +153,7 @@ describe("hosted learning and entity staging probe", () => {
     }, {
       clients: harness.clients,
       probeSuffix: () => suffix,
+      probeToken: () => probeToken,
       now: () => new Date("2026-08-23T04:00:00.000Z"),
       createEvidenceStore: harness.createEvidenceStore,
       createEntityStore: harness.createEntityStore
@@ -121,8 +162,14 @@ describe("hosted learning and entity staging probe", () => {
   });
 });
 
-function probeHarness(options: { failObservedOutcomeSave?: boolean } = {}) {
+function probeHarness(options: {
+  failObservedOutcomeSave?: boolean;
+  rejectAuthorizationAsNonempty?: boolean;
+} = {}) {
+  let sweepCalls = 0;
+  let authorizeCalls = 0;
   let cleanupCalls = 0;
+  let authorizationToken: string | undefined;
   let job: MeasurementJob | undefined;
   let aliasOwner: string | undefined;
   const entities = new Map<string, CanonicalEntity>();
@@ -137,22 +184,58 @@ function probeHarness(options: { failObservedOutcomeSave?: boolean } = {}) {
     const client = {
       rpc: async (name: string, args: Record<string, unknown>) => {
         expect(args.p_organization_id).toBe(scope.organizationId);
+        if (name === "loopgraph_learning_entity_probe_sweep_expired") {
+          sweepCalls += 1;
+          expect(args).toEqual({ p_organization_id: scope.organizationId });
+          return {
+            data: {
+              schemaVersion: "hosted-learning-entity-probe-expired-sweep/v1",
+              authorizationsSwept: 0,
+              evidenceDeleted: 0,
+              entitiesDeleted: 0
+            },
+            error: null
+          };
+        }
         expect(args.p_project_key).toMatch(/^learning_probe_[a-f0-9]{24}$/);
+        if (name === "loopgraph_learning_entity_probe_authorize") {
+          authorizeCalls += 1;
+          expect(args.p_probe_token).toMatch(/^[a-f0-9]{64}$/);
+          if (options.rejectAuthorizationAsNonempty) {
+            return { data: null, error: new Error("scope is not empty") };
+          }
+          if (authorizationToken) {
+            return { data: null, error: new Error("authorization already exists") };
+          }
+          authorizationToken = String(args.p_probe_token);
+          return {
+            data: {
+              schemaVersion: "hosted-learning-entity-probe-authorization/v1",
+              authorized: true
+            },
+            error: null
+          };
+        }
         if (name === "loopgraph_learning_entity_probe_cleanup") {
           cleanupCalls += 1;
+          if (!authorizationToken || args.p_probe_token !== authorizationToken) {
+            return { data: null, error: new Error("cleanup is not authorized") };
+          }
           const evidenceDeleted = Number(Boolean(job)) + Object.values(immutable)
             .reduce((total, records) => total + records.size, 0);
           const entitiesDeleted = entities.size;
+          authorizationToken = undefined;
           job = undefined;
           aliasOwner = undefined;
           entities.clear();
           Object.values(immutable).forEach((records) => records.clear());
           return {
             data: {
-              schemaVersion: "hosted-learning-entity-probe-cleanup/v1",
+              schemaVersion: "hosted-learning-entity-probe-cleanup/v2",
               evidenceClean: true,
               entitiesClean: true,
               aliasesClean: true,
+              authorizationConsumed: true,
               evidenceDeleted,
               entitiesDeleted
             },
@@ -166,7 +249,7 @@ function probeHarness(options: { failObservedOutcomeSave?: boolean } = {}) {
           if (existing && JSON.stringify(existing) !== JSON.stringify(payload)) {
             return { data: null, error: new Error("immutable conflict") };
           }
-          return { data: payload, error: null };
+          return { data: reorderObjectKeys(payload), error: null };
         }
         return { data: null, error: new Error("unexpected RPC") };
       }
@@ -251,10 +334,26 @@ function probeHarness(options: { failObservedOutcomeSave?: boolean } = {}) {
     createEvidenceStore,
     createEntityStore,
     scopes,
+    get sweepCalls() { return sweepCalls; },
+    get authorizeCalls() { return authorizeCalls; },
     get cleanupCalls() { return cleanupCalls; },
-    isEmpty: () => !job && !aliasOwner && entities.size === 0 &&
+    isEmpty: () => !authorizationToken && !job && !aliasOwner && entities.size === 0 &&
       Object.values(immutable).every((records) => records.size === 0)
   };
+}
+
+function reorderObjectKeys<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => reorderObjectKeys(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .reverse()
+        .map(([key, item]) => [key, reorderObjectKeys(item)])
+    ) as T;
+  }
+  return value;
 }
 
 function clone<T>(value: T | undefined): T | undefined {

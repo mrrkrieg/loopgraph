@@ -23,6 +23,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const PROBE_SUFFIX_PATTERN = /^[0-9a-f]{24}$/;
+const PROBE_TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
 type EvidenceProbeStore = {
   saveMeasurementJob(value: MeasurementJob): Promise<MeasurementJob>;
@@ -86,6 +87,7 @@ export async function validateHostedLearningEntitiesStaging(
   dependencies: {
     clients: readonly [SupabaseClient, SupabaseClient];
     probeSuffix?: () => string;
+    probeToken?: () => string;
     now?: () => Date;
     nowMs?: () => number;
     createEvidenceStore?: (client: SupabaseClient, scope: ProbeScope) => EvidenceProbeStore;
@@ -102,6 +104,10 @@ export async function validateHostedLearningEntitiesStaging(
   const suffix = dependencies.probeSuffix?.() ?? randomBytes(12).toString("hex");
   if (!PROBE_SUFFIX_PATTERN.test(suffix)) {
     throw new Error("Hosted learning/entity probe identity is invalid");
+  }
+  const probeToken = dependencies.probeToken?.() ?? randomBytes(32).toString("hex");
+  if (!PROBE_TOKEN_PATTERN.test(probeToken)) {
+    throw new Error("Hosted learning/entity probe authorization is invalid");
   }
 
   const scope = {
@@ -123,9 +129,11 @@ export async function validateHostedLearningEntitiesStaging(
   const fixtures = probeFixtures(suffix, fixtureTime);
   const checks: HostedLearningEntityProbeReceipt["checks"] = [];
 
-  await cleanupProbe(dependencies.clients[0], scope);
+  await sweepExpiredProbeScopes(dependencies.clients[0], scope.organizationId);
+  await authorizeProbe(dependencies.clients[0], scope, probeToken);
   let operationError: unknown;
   let cleanupError: unknown;
+  let cleanupResult: ProbeCleanupResult | undefined;
   try {
     await evidence[0].saveMeasurementJob(fixtures.pendingJob);
     const claims = await Promise.all([
@@ -176,7 +184,7 @@ export async function validateHostedLearningEntitiesStaging(
 
     await evidence[winnerIndex].saveClaimedMeasurementJob(completed, claimedLease.tokenHash);
     const observedJob = await evidence[observerIndex].getMeasurementJob(completed.id);
-    if (JSON.stringify(observedJob) !== JSON.stringify(completed)) {
+    if (!observedJob || !sameCanonicalValue(observedJob, completed)) {
       throw new Error("A second hosted worker did not observe the finalized measurement job");
     }
     checks.push({ name: "cross_replica_job_finalization", ok: true });
@@ -221,7 +229,7 @@ export async function validateHostedLearningEntitiesStaging(
     const visible = await entities[1].list(fixtures.primaryEntity.workspaceId, fixtures.primaryEntity.companyId);
     if (
       visible.length !== 1 ||
-      JSON.stringify(visible[0]) !== JSON.stringify(fixtures.primaryEntity)
+      !sameCanonicalValue(visible[0], fixtures.primaryEntity)
     ) {
       throw new Error("A second hosted worker did not observe the canonical entity");
     }
@@ -238,7 +246,7 @@ export async function validateHostedLearningEntitiesStaging(
     if (
       afterAliasConflict.length !== 1 ||
       afterAliasConflict[0]?.id !== fixtures.primaryEntity.id ||
-      JSON.stringify(afterAliasConflict[0]?.aliases) !== JSON.stringify(fixtures.primaryEntity.aliases)
+      !sameCanonicalValue(afterAliasConflict[0]?.aliases, fixtures.primaryEntity.aliases)
     ) {
       throw new Error("Provider alias ownership changed after the rejected conflict");
     }
@@ -247,13 +255,16 @@ export async function validateHostedLearningEntitiesStaging(
     operationError = error;
   } finally {
     try {
-      await cleanupProbe(dependencies.clients[0], scope);
+      cleanupResult = await cleanupProbe(dependencies.clients[0], scope, probeToken);
     } catch (error) {
       cleanupError = error;
     }
   }
   if (cleanupError) throw cleanupError;
   if (operationError) throw operationError;
+  if (cleanupResult?.evidenceDeleted !== 4 || cleanupResult.entitiesDeleted !== 1) {
+    throw new Error("Hosted learning/entity probe cleanup counts did not match the completed run");
+  }
   checks.push({ name: "probe_scope_clean", ok: true });
 
   if (checks.length !== 9) {
@@ -294,7 +305,7 @@ async function assertImmutableRecord<T extends { id: string }>(input: {
   const replay = await input.readerWriter(input.value);
   if (
     first.duplicate || databaseReplay.error ||
-    JSON.stringify(databaseReplay.data) !== JSON.stringify(input.value) ||
+    !sameCanonicalValue(databaseReplay.data, input.value) ||
     !replay.duplicate
   ) {
     throw new Error(`Hosted ${input.recordType} did not preserve idempotent replay semantics`);
@@ -311,15 +322,64 @@ async function assertImmutableRecord<T extends { id: string }>(input: {
     throw new Error(`Hosted ${input.recordType} accepted a conflicting immutable payload`);
   }
   const retained = await input.reader(input.value.id);
-  if (JSON.stringify(retained) !== JSON.stringify(input.value)) {
+  if (!retained || !sameCanonicalValue(retained, input.value)) {
     throw new Error(`Hosted ${input.recordType} changed after an immutable conflict`);
   }
 }
 
-async function cleanupProbe(client: SupabaseClient, scope: ProbeScope) {
+type ProbeCleanupResult = { evidenceDeleted: number; entitiesDeleted: number };
+
+async function sweepExpiredProbeScopes(client: SupabaseClient, organizationId: string) {
+  const { data, error } = await client.rpc("loopgraph_learning_entity_probe_sweep_expired", {
+    p_organization_id: organizationId
+  });
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Hosted learning/entity expired probe sweep was unavailable");
+  }
+  const value = data as Record<string, unknown>;
+  const expectedKeys = ["authorizationsSwept", "entitiesDeleted", "evidenceDeleted", "schemaVersion"];
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== expectedKeys.length ||
+    expectedKeys.some((key, index) => keys[index] !== key) ||
+    value.schemaVersion !== "hosted-learning-entity-probe-expired-sweep/v1" ||
+    !Number.isSafeInteger(value.authorizationsSwept) || Number(value.authorizationsSwept) < 0 ||
+    !Number.isSafeInteger(value.evidenceDeleted) || Number(value.evidenceDeleted) < 0 ||
+    !Number.isSafeInteger(value.entitiesDeleted) || Number(value.entitiesDeleted) < 0
+  ) {
+    throw new Error("Hosted learning/entity expired probe sweep was invalid");
+  }
+}
+
+async function authorizeProbe(client: SupabaseClient, scope: ProbeScope, probeToken: string) {
+  const { data, error } = await client.rpc("loopgraph_learning_entity_probe_authorize", {
+    p_organization_id: scope.organizationId,
+    p_project_key: scope.projectKey,
+    p_probe_token: probeToken
+  });
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Hosted learning/entity probe authorization was unavailable");
+  }
+  const value = data as Record<string, unknown>;
+  const keys = Object.keys(value).sort();
+  if (
+    keys.length !== 2 || keys[0] !== "authorized" || keys[1] !== "schemaVersion" ||
+    value.schemaVersion !== "hosted-learning-entity-probe-authorization/v1" ||
+    value.authorized !== true
+  ) {
+    throw new Error("Hosted learning/entity probe authorization was invalid");
+  }
+}
+
+async function cleanupProbe(
+  client: SupabaseClient,
+  scope: ProbeScope,
+  probeToken: string
+): Promise<ProbeCleanupResult> {
   const { data, error } = await client.rpc("loopgraph_learning_entity_probe_cleanup", {
     p_organization_id: scope.organizationId,
-    p_project_key: scope.projectKey
+    p_project_key: scope.projectKey,
+    p_probe_token: probeToken
   });
   if (error || !data || typeof data !== "object" || Array.isArray(data)) {
     throw new Error("Hosted learning/entity probe cleanup was unavailable");
@@ -327,6 +387,7 @@ async function cleanupProbe(client: SupabaseClient, scope: ProbeScope) {
   const value = data as Record<string, unknown>;
   const expectedKeys = [
     "aliasesClean",
+    "authorizationConsumed",
     "entitiesClean",
     "entitiesDeleted",
     "evidenceClean",
@@ -337,15 +398,24 @@ async function cleanupProbe(client: SupabaseClient, scope: ProbeScope) {
   if (
     keys.length !== expectedKeys.length ||
     expectedKeys.some((key, index) => keys[index] !== key) ||
-    value.schemaVersion !== "hosted-learning-entity-probe-cleanup/v1" ||
+    value.schemaVersion !== "hosted-learning-entity-probe-cleanup/v2" ||
     value.evidenceClean !== true ||
     value.entitiesClean !== true ||
     value.aliasesClean !== true ||
+    value.authorizationConsumed !== true ||
     !Number.isSafeInteger(value.evidenceDeleted) || Number(value.evidenceDeleted) < 0 ||
     !Number.isSafeInteger(value.entitiesDeleted) || Number(value.entitiesDeleted) < 0
   ) {
     throw new Error("Hosted learning/entity probe cleanup did not prove an empty scope");
   }
+  return {
+    evidenceDeleted: Number(value.evidenceDeleted),
+    entitiesDeleted: Number(value.entitiesDeleted)
+  };
+}
+
+function sameCanonicalValue(left: unknown, right: unknown) {
+  return canonicalAppDigest(left) === canonicalAppDigest(right);
 }
 
 function claimInput(claimedBy: string, now: Date): MeasurementJobClaimInput {

@@ -4,8 +4,10 @@ Loopgraph's hosted evidence and entity-resolution stores are production authorit
 cross-loop learning. Unit tests prove the adapters, but production promotion also needs evidence
 that the deployed PostgreSQL functions preserve their concurrency and immutability guarantees.
 
-The protected `learning-entities` staging job runs that active check. It never runs during local
-startup, preview rendering, webhook intake, or a production request.
+The repository now contains the active check and its database authority. This change deliberately
+does not activate a release-workflow job on its own: the protected job must ship together with the
+signed promotion-evidence binding so a failed or pending proof can never be bypassed. The command
+never runs during local startup, preview rendering, webhook intake, or a production request.
 
 ## What the gate proves
 
@@ -19,8 +21,8 @@ uses two independent service clients to prove:
    changed payload at the database RPC boundary;
 5. a canonical entity written by one client is visible to the other;
 6. a provider alias cannot be assigned to a second canonical entity; and
-7. all evidence, entities, and aliases in the random probe scope are removed before a healthy receipt
-   is returned.
+7. all evidence, entities, aliases, and the one-time cleanup authority in the random probe scope are
+   removed before a healthy receipt is returned.
 
 The receipt contains only the pinned scope digest, timing, and nine boolean control results. It does
 not contain the Supabase origin, organization ID, random project key, entity IDs, provider aliases,
@@ -34,13 +36,18 @@ Apply these migrations to the staging database before running the job:
 - `202607310002_canonical_company_entities.sql`
 - `20260823045212_hosted_learning_entity_probe.sql`
 
-The cleanup function is `SECURITY DEFINER` only because the evidence/entity tables deliberately grant
-the service role read access but no direct delete authority. It uses an empty search path, fully
-qualified relations, refuses non-reserved project keys, deletes only the exact organization/project
-pair, verifies all three tables are empty, revokes default/public execution, and grants execution only
-to `service_role`.
+The probe functions are `SECURITY DEFINER` only because the evidence/entity tables deliberately grant
+the service role read access but no direct delete authority. A reserved project-key pattern is not
+treated as ownership. Before writing anything, the probe sweeps only expired scopes that already have
+a durable authorization, then registers its random empty scope with a 256-bit nonce hash and a
+30-minute expiry. Cleanup locks that exact authorization, requires the matching unexpired nonce,
+deletes only that organization/project pair, verifies evidence, entities, and aliases are empty, and
+consumes the authority atomically. A collision with pre-existing rows is refused instead of cleaned.
+All three functions use an empty search path and fully qualified relations; the authorization table is
+RLS-enabled with no direct grants, default/public execution is revoked, and only `service_role` can
+invoke the functions.
 
-## Protected environment configuration
+## Protected environment configuration for workflow activation
 
 Create a GitHub environment named `learning-entity-staging` with required reviewers. Configure:
 
@@ -75,6 +82,7 @@ LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST=sha256:... \
 npm run --silent validate:learning-entities-staging
 ```
 
-A failed assertion or failed cleanup returns a non-zero exit and no healthy receipt. Database restore
-remains a separate isolated recovery rehearsal; this probe never treats deletion in the primary
-staging database as restore proof.
+A failed assertion, authorization, or cleanup returns a non-zero exit and no healthy receipt. An
+abruptly terminated runner leaves only a short-lived authorization; a later run can sweep it after
+expiry. Database restore remains a separate isolated recovery rehearsal; this probe never treats
+deletion in the primary staging database as restore proof.

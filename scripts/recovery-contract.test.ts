@@ -43,6 +43,7 @@ describe("recovery evidence contract", () => {
       "human_reviews",
       "agent_messages",
       "loopgraph_evidence_records",
+      "loopgraph_learning_entity_probe_authorizations",
       "loopgraph_app_installation_registries",
       "loopgraph_app_operation_actions",
       "loopgraph_app_operation_action_events",

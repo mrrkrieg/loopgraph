@@ -90,10 +90,11 @@ the deployment organization binding is unavailable, the runtime rejects the requ
 using the local file adapters. File stores remain an explicit local-project implementation only and
 are cached by resolved project namespace so two local projects do not share evidence or identity.
 
-The protected [hosted learning and entity staging gate](./HOSTED-LEARNING-ENTITY-STAGING-GATE.md)
+The executable [hosted learning and entity staging gate](./HOSTED-LEARNING-ENTITY-STAGING-GATE.md)
 actively exercises cross-client claims, stale-lease rejection, finalization visibility, all three
-immutable evidence types, provider-alias uniqueness, and exact cleanup against the deployed staging
-database. Applying the migrations and producing that environment-specific receipt remains an
+immutable evidence types, provider-alias uniqueness, and nonce-authorized exact cleanup against a
+deployed staging database. Workflow activation is intentionally paired with making its receipt a
+mandatory signed promotion input. Applying the migrations and producing that environment-specific receipt remains an
 operator action. Database restore behavior stays part of the separate isolated recovery rehearsal;
 neither missing receipt is a reason to fall back to replica-local files.
 
