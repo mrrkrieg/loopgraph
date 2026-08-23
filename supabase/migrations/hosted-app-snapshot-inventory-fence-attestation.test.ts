@@ -21,7 +21,7 @@ describe("hosted App snapshot inventory fence attestation migration", () => {
     expect(sql).toMatch(/mutationFunctionsTriggerOnly/i);
     expect(sql).toMatch(/mutationFunctionsHardened/i);
     expect(sql).toMatch(/count\(function_oid\) = 4/i);
-    expect(sql).toMatch(/function_row\.prosecdef[\s\S]*?'search_path=""' = any\(function_row\.proconfig\)/i);
+    expect(sql).toMatch(/function_row\.prosecdef[\s\S]*?coalesce\('search_path=""' = any\(function_row\.proconfig\), false\)/i);
     expect(sql).toMatch(/revoke all on function public\.loopgraph_app_snapshot_inventory_fence_status_get\(\)[\s\S]*?from public, anon, authenticated/i);
     expect(sql).toMatch(/grant execute on function public\.loopgraph_app_snapshot_inventory_fence_status_get\(\)[\s\S]*?to service_role/i);
     expect(sql).not.toMatch(/return query|select \*/i);

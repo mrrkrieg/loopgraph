@@ -80,7 +80,7 @@ begin
     count(*) = 4
     and coalesce(bool_and(
       function_row.prosecdef
-      and 'search_path=""' = any(function_row.proconfig)
+      and coalesce('search_path=""' = any(function_row.proconfig), false)
     ), false)
   into v_mutation_functions_hardened
   from pg_catalog.pg_proc function_row
