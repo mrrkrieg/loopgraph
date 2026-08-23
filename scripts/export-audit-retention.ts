@@ -447,7 +447,7 @@ const marketplaceCheckpointReceiptSchema = z.object({
 }).passthrough();
 
 const appEvidenceHealthCheckpointReceiptSchema = z.object({
-  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v2"),
+  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v3"),
   targetOrigin: z.string().url(),
   organizationId: z.string().uuid(),
   projectKey: z.string(),

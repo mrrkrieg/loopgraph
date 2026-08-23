@@ -141,7 +141,7 @@ The protected workflow stores the staging, App action, marketplace, hosted App e
 active App snapshot
 mutation-fence, distributed learning/entity, App snapshot isolation, App snapshot recovery,
 App snapshot reconciliation, database recovery, and audit-retention receipts as separate artifacts,
-compiles `loopgraph-production-promotion-evidence/v11`, and creates a GitHub OIDC
+compiles `loopgraph-production-promotion-evidence/v12`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured

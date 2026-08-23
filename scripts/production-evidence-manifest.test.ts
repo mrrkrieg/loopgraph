@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v11",
+      schemaVersion: "loopgraph-production-promotion-evidence/v12",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -116,10 +116,11 @@ describe("production promotion evidence manifest", () => {
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
         appEvidenceHealth: {
           summary: {
-            checks: 7,
+            checks: 8,
             auditedRequestId: "app_evidence_health_12345678",
             auditThroughSequence: 44,
             auditHeadHash: "7".repeat(64),
+            classificationCases: 6,
             health: "degraded",
             totalInstallations: 5,
             totalMatched: 2,
@@ -319,6 +320,21 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(wrongStatus, config))
       .toThrow(/unexpected control status/i);
+
+    const classificationDrift = releaseReceipts();
+    const classificationReceipt = classificationDrift.appEvidenceHealth as Record<string, unknown>;
+    const classificationEvidence = classificationReceipt.classificationEvidence as {
+      cases: Array<Record<string, unknown>>;
+    };
+    classificationDrift.appEvidenceHealth = {
+      ...classificationReceipt,
+      classificationEvidence: {
+        cases: classificationEvidence.cases.map((item) =>
+          item.status === "expired" ? { ...item, observedHealth: "healthy" } : item)
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(classificationDrift, config))
+      .toThrow(/classification fixture set/i);
   });
 
   it("rejects snapshot evidence from another Storage origin or with a missing denial control", () => {
@@ -770,7 +786,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
     },
     appEvidenceHealth: {
-      schemaVersion: "hosted-app-evidence-health-staging-validation/v2",
+      schemaVersion: "hosted-app-evidence-health-staging-validation/v3",
       targetOrigin: deploymentOrigin,
       organizationId,
       projectKey: "main",
@@ -781,6 +797,16 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         throughSequence: 44,
         headHash: "7".repeat(64),
         requestId: "app_evidence_health_12345678"
+      },
+      classificationEvidence: {
+        cases: [
+          { status: "invalid", expectedHealth: "blocked", observedHealth: "blocked", ok: true },
+          { status: "expired", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "renew_soon", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "incomplete", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "current", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "not_applicable", expectedHealth: "healthy", observedHealth: "healthy", ok: true }
+        ]
       },
       projection: {
         generatedAt: checkedAt,
@@ -819,6 +845,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         { name: "replay_denial", status: 409 },
         { name: "aggregate_only_contract" },
         { name: "metrics_projection_parity", status: 200 },
+        { name: "classification_fixture_rehearsal" },
         { name: "independent_audit_evidence", status: 200 }
       ].map(({ name, status }) => ({
         name,

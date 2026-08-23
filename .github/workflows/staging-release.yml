@@ -129,7 +129,7 @@ jobs:
           LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE }}"
           LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
       - run: >-
-          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-evidence-health-staging-receipt.json","utf8"));const names=["unauthenticated_denial","cross_tenant_denial","authorized_health_projection","replay_denial","aggregate_only_contract","metrics_projection_parity","independent_audit_evidence"];if(value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v2"||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-evidence-health-staging-receipt.json","utf8"));const names=["unauthenticated_denial","cross_tenant_denial","authorized_health_projection","replay_denial","aggregate_only_contract","metrics_projection_parity","classification_fixture_rehearsal","independent_audit_evidence"];if(value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v3"||value.checks?.length!==names.length||value.classificationEvidence?.cases?.length!==6||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-evidence-health-staging-evidence

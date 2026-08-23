@@ -61,7 +61,7 @@ describe("hosted App evidence health staging validation", () => {
     });
 
     expect(receipt).toMatchObject({
-      schemaVersion: "hosted-app-evidence-health-staging-validation/v2",
+      schemaVersion: "hosted-app-evidence-health-staging-validation/v3",
       targetOrigin: "https://staging.loopgraph.test",
       organizationId: config.organizationId,
       projectKey: config.projectKey,
@@ -72,6 +72,16 @@ describe("hosted App evidence health staging validation", () => {
         throughSequence: 12,
         headHash: "c".repeat(64),
         requestId: "app_evidence_health_123e4567-e89b-42d3-a456-426614174999"
+      },
+      classificationEvidence: {
+        cases: [
+          { status: "invalid", expectedHealth: "blocked", observedHealth: "blocked", ok: true },
+          { status: "expired", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "renew_soon", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "incomplete", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "current", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "not_applicable", expectedHealth: "healthy", observedHealth: "healthy", ok: true }
+        ]
       },
       projection: {
         health: "degraded",
@@ -94,6 +104,7 @@ describe("hosted App evidence health staging validation", () => {
       "replay_denial",
       "aggregate_only_contract",
       "metrics_projection_parity",
+      "classification_fixture_rehearsal",
       "independent_audit_evidence"
     ]);
     const serialized = JSON.stringify(receipt);

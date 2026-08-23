@@ -46,7 +46,7 @@ The sender independently rejects:
 
 For a production release, the sender also reads the exact `staging-validation/v5`,
 `hosted-marketplace-staging-validation/v2`, and
-`hosted-app-evidence-health-staging-validation/v2` receipts. It rejects a different source origin,
+`hosted-app-evidence-health-staging-validation/v3` receipts. It rejects a different source origin,
 tenant, or project, then proves all three named sequence/hash checkpoints while traversing the pinned chain. A
 checkpoint older than the protected predecessor state fails closed because it can no longer be
 independently replayed by the current drain.

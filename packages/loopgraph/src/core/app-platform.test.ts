@@ -17,6 +17,7 @@ import {
   appInstallationLockSchema,
   appMaturityEvidenceSchema,
   appEvidenceRenewalPlanSchema,
+  deriveAppEvidenceFleetHealth,
   appPlatformJsonSchemas,
   assertSafeInitialRollout,
   canonicalAppDigest,
@@ -284,6 +285,24 @@ describe("Loopgraph App Platform contracts", () => {
       ...plan,
       totalMatched: 1
     })).toThrow(/within the installation total/i);
+  });
+
+  it("derives fleet health with invalid evidence taking precedence over renewal warnings", () => {
+    const empty = {
+      notApplicable: 0,
+      incomplete: 0,
+      current: 0,
+      renewSoon: 0,
+      expired: 0,
+      invalid: 0
+    };
+    expect(deriveAppEvidenceFleetHealth({ ...empty, invalid: 1, expired: 1 })).toBe("blocked");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, expired: 1 })).toBe("degraded");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, renewSoon: 1 })).toBe("degraded");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, incomplete: 1 })).toBe("healthy");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, current: 1 })).toBe("healthy");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, notApplicable: 1 })).toBe("healthy");
+    expect(() => deriveAppEvidenceFleetHealth({ ...empty, invalid: -1 })).toThrow();
   });
 
   it("requires signed catalogs to carry exact publisher trust material instead of a key label alone", () => {

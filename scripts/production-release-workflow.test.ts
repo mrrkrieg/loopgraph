@@ -167,7 +167,8 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE:
         "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
     });
-    expect(source).toContain('value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v2"');
+    expect(source).toContain('value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v3"');
+    expect(source).toContain("value.classificationEvidence?.cases?.length!==6");
     const snapshotValidationStep = (jobs["app-snapshots"].steps ?? []).find(
       (step) => step.run?.includes("validate:app-snapshots-staging")
     );

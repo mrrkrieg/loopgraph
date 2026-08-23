@@ -104,11 +104,21 @@ const appEvidenceCheckNames = [
   "replay_denial",
   "aggregate_only_contract",
   "metrics_projection_parity",
+  "classification_fixture_rehearsal",
   "independent_audit_evidence"
 ] as const;
 
+const appEvidenceClassificationExpectations = [
+  { status: "invalid", health: "blocked" },
+  { status: "expired", health: "degraded" },
+  { status: "renew_soon", health: "degraded" },
+  { status: "incomplete", health: "healthy" },
+  { status: "current", health: "healthy" },
+  { status: "not_applicable", health: "healthy" }
+] as const;
+
 const appEvidenceHealthReceiptSchema = z.object({
-  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v2"),
+  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v3"),
   targetOrigin: originSchema,
   organizationId: z.string().uuid(),
   projectKey: projectKeySchema,
@@ -119,6 +129,21 @@ const appEvidenceHealthReceiptSchema = z.object({
     throughSequence: safeInteger,
     headHash: hashSchema,
     requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/)
+  }).strict(),
+  classificationEvidence: z.object({
+    cases: z.array(z.object({
+      status: z.enum([
+        "invalid",
+        "expired",
+        "renew_soon",
+        "incomplete",
+        "current",
+        "not_applicable"
+      ]),
+      expectedHealth: z.enum(["healthy", "degraded", "blocked"]),
+      observedHealth: z.enum(["healthy", "degraded", "blocked"]),
+      ok: z.literal(true)
+    }).strict()).length(appEvidenceClassificationExpectations.length)
   }).strict(),
   projection: z.object({
     generatedAt: z.string().datetime({ offset: true }),
@@ -149,6 +174,20 @@ const appEvidenceHealthReceiptSchema = z.object({
       path: ["auditEvidence"],
       message: "App evidence audit checkpoint precedes its starting sequence"
     });
+  }
+  for (const [index, expected] of appEvidenceClassificationExpectations.entries()) {
+    const observed = receipt.classificationEvidence.cases[index];
+    if (
+      observed?.status !== expected.status ||
+      observed.expectedHealth !== expected.health ||
+      observed.observedHealth !== expected.health
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["classificationEvidence", "cases", index],
+        message: "App evidence classification fixture set is incomplete or drifted"
+      });
+    }
   }
   const counts = receipt.projection.counts;
   const countTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
@@ -435,7 +474,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v11"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v12"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -709,6 +748,7 @@ export function buildProductionEvidenceManifest(
     ![403, 409].includes(appEvidenceStatuses.get("replay_denial") ?? 0) ||
     appEvidenceStatuses.get("aggregate_only_contract") !== undefined ||
     appEvidenceStatuses.get("metrics_projection_parity") !== 200 ||
+    appEvidenceStatuses.get("classification_fixture_rehearsal") !== undefined ||
     appEvidenceStatuses.get("independent_audit_evidence") !== 200
   ) {
     throw new Error("App evidence health validation returned an unexpected control status");
@@ -893,6 +933,7 @@ export function buildProductionEvidenceManifest(
       auditedRequestId: appEvidenceHealth.auditEvidence.requestId,
       auditThroughSequence: appEvidenceHealth.auditEvidence.throughSequence,
       auditHeadHash: appEvidenceHealth.auditEvidence.headHash,
+      classificationCases: appEvidenceHealth.classificationEvidence.cases.length,
       health: appEvidenceHealth.projection.health,
       totalInstallations: appEvidenceHealth.projection.totalInstallations,
       totalMatched: appEvidenceHealth.projection.totalMatched,
@@ -977,7 +1018,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v11",
+    schemaVersion: "loopgraph-production-promotion-evidence/v12",
     release,
     scope,
     evidence,
