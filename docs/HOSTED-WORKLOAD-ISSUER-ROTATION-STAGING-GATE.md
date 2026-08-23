@@ -108,5 +108,10 @@ digests, eight fixed check results, and one verified audit checkpoint. It never 
 private keys, controller credentials, App data, provider payloads, or raw audit events. Destroy the
 disposable previous private key and rotate all projected tokens after the drill.
 
-An environment-specific execution is still external evidence until this receipt is added to the
-protected release workflow, independent audit retention, and production promotion manifest.
+The protected `workload-issuer-rotation-staging` job now executes this drill after the other
+workload authorization gates, validates the exact eight-check receipt, and uploads it independently
+to evidence compilation and production verification. `audit-drain/v8` must retain its seventh
+sequence/hash checkpoint, while `loopgraph-production-promotion-evidence/v16` independently pins
+the canonical issuer/JWKS/rotation/key scope. The first environment-specific execution remains
+external evidence until an enterprise configures the protected runner, disposable issuer, and
+rotation controller.
