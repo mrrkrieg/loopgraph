@@ -7,7 +7,16 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `ops/slo.yaml` is the versioned SLO and alert contract. Route its metrics to an alerting system with paging ownership; the file is not an alert delivery system by itself.
 - `.github/workflows/staging-release.yml` builds once, deploys the prebuilt artifact to staging, validates it, and only promotes that verified deployment after protected-environment approval.
   The credential-bearing workflow chain runs only from the protected default branch
-  `loopgraph/canvas-first`; environment deployment rules must enforce the same branch.
+  `loopgraph/canvas-first`; environment deployment rules must enforce the same branch. Trigger it
+  with the `staging-release` repository-dispatch event, never with a feature-ref workflow run.
+
+  ```bash
+  gh api --method POST repos/mrrkrieg/loopgraph/dispatches \
+    -f event_type=staging-release \
+    -F 'client_payload[promote_production]=true'
+  ```
+
+  Send `false` to exercise the full evidence chain without entering the protected production job.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
 - `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
@@ -19,8 +28,13 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 - `npm run rehearse:app-snapshot-restore` proves that one exact signed App archive can cross from
   the validated source project into a separately protected disposable Storage project, load through
   an empty runtime, preserve the source during target cleanup, and clean only its random probe.
+- `npm run reconcile:app-snapshots` verifies every current detached installation through the signed
+  archive loader for the exact Storage origin and tenant/project proven by the preceding gates. The
+  protected environment pins that scope independently and requires an explicit empty-inventory
+  policy. Missing, corrupt, untracked, unavailable, incomplete, cross-scope, or stale evidence
+  blocks promotion.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's seven receipts to one source commit,
+- `npm run release:evidence:build` binds the current run's eight receipts to one source commit,
   deployment, source and restore Storage origins, tenant/project, database identity, and exact
   marketplace artifact.
   `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any
@@ -78,8 +92,8 @@ invokes the provider handler. A request older than the configured threshold is s
 ## Release evidence
 
 The protected workflow stores the staging, App action, marketplace, App snapshot isolation,
-App snapshot recovery, database recovery, and audit-retention receipts as separate artifacts, compiles
-`loopgraph-production-promotion-evidence/v4`, and creates a GitHub OIDC
+App snapshot recovery, App snapshot reconciliation, database recovery, and audit-retention receipts
+as separate artifacts, compiles `loopgraph-production-promotion-evidence/v5`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured

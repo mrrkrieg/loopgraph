@@ -465,6 +465,11 @@ does not affect the source, and then removes only the fresh probe. Separate sour
 service roles are accepted only through private `0600` files. Production promotion requires the
 fresh receipt and binds both reviewed Storage origins plus the exact artifact and file digests.
 
+Production promotion also requires `npm run reconcile:app-snapshots` against the exact validated
+Storage origin and tenant/project. The protected gate verifies every currently detached App through
+the signed archive loader, rejects missing, corrupt, untracked, or unavailable recovery authority,
+and contributes only aggregate counts plus an opaque scope digest to the promotion manifest.
+
 ## Department loop library
 
 A new workspace starts empty. Hermes proposes relevant candidates from the shipped library, and only accepted loops become part of the company topology.

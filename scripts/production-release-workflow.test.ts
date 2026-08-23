@@ -20,19 +20,26 @@ type WorkflowJob = {
 describe("staging release workflow contract", () => {
   it("requires every protected and commit-bound receipt before an attested manifest can be promoted", async () => {
     const source = await readFile(".github/workflows/staging-release.yml", "utf8");
-    const workflow = parse(source) as { jobs: Record<string, WorkflowJob> };
+    const workflow = parse(source) as {
+      on: { repository_dispatch: { types: string[] } };
+      jobs: Record<string, WorkflowJob>;
+    };
     const jobs = workflow.jobs;
 
+    expect(workflow.on.repository_dispatch.types).toEqual(["staging-release"]);
+    expect(source).not.toContain("workflow_dispatch");
     expect(jobs.verify.if).toBe("github.ref == 'refs/heads/loopgraph/canvas-first'");
 
     expect(jobs.marketplace.environment).toBe("marketplace-staging");
     expect(jobs["app-snapshots"].environment).toBe("app-snapshot-staging");
     expect(jobs["app-snapshot-recovery"].environment).toBe("app-snapshot-recovery");
+    expect(jobs["app-snapshot-reconciliation"].environment).toBe("app-snapshot-reconciliation");
     expect(jobs.recovery.environment).toBe("recovery-staging");
     expect(jobs["audit-retention"].environment).toBe("audit-retention-staging");
     expect(jobs.evidence.environment).toBe("release-evidence");
     expect(jobs.promote.environment).toBe("production");
     expect(asNeeds(jobs.evidence.needs)).toEqual([
+      "app-snapshot-reconciliation",
       "app-snapshot-recovery",
       "app-snapshots",
       "audit-retention",
@@ -41,6 +48,7 @@ describe("staging release workflow contract", () => {
       "staging"
     ]);
     expect(asNeeds(jobs.promote.needs)).toEqual(["evidence", "staging"]);
+    expect(jobs.promote.if).toBe("${{ github.event.client_payload.promote_production == true }}");
 
     const evidenceSteps = jobs.evidence.steps ?? [];
     expect(evidenceSteps.some((step) => step.run?.includes("release:evidence:build"))).toBe(true);
@@ -64,6 +72,7 @@ describe("staging release workflow contract", () => {
       "marketplace",
       "app-snapshots",
       "app-snapshot-recovery",
+      "app-snapshot-reconciliation",
       "recovery",
       "audit-retention"
     ] as const) {
@@ -74,6 +83,7 @@ describe("staging release workflow contract", () => {
     expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
     expect(source).toContain("npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json");
     expect(source).toContain("npm run --silent rehearse:app-snapshot-restore > app-snapshot-recovery-receipt.json");
+    expect(source).toContain("npm run --silent reconcile:app-snapshots > app-snapshot-reconciliation-receipt.json");
     expect(source).toContain("npm run --silent rehearse:restore > recovery-rehearsal-receipt.json");
     expect(source).toContain("npm run --silent audit:drain > audit-retention-receipt.json");
     const auditDrainStep = (jobs["audit-retention"].steps ?? []).find(
@@ -139,10 +149,31 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_APP_SNAPSHOT_RESTORE_PROJECT_KEY:
         "${{ needs.marketplace.outputs.project_key }}"
     });
+    const snapshotReconciliationStep = (jobs["app-snapshot-reconciliation"].steps ?? []).find(
+      (step) => step.run?.includes("reconcile:app-snapshots")
+    );
+    expect(asNeeds(jobs["app-snapshot-reconciliation"].needs)).toEqual(["app-snapshots", "marketplace"]);
+    expect(snapshotReconciliationStep?.env).toEqual({
+      LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SUPABASE_URL:
+        "${{ needs.app-snapshots.outputs.storage_origin }}",
+      LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE:
+        "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE }}",
+      LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ORGANIZATION_ID:
+        "${{ needs.marketplace.outputs.organization_id }}",
+      LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_PROJECT_KEY:
+        "${{ needs.marketplace.outputs.project_key }}",
+      LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST:
+        "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST }}",
+      LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY:
+        "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY }}"
+    });
+    expect(JSON.stringify(jobs["app-snapshot-reconciliation"])).toContain("persist-credentials");
+    expect(JSON.stringify(jobs["app-snapshot-reconciliation"])).not.toMatch(/actions\/[a-z-]+@v\d/);
     expect(source.match(/LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_RELEASE_STORAGE_URL/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_RELEASE_SNAPSHOT_RESTORE_URL/g)).toHaveLength(2);
   });

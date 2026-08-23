@@ -1,6 +1,7 @@
 import { createPublicKey, verify } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { canonicalAppDigest } from "loopgraph/core";
 import {
   auditDrainReceiptV3Schema,
   canonicalJson,
@@ -139,6 +140,40 @@ const appSnapshotRecoveryReceiptSchema = z.object({
   }).strict()).length(6)
 }).strict();
 
+const appSnapshotReconciliationReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-app-snapshot-reconciliation/v1"),
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  scopeDigest: digestSchema,
+  registriesScanned: safeInteger,
+  detachedInstallations: safeInteger,
+  verifiedSnapshots: safeInteger,
+  missingSnapshots: z.literal(0),
+  corruptSnapshots: z.literal(0),
+  untrackedSnapshots: z.literal(0),
+  unavailableSnapshots: z.literal(0),
+  healthy: z.literal(true),
+  checks: z.array(z.object({
+    name: z.enum([
+      "tenant_registry_scan",
+      "pinned_scope_identity",
+      "non_empty_inventory_policy",
+      "durable_descriptor_authority",
+      "exact_archive_verification",
+      "aggregate_only_receipt"
+    ]),
+    ok: z.literal(true)
+  }).strict()).length(6)
+}).strict().superRefine((receipt, context) => {
+  if (receipt.verifiedSnapshots !== receipt.detachedInstallations) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["verifiedSnapshots"],
+      message: "Every detached App snapshot must verify before promotion"
+    });
+  }
+});
+
 const recoveryReceiptSchema = z.object({
   schemaVersion: z.literal("backup-restore-rehearsal/v2"),
   startedAt: z.string().datetime({ offset: true }),
@@ -179,7 +214,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v4"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v5"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -208,6 +243,7 @@ export const productionEvidenceManifestSchema = z.object({
     marketplace: evidenceDescriptorSchema,
     appSnapshots: evidenceDescriptorSchema,
     appSnapshotRecovery: evidenceDescriptorSchema,
+    appSnapshotReconciliation: evidenceDescriptorSchema,
     recovery: evidenceDescriptorSchema,
     auditRetention: evidenceDescriptorSchema
   }).strict(),
@@ -222,6 +258,7 @@ export type ProductionEvidenceReceipts = {
   marketplace: unknown;
   appSnapshots: unknown;
   appSnapshotRecovery: unknown;
+  appSnapshotReconciliation: unknown;
   recovery: unknown;
   auditRetention: unknown;
 };
@@ -254,6 +291,9 @@ export function buildProductionEvidenceManifest(
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
   const appSnapshots = appSnapshotReceiptSchema.parse(receipts.appSnapshots);
   const appSnapshotRecovery = appSnapshotRecoveryReceiptSchema.parse(receipts.appSnapshotRecovery);
+  const appSnapshotReconciliation = appSnapshotReconciliationReceiptSchema.parse(
+    receipts.appSnapshotReconciliation
+  );
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
   const auditRetention = auditDrainReceiptV3Schema.parse(receipts.auditRetention);
   validateConfig(config);
@@ -268,6 +308,7 @@ export function buildProductionEvidenceManifest(
     ["marketplace validation", marketplace.checkedAt],
     ["App snapshot validation", appSnapshots.checkedAt],
     ["App snapshot recovery rehearsal", appSnapshotRecovery.completedAt],
+    ["App snapshot reconciliation", appSnapshotReconciliation.checkedAt],
     ["recovery rehearsal", recovery.completedAt],
     ["audit retention", auditRetention.completedAt]
   ] as const) {
@@ -302,6 +343,15 @@ export function buildProductionEvidenceManifest(
   }
   if (Date.parse(appSnapshotRecovery.completedAt) < Date.parse(appSnapshotRecovery.startedAt)) {
     throw new Error("App snapshot recovery evidence completed before it started");
+  }
+  if (
+    appSnapshotReconciliation.scopeDigest !== canonicalAppDigest({
+      origin: appSnapshots.targetOrigin,
+      organizationId: config.organizationId,
+      projectKey: config.projectKey
+    })
+  ) {
+    throw new Error("App snapshot reconciliation evidence does not match the protected Storage and tenant scope");
   }
   if (appActionExactlyOnce.sourceCommitSha !== config.commitSha) {
     throw new Error("App action exactly-once proof does not belong to the promoted source commit");
@@ -399,6 +449,18 @@ export function buildProductionEvidenceManifest(
       "cleanup_verified"
     ],
     "App snapshot recovery rehearsal"
+  );
+  requireExactNames(
+    appSnapshotReconciliation.checks.map((check) => check.name),
+    [
+      "tenant_registry_scan",
+      "pinned_scope_identity",
+      "non_empty_inventory_policy",
+      "durable_descriptor_authority",
+      "exact_archive_verification",
+      "aggregate_only_receipt"
+    ],
+    "App snapshot reconciliation"
   );
   requireExactNames(
     recovery.criticalTables.map((table) => table.table),
@@ -525,6 +587,22 @@ export function buildProductionEvidenceManifest(
       artifactDigest: appSnapshotRecovery.artifactDigest,
       filesDigest: appSnapshotRecovery.filesDigest
     }),
+    appSnapshotReconciliation: descriptor(
+      appSnapshotReconciliation,
+      appSnapshotReconciliation.checkedAt,
+      {
+        scopeDigest: appSnapshotReconciliation.scopeDigest,
+        checks: appSnapshotReconciliation.checks.length,
+        registriesScanned: appSnapshotReconciliation.registriesScanned,
+        detachedInstallations: appSnapshotReconciliation.detachedInstallations,
+        verifiedSnapshots: appSnapshotReconciliation.verifiedSnapshots,
+        missingSnapshots: appSnapshotReconciliation.missingSnapshots,
+        corruptSnapshots: appSnapshotReconciliation.corruptSnapshots,
+        untrackedSnapshots: appSnapshotReconciliation.untrackedSnapshots,
+        unavailableSnapshots: appSnapshotReconciliation.unavailableSnapshots,
+        healthy: appSnapshotReconciliation.healthy
+      }
+    ),
     recovery: descriptor(recovery, recovery.completedAt, {
       sourceIdentityDigest: recovery.sourceIdentityDigest,
       criticalTables: recovery.criticalTables.length,
@@ -545,7 +623,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v4",
+    schemaVersion: "loopgraph-production-promotion-evidence/v5",
     release,
     scope,
     evidence,
@@ -573,6 +651,9 @@ export function verifyProductionEvidenceManifest(input: {
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
     appSnapshots: appSnapshotReceiptSchema.parse(input.receipts.appSnapshots),
     appSnapshotRecovery: appSnapshotRecoveryReceiptSchema.parse(input.receipts.appSnapshotRecovery),
+    appSnapshotReconciliation: appSnapshotReconciliationReceiptSchema.parse(
+      input.receipts.appSnapshotReconciliation
+    ),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
     auditRetention: auditDrainReceiptV3Schema.parse(input.receipts.auditRetention)
   };
@@ -582,6 +663,7 @@ export function verifyProductionEvidenceManifest(input: {
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
     ["App snapshot validation", receiptsAtPromotion.appSnapshots.checkedAt],
     ["App snapshot recovery rehearsal", receiptsAtPromotion.appSnapshotRecovery.completedAt],
+    ["App snapshot reconciliation", receiptsAtPromotion.appSnapshotReconciliation.checkedAt],
     ["recovery rehearsal", receiptsAtPromotion.recovery.completedAt],
     ["audit retention", receiptsAtPromotion.auditRetention.completedAt]
   ] as const) {
@@ -700,6 +782,7 @@ async function main() {
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
     appSnapshots: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE"),
     appSnapshotRecovery: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE"),
+    appSnapshotReconciliation: await readJsonReceipt("LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE"),
     recovery: await readJsonReceipt("LOOPGRAPH_RECOVERY_RECEIPT_FILE"),
     auditRetention: await readJsonReceipt("LOOPGRAPH_AUDIT_RECEIPT_FILE")
   };

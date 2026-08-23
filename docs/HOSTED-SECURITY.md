@@ -122,6 +122,13 @@ aggregate counts plus an opaque scope digest. The protected job rejects arbitrar
 runtime scope to a separately pinned digest, and requires an explicit policy before an empty detached
 inventory can pass.
 
+The protected production release chain repeats that reconciliation for the exact Storage origin and
+tenant/project proven earlier in the same run. Its fresh, healthy aggregate receipt is a mandatory
+input to `loopgraph-production-promotion-evidence/v5`; a missing, stale, cross-scope, incomplete, or
+unhealthy receipt blocks promotion. The credential-bearing release workflow is accepted only as a
+`staging-release` repository dispatch, which resolves the workflow and commit from the protected
+default branch instead of accepting an arbitrary workflow ref.
+
 Production activation still requires organization-specific provider sandbox validation, backup and
 restore rehearsal, SLOs and alerts, revocation drills, audit export retention, and policy approval.
 The repository provides the enforcement paths, but cannot prove a customer's cloud IAM, provider

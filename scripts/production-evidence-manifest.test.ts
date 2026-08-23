@@ -57,7 +57,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v4",
+      schemaVersion: "loopgraph-production-promotion-evidence/v5",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -110,6 +110,24 @@ describe("production promotion evidence manifest", () => {
             snapshotIdentityDigest: `sha256:${"4".repeat(64)}`,
             artifactDigest: `sha256:${"2".repeat(64)}`,
             filesDigest: `sha256:${"3".repeat(64)}`
+          }
+        },
+        appSnapshotReconciliation: {
+          summary: {
+            scopeDigest: canonicalAppDigest({
+              origin: storageOrigin,
+              organizationId,
+              projectKey: "main"
+            }),
+            checks: 6,
+            registriesScanned: 4,
+            detachedInstallations: 3,
+            verifiedSnapshots: 3,
+            missingSnapshots: 0,
+            corruptSnapshots: 0,
+            untrackedSnapshots: 0,
+            unavailableSnapshots: 0,
+            healthy: true
           }
         },
         recovery: { summary: { criticalTables: RECOVERY_TABLES.length } },
@@ -172,6 +190,30 @@ describe("production promotion evidence manifest", () => {
     const incomplete = releaseReceipts();
     const recovery = incomplete.appSnapshotRecovery as { checks: Array<Record<string, unknown>> };
     incomplete.appSnapshotRecovery = { ...recovery, checks: recovery.checks.slice(1) };
+    expect(() => buildProductionEvidenceManifest(incomplete, config)).toThrow();
+  });
+
+  it("rejects snapshot reconciliation for another scope or any unhealthy inventory", () => {
+    const wrongScope = releaseReceipts();
+    wrongScope.appSnapshotReconciliation = {
+      ...(wrongScope.appSnapshotReconciliation as Record<string, unknown>),
+      scopeDigest: `sha256:${"f".repeat(64)}`
+    };
+    expect(() => buildProductionEvidenceManifest(wrongScope, config))
+      .toThrow(/protected Storage and tenant scope/i);
+
+    const missing = releaseReceipts();
+    missing.appSnapshotReconciliation = {
+      ...(missing.appSnapshotReconciliation as Record<string, unknown>),
+      verifiedSnapshots: 2,
+      missingSnapshots: 1,
+      healthy: false
+    };
+    expect(() => buildProductionEvidenceManifest(missing, config)).toThrow();
+
+    const incomplete = releaseReceipts();
+    const receipt = incomplete.appSnapshotReconciliation as { checks: Array<Record<string, unknown>> };
+    incomplete.appSnapshotReconciliation = { ...receipt, checks: receipt.checks.slice(1) };
     expect(() => buildProductionEvidenceManifest(incomplete, config)).toThrow();
   });
 
@@ -481,6 +523,32 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "source_preserved_after_target_cleanup",
         "cleanup_verified"
       ].map((name) => ({ name, ok: true, detail: `${name} passed` }))
+    },
+    appSnapshotReconciliation: {
+      schemaVersion: "hosted-app-snapshot-reconciliation/v1",
+      checkedAt,
+      durationMs: 8_000,
+      scopeDigest: canonicalAppDigest({
+        origin: storageOrigin,
+        organizationId,
+        projectKey: "main"
+      }),
+      registriesScanned: 4,
+      detachedInstallations: 3,
+      verifiedSnapshots: 3,
+      missingSnapshots: 0,
+      corruptSnapshots: 0,
+      untrackedSnapshots: 0,
+      unavailableSnapshots: 0,
+      healthy: true,
+      checks: [
+        "tenant_registry_scan",
+        "pinned_scope_identity",
+        "non_empty_inventory_policy",
+        "durable_descriptor_authority",
+        "exact_archive_verification",
+        "aggregate_only_receipt"
+      ].map((name) => ({ name, ok: true }))
     },
     recovery: {
       schemaVersion: "backup-restore-rehearsal/v2",

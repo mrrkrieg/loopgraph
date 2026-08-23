@@ -112,6 +112,13 @@ The evidence artifact contains a scope digest, timestamps, fixed control names, 
 aggregate counts only. It contains no organization ID, project key, workspace ID, App ID,
 installation ID, actor, snapshot path, object key, content digest, archive, or credential.
 
+The production release workflow runs the same reconciliation after the bucket isolation gate and
+binds its fresh receipt to the validated Storage origin plus the exact marketplace tenant/project.
+Promotion fails if the independently pinned scope digest differs, any detached installation is not
+verified, any failure count is non-zero, the control set is incomplete, or the receipt is stale.
+The release is triggered with a `staging-release` repository dispatch so GitHub loads the workflow
+and source SHA from the protected default branch rather than a caller-selected ref.
+
 ## Staging release proof
 
 `npm run validate:app-snapshots-staging` exercises the real protected bucket before production

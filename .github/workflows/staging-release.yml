@@ -1,13 +1,8 @@
 name: Staging release gate
 
 on:
-  workflow_dispatch:
-    inputs:
-      promote_production:
-        description: Promote the verified prebuilt deployment to production
-        required: true
-        default: false
-        type: boolean
+  repository_dispatch:
+    types: [staging-release]
 
 permissions:
   contents: read
@@ -165,6 +160,36 @@ jobs:
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-recovery-receipt.json","utf8"));const source=new URL(value.sourceOrigin);const restore=new URL(value.restoreOrigin);if(value.schemaVersion!=="hosted-app-snapshot-restore-rehearsal/v1"||source.origin===restore.origin||restore.protocol!=="https:"||restore.pathname!=="/"||restore.username||restore.password||restore.search||restore.hash||value.checks?.length!==6)process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`restore_origin=${restore.origin}\n`);'
 
+  app-snapshot-reconciliation:
+    needs: [app-snapshots, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: app-snapshot-reconciliation
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent reconcile:app-snapshots > app-snapshot-reconciliation-receipt.json
+        env:
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SUPABASE_URL: "${{ needs.app-snapshots.outputs.storage_origin }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-reconciliation-receipt.json","utf8"));if(value.schemaVersion!=="hosted-app-snapshot-reconciliation/v1"||value.healthy!==true||value.checks?.length!==6||value.verifiedSnapshots!==value.detachedInstallations||value.missingSnapshots!==0||value.corruptSnapshots!==0||value.untrackedSnapshots!==0||value.unavailableSnapshots!==0||!/^sha256:[a-f0-9]{64}$/.test(value.scopeDigest))process.exit(1);'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-snapshot-reconciliation-evidence
+          path: app-snapshot-reconciliation-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
   recovery:
     needs: staging
     runs-on: [self-hosted, loopgraph-staging]
@@ -231,7 +256,7 @@ jobs:
           retention-days: 90
 
   evidence:
-    needs: [staging, marketplace, app-snapshots, app-snapshot-recovery, recovery, audit-retention]
+    needs: [staging, marketplace, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
     runs-on: ubuntu-latest
     environment: release-evidence
     permissions:
@@ -271,6 +296,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@v4
         with:
+          name: app-snapshot-reconciliation-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@v4
+        with:
           name: audit-retention-receipt
           path: release-evidence
       - run: npm run --silent release:evidence:build > release-evidence/production-evidence-manifest.json
@@ -280,6 +309,7 @@ jobs:
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-reconciliation-receipt.json"
           LOOPGRAPH_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/recovery-rehearsal-receipt.json"
           LOOPGRAPH_AUDIT_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/audit-retention-receipt.json"
           LOOPGRAPH_RELEASE_DEPLOYMENT_URL: "${{ needs.staging.outputs.deployment_url }}"
@@ -308,7 +338,7 @@ jobs:
           retention-days: 90
 
   promote:
-    if: ${{ inputs.promote_production }}
+    if: ${{ github.event.client_payload.promote_production == true }}
     needs: [staging, evidence]
     runs-on: ubuntu-latest
     environment: production
@@ -338,6 +368,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@v4
         with:
+          name: app-snapshot-reconciliation-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@v4
+        with:
           name: audit-retention-receipt
           path: release-evidence
       - uses: actions/download-artifact@v4
@@ -351,6 +385,7 @@ jobs:
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-reconciliation-receipt.json"
           LOOPGRAPH_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/recovery-rehearsal-receipt.json"
           LOOPGRAPH_AUDIT_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/audit-retention-receipt.json"
           LOOPGRAPH_RELEASE_DEPLOYMENT_URL: "${{ needs.staging.outputs.deployment_url }}"
