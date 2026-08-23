@@ -17,7 +17,8 @@ import {
 import {
   APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS,
   APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS,
-  appEvidenceFreshnessFailure,
+  APP_OPERATIONAL_EVIDENCE_RENEWAL_LEAD_SECONDS,
+  assessAppEvidenceFreshness,
   boundTimestampedAppEvidence,
   historicalReplayEvidenceTimestamp,
   type TimestampedAppEvidence
@@ -72,11 +73,13 @@ export function assessAppOperationalMaturity(input: {
   const replayObservedAt = replay ? historicalReplayEvidenceTimestamp(replay) : undefined;
   const freshnessRequirements = [
     {
+      id: "historical_replay" as const,
       label: "historical replay",
       evidence: replay && replayObservedAt ? { reference: replay.id, observedAt: replayObservedAt } : undefined,
       maxAgeSeconds: APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS
     },
     {
+      id: "completed_run" as const,
       label: "completed App run",
       evidence: boundTimestampedAppEvidence(
         input.operatingEvidence.latestCompletedRun,
@@ -85,6 +88,7 @@ export function assessAppOperationalMaturity(input: {
       maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
     },
     {
+      id: "observed_outcome" as const,
       label: "observed outcome",
       evidence: boundTimestampedAppEvidence(
         input.operatingEvidence.latestObservedOutcome,
@@ -93,6 +97,7 @@ export function assessAppOperationalMaturity(input: {
       maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
     },
     {
+      id: "observed_value" as const,
       label: "observed value",
       evidence: boundTimestampedAppEvidence(
         input.operatingEvidence.latestObservedValue,
@@ -101,8 +106,11 @@ export function assessAppOperationalMaturity(input: {
       maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
     }
   ];
-  const freshnessFailures = freshnessRequirements.flatMap((requirement) =>
-    appEvidenceFreshnessFailure(requirement, evaluatedAt));
+  const freshnessResults = freshnessRequirements.map((requirement) =>
+    assessAppEvidenceFreshness(requirement, evaluatedAt));
+  const freshnessFailures = freshnessResults
+    .filter((result) => !["current", "renew_soon"].includes(result.status))
+    .map((result) => result.summary);
   const productionEvidenceFresh = freshnessFailures.length === 0;
   const productionProofComplete = connected &&
     replay?.status === "passed" &&
@@ -115,6 +123,14 @@ export function assessAppOperationalMaturity(input: {
     input.operatingEvidence.observedOutcomeRefs.length > 0 &&
     input.operatingEvidence.observedValueRefs.length > 0;
   const productionProven = productionProofComplete && productionEvidenceFresh;
+  const freshness = operationalEvidenceFreshnessSummary({
+    results: freshnessResults,
+    productionProofComplete: Boolean(productionProofComplete),
+    hasAnyEvidence: Boolean(replay) ||
+      input.operatingEvidence.completedRunRefs.length > 0 ||
+      input.operatingEvidence.observedOutcomeRefs.length > 0 ||
+      input.operatingEvidence.observedValueRefs.length > 0
+  });
 
   const trustedKeys = (input.trustedVerifierKeys ?? []).map((key) => appVerifierTrustKeySchema.parse(key));
   const verification = (input.verificationReceipts ?? [])
@@ -201,9 +217,57 @@ export function assessAppOperationalMaturity(input: {
     artifactDigest: input.installation.artifactDigest,
     maturity,
     gates,
+    freshness,
     evaluatedAt: evaluatedAt.toISOString(),
     evidenceDerived: true
   });
+}
+
+function operationalEvidenceFreshnessSummary(input: {
+  results: ReturnType<typeof assessAppEvidenceFreshness>[];
+  productionProofComplete: boolean;
+  hasAnyEvidence: boolean;
+}): AppOperationalMaturityAssessment["freshness"] {
+  const expiryTimes = input.results.flatMap((result) =>
+    result.expiresAt ? [Date.parse(result.expiresAt)] : []);
+  const allExpiriesKnown = expiryTimes.length === input.results.length;
+  const validUntilMs = allExpiriesKnown ? Math.min(...expiryTimes) : undefined;
+  const validUntil = validUntilMs === undefined ? undefined : new Date(validUntilMs).toISOString();
+  const renewalRecommendedAt = validUntilMs === undefined
+    ? undefined
+    : new Date(validUntilMs - APP_OPERATIONAL_EVIDENCE_RENEWAL_LEAD_SECONDS * 1_000).toISOString();
+  const invalid = input.results.some((result) => ["missing", "invalid", "future"].includes(result.status));
+  const expired = input.results.some((result) => result.status === "expired");
+  const renewSoon = input.results.some((result) => result.status === "renew_soon");
+  const status: AppOperationalMaturityAssessment["freshness"]["status"] = !input.hasAnyEvidence
+    ? "not_applicable"
+    : !input.productionProofComplete
+      ? "incomplete"
+      : invalid
+        ? "invalid"
+        : expired
+          ? "expired"
+          : renewSoon
+            ? "renew_soon"
+            : "current";
+  const summary = status === "not_applicable"
+    ? "Production evidence has not been recorded yet."
+    : status === "incomplete"
+      ? "Production evidence exists but the complete reviewed proof set has not been established."
+      : status === "invalid"
+        ? "Production proof contains missing, invalid, unbound, or future-dated evidence."
+        : status === "expired"
+          ? `Production proof expired${validUntil ? ` at ${validUntil}` : ""}.`
+          : status === "renew_soon"
+            ? `Production proof is current but should be renewed before ${validUntil}.`
+            : `Production proof is current through ${validUntil}.`;
+  return {
+    status,
+    summary,
+    ...(validUntil ? { validUntil } : {}),
+    ...(renewalRecommendedAt ? { renewalRecommendedAt } : {}),
+    requirements: input.results
+  };
 }
 
 export function verifyAppIndependentVerificationReceipt(

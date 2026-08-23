@@ -205,6 +205,10 @@ The same source timestamps cap the public operational-maturity assessment: an Ap
 `production_proven` or `loopgraph_verified` after its replay, completed-run, outcome, or value proof
 expires. Timestamped proof must reference one of the exact App-owned evidence records returned by the
 tenant-scoped snapshot; an unrelated fresh timestamp cannot refresh an older record.
+The versioned maturity response includes the status and expiry of replay, completed-run, outcome,
+and value proof, plus the earliest `validUntil` and a seven-day `renewalRecommendedAt`. Hermes, CLI,
+and browser consumers therefore share one proactive renewal clock instead of learning about expired
+proof only after a blocked activation.
 The approval receipt embeds that gate; consumption recomputes it and fails closed if evidence is no
 longer sufficient. Human approval supplies accountability, not a bypass around missing evidence.
 

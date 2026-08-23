@@ -34,7 +34,7 @@ export const APP_ACTIVATION_GATE_SCHEMA_VERSION = "loopgraph-app-activation-gate
 export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha2" as const;
 export const LEGACY_APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
-export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
+export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha2" as const;
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
 export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
 export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
@@ -181,6 +181,31 @@ const appOperationalMaturityGateSchema = z.object({
   remediation: z.string().min(1).max(1000).optional()
 }).strict();
 
+const appOperationalEvidenceFreshnessRequirementSchema = z.object({
+  id: z.enum(["historical_replay", "completed_run", "observed_outcome", "observed_value"]),
+  status: z.enum(["current", "renew_soon", "expired", "missing", "invalid", "future"]),
+  summary: z.string().min(1).max(1000),
+  evidenceRef: z.string().min(1).max(1000).optional(),
+  observedAt: isoDateTimeSchema.optional(),
+  expiresAt: isoDateTimeSchema.optional()
+}).strict();
+
+const appOperationalEvidenceFreshnessSchema = z.object({
+  status: z.enum(["not_applicable", "incomplete", "current", "renew_soon", "expired", "invalid"]),
+  summary: z.string().min(1).max(1000),
+  validUntil: isoDateTimeSchema.optional(),
+  renewalRecommendedAt: isoDateTimeSchema.optional(),
+  requirements: z.array(appOperationalEvidenceFreshnessRequirementSchema).length(4)
+}).strict().superRefine((freshness, ctx) => {
+  const ids = ["historical_replay", "completed_run", "observed_outcome", "observed_value"] as const;
+  if (freshness.requirements.some((requirement, index) => requirement.id !== ids[index])) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requirements"], message: "Operational evidence freshness requirements must be complete and ordered" });
+  }
+  if (freshness.validUntil && freshness.renewalRecommendedAt && Date.parse(freshness.renewalRecommendedAt) >= Date.parse(freshness.validUntil)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["renewalRecommendedAt"], message: "Evidence renewal must be recommended before proof expires" });
+  }
+});
+
 export const appOperationalMaturityAssessmentSchema = z.object({
   schemaVersion: z.literal(APP_OPERATIONAL_MATURITY_SCHEMA_VERSION),
   installationId: appIdSchema,
@@ -188,6 +213,7 @@ export const appOperationalMaturityAssessmentSchema = z.object({
   artifactDigest: artifactDigestSchema,
   maturity: appMaturitySchema,
   gates: z.array(appOperationalMaturityGateSchema).length(4),
+  freshness: appOperationalEvidenceFreshnessSchema,
   evaluatedAt: isoDateTimeSchema,
   evidenceDerived: z.literal(true)
 }).strict().superRefine((assessment, ctx) => {
