@@ -238,6 +238,7 @@ export function runAppHistoricalReplay(input: {
     writeBlocked: true,
     startedAt,
     completedAt: startedAt,
+    sourceWindow: { from: request.from, to: request.to },
     scenarios,
     metrics: {
       eventCount: scenarios.length,

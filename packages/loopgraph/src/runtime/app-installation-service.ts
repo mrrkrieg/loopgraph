@@ -178,6 +178,24 @@ type PrepareLifecycleOperationInput = Omit<AppLifecycleOperation, "status" | "st
   now: Date;
 };
 
+export const APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+export const APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+export const APP_ACTIVATION_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60;
+
+type TimestampedActivationEvidence = {
+  reference: string;
+  observedAt: string;
+};
+
+type AppOperationalEvidenceSnapshot = {
+  completedRunRefs: string[];
+  observedOutcomeRefs: string[];
+  observedValueRefs: string[];
+  latestCompletedRun?: TimestampedActivationEvidence;
+  latestObservedOutcome?: TimestampedActivationEvidence;
+  latestObservedValue?: TimestampedActivationEvidence;
+};
+
 export class AppInstallationService {
   private readonly installationStore: AppInstallationStore;
   private readonly contextStore: CompanyContextStore;
@@ -2875,8 +2893,29 @@ export class AppInstallationService {
     installation: WorkspaceAppInstallation,
     readiness: AppReadiness,
     now: Date,
-    includeIndependentVerification = true
+    includeIndependentVerification = true,
+    evidenceSnapshot?: AppOperationalEvidenceSnapshot
   ): Promise<AppOperationalMaturityAssessment> {
+    const operatingEvidence = evidenceSnapshot ?? await this.loadOperationalEvidence(installation);
+    const verificationRegistry = includeIndependentVerification ? await this.verificationStore.read() : undefined;
+    return assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: registry.evaluations,
+      operatingEvidence: {
+        completedRunRefs: operatingEvidence.completedRunRefs,
+        observedOutcomeRefs: operatingEvidence.observedOutcomeRefs,
+        observedValueRefs: operatingEvidence.observedValueRefs
+      },
+      verificationReceipts: verificationRegistry?.receipts,
+      trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
+      now
+    });
+  }
+
+  private async loadOperationalEvidence(
+    installation: WorkspaceAppInstallation
+  ): Promise<AppOperationalEvidenceSnapshot> {
     const workspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
     const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
     const [outcomes, valueEntries, completedEvents] = await Promise.all([
@@ -2888,26 +2927,29 @@ export class AppInstallationService {
         eventType: "run.completed"
       })
     ]);
-    const verificationRegistry = includeIndependentVerification ? await this.verificationStore.read() : undefined;
-    return assessAppOperationalMaturity({
-      installation,
-      readiness,
-      evaluations: registry.evaluations,
-      operatingEvidence: {
-        completedRunRefs: uniqueStrings(completedEvents
-          .filter((event) => loopIds.has(event.loopId))
-          .map((event) => `run:${event.runId}`)),
-        observedOutcomeRefs: outcomes
-          .filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed")
-          .map((outcome) => `outcome:${outcome.id}`),
-        observedValueRefs: valueEntries
-          .filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed")
-          .map((entry) => `value:${entry.id}`)
-      },
-      verificationReceipts: verificationRegistry?.receipts,
-      trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
-      now
-    });
+    const appRuns = completedEvents.filter((event) => loopIds.has(event.loopId));
+    const appOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
+    const appValueEntries = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
+    return {
+      completedRunRefs: uniqueStrings(appRuns.map((event) => `run:${event.runId}`)),
+      observedOutcomeRefs: uniqueStrings(appOutcomes.map((outcome) => `outcome:${outcome.id}`)),
+      observedValueRefs: uniqueStrings(appValueEntries.map((entry) => `value:${entry.id}`)),
+      latestCompletedRun: latestTimestampedEvidence(
+        appRuns,
+        (event) => `run:${event.runId}`,
+        (event) => event.recordedAt
+      ),
+      latestObservedOutcome: latestTimestampedEvidence(
+        appOutcomes,
+        (outcome) => `outcome:${outcome.id}`,
+        (outcome) => outcome.evaluationWindow.end
+      ),
+      latestObservedValue: latestTimestampedEvidence(
+        appValueEntries,
+        (entry) => `value:${entry.id}`,
+        (entry) => entry.window.end
+      )
+    };
   }
 
   private async buildActivationGate(
@@ -2917,12 +2959,16 @@ export class AppInstallationService {
     now: Date
   ): Promise<AppActivationGate> {
     const readiness = await this.buildReadiness(registry, installation, now);
-    const maturity = await this.buildOperationalMaturity(registry, installation, readiness, now, false);
+    const operatingEvidence = await this.loadOperationalEvidence(installation);
+    const maturity = await this.buildOperationalMaturity(registry, installation, readiness, now, false, operatingEvidence);
+    const exactEvaluations = registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest);
     const recommendation = createPromotionRecommendation({
       installationId: installation.id,
-      evaluations: registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest),
+      evaluations: exactEvaluations,
       now
     });
+    const latestReplay = [...exactEvaluations].reverse().find((evaluation) =>
+      evaluation.installationId === installation.id && evaluation.level === "historical_replay");
     const requiredMaturity = mode === "execute_with_approval" ? "production_proven" as const : "connected" as const;
     const requiredMaturityGate = maturity.gates.find((gate) => gate.level === requiredMaturity)!;
     let lifecycleError: string | undefined;
@@ -2934,6 +2980,12 @@ export class AppInstallationService {
     const recommendationReady = mode !== "recommend" || recommendation.recommendedMode === "recommend";
     const permissionReady = mode !== "execute_with_approval" || !installation.permissions.some((permission) =>
       permission.authority === "execute" && permission.decision === "allow");
+    const freshnessCheck = activationEvidenceFreshnessCheck({
+      mode,
+      replay: latestReplay,
+      operatingEvidence,
+      now
+    });
     const checks: AppActivationGate["checks"] = [
       {
         id: "ordered-lifecycle",
@@ -2962,6 +3014,7 @@ export class AppInstallationService {
         evidenceRefs: mode === "recommend" ? recommendation.evidenceRefs.slice(-100) : [],
         ...(!recommendationReady ? { remediation: "Run and completely label a bounded historical replay, then resolve every failing promotion gate." } : {})
       },
+      freshnessCheck,
       {
         id: "permission-boundary",
         status: permissionReady ? "pass" : "blocked",
@@ -4330,6 +4383,114 @@ function assertLifecycleTransition(from: WorkspaceAppInstallation["state"], requ
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function activationEvidenceFreshnessCheck(input: {
+  mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  replay?: AppEvalRun;
+  operatingEvidence: AppOperationalEvidenceSnapshot;
+  now: Date;
+}): AppActivationGate["checks"][number] {
+  if (input.mode === "shadow") {
+    return {
+      id: "evidence-freshness",
+      status: "not_applicable",
+      summary: "Shadow mode uses current connection readiness and exact-artifact conformance; historical operating evidence is not required.",
+      evidenceRefs: []
+    };
+  }
+  const replayObservedAt = input.replay ? historicalReplayEvidenceTimestamp(input.replay) : undefined;
+  const replayEvidence = input.replay && replayObservedAt ? {
+    reference: input.replay.id,
+    observedAt: replayObservedAt
+  } : undefined;
+  const requiredEvidence: Array<{
+    label: string;
+    evidence?: TimestampedActivationEvidence;
+    maxAgeSeconds: number;
+  }> = [
+    {
+      label: "historical replay",
+      evidence: replayEvidence,
+      maxAgeSeconds: APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS
+    },
+    ...(input.mode === "execute_with_approval" ? [
+      {
+        label: "completed App run",
+        evidence: input.operatingEvidence.latestCompletedRun,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      },
+      {
+        label: "observed outcome",
+        evidence: input.operatingEvidence.latestObservedOutcome,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      },
+      {
+        label: "observed value",
+        evidence: input.operatingEvidence.latestObservedValue,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      }
+    ] : [])
+  ];
+  const failures = requiredEvidence.flatMap((requirement) =>
+    activationEvidenceFreshnessFailure(requirement, input.now));
+  const evidenceRefs = requiredEvidence.flatMap((requirement) =>
+    requirement.evidence ? [requirement.evidence.reference] : []);
+  const maxAgeDays = APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS / (24 * 60 * 60);
+  return {
+    id: "evidence-freshness",
+    status: failures.length === 0 ? "pass" : "blocked",
+    summary: failures.length === 0
+      ? input.mode === "recommend"
+        ? `The reviewed historical replay is no older than ${maxAgeDays} days.`
+        : `The reviewed replay and latest completed-run, observed-outcome, and observed-value evidence are no older than ${maxAgeDays} days.`
+      : `Activation evidence is not current: ${failures.join("; ")}.`,
+    evidenceRefs,
+    ...(failures.length > 0 ? {
+      remediation: input.mode === "recommend"
+        ? "Run and completely review a new bounded historical replay before requesting recommendation approval."
+        : "Run a fresh reviewed replay and record recent completed work, observed outcomes, and observed net value before requesting execution approval."
+    } : {})
+  };
+}
+
+function activationEvidenceFreshnessFailure(
+  requirement: {
+    label: string;
+    evidence?: TimestampedActivationEvidence;
+    maxAgeSeconds: number;
+  },
+  now: Date
+): string[] {
+  if (!requirement.evidence) return [`${requirement.label} is missing`];
+  const observedAt = Date.parse(requirement.evidence.observedAt);
+  const futureSkewMs = APP_ACTIVATION_EVIDENCE_FUTURE_SKEW_SECONDS * 1_000;
+  if (!Number.isFinite(observedAt)) return [`${requirement.label} has an invalid timestamp`];
+  if (observedAt > now.getTime() + futureSkewMs) return [`${requirement.label} is dated too far in the future`];
+  if (now.getTime() - observedAt > requirement.maxAgeSeconds * 1_000) {
+    return [`${requirement.label} is older than ${requirement.maxAgeSeconds / (24 * 60 * 60)} days`];
+  }
+  return [];
+}
+
+function historicalReplayEvidenceTimestamp(replay: AppEvalRun): string | undefined {
+  if (replay.sourceWindow?.to) return replay.sourceWindow.to;
+  const windowRef = replay.evidenceRefs.find((reference) => reference.startsWith("historical-window:"));
+  if (!windowRef) return undefined;
+  const separator = windowRef.indexOf("/", "historical-window:".length);
+  if (separator < 0) return undefined;
+  const to = windowRef.slice(separator + 1);
+  return Number.isFinite(Date.parse(to)) ? new Date(to).toISOString() : undefined;
+}
+
+function latestTimestampedEvidence<T>(
+  values: T[],
+  reference: (value: T) => string,
+  observedAt: (value: T) => string
+): TimestampedActivationEvidence | undefined {
+  const latest = [...values].sort((left, right) =>
+    Date.parse(observedAt(right)) - Date.parse(observedAt(left)) || reference(left).localeCompare(reference(right)))[0];
+  return latest ? { reference: reference(latest), observedAt: observedAt(latest) } : undefined;
 }
 
 function uniqueStrings(values: string[]): string[] {

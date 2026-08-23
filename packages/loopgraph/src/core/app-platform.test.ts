@@ -435,12 +435,17 @@ describe("Loopgraph App Platform contracts", () => {
       writeBlocked: true,
       startedAt: now,
       completedAt: later,
+      sourceWindow: { from: "2026-08-01T00:00:00.000Z", to: "2026-08-08T00:00:00.000Z" },
       scenarios: [],
       metrics: {},
       evidenceRefs: []
     } as const;
     expect(appEvalRunSchema.parse(base).writeBlocked).toBe(true);
     expect(() => appEvalRunSchema.parse({ ...base, writeBlocked: false })).toThrow(/block all writes/i);
+    expect(() => appEvalRunSchema.parse({
+      ...base,
+      sourceWindow: { from: "2026-08-08T00:00:00.000Z", to: "2026-08-01T00:00:00.000Z" }
+    })).toThrow(/source window end/i);
   });
 
   it("bounds historical replay by time window, event count, and event occurrence", () => {

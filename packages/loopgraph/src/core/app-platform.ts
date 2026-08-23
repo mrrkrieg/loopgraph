@@ -1303,6 +1303,10 @@ export const appEvalRunSchema = z.object({
   writeBlocked: z.boolean(),
   startedAt: isoDateTimeSchema,
   completedAt: isoDateTimeSchema.optional(),
+  sourceWindow: z.object({
+    from: isoDateTimeSchema,
+    to: isoDateTimeSchema
+  }).strict().optional(),
   scenarios: z.array(z.object({
     id: appIdSchema,
     status: z.enum(["passed", "failed", "skipped"]),
@@ -1322,6 +1326,9 @@ export const appEvalRunSchema = z.object({
 }).strict().superRefine((run, ctx) => {
   if (run.level === "historical_replay" && (!run.replay || !run.writeBlocked)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["writeBlocked"], message: "Historical replay must be marked replay and block all writes" });
+  }
+  if (run.sourceWindow && Date.parse(run.sourceWindow.from) >= Date.parse(run.sourceWindow.to)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceWindow", "to"], message: "Evaluation source window end must follow its start" });
   }
 });
 

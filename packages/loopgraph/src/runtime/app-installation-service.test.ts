@@ -252,11 +252,15 @@ async function installSalesApp(input: Awaited<ReturnType<typeof harness>>, now =
 async function recordRecommendationProof(
   input: Awaited<ReturnType<typeof harness>>,
   installationId: string,
-  now = new Date("2026-08-08T12:04:30.000Z")
+  now = new Date("2026-08-08T12:04:30.000Z"),
+  window = {
+    from: "2026-08-01T00:00:00.000Z",
+    to: "2026-08-08T00:00:00.000Z"
+  }
 ) {
   const events = Array.from({ length: 5 }, (_, index) => ({
     id: `historical-qualified-lead-${index + 1}`,
-    occurredAt: new Date(Date.UTC(2026, 7, 1 + index, 9)).toISOString(),
+    occurredAt: new Date(Date.parse(window.from) + index * 24 * 60 * 60 * 1_000 + 9 * 60 * 60 * 1_000).toISOString(),
     source: "hubspot",
     eventType: "lead.created",
     subject: { type: "lead", id: `lead-historical-${index + 1}` },
@@ -273,8 +277,8 @@ async function recordRecommendationProof(
   const replay = await input.service.historicalReplay({
     schemaVersion: "loopgraph-app-eval/v1alpha1",
     installationId,
-    from: "2026-08-01T00:00:00.000Z",
-    to: "2026-08-08T00:00:00.000Z",
+    from: window.from,
+    to: window.to,
     maxEvents: events.length,
     events,
     requestedAt: now.toISOString(),
@@ -925,6 +929,21 @@ describe("atomic app installation lifecycle", () => {
     })).rejects.toThrow(/promotion-evidence/i);
 
     const replay = await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:05:00.000Z"));
+    expect(replay.sourceWindow).toEqual({
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-08T00:00:00.000Z"
+    });
+    const staleRecommendGate = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-09-08T12:05:00.000Z")
+    );
+    expect(staleRecommendGate).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
+      ])
+    });
     const recommendGate = await input.service.activationGate(
       applied.installation.id,
       "recommend",
@@ -977,6 +996,39 @@ describe("atomic app installation lifecycle", () => {
       status: "ready",
       requiredMaturity: "production_proven",
       observedMaturity: "production_proven"
+    });
+    const staleExecuteGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-09-08T12:08:00.000Z")
+    );
+    expect(staleExecuteGate).toMatchObject({
+      status: "blocked",
+      observedMaturity: "production_proven",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
+      ])
+    });
+    await recordRecommendationProof(
+      input,
+      applied.installation.id,
+      new Date("2026-08-08T12:09:00.000Z"),
+      { from: "2026-09-01T00:00:00.000Z", to: "2026-09-08T00:00:00.000Z" }
+    );
+    const futureDatedExecuteGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:10:00.000Z")
+    );
+    expect(futureDatedExecuteGate).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          id: "evidence-freshness",
+          status: "blocked",
+          summary: expect.stringMatching(/future/i)
+        })
+      ])
     });
   }, 20_000);
 
