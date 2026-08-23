@@ -384,7 +384,7 @@ export async function syncHermesWebhookRoutes(
   const generatedAt = (input.now ?? new Date()).toISOString();
   const manifestPath = path.join(getLoopgraphRoot(projectRoot), "hermes-routes.json");
   const plan = await planHermesWebhookRoutes({ projectRoot, now: input.now });
-  const existingManifest = await readExistingManifest(manifestPath);
+  const existingManifest = await readHermesRoutesManifest(manifestPath);
   const existingRoutes = existingManifest?.routes ?? [];
   const existingManaged = existingRoutes.filter((route) => route.managedBy === "loopgraph");
   const preservedExternalRoutes = existingRoutes
@@ -437,7 +437,7 @@ export async function doctorHermesWebhookRoutes(
   const checkedAt = (input.now ?? new Date()).toISOString();
   const manifestPath = path.join(getLoopgraphRoot(projectRoot), "hermes-routes.json");
   const plan = await planHermesWebhookRoutes({ projectRoot, now: input.now });
-  const manifest = await readExistingManifest(manifestPath);
+  const manifest = await readHermesRoutesManifest(manifestPath);
   const manifestRoutes = manifest?.routes ?? [];
   const managedRoutes = manifestRoutes.filter((route) => route.managedBy === "loopgraph");
   const externalRoutes = manifestRoutes.filter((route) => route.managedBy !== "loopgraph");
@@ -751,7 +751,7 @@ function nextActionsForRoutes(routes: HermesWebhookRoutePlanItem[]): string[] {
   ];
 }
 
-async function readExistingManifest(manifestPath: string): Promise<HermesRoutesManifest | null> {
+export async function readHermesRoutesManifest(manifestPath: string): Promise<HermesRoutesManifest | null> {
   try {
     const raw = await readFile(manifestPath, "utf8");
     const parsed = JSON.parse(raw) as unknown;

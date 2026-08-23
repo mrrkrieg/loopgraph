@@ -31,6 +31,12 @@ import {
   syncHermesWebhookRoutes,
   testHermesWebhookFixture
 } from "../runtime/hermes-webhooks";
+import {
+  activateHermesRoutes,
+  getHermesRouteActivationStatus,
+  prepareHermesRouteActivation
+} from "../runtime/hermes-route-activation";
+import { ProjectedFileWorkloadTokenProvider } from "../runtime/workload-token-provider";
 import { initLoopgraphWorkspace, inspectLoopgraphWorkspace } from "../runtime/workspace";
 import {
   prepareLoopgraphStudio,
@@ -2187,6 +2193,54 @@ hermesWebhooks
       dryRun: Boolean(options.dryRun)
     });
     console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("prepare")
+  .description("Prepare the exact secret-free route contract a Hermes-owned controller may activate in shadow mode")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    const result = await prepareHermesRouteActivation({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("activate")
+  .description("Apply a confirmed shadow-route plan through a workload-authenticated Hermes route controller")
+  .requiredOption("--controller-url <url>", "Exact Hermes route controller reconcile endpoint")
+  .requiredOption("--token-file <path>", "Absolute 0600 projected workload-token file")
+  .requiredOption("--confirm <digest>", "Exact planDigest returned by hermes webhooks prepare")
+  .option("--audience <audience>", "Workload-token audience", "loopgraph-hermes-route-controller")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: {
+    project: string;
+    controllerUrl: string;
+    tokenFile: string;
+    confirm: string;
+    audience: string;
+  }) => {
+    const result = await activateHermesRoutes({
+      projectRoot: path.resolve(options.project),
+      controllerUrl: options.controllerUrl,
+      audience: options.audience,
+      confirmationDigest: options.confirm,
+      tokenProvider: new ProjectedFileWorkloadTokenProvider(options.tokenFile)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("activation-status")
+  .description("Verify the last secret-free Hermes route receipt still matches the current Loopgraph plan")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    const result = await getHermesRouteActivationStatus({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ready) process.exitCode = 1;
   });
 
 hermesWebhooks

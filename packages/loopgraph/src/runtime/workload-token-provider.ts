@@ -1,4 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile } from "node:fs/promises";
+import path from "node:path";
 
 export type WorkloadTokenRequest = {
   audience: string;
@@ -6,6 +8,31 @@ export type WorkloadTokenRequest = {
 
 export interface WorkloadTokenProvider {
   getToken(input: WorkloadTokenRequest): Promise<string>;
+}
+
+export class ProjectedFileWorkloadTokenProvider implements WorkloadTokenProvider {
+  constructor(private readonly filePath: string) {
+    if (!path.isAbsolute(filePath)) {
+      throw new Error("Projected workload token path must be absolute");
+    }
+  }
+
+  async getToken(): Promise<string> {
+    let handle;
+    try {
+      handle = await open(this.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || metadata.size < 32 || metadata.size > 64 * 1024) {
+        throw new Error("Projected workload token must be one bounded regular file");
+      }
+      if (process.platform !== "win32" && (metadata.mode & 0o077) !== 0) {
+        throw new Error("Projected workload token must not be accessible by group or other users");
+      }
+      return boundedToken(await handle.readFile("utf8"));
+    } finally {
+      await handle?.close();
+    }
+  }
 }
 
 export function hasAmbientWorkloadIdentity(env: NodeJS.ProcessEnv = process.env) {

@@ -44,7 +44,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ### Hermes event brain and durable execution
 
-- Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision.
+- Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision. Loopgraph can now compile the current route manifest into a content-bound, secret-free Hermes Route Controller request and verify an exact receipt for the route profile, restricted MCP tools, transformer, signature state, and provider subscription state. Activation uses a projected workload token, stores only a user-protected receipt, permits additions/updates in shadow mode only, and never authorizes deletion or live execution. A real Hermes controller deployment and provider-domain registration remain environment-specific.
 - Twenty-four provider onboarding profiles define least-privilege authorization, subscriptions/streams/detectors, signature requirements, and normalization transformers. Trusted Hermes MCP tools expose catalog, preparation, and bounded normalization operations while default-redacting one-time OAuth material.
 - BigQuery and Snowflake satisfy the warehouse capabilities already declared by the official Management and Operations/Finance apps through broker-owned, read-only query templates with mandatory time windows, byte/result ceilings, fixed provider endpoints, and no caller-supplied SQL or account context.
 - A durable warehouse detector scheduler now provisions company-metric, forecast-variance, and capacity-plan windows, fences concurrent workers with hashed leases, validates explicit material-event rows, signs normalized evidence, forwards it to Hermes with workload identity, retries the exact window, and advances checkpoints only after complete delivery. Raw query rows remain process-local; durable state contains hashes and receipt/event identities only.
@@ -308,7 +308,10 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    receiver receipt continuity, and an Ed25519-signed immutability acknowledgement; the repository
    cannot contain a receipt proving a customer storage account actually enabled WORM enforcement.
 4. Register provider applications and use Hermes-owned credentials to execute the supplied OAuth,
-   webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
+   webhook/stream/detector, signature, and transformer contracts against live tenant accounts. Deploy
+   the narrow Hermes Route Controller endpoint, bind its workload-identity audience, and produce the
+   first real `hermes-route-controller-receipt/v1alpha1`; Loopgraph now validates and stores that
+   receipt but cannot manufacture evidence for an external Hermes gateway.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, run the App snapshot staging gate, and complete clean-install plus hosted
    multi-user release audits. The executable gate is present; the environment-specific receipt

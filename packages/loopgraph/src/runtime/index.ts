@@ -42,6 +42,7 @@ export * from "./agent-operations-read-model";
 export * from "./routing-operations-query";
 export * from "./lifecycle-events";
 export * from "./hermes-webhooks";
+export * from "./hermes-route-activation";
 export * from "./hermes-operations-store";
 export * from "./hermes-execution-service";
 export * from "./hermes-execution-transport";

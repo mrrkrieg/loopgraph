@@ -181,7 +181,22 @@ npm run loopgraph -- hermes webhooks doctor --project .
 
 Sync writes `.loopgraph/hermes-routes.json` with non-secret route metadata only, including the lifecycle callback route. It preserves unrelated external route references in sanitized form and removes stale Loopgraph-managed entries.
 
-Doctor checks whether the manifest still matches the current routing catalog. These commands are advanced recovery controls; the supervisor performs the same safe local synchronization. Applying routes to real provider subscriptions remains a Hermes-owned/configured step.
+Doctor checks whether the manifest still matches the current routing catalog. These commands are advanced recovery controls; the supervisor performs the same safe local synchronization.
+
+For an enterprise Hermes deployment, prepare and apply the exact shadow-route contract through a Hermes-owned Route Controller:
+
+```bash
+npm run loopgraph -- hermes webhooks prepare --project .
+
+npm run loopgraph -- hermes webhooks activate --project . \
+  --controller-url https://hermes.example.com/v1/loopgraph/routes/reconcile \
+  --token-file /run/secrets/loopgraph/hermes-route-controller.jwt \
+  --confirm <planDigest>
+
+npm run loopgraph -- hermes webhooks activation-status --project .
+```
+
+The first command returns the digest to confirm. Activation accepts only a short-lived workload token from an absolute, user-only file. Hermes retains provider credentials and signing material; Loopgraph persists only a secret-free receipt proving the exact profile, skill, tool boundary, transformer, signature state, and provider subscription state. The v1 protocol can add or update shadow routes but cannot delete routes or enable live execution. See [Hermes Route Controller contract](./HERMES-ROUTE-CONTROLLER.md).
 
 ## 8. Rehearse an event before live webhooks
 
@@ -212,7 +227,7 @@ The fixture test:
 - asks the local shadow router for a decision;
 - validates expected action and loop IDs.
 
-It does not send a real provider webhook, apply a live Hermes route, or store provider credentials.
+It does not send a real provider webhook, apply a Hermes route, or store provider credentials. Route activation is the separate confirmed controller operation above.
 
 ## 9. Run the durable local worker separately only for diagnosis
 

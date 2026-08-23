@@ -1,0 +1,92 @@
+# Hermes Route Controller contract
+
+Loopgraph plans which events Hermes should receive and which restricted routing profile each event family may use. Hermes owns the live gateway, provider subscription, signature material, and route secret. The Route Controller protocol joins those responsibilities without copying credentials into Loopgraph or allowing an untrusted webhook turn to reconfigure itself.
+
+## Trust boundary
+
+```text
+Provider connection + webhook secret
+              |
+              v
+      Hermes Route Controller
+              |
+       signed/verified event
+              v
+      restricted Hermes route
+              |
+       normalized EventEnvelope
+              v
+     Loopgraph routing contract
+```
+
+Loopgraph sends only a desired-state contract. It never sends or receives provider access tokens, refresh tokens, client secrets, webhook secrets, signature keys, or raw provider payloads through this protocol.
+
+The controller must:
+
+- authenticate Loopgraph with workload identity;
+- resolve provider credentials only inside the Hermes credential boundary;
+- configure provider-specific signature and replay verification;
+- select the named, reviewed `EventEnvelope` transformer;
+- bind the exact `loopgraph_webhook_router` or `loopgraph_lifecycle_router` profile;
+- expose only the exact listed Loopgraph MCP tools;
+- keep every new route in log/shadow mode;
+- return a secret-free receipt proving the applied contract;
+- leave removals unapplied because the v1 protocol never authorizes destructive reconciliation.
+
+## Protocol
+
+Loopgraph sends `hermes-route-controller-request/v1alpha1` to one configured reconcile endpoint. The request is content-bound to:
+
+- the current project and routing catalog;
+- `.loopgraph/hermes-routes.json`;
+- every route ID, source pattern, and event allowlist;
+- the Hermes profile, skill, and restricted MCP tools;
+- the reviewed transformer version;
+- the existing Hermes-managed connection IDs;
+- shadow/log activation;
+- `destructiveChangesAllowed=false`.
+
+Hermes returns `hermes-route-controller-receipt/v1alpha1`. Loopgraph rejects the receipt unless its request, project, catalog, manifest, plan, route set, config digests, profiles, skills, tool lists, and transformers match exactly. A shadow route cannot claim readiness without signature verification. A provider route cannot claim an active subscription without a bound connection.
+
+The accepted receipt is written atomically to `.loopgraph/hermes-route-activation.json` with user-only permissions. URLs containing credentials, query parameters, or fragments and secret-shaped receipt content are rejected.
+
+## Operator flow
+
+First synchronize and test the local route contracts:
+
+```bash
+loopgraph hermes webhooks sync --project .
+loopgraph hermes webhooks doctor --project .
+loopgraph hermes webhooks test --project . --fixture <event.json> --require-synced-manifest
+```
+
+Prepare the exact activation contract:
+
+```bash
+loopgraph hermes webhooks prepare --project .
+```
+
+Review the output, then pass its exact `planDigest` to the apply command. The controller token must be a short-lived projected workload token in an absolute regular file that is not readable or writable by group or other users:
+
+```bash
+loopgraph hermes webhooks activate \
+  --project . \
+  --controller-url https://hermes.example.com/v1/loopgraph/routes/reconcile \
+  --token-file /run/secrets/loopgraph/hermes-route-controller.jwt \
+  --audience loopgraph-hermes-route-controller \
+  --confirm <planDigest>
+```
+
+Check whether the stored receipt still matches the active Loopgraph catalog:
+
+```bash
+loopgraph hermes webhooks activation-status --project .
+```
+
+`ready=false` is expected while a provider connection or administrator confirmation is pending. It grants no execution authority. Provider writes remain controlled by connector capabilities, action fingerprints, approvals, and the normal Loopgraph promotion gates.
+
+## Controller implementation requirements
+
+The Hermes-side controller is intentionally a narrow adapter, not an arbitrary shell or HTTP proxy. It should implement one operation: reconcile the supplied additions and updates into shadow routes, then return the versioned receipt. It must not accept caller-supplied commands, scripts, provider URLs, secrets, or tool names outside the desired contract.
+
+The current Loopgraph repository contains the client schemas, validation, CLI, receipt store, and fake-controller contract tests. Deploying a real controller and registering real provider applications remain environment-specific operations because an open-source repository cannot contain an enterprise's credentials, public domains, or cloud workload identities.
