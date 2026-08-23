@@ -163,6 +163,12 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   checkpoint, emits `audit-drain/v5`, and the v13 production manifest rechecks both distinct origins,
   tenant/project, freshness, ten exact controls/statuses, bounded rate policy, family revocation,
   and the full receipt digest before the prebuilt deployment can be promoted.
+- Hosted readiness and protected Prometheus metrics now consume a tenant/project-scoped,
+  service-role-only CLI security projection. It separates active, refresh-required, expired, and
+  revoked sessions; reports recent refresh replay, impossible unrevoked replay families, pending
+  device-flow age, and no identities or credential digests. Contained replay degrades operations for
+  review; an unrevoked replay or unavailable projection fails readiness closed. The v2 SLO contract
+  assigns both conditions to the security runbook.
 - Production promotion now compiles staging readiness, hosted-marketplace isolation, snapshot-consistent recovery, and independently acknowledged audit-retention receipts into one content-bound manifest. The workflow attests that exact manifest with GitHub OIDC, reconstructs it in the protected production job, verifies the upstream digest and provenance, and only then promotes the same prebuilt deployment. Receipt freshness is rechecked against the actual promotion time; deployment origin, tenant/project, database identity, marketplace artifact, exact audit sequence/hash checkpoints, acknowledgement digest, and restored-table fingerprints all fail closed.
 - Hosted App snapshot activation now has a dedicated protected staging gate. It proves the real
   bucket is private and bounded, exercises authenticated read/insert/update/delete denial, replays
@@ -288,7 +294,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    rejection, exact signed staging, and audit presence are already part of the executable marketplace
    gate. The CLI-session matrix, exact workflow validator, fourth retained audit checkpoint, and v13
    promotion binding are implemented; the environment-specific receipt, live issuer propagation,
-   MFA administrator controls, and release revocation proof remain external.
+   live MFA administrator-control validation, release revocation proof, migration application, and real alert
+   delivery remain external. The aggregate CLI security projection and v2 SLO/runbook contract are
+   implemented in the repository.
 7. Configure the protected App evidence-health staging workload identities and run
    `validate:app-evidence-health-staging` against each deployed environment. The executable gate is
    present; only the first deployment-specific receipt remains external. The gate now runs the

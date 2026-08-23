@@ -5,6 +5,10 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 ## Required controls
 
 - `ops/slo.yaml` is the versioned SLO and alert contract. Route its metrics to an alerting system with paging ownership; the file is not an alert delivery system by itself.
+- Hosted readiness also reads the service-role-only CLI security snapshot. Recent refresh-family
+  replay marks operations degraded, while any replayed-but-unrevoked family or unavailable snapshot
+  fails the protected readiness boundary. The projection exposes counts and ages only—never token
+  digests, users, devices, or request fingerprints.
 - `.github/workflows/staging-release.yml` builds once, deploys the prebuilt artifact to staging, validates it, and only promotes that verified deployment after protected-environment approval.
   The credential-bearing workflow chain runs only from the protected default branch
   `loopgraph/canvas-first`; environment deployment rules must enforce the same branch. Trigger it
