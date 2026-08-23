@@ -112,7 +112,8 @@ Detached private App artifacts use the private `loopgraph-app-snapshots` Storage
 server-side service role may access that bucket; browser sessions, Hermes, and provider workers
 receive logical snapshot receipts rather than object keys or download capabilities. Uploads are
 immutable, tenant-scoped, and verified against both the App artifact and full file inventory before
-they become replay authority.
+they become replay authority. An all-command restrictive Storage policy denies the bucket to every
+non-bypass role even if another project policy is broadly permissive.
 
 Production activation still requires organization-specific provider sandbox validation, backup and
 restore rehearsal, SLOs and alerts, revocation drills, audit export retention, and policy approval.

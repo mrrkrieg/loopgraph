@@ -24,8 +24,11 @@ disposable read-through cache.
 
 Migration `20260823003136_hosted_app_snapshots.sql` creates the private
 `loopgraph-app-snapshots` bucket with a 100 MiB archive limit and `application/json` allowlist.
-The bucket intentionally has no `anon` or `authenticated` Storage policy. The server-only
-Supabase service role is the sole data-plane principal.
+It also installs an all-command restrictive policy for `public` that evaluates false for this
+bucket and true for every other bucket. PostgreSQL AND-combines that guard with any applicable
+permissive policy, so an existing project-wide `USING (true)` rule cannot grant browser or worker
+access to App snapshots. The server-only Supabase service role bypasses RLS and is the sole
+supported data-plane principal.
 
 Object identities are derived by the server from:
 
@@ -35,10 +38,9 @@ artifact digest / full-file digest.loopgraph-pack.json
 ```
 
 Hermes, browsers, connector workers, and lifecycle tool callers cannot provide or receive that
-identity. Because Supabase Storage policies are permissive when multiple policies match, operators
-must not add a broad `storage.objects` policy that includes this bucket. The migration fails when
-it finds a policy that explicitly names the bucket; deployment review must also reject broad
-project-wide policies.
+identity. Operators should still audit broad `storage.objects` policies as part of deployment
+review, but the snapshot bucket's restrictive policy is the enforcement boundary: permissive
+policies cannot override it for a non-bypass role.
 
 ## Exact detach and replay sequence
 

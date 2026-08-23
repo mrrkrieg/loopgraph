@@ -1,7 +1,8 @@
--- Private immutable LoopPack archives for detached Apps. Browser and
--- authenticated clients receive no Storage policy for this bucket; only the
--- server-side service role used by the tenant-scoped App snapshot adapter may
--- create, read, or verify objects.
+-- Private immutable LoopPack archives for detached Apps. A restrictive policy
+-- denies every non-bypass role access to this bucket even when the project has
+-- an unrelated broad permissive Storage policy. Only the server-side Supabase
+-- service role used by the tenant-scoped App snapshot adapter may create, read,
+-- or verify objects.
 
 insert into storage.buckets (
   id,
@@ -22,22 +23,19 @@ set public = false,
     file_size_limit = excluded.file_size_limit,
     allowed_mime_types = excluded.allowed_mime_types;
 
--- Fail the migration if a project-wide policy accidentally names this bucket.
--- Supabase Storage RLS policies are permissive (OR-combined), so the supported
--- deployment contract is intentionally policy-free for this service bucket.
-do $$
-begin
-  if exists (
-    select 1
-    from pg_policies
-    where schemaname = 'storage'
-      and tablename = 'objects'
-      and (
-        coalesce(qual, '') ilike '%loopgraph-app-snapshots%'
-        or coalesce(with_check, '') ilike '%loopgraph-app-snapshots%'
-      )
-  ) then
-    raise exception 'loopgraph-app-snapshots must remain service-role-only and policy-free';
-  end if;
-end;
-$$;
+-- PostgreSQL OR-combines permissive policies and AND-combines restrictive
+-- policies. This project-wide guard is true for every other bucket, so it does
+-- not narrow their existing policies. It is false for this bucket, preventing
+-- any anon, authenticated, or custom non-BYPASSRLS role from reading, creating,
+-- changing, or deleting App snapshots. Supabase's server-only service role
+-- bypasses RLS and remains the sole supported data-plane principal.
+drop policy if exists "Loopgraph App snapshots deny client access"
+  on storage.objects;
+
+create policy "Loopgraph App snapshots deny client access"
+on storage.objects
+as restrictive
+for all
+to public
+using (bucket_id <> 'loopgraph-app-snapshots')
+with check (bucket_id <> 'loopgraph-app-snapshots');
