@@ -44,6 +44,8 @@
     "validate:app-snapshots-staging": "node --import tsx --conditions=react-server scripts/validate-hosted-app-snapshots-staging.ts",
     "probe:app-snapshot-fence": "node --import tsx --conditions=react-server scripts/probe-hosted-app-snapshot-inventory-fence.ts",
     "print:app-snapshot-fence-probe-scope": "node --import tsx --conditions=react-server scripts/probe-hosted-app-snapshot-inventory-fence.ts --print-scope-digest",
+    "validate:learning-entities-staging": "node --import tsx --conditions=react-server scripts/validate-hosted-learning-entities-staging.ts",
+    "print:learning-entity-probe-scope": "node --import tsx --conditions=react-server scripts/validate-hosted-learning-entities-staging.ts --print-scope-digest",
     "rehearse:app-snapshot-restore": "node --import tsx --conditions=react-server scripts/rehearse-hosted-app-snapshot-restore.ts",
     "reconcile:app-snapshots": "node --import tsx --conditions=react-server scripts/reconcile-hosted-app-snapshots.ts",
     "print:app-snapshot-reconciliation-scope": "node --import tsx --conditions=react-server scripts/reconcile-hosted-app-snapshots.ts --print-scope-digest",
