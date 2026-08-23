@@ -49,6 +49,7 @@ import {
   type AppRuntimeOperationTransport
 } from "./app-runtime-operations";
 import { FileAppInstallationStore, type AppInstallationStore } from "./app-installation-store";
+import { FileAppSnapshotStore, type AppSnapshotStore } from "./app-snapshot-store";
 import {
   FileAppVerificationStore,
   type AppVerificationRegistry,
@@ -630,6 +631,7 @@ export async function callLoopgraphAppTool(
     hermesOperationsStore?: HermesOperationsStore;
     loopSpecStore?: LoopSpecRegistryStore;
     appInstallationStoreFactory?: (workspaceId: string) => AppInstallationStore;
+    appSnapshotStoreFactory?: (workspaceId: string) => AppSnapshotStore;
     companyContextStoreFactory?: (workspaceId: string, companyId: string) => CompanyContextStore;
     connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
     providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
@@ -755,7 +757,13 @@ export async function callLoopgraphAppTool(
       projectRoot,
       identity.workspaceId,
       identity.companyId,
-      { installationStore, contextStore, mappingStore, loopSpecStore: options.loopSpecStore }
+      {
+        installationStore,
+        contextStore,
+        mappingStore,
+        loopSpecStore: options.loopSpecStore,
+        snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId)
+      }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
     const applications = await Promise.all(orderedDefinitions.map(async (definition) => {
@@ -1101,7 +1109,13 @@ export async function callLoopgraphAppTool(
     projectRoot,
     identity.workspaceId,
     identity.companyId,
-    { installationStore, contextStore, mappingStore, loopSpecStore: options.loopSpecStore }
+    {
+      installationStore,
+      contextStore,
+      mappingStore,
+      loopSpecStore: options.loopSpecStore,
+      snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId)
+    }
   );
   if (name === "loopgraph_app_onboarding_get") {
     const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -2215,6 +2229,14 @@ function appInstallationStore(
   workspaceId: string
 ): AppInstallationStore {
   return options.appInstallationStoreFactory?.(workspaceId) ?? new FileAppInstallationStore(appsRoot, workspaceId);
+}
+
+function appSnapshotStore(
+  options: { appSnapshotStoreFactory?: (workspaceId: string) => AppSnapshotStore },
+  projectRoot: string,
+  workspaceId: string
+): AppSnapshotStore {
+  return options.appSnapshotStoreFactory?.(workspaceId) ?? new FileAppSnapshotStore(projectRoot);
 }
 
 function connectorFieldMappingStore(

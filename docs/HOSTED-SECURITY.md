@@ -108,6 +108,11 @@ version registry. Opportunities, proposed graph changes, controller policies/che
 and controller triggers now use a tenant/project-scoped database boundary with atomic claims,
 UUID lease fencing, and a renewable controller lease. Graph snapshots, approvals, transactions,
 promotions, measurements, outcomes, and value records also use the distributed tenant/project store.
+Detached private App artifacts use the private `loopgraph-app-snapshots` Storage bucket. Only the
+server-side service role may access that bucket; browser sessions, Hermes, and provider workers
+receive logical snapshot receipts rather than object keys or download capabilities. Uploads are
+immutable, tenant-scoped, and verified against both the App artifact and full file inventory before
+they become replay authority.
 
 Production activation still requires organization-specific provider sandbox validation, backup and
 restore rehearsal, SLOs and alerts, revocation drills, audit export retention, and policy approval.
@@ -124,6 +129,8 @@ The evidence-to-design control boundary is described in
 [Distributed opportunity and controller runtime](./DISTRIBUTED-OPPORTUNITY-CONTROLLER.md).
 The materialization boundary is described in the
 [Versioned LoopSpec registry](./VERSIONED-LOOPSPEC-REGISTRY.md).
+Detached artifact durability is described in
+[Hosted App snapshots](./HOSTED-APP-SNAPSHOTS.md).
 
 Machine routes additionally require tenant/project-bound replay receipts and durable rate windows.
 See [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md).

@@ -45,6 +45,12 @@ owner must invite the account.
 - included in backup and restore procedures;
 - mounted consistently for every process that is allowed to operate the project.
 
+Detached private App artifacts are the exception to this filesystem authority. In hosted mode,
+their immutable archives live in the private `loopgraph-app-snapshots` Supabase Storage bucket.
+The runtime root holds only a verified, disposable read-through cache. A new replica can recover
+the exact detached artifact from the shared lifecycle receipt and object store without sharing a
+volume with the worker that performed the detach.
+
 Do not point this variable at `/tmp`, a Vercel function filesystem, or another ephemeral serverless
 directory. The public Vercel preview is illustrative and does not run private durable company work.
 
@@ -89,3 +95,5 @@ See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md), and
 [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) for the
 implemented protocols and exact remaining boundary.
+See [Hosted App snapshots](./HOSTED-APP-SNAPSHOTS.md) for the detach authority, bucket, recovery,
+and backup contract.

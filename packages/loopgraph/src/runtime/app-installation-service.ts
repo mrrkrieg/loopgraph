@@ -1,4 +1,4 @@
-import { cp, lstat, mkdir, readFile, rename, rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -45,7 +45,12 @@ import {
 } from "../core";
 import { appSetupDefinitionSchema } from "../core/app-pack-content";
 import { compileLoopPack } from "./app-pack-compiler";
-import { loadLoopPackDirectory, type LoopPackLoadResult } from "./app-pack-loader";
+import type { LoopPackLoadResult } from "./app-pack-loader";
+import {
+  appSnapshotFilesDigest,
+  FileAppSnapshotStore,
+  type AppSnapshotStore
+} from "./app-snapshot-store";
 import {
   loadConnectorRecipes,
   resolveConnectorCapabilities,
@@ -170,6 +175,7 @@ export class AppInstallationService {
   private readonly contextStore: CompanyContextStore;
   private readonly mappingStore: ConnectorFieldMappingStore;
   private readonly loopSpecStore: LoopSpecRegistryStore;
+  private readonly snapshotStore: AppSnapshotStore;
 
   constructor(
     private readonly marketplace: LocalAppMarketplace,
@@ -181,6 +187,7 @@ export class AppInstallationService {
       contextStore?: CompanyContextStore;
       mappingStore?: ConnectorFieldMappingStore;
       loopSpecStore?: LoopSpecRegistryStore;
+      snapshotStore?: AppSnapshotStore;
     } = {}
   ) {
     const appsRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps");
@@ -188,6 +195,7 @@ export class AppInstallationService {
     this.contextStore = dependencies.contextStore ?? new FileCompanyContextStore(path.join(appsRoot, "company-context.json"));
     this.mappingStore = dependencies.mappingStore ?? new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), workspaceId);
     this.loopSpecStore = dependencies.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
+    this.snapshotStore = dependencies.snapshotStore ?? new FileAppSnapshotStore(projectRoot);
   }
 
   private async prepareLifecycleOperation(input: PrepareLifecycleOperationInput): Promise<AppLifecycleOperation> {
@@ -2051,12 +2059,11 @@ export class AppInstallationService {
         : undefined;
       if (!installation || !receipt) throw new Error("Completed detach operation is missing its durable result");
       assertDetachReplayAuthority(completed, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
-      await assertSnapshotArtifact(
-        this.projectRoot,
-        completed.detach.snapshotPath,
-        completed.detach.snapshotArtifactDigest,
-        completed.detach.snapshotFilesDigest
-      );
+      await this.snapshotStore.assertExact({
+        snapshotPath: completed.detach.snapshotPath,
+        artifactDigest: completed.detach.snapshotArtifactDigest,
+        filesDigest: completed.detach.snapshotFilesDigest
+      });
       return { installation, receipt, lock: createInstallationLock(observedRegistry) };
     }
 
@@ -2094,7 +2101,12 @@ export class AppInstallationService {
       installation.derivation.derivedAppId,
       installation.version
     );
-    if (!existingOperation && await pathExists(resolvePackFile(this.projectRoot, snapshotPath))) {
+    const snapshotDescriptor = {
+      snapshotPath,
+      artifactDigest: loaded.artifact.digest,
+      filesDigest: appSnapshotFilesDigest(loaded)
+    };
+    if (!existingOperation && await this.snapshotStore.exists(snapshotDescriptor)) {
       throw new Error(`Private App snapshot target already exists: ${snapshotPath}`);
     }
     const updated: WorkspaceAppInstallation = {
@@ -2132,7 +2144,7 @@ export class AppInstallationService {
         sourceLoopIds: [...sourceLoopIds].sort(),
         snapshotPath,
         snapshotArtifactDigest: loaded.artifact.digest,
-        snapshotFilesDigest: loopPackFileInventoryDigest(loaded),
+        snapshotFilesDigest: snapshotDescriptor.filesDigest,
         targetInstallationDigest: canonicalAppDigest(updated),
         targetOwnershipDigest: sourceOwnershipDigest,
         targetLoopInventoryDigest,
@@ -2162,7 +2174,7 @@ export class AppInstallationService {
           installationOwnershipDigest(registry, current.id) !== recovery.sourceOwnershipDigest ||
           recovery.snapshotPath !== snapshotPath ||
           recovery.snapshotArtifactDigest !== loaded.artifact.digest ||
-          recovery.snapshotFilesDigest !== loopPackFileInventoryDigest(loaded) ||
+          recovery.snapshotFilesDigest !== appSnapshotFilesDigest(loaded) ||
           canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
           installationOwnershipDigest(registry, current.id) !== recovery.targetOwnershipDigest ||
           canonicalAppDigest([...current.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
@@ -2185,12 +2197,11 @@ export class AppInstallationService {
           throw new Error("Owned LoopSpec topology changed after detach recovery was prepared");
         }
 
-        await materializePrivateSnapshot({
-          projectRoot: this.projectRoot,
-          sourceRoot: loaded.root,
+        await this.snapshotStore.materialize({
+          source: loaded,
           snapshotPath: recovery.snapshotPath,
-          expectedArtifactDigest: recovery.snapshotArtifactDigest,
-          expectedFilesDigest: recovery.snapshotFilesDigest,
+          artifactDigest: recovery.snapshotArtifactDigest,
+          filesDigest: recovery.snapshotFilesDigest,
           operationId: currentOperation.id
         });
         const mutation = lifecycleMutation(registry, currentUpdated, {
@@ -3031,10 +3042,19 @@ export class AppInstallationService {
 
   private async loadInstallationArtifact(installation: WorkspaceAppInstallation): Promise<LoopPackLoadResult> {
     if (installation.derivation?.detachedAt && installation.derivation.snapshotPath) {
-      const snapshotRoot = resolvePackFile(this.projectRoot, installation.derivation.snapshotPath);
-      const loaded = await loadLoopPackDirectory(snapshotRoot);
-      if (loaded.artifact.digest !== installation.artifactDigest) throw new Error("Detached app snapshot no longer matches its pinned digest");
-      return loaded;
+      const completed = [...(await this.installationStore.read()).lifecycleOperations].reverse().find((operation) =>
+        operation.action === "detach" &&
+        operation.installationId === installation.id &&
+        operation.status === "completed" &&
+        operation.detach?.snapshotPath === installation.derivation?.snapshotPath &&
+        operation.detach?.targetInstallationDigest === canonicalAppDigest(installation)
+      );
+      if (!completed?.detach) throw new Error("Detached app is missing its exact snapshot receipt");
+      return this.snapshotStore.loadExact({
+        snapshotPath: completed.detach.snapshotPath,
+        artifactDigest: completed.detach.snapshotArtifactDigest,
+        filesDigest: completed.detach.snapshotFilesDigest
+      });
     }
     return this.marketplace.getAppArtifact(installation.appId, installation.version, installation.artifactDigest);
   }
@@ -3608,81 +3628,6 @@ function resolvePackFile(root: string, relativePath: string): string {
   const relative = path.relative(root, absolute);
   if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error(`Pack path escapes root: ${relativePath}`);
   return absolute;
-}
-
-async function pathExists(target: string): Promise<boolean> {
-  try {
-    await lstat(target);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-function loopPackFileInventoryDigest(loaded: LoopPackLoadResult): string {
-  return canonicalAppDigest(loaded.artifact.files
-    .map((file) => ({ path: file.path, digest: file.digest, sizeBytes: file.sizeBytes }))
-    .sort((left, right) => left.path.localeCompare(right.path)));
-}
-
-async function assertSnapshotArtifact(
-  projectRoot: string,
-  snapshotPath: string,
-  expectedArtifactDigest: string,
-  expectedFilesDigest: string
-): Promise<void> {
-  const snapshotRoot = resolvePackFile(projectRoot, snapshotPath);
-  const snapshot = await loadLoopPackDirectory(snapshotRoot);
-  if (
-    snapshot.artifact.digest !== expectedArtifactDigest ||
-    loopPackFileInventoryDigest(snapshot) !== expectedFilesDigest
-  ) {
-    throw new Error("Private App snapshot no longer matches its recorded immutable artifact digest");
-  }
-}
-
-async function materializePrivateSnapshot(input: {
-  projectRoot: string;
-  sourceRoot: string;
-  snapshotPath: string;
-  expectedArtifactDigest: string;
-  expectedFilesDigest: string;
-  operationId: string;
-}): Promise<void> {
-  const snapshotRoot = resolvePackFile(input.projectRoot, input.snapshotPath);
-  if (await pathExists(snapshotRoot)) {
-    await assertSnapshotArtifact(input.projectRoot, input.snapshotPath, input.expectedArtifactDigest, input.expectedFilesDigest);
-    return;
-  }
-
-  const stagingPath = path.posix.join(
-    ".loopgraph",
-    "apps",
-    "private-snapshots",
-    ".staging",
-    contentHash({ operationId: input.operationId, snapshotPath: input.snapshotPath })
-  );
-  const stagingRoot = resolvePackFile(input.projectRoot, stagingPath);
-  await rm(stagingRoot, { recursive: true, force: true });
-  await mkdir(path.dirname(stagingRoot), { recursive: true });
-  await cp(input.sourceRoot, stagingRoot, { recursive: true, force: false, errorOnExist: true });
-  const staged = await loadLoopPackDirectory(stagingRoot);
-  if (
-    staged.artifact.digest !== input.expectedArtifactDigest ||
-    loopPackFileInventoryDigest(staged) !== input.expectedFilesDigest
-  ) {
-    throw new Error("Staged private App snapshot does not match the exact source artifact");
-  }
-  await mkdir(path.dirname(snapshotRoot), { recursive: true });
-  try {
-    await rename(stagingRoot, snapshotRoot);
-  } catch (error) {
-    if (!(await pathExists(snapshotRoot))) throw error;
-    await assertSnapshotArtifact(input.projectRoot, input.snapshotPath, input.expectedArtifactDigest, input.expectedFilesDigest);
-    await rm(stagingRoot, { recursive: true, force: true });
-  }
-  await assertSnapshotArtifact(input.projectRoot, input.snapshotPath, input.expectedArtifactDigest, input.expectedFilesDigest);
 }
 
 function resolveSelectedModules(modules: Array<{ id: string; defaultEnabled: boolean; dependsOn: string[] }>, requested?: string[]): string[] {

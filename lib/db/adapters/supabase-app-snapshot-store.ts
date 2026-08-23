@@ -1,0 +1,264 @@
+import "server-only";
+
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile, lstat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { canonicalAppDigest } from "loopgraph/core";
+import {
+  appSnapshotDescriptor,
+  appSnapshotFilesDigest,
+  createLoopPackArchive,
+  extractLoopPackArchive,
+  loadLoopPackDirectory,
+  type AppSnapshotDescriptor,
+  type AppSnapshotMaterialization,
+  type AppSnapshotStore,
+  type LoopPackLoadResult
+} from "loopgraph/runtime";
+import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
+
+export const HOSTED_APP_SNAPSHOT_BUCKET = "loopgraph-app-snapshots";
+export const HOSTED_APP_SNAPSHOT_MEDIA_TYPE = "application/json";
+export const MAX_HOSTED_APP_SNAPSHOT_BYTES = 100 * 1024 * 1024;
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SCOPE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,159}$/;
+
+type Scope = {
+  organizationId: string;
+  projectKey: string;
+  workspaceId: string;
+};
+
+/**
+ * Service-role-only immutable App snapshot storage for hosted runtimes.
+ *
+ * Object names are tenant-scoped and content-bound. Upload never uses upsert:
+ * the first exact writer wins, while a collision is accepted only after the
+ * existing archive downloads and verifies against both recorded digests.
+ */
+export class SupabaseAppSnapshotStore implements AppSnapshotStore {
+  readonly persistence = "distributed" as const;
+  private readonly projectRoot: string;
+
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly scope: Scope,
+    projectRoot: string
+  ) {
+    if (!UUID_PATTERN.test(scope.organizationId)) throw new Error("App snapshot store organization ID must be a UUID");
+    if (!SCOPE_ID_PATTERN.test(scope.projectKey) || scope.projectKey.length > 64) throw new Error("App snapshot store project key is invalid");
+    if (!SCOPE_ID_PATTERN.test(scope.workspaceId)) throw new Error("App snapshot store workspace ID is invalid");
+    this.projectRoot = path.resolve(projectRoot);
+  }
+
+  async exists(descriptor: AppSnapshotDescriptor): Promise<boolean> {
+    const parsed = appSnapshotDescriptor(descriptor);
+    const { data, error } = await this.supabase.storage
+      .from(HOSTED_APP_SNAPSHOT_BUCKET)
+      .list(this.logicalObjectPrefix(parsed), { limit: 1 });
+    if (error) throw new Error("Hosted App snapshot store could not check immutable object identity");
+    return (data ?? []).length > 0;
+  }
+
+  async materialize(input: AppSnapshotMaterialization): Promise<void> {
+    const descriptor = appSnapshotDescriptor(input);
+    if (
+      input.source.artifact.digest !== descriptor.artifactDigest ||
+      appSnapshotFilesDigest(input.source) !== descriptor.filesDigest
+    ) {
+      throw new Error("Hosted App snapshot source does not match the exact recorded artifact");
+    }
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-app-snapshot-upload-"));
+    const archivePath = path.join(temporaryRoot, "snapshot.loopgraph-pack.json");
+    try {
+      const artifact = await createLoopPackArchive(input.source.root, archivePath);
+      if (artifact.digest !== descriptor.artifactDigest) {
+        throw new Error("Hosted App snapshot archive changed during creation");
+      }
+      const bytes = await readFile(archivePath);
+      assertArchiveSize(bytes.byteLength);
+      const { error } = await this.supabase.storage
+        .from(HOSTED_APP_SNAPSHOT_BUCKET)
+        .upload(this.objectKey(descriptor), bytes, {
+          contentType: HOSTED_APP_SNAPSHOT_MEDIA_TYPE,
+          cacheControl: "0",
+          upsert: false
+        });
+      if (error && !isAlreadyExistsError(error)) {
+        throw new Error("Hosted App snapshot upload failed");
+      }
+      await this.assertExact(descriptor);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+
+  async assertExact(descriptor: AppSnapshotDescriptor): Promise<void> {
+    const parsed = appSnapshotDescriptor(descriptor);
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-app-snapshot-verify-"));
+    try {
+      await this.downloadAndExtract(parsed, temporaryRoot);
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+
+  async loadExact(descriptor: AppSnapshotDescriptor): Promise<LoopPackLoadResult> {
+    const parsed = appSnapshotDescriptor(descriptor);
+    const temporaryRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-app-snapshot-load-"));
+    try {
+      const staged = await this.downloadAndExtract(parsed, temporaryRoot);
+      const cacheRoot = path.join(
+        this.projectRoot,
+        ".loopgraph",
+        "apps",
+        "snapshot-cache",
+        canonicalAppDigest({
+          snapshotPath: parsed.snapshotPath,
+          artifactDigest: parsed.artifactDigest,
+          filesDigest: parsed.filesDigest
+        }).slice("sha256:".length)
+      );
+      await assertNoSymbolicLinkAncestors(this.projectRoot, cacheRoot);
+      await mkdir(path.dirname(cacheRoot), { recursive: true });
+      if (await pathExists(cacheRoot)) {
+        try {
+          const cached = await loadLoopPackDirectory(cacheRoot);
+          assertLoadedSnapshot(cached, parsed);
+          return cached;
+        } catch {
+          await rm(cacheRoot, { recursive: true, force: true });
+        }
+      }
+      try {
+        await rename(staged.root, cacheRoot);
+      } catch (error) {
+        if (!(await pathExists(cacheRoot))) throw error;
+      }
+      const cached = await loadLoopPackDirectory(cacheRoot);
+      assertLoadedSnapshot(cached, parsed);
+      return cached;
+    } finally {
+      await rm(temporaryRoot, { recursive: true, force: true });
+    }
+  }
+
+  private async downloadAndExtract(
+    descriptor: AppSnapshotDescriptor,
+    temporaryRoot: string
+  ): Promise<LoopPackLoadResult> {
+    const { data, error } = await this.supabase.storage
+      .from(HOSTED_APP_SNAPSHOT_BUCKET)
+      .download(this.objectKey(descriptor));
+    if (error || !data) throw new Error("Hosted App snapshot is unavailable");
+    const bytes = new Uint8Array(await data.arrayBuffer());
+    assertArchiveSize(bytes.byteLength);
+    const mediaType = data.type?.split(";", 1)[0];
+    if (mediaType && mediaType !== HOSTED_APP_SNAPSHOT_MEDIA_TYPE) {
+      throw new Error("Hosted App snapshot has an unexpected media type");
+    }
+    const archivePath = path.join(temporaryRoot, "snapshot.loopgraph-pack.json");
+    const packRoot = path.join(temporaryRoot, "pack");
+    await writeFile(archivePath, bytes, { flag: "wx", mode: 0o600 });
+    const artifact = await extractLoopPackArchive(archivePath, packRoot);
+    if (artifact.digest !== descriptor.artifactDigest) {
+      throw new Error("Hosted App snapshot archive does not match its recorded artifact digest");
+    }
+    const loaded = await loadLoopPackDirectory(packRoot);
+    assertLoadedSnapshot(loaded, descriptor);
+    return loaded;
+  }
+
+  private objectKey(descriptor: AppSnapshotDescriptor): string {
+    const artifact = descriptor.artifactDigest.slice("sha256:".length);
+    const files = descriptor.filesDigest.slice("sha256:".length);
+    return [
+      this.logicalObjectPrefix(descriptor),
+      artifact,
+      `${files}.loopgraph-pack.json`
+    ].join("/");
+  }
+
+  private logicalObjectPrefix(descriptor: AppSnapshotDescriptor): string {
+    const logicalPath = canonicalAppDigest({ snapshotPath: descriptor.snapshotPath }).slice("sha256:".length);
+    return [
+      this.scope.organizationId,
+      this.scope.projectKey,
+      this.scope.workspaceId,
+      logicalPath
+    ].join("/");
+  }
+}
+
+export function isSupabaseAppSnapshotStoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(
+    env.NEXT_PUBLIC_SUPABASE_URL &&
+    env.SUPABASE_SERVICE_ROLE_KEY &&
+    env.LOOPGRAPH_HOSTED_ORGANIZATION_ID
+  );
+}
+
+export function createSupabaseAppSnapshotStore(
+  workspaceId: string,
+  projectRoot: string
+): SupabaseAppSnapshotStore {
+  const supabase = createSupabaseAdminClient();
+  const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  if (!supabase || !organizationId) throw new Error("Supabase App snapshot storage requires a hosted organization");
+  return new SupabaseAppSnapshotStore(supabase, { organizationId, projectKey, workspaceId }, projectRoot);
+}
+
+function assertLoadedSnapshot(loaded: LoopPackLoadResult, descriptor: AppSnapshotDescriptor): void {
+  if (
+    loaded.artifact.digest !== descriptor.artifactDigest ||
+    appSnapshotFilesDigest(loaded) !== descriptor.filesDigest
+  ) {
+    throw new Error("Hosted App snapshot no longer matches its immutable artifact identity");
+  }
+}
+
+function assertArchiveSize(sizeBytes: number): void {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > MAX_HOSTED_APP_SNAPSHOT_BYTES) {
+    throw new Error(`Hosted App snapshot archive must be between 1 and ${MAX_HOSTED_APP_SNAPSHOT_BYTES} bytes`);
+  }
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { message?: unknown; statusCode?: unknown };
+  const status = Number(value.statusCode);
+  return status === 409 || /already exists|duplicate/i.test(String(value.message ?? ""));
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function assertNoSymbolicLinkAncestors(root: string, target: string): Promise<void> {
+  const relative = path.relative(root, target);
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Hosted App snapshot cache escaped the project root");
+  }
+  let current = path.resolve(root);
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      const stat = await lstat(current);
+      if (stat.isSymbolicLink()) {
+        throw new Error("Hosted App snapshot cache contains a symbolic link");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+  }
+}

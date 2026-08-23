@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   hermesOperationsStore: {},
   routingStore: {},
   appInstallationStore: { persistence: "distributed" },
+  appSnapshotStore: { persistence: "distributed" },
   appOperationActionStore: { persistence: "distributed" },
   appVerificationStore: { persistence: "distributed" },
   companyContextStore: { persistence: "distributed" },
@@ -27,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   getHermesOperationsStore: vi.fn(),
   getRoutingStore: vi.fn(),
   getAppInstallationStore: vi.fn(),
+  getAppSnapshotStore: vi.fn(),
   getAppOperationActionStore: vi.fn(),
   getCompanyContextStore: vi.fn(),
   getLoopSpecRegistryStore: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getHermesOperationsStore: mocks.getHermesOperationsStore,
   getRoutingStore: mocks.getRoutingStore,
   getAppInstallationStore: mocks.getAppInstallationStore,
+  getAppSnapshotStore: mocks.getAppSnapshotStore,
   getAppOperationActionStore: mocks.getAppOperationActionStore,
   getCompanyContextStore: mocks.getCompanyContextStore,
   getLoopSpecRegistryStore: mocks.getLoopSpecRegistryStore,
@@ -93,6 +96,7 @@ beforeEach(() => {
   mocks.getHermesOperationsStore.mockReturnValue(mocks.hermesOperationsStore);
   mocks.getRoutingStore.mockReturnValue(mocks.routingStore);
   mocks.getAppInstallationStore.mockReturnValue(mocks.appInstallationStore);
+  mocks.getAppSnapshotStore.mockReturnValue(mocks.appSnapshotStore);
   mocks.getAppOperationActionStore.mockReturnValue(mocks.appOperationActionStore);
   mocks.getCompanyContextStore.mockReturnValue(mocks.companyContextStore);
   mocks.getLoopSpecRegistryStore.mockReturnValue(mocks.loopSpecStore);
@@ -127,6 +131,7 @@ describe("hosted app tool bridge", () => {
       });
       expect(options.appVerificationStoreFactory("acme")).toBe(mocks.appVerificationStore);
       expect(options.appInstallationStoreFactory("acme")).toBe(mocks.appInstallationStore);
+      expect(options.appSnapshotStoreFactory("acme")).toBe(mocks.appSnapshotStore);
       expect(options.companyContextStoreFactory("acme", "acme-company")).toBe(mocks.companyContextStore);
       expect(options.connectorFieldMappingStoreFactory("acme")).toBe(mocks.connectorFieldMappingStore);
       expect(options.providerSchemaSnapshotStoreFactory("acme")).toBe(mocks.providerSchemaSnapshotStore);
@@ -142,6 +147,10 @@ describe("hosted app tool bridge", () => {
       workspaceId: "acme"
     });
     expect(mocks.getAppInstallationStore).toHaveBeenCalledWith({
+      projectRoot: "/srv/loopgraph/tenant/main",
+      workspaceId: "acme"
+    });
+    expect(mocks.getAppSnapshotStore).toHaveBeenCalledWith({
       projectRoot: "/srv/loopgraph/tenant/main",
       workspaceId: "acme"
     });

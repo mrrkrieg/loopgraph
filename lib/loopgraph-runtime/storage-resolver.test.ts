@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
+  getAppSnapshotStore,
   getAppVerificationStore,
   getCompanyContextStore,
   getConnectorFieldMappingStore,
@@ -148,6 +149,15 @@ describe("hosted runtime namespaces", () => {
     expect(secondWorkspace).not.toBe(first);
   });
 
+  it("scopes local App snapshots by project and workspace", () => {
+    const first = getAppSnapshotStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
+    const firstAgain = getAppSnapshotStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
+    const secondWorkspace = getAppSnapshotStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "globex", forceFile: true });
+    expect(first.persistence).toBe("local");
+    expect(firstAgain).toBe(first);
+    expect(secondWorkspace).not.toBe(first);
+  });
+
   it("scopes local App connector metadata by project and workspace", () => {
     const mappings = getConnectorFieldMappingStore({ projectRoot: "/tmp/loopgraph-metadata-a", workspaceId: "acme", forceFile: true });
     const mappingsAgain = getConnectorFieldMappingStore({ projectRoot: "/tmp/loopgraph-metadata-a", workspaceId: "acme", forceFile: true });
@@ -184,6 +194,9 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getAppInstallationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App installation storage is required"
+    );
+    expect(() => getAppSnapshotStore({ workspaceId: "acme" })).toThrow(
+      "Distributed App snapshot storage is required"
     );
     expect(() => getConnectorFieldMappingStore({ workspaceId: "acme" })).toThrow(
       "Distributed App field-mapping storage is required"

@@ -12,6 +12,7 @@ import {
   FileMeasurementStore,
   FileOutcomeStore,
   FileAppInstallationStore,
+  FileAppSnapshotStore,
   FileAppOperationActionStore,
   FileAppVerificationStore,
   FileCompanyContextStore,
@@ -30,6 +31,7 @@ import {
   type MeasurementStore,
   type OutcomeStore,
   type AppInstallationStore,
+  type AppSnapshotStore,
   type AppOperationActionStore,
   type AppVerificationStore,
   type CompanyContextStore,
@@ -86,6 +88,10 @@ import {
   isSupabaseAppInstallationStoreEnabled
 } from "@/lib/db/adapters/supabase-app-installation-store";
 import {
+  createSupabaseAppSnapshotStore,
+  isSupabaseAppSnapshotStoreEnabled
+} from "@/lib/db/adapters/supabase-app-snapshot-store";
+import {
   createSupabaseAppOperationActionStore,
   isSupabaseAppOperationActionStoreEnabled
 } from "@/lib/db/adapters/supabase-app-operation-action-store";
@@ -112,6 +118,7 @@ const cachedMeasurementStores = new Map<string, MeasurementStore>();
 const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
 const cachedAppInstallationStores = new Map<string, AppInstallationStore>();
+const cachedAppSnapshotStores = new Map<string, AppSnapshotStore>();
 const cachedAppOperationActionStores = new Map<string, AppOperationActionStore>();
 const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
 const cachedCompanyContextStores = new Map<string, CompanyContextStore>();
@@ -489,6 +496,28 @@ export function getAppInstallationStore(options: {
   return store;
 }
 
+export function getAppSnapshotStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): AppSnapshotStore {
+  const useSupabase = !options.forceFile && isSupabaseAppSnapshotStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App snapshot storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-snapshots:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-snapshots:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedAppSnapshotStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseAppSnapshotStore(options.workspaceId, projectRoot)
+    : new FileAppSnapshotStore(projectRoot);
+  cachedAppSnapshotStores.set(cacheKey, store);
+  return store;
+}
+
 export function getAppOperationActionStore(options: {
   workspaceId: string;
   projectRoot?: string;
@@ -604,6 +633,7 @@ export function resetStorageAdapterCache() {
   cachedOutcomeStores.clear();
   cachedEntityStores.clear();
   cachedAppInstallationStores.clear();
+  cachedAppSnapshotStores.clear();
   cachedAppOperationActionStores.clear();
   cachedAppVerificationStores.clear();
   cachedCompanyContextStores.clear();
