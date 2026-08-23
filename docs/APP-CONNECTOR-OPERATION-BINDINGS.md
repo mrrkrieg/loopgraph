@@ -201,6 +201,10 @@ fully labeled replay recommendation, and execute-with-approval requires producti
 The replay source window, completed App work, observed outcome window, and observed value window
 are freshness checked rather than trusting when a receipt happened to be written. Recommendation
 and execution evidence is capped at 30 days, with only five minutes of future clock skew accepted.
+The same source timestamps cap the public operational-maturity assessment: an App cannot remain
+`production_proven` or `loopgraph_verified` after its replay, completed-run, outcome, or value proof
+expires. Timestamped proof must reference one of the exact App-owned evidence records returned by the
+tenant-scoped snapshot; an unrelated fresh timestamp cannot refresh an older record.
 The approval receipt embeds that gate; consumption recomputes it and fails closed if evidence is no
 longer sufficient. Human approval supplies accountability, not a bypass around missing evidence.
 

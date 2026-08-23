@@ -96,16 +96,59 @@ describe("installed App operational maturity", () => {
       installation,
       readiness,
       evaluations: [synthetic, replay],
-      operatingEvidence: {
-        completedRunRefs: ["run:completed-1"],
-        observedOutcomeRefs: ["outcome:qualified-pipeline"],
-        observedValueRefs: ["value:net-time-saved"]
-      },
+      operatingEvidence: freshEvidence(),
       now: new Date(now)
     });
     expect(production.maturity).toBe("production_proven");
     expect(production.gates[2]).toMatchObject({ status: "achieved", evidenceRefs: expect.arrayContaining([replay.id, "outcome:qualified-pipeline"]) });
     expect(production.gates[3]).toMatchObject({ status: "blocked" });
+  });
+
+  it("downgrades production proof when replay or operating evidence is stale or unbound", () => {
+    const stale = assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: [syntheticRun(), replayRun()],
+      operatingEvidence: freshEvidence(),
+      now: new Date("2026-09-09T00:00:01.000Z")
+    });
+    expect(stale.maturity).toBe("connected");
+    expect(stale.gates[2]).toMatchObject({
+      status: "blocked",
+      summary: expect.stringMatching(/expired.*older than 30 days/i)
+    });
+
+    const unbound = assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: [syntheticRun(), replayRun()],
+      operatingEvidence: {
+        ...freshEvidence(),
+        latestObservedValue: { reference: "value:different-entry", observedAt: now }
+      },
+      now: new Date(now)
+    });
+    expect(unbound.maturity).toBe("connected");
+    expect(unbound.gates[2]).toMatchObject({
+      status: "blocked",
+      summary: expect.stringMatching(/observed value is missing/i)
+    });
+
+    const futureDated = assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: [syntheticRun(), replayRun()],
+      operatingEvidence: {
+        ...freshEvidence(),
+        latestCompletedRun: { reference: "run:completed-1", observedAt: "2026-08-21T12:06:00.000Z" }
+      },
+      now: new Date(now)
+    });
+    expect(futureDated.maturity).toBe("connected");
+    expect(futureDated.gates[2]).toMatchObject({
+      status: "blocked",
+      summary: expect.stringMatching(/completed App run is dated too far in the future/i)
+    });
   });
 
   it("requires an independently digest-bound receipt for Loopgraph verified", () => {
@@ -125,17 +168,26 @@ describe("installed App operational maturity", () => {
       installation,
       readiness,
       evaluations: [syntheticRun(), replayRun()],
-      operatingEvidence: {
-        completedRunRefs: ["run:completed-1"],
-        observedOutcomeRefs: ["outcome:qualified-pipeline"],
-        observedValueRefs: ["value:net-time-saved"]
-      },
+      operatingEvidence: freshEvidence(),
       verificationReceipts: [receipt],
       trustedVerifierKeys,
       now: new Date(now)
     });
     expect(assessment.maturity).toBe("loopgraph_verified");
     expect(assessment.gates[3]).toMatchObject({ status: "achieved", evidenceRefs: expect.arrayContaining([receipt.id, receipt.verificationDigest]) });
+
+    const expiredAssessment = assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: [syntheticRun(), replayRun()],
+      operatingEvidence: freshEvidence(),
+      verificationReceipts: [receipt],
+      trustedVerifierKeys,
+      now: new Date("2026-09-09T00:00:01.000Z")
+    });
+    expect(expiredAssessment.maturity).toBe("connected");
+    expect(expiredAssessment.gates[2]).toMatchObject({ status: "blocked" });
+    expect(expiredAssessment.gates[3]).toMatchObject({ status: "blocked" });
 
     const wrongDigestReceipt = createAppIndependentVerificationReceipt({
       installationId: installation.id,
@@ -153,11 +205,7 @@ describe("installed App operational maturity", () => {
       installation,
       readiness,
       evaluations: [syntheticRun(), replayRun()],
-      operatingEvidence: {
-        completedRunRefs: ["run:completed-1"],
-        observedOutcomeRefs: ["outcome:qualified-pipeline"],
-        observedValueRefs: ["value:net-time-saved"]
-      },
+      operatingEvidence: freshEvidence(),
       verificationReceipts: [wrongDigestReceipt],
       trustedVerifierKeys,
       now: new Date(now)
@@ -200,6 +248,10 @@ function replayRun(): AppEvalRun {
     writeBlocked: true,
     startedAt: now,
     completedAt: now,
+    sourceWindow: {
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-08T00:00:00.000Z"
+    },
     scenarios: Array.from({ length: 5 }, (_, index) => ({ id: `historical-${index + 1}`, status: "passed", humanLabel: "correct", reviewMinutes: 1, evidenceRefs: [`historical-event:${index + 1}`] })),
     metrics: { providerWrites: 0, eventCount: 5, labeled: 5, correct: 5 },
     evidenceRefs: ["historical-window:bounded"]
@@ -208,4 +260,15 @@ function replayRun(): AppEvalRun {
 
 function emptyEvidence() {
   return { completedRunRefs: [], observedOutcomeRefs: [], observedValueRefs: [] };
+}
+
+function freshEvidence() {
+  return {
+    completedRunRefs: ["run:completed-1"],
+    observedOutcomeRefs: ["outcome:qualified-pipeline"],
+    observedValueRefs: ["value:net-time-saved"],
+    latestCompletedRun: { reference: "run:completed-1", observedAt: now },
+    latestObservedOutcome: { reference: "outcome:qualified-pipeline", observedAt: now },
+    latestObservedValue: { reference: "value:net-time-saved", observedAt: now }
+  };
 }

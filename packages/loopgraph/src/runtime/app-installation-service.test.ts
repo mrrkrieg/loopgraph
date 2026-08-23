@@ -1004,7 +1004,7 @@ describe("atomic app installation lifecycle", () => {
     );
     expect(staleExecuteGate).toMatchObject({
       status: "blocked",
-      observedMaturity: "production_proven",
+      observedMaturity: "connected",
       checks: expect.arrayContaining([
         expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
       ])

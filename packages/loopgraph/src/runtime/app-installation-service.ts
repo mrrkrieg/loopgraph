@@ -92,6 +92,13 @@ import {
   runAppSyntheticConformance
 } from "./app-quality-engine";
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
+import {
+  APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS,
+  APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS,
+  appEvidenceFreshnessFailure,
+  historicalReplayEvidenceTimestamp,
+  type TimestampedAppEvidence
+} from "./app-evidence-freshness";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
 import { FileAppVerificationStore, type AppVerificationStore } from "./app-verification-store";
@@ -178,22 +185,13 @@ type PrepareLifecycleOperationInput = Omit<AppLifecycleOperation, "status" | "st
   now: Date;
 };
 
-export const APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-export const APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
-export const APP_ACTIVATION_EVIDENCE_FUTURE_SKEW_SECONDS = 5 * 60;
-
-type TimestampedActivationEvidence = {
-  reference: string;
-  observedAt: string;
-};
-
 type AppOperationalEvidenceSnapshot = {
   completedRunRefs: string[];
   observedOutcomeRefs: string[];
   observedValueRefs: string[];
-  latestCompletedRun?: TimestampedActivationEvidence;
-  latestObservedOutcome?: TimestampedActivationEvidence;
-  latestObservedValue?: TimestampedActivationEvidence;
+  latestCompletedRun?: TimestampedAppEvidence;
+  latestObservedOutcome?: TimestampedAppEvidence;
+  latestObservedValue?: TimestampedAppEvidence;
 };
 
 export class AppInstallationService {
@@ -2905,7 +2903,10 @@ export class AppInstallationService {
       operatingEvidence: {
         completedRunRefs: operatingEvidence.completedRunRefs,
         observedOutcomeRefs: operatingEvidence.observedOutcomeRefs,
-        observedValueRefs: operatingEvidence.observedValueRefs
+        observedValueRefs: operatingEvidence.observedValueRefs,
+        latestCompletedRun: operatingEvidence.latestCompletedRun,
+        latestObservedOutcome: operatingEvidence.latestObservedOutcome,
+        latestObservedValue: operatingEvidence.latestObservedValue
       },
       verificationReceipts: verificationRegistry?.receipts,
       trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
@@ -4406,7 +4407,7 @@ function activationEvidenceFreshnessCheck(input: {
   } : undefined;
   const requiredEvidence: Array<{
     label: string;
-    evidence?: TimestampedActivationEvidence;
+    evidence?: TimestampedAppEvidence;
     maxAgeSeconds: number;
   }> = [
     {
@@ -4433,7 +4434,7 @@ function activationEvidenceFreshnessCheck(input: {
     ] : [])
   ];
   const failures = requiredEvidence.flatMap((requirement) =>
-    activationEvidenceFreshnessFailure(requirement, input.now));
+    appEvidenceFreshnessFailure(requirement, input.now));
   const evidenceRefs = requiredEvidence.flatMap((requirement) =>
     requirement.evidence ? [requirement.evidence.reference] : []);
   const maxAgeDays = APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS / (24 * 60 * 60);
@@ -4454,40 +4455,11 @@ function activationEvidenceFreshnessCheck(input: {
   };
 }
 
-function activationEvidenceFreshnessFailure(
-  requirement: {
-    label: string;
-    evidence?: TimestampedActivationEvidence;
-    maxAgeSeconds: number;
-  },
-  now: Date
-): string[] {
-  if (!requirement.evidence) return [`${requirement.label} is missing`];
-  const observedAt = Date.parse(requirement.evidence.observedAt);
-  const futureSkewMs = APP_ACTIVATION_EVIDENCE_FUTURE_SKEW_SECONDS * 1_000;
-  if (!Number.isFinite(observedAt)) return [`${requirement.label} has an invalid timestamp`];
-  if (observedAt > now.getTime() + futureSkewMs) return [`${requirement.label} is dated too far in the future`];
-  if (now.getTime() - observedAt > requirement.maxAgeSeconds * 1_000) {
-    return [`${requirement.label} is older than ${requirement.maxAgeSeconds / (24 * 60 * 60)} days`];
-  }
-  return [];
-}
-
-function historicalReplayEvidenceTimestamp(replay: AppEvalRun): string | undefined {
-  if (replay.sourceWindow?.to) return replay.sourceWindow.to;
-  const windowRef = replay.evidenceRefs.find((reference) => reference.startsWith("historical-window:"));
-  if (!windowRef) return undefined;
-  const separator = windowRef.indexOf("/", "historical-window:".length);
-  if (separator < 0) return undefined;
-  const to = windowRef.slice(separator + 1);
-  return Number.isFinite(Date.parse(to)) ? new Date(to).toISOString() : undefined;
-}
-
 function latestTimestampedEvidence<T>(
   values: T[],
   reference: (value: T) => string,
   observedAt: (value: T) => string
-): TimestampedActivationEvidence | undefined {
+): TimestampedAppEvidence | undefined {
   const latest = [...values].sort((left, right) =>
     Date.parse(observedAt(right)) - Date.parse(observedAt(left)) || reference(left).localeCompare(reference(right)))[0];
   return latest ? { reference: reference(latest), observedAt: observedAt(latest) } : undefined;

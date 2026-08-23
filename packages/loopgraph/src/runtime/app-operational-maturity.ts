@@ -14,6 +14,14 @@ import {
   type AppVerifierTrustKey,
   type WorkspaceAppInstallation
 } from "../core";
+import {
+  APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS,
+  APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS,
+  appEvidenceFreshnessFailure,
+  boundTimestampedAppEvidence,
+  historicalReplayEvidenceTimestamp,
+  type TimestampedAppEvidence
+} from "./app-evidence-freshness";
 
 const MIN_REVIEWED_HISTORICAL_EVENTS = 5;
 const MIN_ROUTING_ACCURACY = 0.95;
@@ -26,11 +34,15 @@ export function assessAppOperationalMaturity(input: {
     completedRunRefs: string[];
     observedOutcomeRefs: string[];
     observedValueRefs: string[];
+    latestCompletedRun?: TimestampedAppEvidence;
+    latestObservedOutcome?: TimestampedAppEvidence;
+    latestObservedValue?: TimestampedAppEvidence;
   };
   verificationReceipts?: AppIndependentVerificationReceipt[];
   trustedVerifierKeys?: AppVerifierTrustKey[];
   now?: Date;
 }): AppOperationalMaturityAssessment {
+  const evaluatedAt = input.now ?? new Date();
   const exactEvaluations = input.evaluations.filter((evaluation) =>
     evaluation.installationId === input.installation.id &&
     evaluation.artifactDigest === input.installation.artifactDigest);
@@ -57,7 +69,42 @@ export function assessAppOperationalMaturity(input: {
   const correct = reviewed.filter((scenario) => scenario.humanLabel === "correct").length;
   const routingAccuracy = reviewed.length > 0 ? correct / reviewed.length : 0;
   const replayProviderWrites = numberMetric(replay, "providerWrites");
-  const productionProven = connected &&
+  const replayObservedAt = replay ? historicalReplayEvidenceTimestamp(replay) : undefined;
+  const freshnessRequirements = [
+    {
+      label: "historical replay",
+      evidence: replay && replayObservedAt ? { reference: replay.id, observedAt: replayObservedAt } : undefined,
+      maxAgeSeconds: APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS
+    },
+    {
+      label: "completed App run",
+      evidence: boundTimestampedAppEvidence(
+        input.operatingEvidence.latestCompletedRun,
+        input.operatingEvidence.completedRunRefs
+      ),
+      maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+    },
+    {
+      label: "observed outcome",
+      evidence: boundTimestampedAppEvidence(
+        input.operatingEvidence.latestObservedOutcome,
+        input.operatingEvidence.observedOutcomeRefs
+      ),
+      maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+    },
+    {
+      label: "observed value",
+      evidence: boundTimestampedAppEvidence(
+        input.operatingEvidence.latestObservedValue,
+        input.operatingEvidence.observedValueRefs
+      ),
+      maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+    }
+  ];
+  const freshnessFailures = freshnessRequirements.flatMap((requirement) =>
+    appEvidenceFreshnessFailure(requirement, evaluatedAt));
+  const productionEvidenceFresh = freshnessFailures.length === 0;
+  const productionProofComplete = connected &&
     replay?.status === "passed" &&
     replay.writeBlocked &&
     replayProviderWrites === 0 &&
@@ -67,6 +114,7 @@ export function assessAppOperationalMaturity(input: {
     input.operatingEvidence.completedRunRefs.length > 0 &&
     input.operatingEvidence.observedOutcomeRefs.length > 0 &&
     input.operatingEvidence.observedValueRefs.length > 0;
+  const productionProven = productionProofComplete && productionEvidenceFresh;
 
   const trustedKeys = (input.trustedVerifierKeys ?? []).map((key) => appVerifierTrustKeySchema.parse(key));
   const verification = (input.verificationReceipts ?? [])
@@ -115,11 +163,17 @@ export function assessAppOperationalMaturity(input: {
       status: productionProven ? "achieved" : "blocked",
       summary: productionProven
         ? `${reviewed.length} historical decisions were reviewed at ${(routingAccuracy * 100).toFixed(1)}% accuracy and observed outcome/value evidence was recorded.`
-        : "Production proof requires reviewed historical behavior, completed work, and observed outcome plus net-value evidence.",
+        : productionProofComplete && freshnessFailures.length > 0
+          ? `Production proof expired because ${freshnessFailures.join("; ")}.`
+          : "Production proof requires reviewed historical behavior, completed work, and observed outcome plus net-value evidence.",
       evidenceRefs: productionProven
         ? [replay!.id, ...input.operatingEvidence.completedRunRefs, ...input.operatingEvidence.observedOutcomeRefs, ...input.operatingEvidence.observedValueRefs]
         : [],
-      ...(!productionProven ? { remediation: `Review at least ${MIN_REVIEWED_HISTORICAL_EVENTS} historical decisions at 95%+ accuracy, then record completed runs, observed outcomes, and observed value.` } : {})
+      ...(!productionProven ? {
+        remediation: productionProofComplete
+          ? "Run a fresh reviewed replay and record recent completed work, observed outcomes, and observed net value."
+          : `Review at least ${MIN_REVIEWED_HISTORICAL_EVENTS} historical decisions at 95%+ accuracy, then record completed runs, observed outcomes, and observed value.`
+      } : {})
     },
     {
       level: "loopgraph_verified",
@@ -147,7 +201,7 @@ export function assessAppOperationalMaturity(input: {
     artifactDigest: input.installation.artifactDigest,
     maturity,
     gates,
-    evaluatedAt: (input.now ?? new Date()).toISOString(),
+    evaluatedAt: evaluatedAt.toISOString(),
     evidenceDerived: true
   });
 }

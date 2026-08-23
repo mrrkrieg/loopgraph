@@ -121,6 +121,7 @@ export * from "./app-runtime-operations";
 export * from "./app-runtime-operation-catalog";
 export * from "./app-quality-engine";
 export * from "./app-operational-maturity";
+export * from "./app-evidence-freshness";
 export * from "./app-verification-store";
 export * from "./app-onboarding-journey";
 export * from "./department-pack-catalog";
