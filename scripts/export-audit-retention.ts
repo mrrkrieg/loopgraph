@@ -222,7 +222,7 @@ export async function drainAuditRetention(
       }
       const completedAt = now();
       return auditDrainReceiptSchema.parse({
-        schemaVersion: "audit-drain/v3",
+        schemaVersion: "audit-drain/v4",
         organizationId: config.organizationId,
         projectKey: config.projectKey,
         sourceOrigin: source.origin,
@@ -382,6 +382,7 @@ async function main() {
   const releaseCheckpoints = await readReleaseCheckpoints({
     stagingFile: required("LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE"),
     marketplaceFile: required("LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE"),
+    appEvidenceHealthFile: required("LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE"),
     sourceOrigin: source.origin,
     organizationId,
     projectKey
@@ -445,9 +446,21 @@ const marketplaceCheckpointReceiptSchema = z.object({
   }).passthrough()
 }).passthrough();
 
+const appEvidenceHealthCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v2"),
+  targetOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
 async function readReleaseCheckpoints(input: {
   stagingFile: string;
   marketplaceFile: string;
+  appEvidenceHealthFile: string;
   sourceOrigin: string;
   organizationId: string;
   projectKey: string;
@@ -462,7 +475,14 @@ async function readReleaseCheckpoints(input: {
     "LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE",
     1024 * 1024
   )));
-  for (const receipt of [staging, marketplace]) {
+  const appEvidenceHealth = appEvidenceHealthCheckpointReceiptSchema.parse(JSON.parse(
+    await readBoundedIntegrityFile(
+      input.appEvidenceHealthFile,
+      "LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE",
+      1024 * 1024
+    )
+  ));
+  for (const receipt of [staging, marketplace, appEvidenceHealth]) {
     if (
       trustedEndpoint(receipt.targetOrigin, "Release checkpoint origin", true).origin !== input.sourceOrigin ||
       receipt.organizationId !== input.organizationId ||
@@ -481,6 +501,11 @@ async function readReleaseCheckpoints(input: {
       name: "marketplace",
       sequence: marketplace.auditEvidence.throughSequence,
       hash: marketplace.auditEvidence.headHash
+    },
+    {
+      name: "app_evidence_health",
+      sequence: appEvidenceHealth.auditEvidence.throughSequence,
+      hash: appEvidenceHealth.auditEvidence.headHash
     }
   ]);
 }

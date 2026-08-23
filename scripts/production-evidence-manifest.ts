@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { canonicalAppDigest } from "loopgraph/core";
 import {
-  auditDrainReceiptV3Schema,
+  auditDrainReceiptV4Schema,
   canonicalJson,
   readBoundedIntegrityFile,
   retentionAcknowledgementSigningPayload,
@@ -103,16 +103,23 @@ const appEvidenceCheckNames = [
   "authorized_health_projection",
   "replay_denial",
   "aggregate_only_contract",
-  "metrics_projection_parity"
+  "metrics_projection_parity",
+  "independent_audit_evidence"
 ] as const;
 
 const appEvidenceHealthReceiptSchema = z.object({
-  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v1"),
+  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v2"),
   targetOrigin: originSchema,
   organizationId: z.string().uuid(),
   projectKey: projectKeySchema,
   checkedAt: z.string().datetime({ offset: true }),
   durationMs: safeInteger,
+  auditEvidence: z.object({
+    afterSequence: safeInteger,
+    throughSequence: safeInteger,
+    headHash: hashSchema,
+    requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/)
+  }).strict(),
   projection: z.object({
     generatedAt: z.string().datetime({ offset: true }),
     health: z.enum(["healthy", "degraded", "blocked"]),
@@ -136,6 +143,13 @@ const appEvidenceHealthReceiptSchema = z.object({
     detail: z.string().min(1).max(2048)
   }).strict()).length(appEvidenceCheckNames.length)
 }).strict().superRefine((receipt, context) => {
+  if (receipt.auditEvidence.afterSequence > receipt.auditEvidence.throughSequence) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["auditEvidence"],
+      message: "App evidence audit checkpoint precedes its starting sequence"
+    });
+  }
   const counts = receipt.projection.counts;
   const countTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const expectedHealth = counts.invalid > 0
@@ -421,7 +435,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v10"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v11"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -523,7 +537,7 @@ export function buildProductionEvidenceManifest(
     receipts.appSnapshotReconciliation
   );
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
-  const auditRetention = auditDrainReceiptV3Schema.parse(receipts.auditRetention);
+  const auditRetention = auditDrainReceiptV4Schema.parse(receipts.auditRetention);
   validateConfig(config);
   const auditRetentionPublicKey = createPublicKey(config.auditRetentionPublicKeyPem);
   if (auditRetentionPublicKey.asymmetricKeyType !== "ed25519") {
@@ -694,7 +708,8 @@ export function buildProductionEvidenceManifest(
     appEvidenceStatuses.get("authorized_health_projection") !== 202 ||
     ![403, 409].includes(appEvidenceStatuses.get("replay_denial") ?? 0) ||
     appEvidenceStatuses.get("aggregate_only_contract") !== undefined ||
-    appEvidenceStatuses.get("metrics_projection_parity") !== 200
+    appEvidenceStatuses.get("metrics_projection_parity") !== 200 ||
+    appEvidenceStatuses.get("independent_audit_evidence") !== 200
   ) {
     throw new Error("App evidence health validation returned an unexpected control status");
   }
@@ -757,7 +772,7 @@ export function buildProductionEvidenceManifest(
   );
   requireExactNames(
     auditRetention.verifiedReleaseCheckpoints.map((checkpoint) => checkpoint.name),
-    ["staging", "marketplace"],
+    ["staging", "marketplace", "app_evidence_health"],
     "Audit retention checkpoint proof"
   );
   const retainedStaging = auditRetention.verifiedReleaseCheckpoints.find(
@@ -766,11 +781,16 @@ export function buildProductionEvidenceManifest(
   const retainedMarketplace = auditRetention.verifiedReleaseCheckpoints.find(
     (checkpoint) => checkpoint.name === "marketplace"
   );
+  const retainedAppEvidenceHealth = auditRetention.verifiedReleaseCheckpoints.find(
+    (checkpoint) => checkpoint.name === "app_evidence_health"
+  );
   if (
     retainedStaging?.sequence !== staging.auditCheckpoint.headSequence ||
     retainedStaging?.hash !== staging.auditCheckpoint.headHash ||
     retainedMarketplace?.sequence !== marketplace.auditEvidence.throughSequence ||
     retainedMarketplace?.hash !== marketplace.auditEvidence.headHash ||
+    retainedAppEvidenceHealth?.sequence !== appEvidenceHealth.auditEvidence.throughSequence ||
+    retainedAppEvidenceHealth?.hash !== appEvidenceHealth.auditEvidence.headHash ||
     auditRetention.verifiedReleaseCheckpoints.some((checkpoint) =>
       checkpoint.sequence < auditRetention.fromSequence ||
       checkpoint.sequence > auditRetention.throughSequence
@@ -870,6 +890,9 @@ export function buildProductionEvidenceManifest(
     }),
     appEvidenceHealth: descriptor(appEvidenceHealth, appEvidenceHealth.checkedAt, {
       checks: appEvidenceHealth.checks.length,
+      auditedRequestId: appEvidenceHealth.auditEvidence.requestId,
+      auditThroughSequence: appEvidenceHealth.auditEvidence.throughSequence,
+      auditHeadHash: appEvidenceHealth.auditEvidence.headHash,
       health: appEvidenceHealth.projection.health,
       totalInstallations: appEvidenceHealth.projection.totalInstallations,
       totalMatched: appEvidenceHealth.projection.totalMatched,
@@ -954,7 +977,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v10",
+    schemaVersion: "loopgraph-production-promotion-evidence/v11",
     release,
     scope,
     evidence,
@@ -991,7 +1014,7 @@ export function verifyProductionEvidenceManifest(input: {
       input.receipts.appSnapshotReconciliation
     ),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
-    auditRetention: auditDrainReceiptV3Schema.parse(input.receipts.auditRetention)
+    auditRetention: auditDrainReceiptV4Schema.parse(input.receipts.auditRetention)
   };
   for (const [label, timestamp] of [
     ["staging validation", receiptsAtPromotion.staging.checkedAt],

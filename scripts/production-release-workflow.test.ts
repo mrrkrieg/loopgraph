@@ -125,8 +125,15 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE:
         "${{ github.workspace }}/release-checkpoints/staging-validation-receipt.json",
       LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE:
-        "${{ github.workspace }}/release-checkpoints/marketplace-validation-receipt.json"
+        "${{ github.workspace }}/release-checkpoints/marketplace-validation-receipt.json",
+      LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE:
+        "${{ github.workspace }}/release-checkpoints/app-evidence-health-staging-receipt.json"
     });
+    expect(asNeeds(jobs["audit-retention"].needs)).toEqual([
+      "app-evidence-health",
+      "marketplace",
+      "staging"
+    ]);
     const stagingValidationStep = (jobs.marketplace.steps ?? []).find(
       (step) => step.run?.includes("validate:staging")
     );
@@ -160,7 +167,7 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE:
         "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
     });
-    expect(source).toContain('value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v1"');
+    expect(source).toContain('value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v2"');
     const snapshotValidationStep = (jobs["app-snapshots"].steps ?? []).find(
       (step) => step.run?.includes("validate:app-snapshots-staging")
     );
@@ -259,7 +266,7 @@ describe("staging release workflow contract", () => {
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE/g)).toHaveLength(2);
-    expect(source.match(/name: app-evidence-health-staging-evidence/g)).toHaveLength(3);
+    expect(source.match(/name: app-evidence-health-staging-evidence/g)).toHaveLength(4);
     expect(source.match(/name: learning-entity-staging-evidence/g)).toHaveLength(3);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE/g)).toHaveLength(2);

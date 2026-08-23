@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v10",
+      schemaVersion: "loopgraph-production-promotion-evidence/v11",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -116,7 +116,10 @@ describe("production promotion evidence manifest", () => {
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
         appEvidenceHealth: {
           summary: {
-            checks: 6,
+            checks: 7,
+            auditedRequestId: "app_evidence_health_12345678",
+            auditThroughSequence: 44,
+            auditHeadHash: "7".repeat(64),
             health: "degraded",
             totalInstallations: 5,
             totalMatched: 2,
@@ -267,6 +270,18 @@ describe("production promotion evidence manifest", () => {
       }
     };
     expect(() => buildProductionEvidenceManifest(staleProjection, config)).toThrow();
+
+    const unretainedAudit = releaseReceipts();
+    const auditedReceipt = unretainedAudit.appEvidenceHealth as Record<string, unknown>;
+    unretainedAudit.appEvidenceHealth = {
+      ...auditedReceipt,
+      auditEvidence: {
+        ...(auditedReceipt.auditEvidence as Record<string, unknown>),
+        throughSequence: 45
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(unretainedAudit, config))
+      .toThrow(/exact release checkpoints/i);
   });
 
   it("rejects App evidence metric drift or an inexact control set", () => {
@@ -532,7 +547,8 @@ describe("production promotion evidence manifest", () => {
       ...receipt,
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "f".repeat(64) },
-        { name: "marketplace", sequence: 42, hash: "6".repeat(64) }
+        { name: "marketplace", sequence: 42, hash: "6".repeat(64) },
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(alteredCheckpoint, config))
@@ -597,7 +613,8 @@ describe("production promotion evidence manifest", () => {
       ...(aboveSignedHead.auditRetention as Record<string, unknown>),
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "4".repeat(64) },
-        { name: "marketplace", sequence: 51, hash: "7".repeat(64) }
+        { name: "marketplace", sequence: 51, hash: "7".repeat(64) },
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(aboveSignedHead, config))
@@ -753,12 +770,18 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
     },
     appEvidenceHealth: {
-      schemaVersion: "hosted-app-evidence-health-staging-validation/v1",
+      schemaVersion: "hosted-app-evidence-health-staging-validation/v2",
       targetOrigin: deploymentOrigin,
       organizationId,
       projectKey: "main",
       checkedAt,
       durationMs: 500,
+      auditEvidence: {
+        afterSequence: 42,
+        throughSequence: 44,
+        headHash: "7".repeat(64),
+        requestId: "app_evidence_health_12345678"
+      },
       projection: {
         generatedAt: checkedAt,
         health: "degraded",
@@ -795,7 +818,8 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         { name: "authorized_health_projection", status: 202 },
         { name: "replay_denial", status: 409 },
         { name: "aggregate_only_contract" },
-        { name: "metrics_projection_parity", status: 200 }
+        { name: "metrics_projection_parity", status: 200 },
+        { name: "independent_audit_evidence", status: 200 }
       ].map(({ name, status }) => ({
         name,
         ...(status === undefined ? {} : { status }),
@@ -978,7 +1002,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       }
     },
     auditRetention: {
-      schemaVersion: "audit-drain/v3",
+      schemaVersion: "audit-drain/v4",
       organizationId,
       projectKey: "main",
       sourceOrigin: deploymentOrigin,
@@ -994,7 +1018,8 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       lastDestinationAcknowledgement: acknowledgement,
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "4".repeat(64) },
-        { name: "marketplace", sequence: 42, hash: "6".repeat(64) }
+        { name: "marketplace", sequence: 42, hash: "6".repeat(64) },
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) }
       ]
     }
   };

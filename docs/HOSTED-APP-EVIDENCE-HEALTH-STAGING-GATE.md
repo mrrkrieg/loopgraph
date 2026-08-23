@@ -29,7 +29,7 @@ long-lived bearer value.
 
 ## Exact controls
 
-The validator performs six ordered checks:
+The validator performs seven ordered checks:
 
 1. `unauthenticated_denial` — the schedule rejects a request without workload identity.
 2. `cross_tenant_denial` — neither the valid schedule identity nor the observability identity can
@@ -41,6 +41,8 @@ The validator performs six ordered checks:
    totals, status counts, health, and truncation. Any extra field fails the gate.
 6. `metrics_projection_parity` — each protected unlabeled Prometheus gauge exactly matches the
    schedule projection.
+7. `independent_audit_evidence` — a separately authorized audit export pins one verified hash-chain
+   checkpoint containing the accepted `schedule.app_evidence_health` request ID.
 
 The validator also requires:
 
@@ -55,8 +57,9 @@ The validator also requires:
 
 ## Receipt boundary
 
-`hosted-app-evidence-health-staging-validation/v1` contains the deployment origin, tenant/project,
-check time, aggregate projection, matching aggregate metrics, and six booleans. It contains no App
+`hosted-app-evidence-health-staging-validation/v2` contains the deployment origin, tenant/project,
+check time, aggregate projection, matching aggregate metrics, seven booleans, and the bounded audit
+checkpoint sequence/hash plus accepted request ID. It contains no App
 ID, installation ID, artifact digest, credential ID, provider field, returned action, source
 payload, or token.
 
