@@ -9,6 +9,7 @@ import {
   getConnectorFieldMappingStore,
   getDiscoveryDesignStore,
   getEntityResolutionStore,
+  getHermesRouteActivationStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopSpecRegistryStore,
@@ -143,6 +144,15 @@ describe("hosted runtime namespaces", () => {
     expect(secondWorkspace).not.toBe(first);
   });
 
+  it("scopes local Hermes route activation proof by project and workspace", () => {
+    const first = getHermesRouteActivationStore({ projectRoot: "/tmp/loopgraph-routes-a", workspaceId: "acme", forceFile: true });
+    const firstAgain = getHermesRouteActivationStore({ projectRoot: "/tmp/loopgraph-routes-a", workspaceId: "acme", forceFile: true });
+    const secondWorkspace = getHermesRouteActivationStore({ projectRoot: "/tmp/loopgraph-routes-a", workspaceId: "globex", forceFile: true });
+    expect(first.persistence).toBe("file");
+    expect(firstAgain).toBe(first);
+    expect(secondWorkspace).not.toBe(first);
+  });
+
   it("scopes local App installation registries by project and workspace", () => {
     const first = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
     const firstAgain = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
@@ -228,6 +238,9 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getAppVerificationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App verification storage is required"
+    );
+    expect(() => getHermesRouteActivationStore({ workspaceId: "acme" })).toThrow(
+      "Distributed Hermes route activation storage is required"
     );
     expect(() => getAppInstallationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App installation storage is required"

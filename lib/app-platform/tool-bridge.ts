@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   callLoopgraphAppTool as callRuntimeAppTool,
   connectionInstanceFromBrokerInstallation,
+  getHermesRouteActivationStatus,
   type LoopgraphAppToolName
 } from "loopgraph/runtime";
 import { marketplaceAppSchema, type ConnectionInstance, type MarketplaceApp } from "loopgraph/core";
@@ -22,6 +23,7 @@ import {
   getCompanyContextStore,
   getConnectorFieldMappingStore,
   getHermesOperationsStore,
+  getHermesRouteActivationStore,
   getLoopSpecRegistryStore,
   getOutcomeStore,
   getProviderSchemaSnapshotStore,
@@ -132,6 +134,17 @@ export async function callLoopgraphAppTool(
     connectorFieldMappingStoreFactory: (workspaceId: string) => getConnectorFieldMappingStore({ projectRoot, workspaceId }),
     providerSchemaSnapshotStoreFactory: (workspaceId: string) => getProviderSchemaSnapshotStore({ projectRoot, workspaceId }),
     loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
+    ...(hostedMode ? {
+      routeActivationStatusProvider: (input: { projectRoot?: string; now?: Date }) =>
+        getHermesRouteActivationStatus({
+          ...input,
+          projectRoot,
+          recordStore: getHermesRouteActivationStore({
+            projectRoot,
+            workspaceId: hostedWorkspaceId()
+          })
+        })
+    } : {}),
     ...(CONNECTION_AWARE_TOOLS.has(name) ? {
       connections: await trustedConnections(operationExecutionOptions?.connectorTenant.organizationId)
     } : {}),

@@ -49,7 +49,7 @@ Loopgraph sends `hermes-route-controller-request/v1alpha1` to one configured rec
 
 Hermes returns `hermes-route-controller-receipt/v1alpha1`. Loopgraph rejects the receipt unless its request, project, catalog, manifest, plan, route set, config digests, profiles, skills, tool lists, and transformers match exactly. A shadow route cannot claim readiness without signature verification. A provider route cannot claim an active subscription without a bound connection, and a required provider route cannot use `not_applicable` to bypass subscription setup.
 
-The accepted receipt is written atomically to `.loopgraph/hermes-route-activation.json` with user-only permissions. URLs containing credentials, query parameters, or fragments and secret-shaped receipt content are rejected.
+The accepted receipt uses one storage-neutral runtime contract. Local projects write it atomically to `.loopgraph/hermes-route-activation.json` with user-only permissions. Hosted projects append it to an organization/project/workspace-scoped Supabase ledger through a bounded service-role RPC; direct client writes are revoked and RLS is enabled. Both adapters revalidate every route digest, the complete plan digest, the exact receipt scope, non-destructive authority, and computed readiness before accepting or returning a record. URLs containing credentials, query parameters, or fragments and secret-shaped receipt content are rejected.
 
 ## Operator flow
 
@@ -84,6 +84,8 @@ Check whether the stored receipt still matches the active Loopgraph catalog:
 loopgraph hermes webhooks activation-status --project .
 ```
 
+In the hosted runtime, Installed App maturity, activation gates, the Management routing read model, and measurement reconciliation resolve the same tenant-scoped distributed receipt. Hosted storage configuration fails closed instead of falling back to deployment-local disk, so separate replicas cannot disagree about whether Hermes actually applied the route contract.
+
 Trusted Hermes administration turns can inspect the same plan and status through `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status`. Those tools are read-only and are absent from the isolated webhook-router and lifecycle-router MCP profiles. The mutating activation operation remains CLI/deployment-only so an incoming event can never change its own route or request a controller credential.
 
 `ready=false` is expected while a provider connection or administrator confirmation is pending. It grants no execution authority. Provider writes remain controlled by connector capabilities, action fingerprints, approvals, and the normal Loopgraph promotion gates.
@@ -94,4 +96,4 @@ Installed App readiness uses this same receipt at Loop-ID granularity. Loopgraph
 
 The Hermes-side controller is intentionally a narrow adapter, not an arbitrary shell or HTTP proxy. It should implement one operation: reconcile the supplied additions and updates into shadow routes, then return the versioned receipt. It must not accept caller-supplied commands, scripts, provider URLs, secrets, or tool names outside the desired contract.
 
-The current Loopgraph repository contains the client schemas, validation, CLI, receipt store, and fake-controller contract tests. Deploying a real controller and registering real provider applications remain environment-specific operations because an open-source repository cannot contain an enterprise's credentials, public domains, or cloud workload identities.
+The current Loopgraph repository contains the client schemas, validation, CLI, local and distributed receipt stores, RLS migration, and fake-controller contract tests. Deploying a real controller, applying the migration to a hosted environment, and registering real provider applications remain environment-specific operations because an open-source repository cannot contain an enterprise's credentials, public domains, or cloud workload identities.

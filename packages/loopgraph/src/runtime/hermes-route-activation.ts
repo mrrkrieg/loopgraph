@@ -32,6 +32,42 @@ import type { WorkloadTokenProvider } from "./workload-token-provider";
 
 export const HERMES_ROUTE_ACTIVATION_FILE = "hermes-route-activation.json" as const;
 
+export interface HermesRouteActivationStore {
+  readonly persistence: "file" | "distributed";
+  readonly reference: string;
+  read(): Promise<HermesRouteActivationRecord | null>;
+  write(record: HermesRouteActivationRecord): Promise<void>;
+}
+
+export class FileHermesRouteActivationStore implements HermesRouteActivationStore {
+  readonly persistence = "file" as const;
+  readonly reference: string;
+
+  constructor(private readonly projectRoot = process.cwd()) {
+    this.reference = activationRecordPath(path.resolve(projectRoot));
+  }
+
+  async read(): Promise<HermesRouteActivationRecord | null> {
+    try {
+      return validateHermesRouteActivationRecord(JSON.parse(await readFile(this.reference, "utf8")));
+    } catch (error) {
+      if (isFileNotFound(error)) return null;
+      if (error instanceof HermesRouteActivationError) throw error;
+      throw new HermesRouteActivationError("activation_record_invalid", "Stored Hermes route activation receipt is invalid");
+    }
+  }
+
+  async write(recordInput: HermesRouteActivationRecord): Promise<void> {
+    const record = validateHermesRouteActivationRecord(recordInput);
+    await mkdir(path.dirname(this.reference), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${this.reference}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
+    await rename(temporaryPath, this.reference);
+    if (process.platform !== "win32") await chmod(this.reference, 0o600);
+  }
+}
+
 export const hermesRouteActivationPrepareInputSchema = z.object({
   projectRoot: z.string().optional()
 }).default({});
@@ -101,6 +137,11 @@ export type ActivateHermesRoutesInput = PrepareHermesRouteActivationInput & {
   confirmationDigest: string;
   tokenProvider: WorkloadTokenProvider;
   fetcher?: typeof fetch;
+  recordStore?: HermesRouteActivationStore;
+};
+
+export type GetHermesRouteActivationStatusInput = PrepareHermesRouteActivationInput & {
+  recordStore?: HermesRouteActivationStore;
 };
 
 export type HermesRouteActivationStatus = {
@@ -248,17 +289,18 @@ export async function activateHermesRoutes(
     receipt
   });
   assertSecretFree(record, "Hermes route activation record");
-  await writeActivationRecord(projectRoot, record);
+  await (input.recordStore ?? new FileHermesRouteActivationStore(projectRoot)).write(record);
   return record;
 }
 
 export async function getHermesRouteActivationStatus(
-  input: PrepareHermesRouteActivationInput = {}
+  input: GetHermesRouteActivationStatusInput = {}
 ): Promise<HermesRouteActivationStatus> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const recordPath = activationRecordPath(projectRoot);
+  const recordStore = input.recordStore ?? new FileHermesRouteActivationStore(projectRoot);
+  const recordPath = recordStore.reference;
   const checkedAt = (input.now ?? new Date()).toISOString();
-  const record = await readActivationRecord(projectRoot);
+  const record = await recordStore.read();
   if (!record) {
     return {
       projectRoot,
@@ -659,20 +701,27 @@ export function activationRecordPath(projectRoot: string): string {
   return path.join(getLoopgraphRoot(projectRoot), HERMES_ROUTE_ACTIVATION_FILE);
 }
 
-async function readActivationRecord(projectRoot: string): Promise<HermesRouteActivationRecord | null> {
-  try {
-    const record = hermesRouteActivationRecordSchema.parse(JSON.parse(await readFile(activationRecordPath(projectRoot), "utf8")));
-    verifyStoredActivationRecord(record);
-    return record;
-  } catch (error) {
-    if (isFileNotFound(error)) return null;
-    throw new HermesRouteActivationError("activation_record_invalid", "Stored Hermes route activation receipt is invalid");
-  }
-}
-
-function verifyStoredActivationRecord(record: HermesRouteActivationRecord): void {
+export function validateHermesRouteActivationRecord(input: unknown): HermesRouteActivationRecord {
+  const record = hermesRouteActivationRecordSchema.parse(input);
   const receipt = record.receipt;
   const plan = record.plan;
+  for (const route of plan.routes) {
+    const { configDigest, ...routeIdentity } = route;
+    if (contentHash(routeIdentity) !== configDigest) {
+      throw new Error(`Stored Hermes route ${route.routeName} changed its content digest`);
+    }
+  }
+  const planIdentity = {
+    projectRootHash: plan.projectRootHash,
+    catalogVersion: plan.catalogVersion,
+    manifestDigest: plan.manifestDigest,
+    controllerProtocol: plan.controllerProtocol,
+    destructiveChangesAllowed: plan.destructiveChangesAllowed,
+    routes: plan.routes
+  };
+  if (contentHash(planIdentity) !== plan.planDigest) {
+    throw new Error("Stored Hermes route activation plan changed its content digest");
+  }
   if (
     receipt.projectRootHash !== plan.projectRootHash ||
     receipt.catalogVersion !== plan.catalogVersion ||
@@ -723,6 +772,7 @@ function verifyStoredActivationRecord(record: HermesRouteActivationRecord): void
     throw new Error("Stored Hermes route readiness does not match its route receipts");
   }
   assertSecretFree(record, "stored Hermes route activation record");
+  return record;
 }
 
 function routeReceiptReady(
@@ -734,16 +784,6 @@ function routeReceiptReady(
     (desired.subscription.required
       ? actual.subscriptionState === "active"
       : ["active", "not_applicable"].includes(actual.subscriptionState));
-}
-
-async function writeActivationRecord(projectRoot: string, record: HermesRouteActivationRecord): Promise<void> {
-  const filePath = activationRecordPath(projectRoot);
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
-  await rename(temporaryPath, filePath);
-  if (process.platform !== "win32") await chmod(filePath, 0o600);
 }
 
 function isFileNotFound(error: unknown): boolean {

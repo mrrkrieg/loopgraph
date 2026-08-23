@@ -8,7 +8,13 @@ import { StatusPill } from "../status-pill";
 import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
 import { loadLatestManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
-import { getActiveLoopgraphProjectRoot, getStorageAdapter } from "@/lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesRouteActivationStore,
+  getLoopSpecRegistryStore,
+  getRoutingStore,
+  getStorageAdapter
+} from "@/lib/loopgraph-runtime/storage-resolver";
 import { DepartmentManagementCard } from "./department-management-card";
 import { EventRoutingTable } from "./event-routing-table";
 
@@ -25,7 +31,14 @@ export async function ManagementBrainPage({ previewMode = false, routingQuery = 
   const storage = getStorageAdapter();
   const cases = await storage.listCases();
   const rollup = await loadLatestManagementRollup();
-  const routingOperations = await loadEventRoutingOperations({ projectRoot, ...routingQuery });
+  const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const routingOperations = await loadEventRoutingOperations({
+    projectRoot,
+    ...routingQuery,
+    store: getRoutingStore(),
+    loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
+    routeActivationStore: getHermesRouteActivationStore({ projectRoot, workspaceId })
+  });
   const departments = Array.from(new Set(workspace.loops.map((loop) => loop.department))).filter(
     (department) => department !== "management"
   );

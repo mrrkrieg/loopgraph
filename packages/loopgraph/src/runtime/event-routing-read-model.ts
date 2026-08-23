@@ -10,7 +10,11 @@ import type {
   RoutingCorrection
 } from "../core";
 import { planHermesWebhookRoutes, type HermesWebhookPlanResult } from "./hermes-webhooks";
-import { getHermesRouteActivationStatus, type HermesRouteActivationStatus } from "./hermes-route-activation";
+import {
+  getHermesRouteActivationStatus,
+  type HermesRouteActivationStatus,
+  type HermesRouteActivationStore
+} from "./hermes-route-activation";
 import { listLoopgraphLifecycleDeliveries, type LoopgraphLifecycleDelivery } from "./lifecycle-events";
 import {
   loopgraph_events_get,
@@ -45,6 +49,7 @@ export type EventRoutingOperationsInput = EventRoutingOperationsFilters & {
   now?: Date;
   store?: RoutingStore;
   loopSpecStore?: LoopSpecRegistryStore;
+  routeActivationStore?: HermesRouteActivationStore;
 };
 
 export type EventRoutingOperationsRow = {
@@ -284,7 +289,7 @@ export async function loadEventRoutingOperations(
     store.listRoutingCorrections(),
     listLoopgraphLifecycleDeliveries(projectRoot),
     safeWebhookPlan(projectRoot, input.now),
-    safeWebhookActivation(projectRoot, input.now)
+    safeWebhookActivation(projectRoot, input.now, input.routeActivationStore)
   ]);
 
   const catalogByLoopId = new Map(catalog.routingCards.map((card) => [card.loopId, card]));
@@ -818,13 +823,17 @@ async function safeWebhookPlan(projectRoot: string, now?: Date): Promise<HermesW
   }
 }
 
-async function safeWebhookActivation(projectRoot: string, now?: Date): Promise<HermesRouteActivationStatus> {
+async function safeWebhookActivation(
+  projectRoot: string,
+  now?: Date,
+  recordStore?: HermesRouteActivationStore
+): Promise<HermesRouteActivationStatus> {
   try {
-    return await getHermesRouteActivationStatus({ projectRoot, now });
+    return await getHermesRouteActivationStatus({ projectRoot, now, recordStore });
   } catch {
     return {
       projectRoot,
-      recordPath: path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
+      recordPath: recordStore?.reference ?? path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
       checkedAt: (now ?? new Date()).toISOString(),
       exists: true,
       current: false,

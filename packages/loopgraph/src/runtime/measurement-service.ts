@@ -24,6 +24,7 @@ import {
 import { doctorHermesWebhookRoutes } from "./hermes-webhooks";
 import {
   getHermesRouteActivationStatus,
+  type HermesRouteActivationStore,
   type HermesRouteActivationStatus
 } from "./hermes-route-activation";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
@@ -105,7 +106,10 @@ export async function scheduleDueMeasurements(input: {
   backfillWindows?: number;
   maxAttempts?: number;
   now?: Date;
-}, options: { store?: MeasurementStore } = {}): Promise<{
+}, options: {
+  store?: MeasurementStore;
+  routeActivationStore?: HermesRouteActivationStore;
+} = {}): Promise<{
   schemaVersion: "measurement-scheduler/v1alpha1";
   scheduledAt: string;
   created: MeasurementJob[];
@@ -375,7 +379,10 @@ export async function reconcileConnectionsAndMeasurements(input: {
   healthStaleAfterHours?: number;
   measurementOverdueAfterHours?: number;
   now?: Date;
-}, options: { store?: MeasurementStore } = {}): Promise<{
+}, options: {
+  store?: MeasurementStore;
+  routeActivationStore?: HermesRouteActivationStore;
+} = {}): Promise<{
   report: ConnectionReconciliationReport;
   controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 }> {
@@ -393,7 +400,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
   const [plan, webhook, activation, bindings, instances, jobs] = await Promise.all([
     buildConnectionPlan({ projectRoot, now }),
     doctorHermesWebhookRoutes({ projectRoot, now }),
-    safeHermesRouteActivationStatus(projectRoot, now),
+    safeHermesRouteActivationStatus(projectRoot, now, options.routeActivationStore),
     store.listMetricBindings(),
     readConnectionInstances(projectRoot),
     store.listMeasurementJobs()
@@ -595,14 +602,15 @@ export async function reconcileConnectionsAndMeasurements(input: {
 
 async function safeHermesRouteActivationStatus(
   projectRoot: string,
-  now: Date
+  now: Date,
+  recordStore?: HermesRouteActivationStore
 ): Promise<HermesRouteActivationStatus> {
   try {
-    return await getHermesRouteActivationStatus({ projectRoot, now });
+    return await getHermesRouteActivationStatus({ projectRoot, now, recordStore });
   } catch (error) {
     return {
       projectRoot,
-      recordPath: path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
+      recordPath: recordStore?.reference ?? path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
       checkedAt: now.toISOString(),
       exists: true,
       current: false,
