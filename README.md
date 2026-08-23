@@ -457,6 +457,12 @@ LoopPack through a second empty replica root, and then removes the probe. Its se
 receipt is content-bound into the production promotion manifest; the service-role key is
 accepted only through a private `0600` file and is never copied into the receipt or logs.
 
+The same staging job first runs `npm run probe:app-snapshot-fence` in a random reserved scope. It
+actively proves that registry insert/update/delete and Storage upload/replace/delete all advance
+the live mutation generation, then removes the probe registry, object, and generation row. The
+command is scope-pinned, requires an explicit mutation confirmation, and emits only eight booleans
+plus an opaque scope digest.
+
 Production recovery adds a distinct cross-origin gate:
 `npm run rehearse:app-snapshot-restore`. It exports one exact generated archive from the
 validated source bucket, restores it with first-writer semantics into a separately protected

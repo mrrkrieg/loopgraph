@@ -29,6 +29,11 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   immutability, exact recovery through a second replica root, and verified cleanup. The service-role
   key is read only from a private projected file; its receipt contains content identities, not the
   credential or object key.
+- `npm run probe:app-snapshot-fence` is an explicit staging-only mutation rehearsal. It uses a
+  random reserved project scope to prove registry insert/update/delete and protected Storage
+  upload/replace/delete each advance the live generation fence. It removes the probe registry and
+  object, deletes the synthetic generation row, and emits only the pinned scope digest plus eight
+  true control results. The command refuses to run without an exact `yes` mutation confirmation.
 - `npm run rehearse:app-snapshot-restore` proves that one exact signed App archive can cross from
   the validated source project into a separately protected disposable Storage project, load through
   an empty runtime, preserve the source during target cleanup, and clean only its random probe.
@@ -148,6 +153,12 @@ command, artifact, or log. The environment also receives the public Supabase ori
 and the allowed short-lived user-session file. Rotate the service credential or destroy the
 ephemeral runner projection after the gate. The emitted Storage origin is non-secret and is carried
 forward as a protected job output so production reconstruction cannot substitute another project.
+
+Set `LOOPGRAPH_EXPECTED_APP_SNAPSHOT_FENCE_PROBE_SCOPE_DIGEST` from
+`npm run --silent print:app-snapshot-fence-probe-scope` for the reviewed staging origin and
+organization. The workflow fixes `LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_ALLOW_MUTATION=yes`; do not
+copy that confirmation into production jobs. A failed cleanup is a hard failure and deliberately
+leaves reconciliation unable to promote until an operator inspects the isolated probe scope.
 
 ## App snapshot recovery boundary
 

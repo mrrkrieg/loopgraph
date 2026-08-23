@@ -105,6 +105,7 @@ describe("staging release workflow contract", () => {
     expect(source).toContain("npm run --silent validate:staging > staging-validation-receipt.json");
     expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
     expect(source).toContain("npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json");
+    expect(source).toContain("npm run --silent probe:app-snapshot-fence > app-snapshot-fence-probe-receipt.json");
     expect(source).toContain("npm run --silent rehearse:app-snapshot-restore > app-snapshot-recovery-receipt.json");
     expect(source).toContain("npm run --silent reconcile:app-snapshots > app-snapshot-reconciliation-receipt.json");
     expect(source).toContain("npm run --silent rehearse:restore > recovery-rehearsal-receipt.json");
@@ -139,6 +140,9 @@ describe("staging release workflow contract", () => {
     const snapshotValidationStep = (jobs["app-snapshots"].steps ?? []).find(
       (step) => step.run?.includes("validate:app-snapshots-staging")
     );
+    const snapshotFenceProbeStep = (jobs["app-snapshots"].steps ?? []).find(
+      (step) => step.run?.includes("probe:app-snapshot-fence")
+    );
     expect(asNeeds(jobs["app-snapshots"].needs)).toEqual(["marketplace", "staging"]);
     expect(snapshotValidationStep?.env).toMatchObject({
       LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}",
@@ -151,6 +155,19 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_STAGING_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}",
       LOOPGRAPH_STAGING_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
     });
+    expect(snapshotFenceProbeStep?.env).toEqual({
+      LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_ALLOW_MUTATION: "yes",
+      LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_SUPABASE_URL:
+        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}",
+      LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_SERVICE_ROLE_KEY_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE }}",
+      LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_ORGANIZATION_ID:
+        "${{ needs.marketplace.outputs.organization_id }}",
+      LOOPGRAPH_EXPECTED_APP_SNAPSHOT_FENCE_PROBE_SCOPE_DIGEST:
+        "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_FENCE_PROBE_SCOPE_DIGEST }}"
+    });
+    expect(source).toContain('value.schemaVersion!=="hosted-app-snapshot-fence-probe/v1"');
+    expect(source).toContain("value.checks?.length!==names.length");
     const snapshotRecoveryStep = (jobs["app-snapshot-recovery"].steps ?? []).find(
       (step) => step.run?.includes("rehearse:app-snapshot-restore")
     );
