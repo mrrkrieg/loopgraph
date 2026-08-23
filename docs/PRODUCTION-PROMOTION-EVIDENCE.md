@@ -1,8 +1,8 @@
 # Production promotion evidence
 
-Loopgraph promotes an exact prebuilt deployment only when one workflow run proves nine independent
+Loopgraph promotes an exact prebuilt deployment only when one workflow run proves ten independent
 environment control receipts plus the commit-bound App action exactly-once contract, then binds all
-ten receipts into one attested manifest. A build result, environment approval, or green staging
+eleven receipts into one attested manifest. A build result, environment approval, or green staging
 URL alone is not sufficient evidence.
 
 ```mermaid
@@ -10,6 +10,7 @@ flowchart LR
   V["Build and prebuilt staging deployment"] --> S["Staging readiness receipt"]
   V --> F["App action fault-injection receipt"]
   V --> M["Marketplace isolation and artifact receipt"]
+  V --> D["Hosted App evidence-health receipt"]
   V --> Q["Active snapshot mutation-fence receipt"]
   V --> L["Distributed learning and entity receipt"]
   V --> H["Hosted App snapshot isolation and replica receipt"]
@@ -20,6 +21,7 @@ flowchart LR
   S --> E["Promotion evidence compiler"]
   F --> E
   M --> E
+  D --> E
   Q --> E
   L --> E
   H --> E
@@ -42,6 +44,7 @@ The compiler in `scripts/production-evidence-manifest.ts` accepts only these ver
 | `staging-validation/v5` | Exact HTTPS deployment origin, organization, project, readiness, protected metrics, zero pending/stale App action commits, the reviewed action-reconciliation threshold, verified audit checkpoint, unauthenticated/foreign/suspended user denial, and one complete database-owned user quota window ending in `429` |
 | `app-action-exactly-once-proof/v1` | Exact source commit, real Broker prepare/commit/idempotency/reconcile code, a simulated lost App terminal write, receipt-only recovery, one replay, one provider-fixture invocation, and an explicit no-network/no-credential boundary |
 | `hosted-marketplace-staging-validation/v2` | Exact origin and tenant, selected app/version/artifact digest, signature/cache verification, tenant denial, revocation, replay denial, and the pinned audit checkpoint containing the accepted request |
+| `hosted-app-evidence-health-staging-validation/v1` | Exact deployment and tenant/project, separate schedule/observability workload boundaries, unauthenticated and cross-tenant denial, replay rejection, fresh aggregate-only App evidence status, complete fleet-count invariants, and exact protected-metric parity |
 | `hosted-app-snapshot-fence-probe/v1` | Pinned Storage origin and organization scope, real registry insert/update/delete plus private Storage upload/non-upserting replacement/delete generation advances, verified authority/generation cleanup, and an aggregate-only status surface |
 | `hosted-learning-entity-staging-validation/v1` | Pinned Supabase origin and organization scope, one-winner distributed measurement claims, stale-lease rejection, cross-replica finalization, immutable metric/outcome/value conflicts, cross-replica entity visibility, single-owner provider aliases, and nonce-authorized exact cleanup |
 | `hosted-app-snapshot-staging-validation/v1` | Exact Supabase Storage origin and tenant/project, private bounded bucket, authenticated read/insert/update/delete denial, first-writer immutability, content-bound recovery through a second replica root, and verified probe cleanup |
@@ -72,7 +75,7 @@ environment, then against independently configured release-evidence/production v
 therefore cannot silently bless newly orphaned archives. Malformed Storage objects always fail and
 are never covered by the retention digest. No release receipt contains object keys or archive paths.
 
-The resulting `loopgraph-production-promotion-evidence/v9` manifest records the repository, commit,
+The resulting `loopgraph-production-promotion-evidence/v10` manifest records the repository, commit,
 GitHub workflow run and attempt, deployment origin, tenant/project, database identity digest,
 marketplace release, active mutation-probe and learning/entity probe scopes, approved unreferenced-snapshot inventory digest,
 trusted retention key ID and
@@ -82,7 +85,7 @@ verifies the receiver acknowledgement against that protected Ed25519 trust ancho
 contain workload tokens, database URLs, passwords, provider payloads, or private signing material.
 
 GitHub's provenance action attests the exact manifest file with workflow OIDC. The production job
-downloads the current run's immutable artifacts, rebuilds and compares the manifest from the ten
+downloads the current run's immutable artifacts, rebuilds and compares the manifest from the eleven
 receipts, checks the upstream evidence-set digest, verifies the GitHub attestation, and only
 then calls `vercel promote` for the same deployment URL.
 
@@ -120,6 +123,20 @@ configured expected limit and the database policy fails the release instead of w
 
 The job emits validated non-secret scope and artifact identities as job outputs. Later jobs do not
 receive the token files or marketplace environment configuration.
+
+### `app-evidence-health-staging`
+
+- `LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE`: absolute mode-`0600` projected workload JWT
+  granting only `schedule.app_evidence_health`;
+- `LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE`: a separate absolute mode-`0600` projected workload
+  JWT granting only `observability.read`.
+
+The job receives the exact deployment origin and tenant/project only from validated upstream job
+outputs. It proves both identities reject a foreign tenant, the schedule rejects unauthenticated and
+replayed requests, the response is fresh and aggregate-only, and the protected metrics match every
+fleet count. It cannot replay an App, record evidence, create approval, activate an App, invoke a
+connector, or write to a provider. Its secret-free receipt is downloaded independently by evidence
+compilation and production verification.
 
 ### `app-snapshot-staging`
 
@@ -238,6 +255,6 @@ access and fails unless interruption, receipt-only recovery, and replay cause ex
 mutation. An approved non-production provider account is still required to prove the external
 provider's own idempotency behavior and the deployed distributed stores under a real process loss.
 
-Retain the manifest, ten receipts, GitHub attestation, workflow URL, promoted deployment URL, and
+Retain the manifest, eleven receipts, GitHub attestation, workflow URL, promoted deployment URL, and
 alert/configuration revisions according to enterprise policy. The external WORM receiver remains
 the authoritative audit boundary even if GitHub artifacts expire.

@@ -88,6 +88,114 @@ const marketplaceReceiptSchema = z.object({
   }).strict()).length(7)
 }).strict();
 
+const appEvidenceCountSchema = z.object({
+  invalid: safeInteger,
+  expired: safeInteger,
+  renewSoon: safeInteger,
+  incomplete: safeInteger,
+  current: safeInteger,
+  notApplicable: safeInteger
+}).strict();
+
+const appEvidenceCheckNames = [
+  "unauthenticated_denial",
+  "cross_tenant_denial",
+  "authorized_health_projection",
+  "replay_denial",
+  "aggregate_only_contract",
+  "metrics_projection_parity"
+] as const;
+
+const appEvidenceHealthReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-app-evidence-health-staging-validation/v1"),
+  targetOrigin: originSchema,
+  organizationId: z.string().uuid(),
+  projectKey: projectKeySchema,
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  projection: z.object({
+    generatedAt: z.string().datetime({ offset: true }),
+    health: z.enum(["healthy", "degraded", "blocked"]),
+    totalInstallations: safeInteger,
+    totalMatched: safeInteger,
+    itemsReturned: safeInteger,
+    truncated: z.boolean(),
+    counts: appEvidenceCountSchema
+  }).strict(),
+  metrics: z.object({
+    health: z.union([z.literal(0), z.literal(1)]),
+    totalInstallations: safeInteger,
+    itemsReturned: safeInteger,
+    truncated: z.union([z.literal(0), z.literal(1)]),
+    counts: appEvidenceCountSchema
+  }).strict(),
+  checks: z.array(z.object({
+    name: z.enum(appEvidenceCheckNames),
+    ok: z.literal(true),
+    status: z.number().int().min(100).max(599).optional(),
+    detail: z.string().min(1).max(2048)
+  }).strict()).length(appEvidenceCheckNames.length)
+}).strict().superRefine((receipt, context) => {
+  const counts = receipt.projection.counts;
+  const countTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const expectedHealth = counts.invalid > 0
+    ? "blocked"
+    : counts.expired > 0 || counts.renewSoon > 0
+      ? "degraded"
+      : "healthy";
+  if (!Number.isSafeInteger(countTotal) || countTotal !== receipt.projection.totalInstallations) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["projection", "counts"],
+      message: "App evidence counts must cover the installed fleet exactly once"
+    });
+  }
+  if (
+    receipt.projection.totalMatched > receipt.projection.totalInstallations ||
+    receipt.projection.itemsReturned > receipt.projection.totalMatched ||
+    receipt.projection.truncated !==
+      (receipt.projection.itemsReturned < receipt.projection.totalMatched)
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["projection"],
+      message: "App evidence fleet totals or truncation are inconsistent"
+    });
+  }
+  if (receipt.projection.health !== expectedHealth) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["projection", "health"],
+      message: "App evidence health does not match its counts"
+    });
+  }
+  if (
+    receipt.metrics.health !== (receipt.projection.health === "healthy" ? 1 : 0) ||
+    receipt.metrics.totalInstallations !== receipt.projection.totalInstallations ||
+    receipt.metrics.itemsReturned !== receipt.projection.itemsReturned ||
+    receipt.metrics.truncated !== (receipt.projection.truncated ? 1 : 0) ||
+    Object.keys(counts).some((name) =>
+      receipt.metrics.counts[name as keyof typeof counts] !==
+      counts[name as keyof typeof counts])
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["metrics"],
+      message: "App evidence metrics must match the schedule projection"
+    });
+  }
+  if (
+    Math.abs(Date.parse(receipt.checkedAt) - Date.parse(receipt.projection.generatedAt)) >
+    5 * 60_000
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["projection", "generatedAt"],
+      message: "App evidence projection must be fresh at receipt creation"
+    });
+  }
+});
+
 const appSnapshotReceiptSchema = z.object({
   schemaVersion: z.literal("hosted-app-snapshot-staging-validation/v1"),
   targetOrigin: originSchema,
@@ -313,7 +421,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v9"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v10"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -349,6 +457,7 @@ export const productionEvidenceManifestSchema = z.object({
     staging: evidenceDescriptorSchema,
     appActionExactlyOnce: evidenceDescriptorSchema,
     marketplace: evidenceDescriptorSchema,
+    appEvidenceHealth: evidenceDescriptorSchema,
     appSnapshotFenceProbe: evidenceDescriptorSchema,
     learningEntities: evidenceDescriptorSchema,
     appSnapshots: evidenceDescriptorSchema,
@@ -366,6 +475,7 @@ export type ProductionEvidenceReceipts = {
   staging: unknown;
   appActionExactlyOnce: unknown;
   marketplace: unknown;
+  appEvidenceHealth: unknown;
   appSnapshotFenceProbe: unknown;
   learningEntities: unknown;
   appSnapshots: unknown;
@@ -402,6 +512,7 @@ export function buildProductionEvidenceManifest(
   const staging = stagingReceiptSchema.parse(receipts.staging);
   const appActionExactlyOnce = verifyAppActionExactlyOnceProof(receipts.appActionExactlyOnce);
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
+  const appEvidenceHealth = appEvidenceHealthReceiptSchema.parse(receipts.appEvidenceHealth);
   const appSnapshotFenceProbe = appSnapshotFenceProbeReceiptSchema.parse(
     receipts.appSnapshotFenceProbe
   );
@@ -423,6 +534,7 @@ export function buildProductionEvidenceManifest(
     ["staging validation", staging.checkedAt],
     ["App action exactly-once proof", appActionExactlyOnce.checkedAt],
     ["marketplace validation", marketplace.checkedAt],
+    ["App evidence health validation", appEvidenceHealth.checkedAt],
     ["App snapshot mutation fence probe", appSnapshotFenceProbe.checkedAt],
     ["hosted learning and entity validation", learningEntities.checkedAt],
     ["App snapshot validation", appSnapshots.checkedAt],
@@ -437,6 +549,7 @@ export function buildProductionEvidenceManifest(
   if (
     staging.targetOrigin !== deploymentOrigin ||
     marketplace.targetOrigin !== deploymentOrigin ||
+    appEvidenceHealth.targetOrigin !== deploymentOrigin ||
     auditRetention.sourceOrigin !== deploymentOrigin
   ) {
     throw new Error("Release receipts do not belong to the exact promoted deployment origin");
@@ -500,11 +613,13 @@ export function buildProductionEvidenceManifest(
   if (
     staging.organizationId !== config.organizationId ||
     marketplace.organizationId !== config.organizationId ||
+    appEvidenceHealth.organizationId !== config.organizationId ||
     appSnapshots.organizationId !== config.organizationId ||
     appSnapshotRecovery.organizationId !== config.organizationId ||
     auditRetention.organizationId !== config.organizationId ||
     staging.projectKey !== config.projectKey ||
     marketplace.projectKey !== config.projectKey ||
+    appEvidenceHealth.projectKey !== config.projectKey ||
     appSnapshots.projectKey !== config.projectKey ||
     appSnapshotRecovery.projectKey !== config.projectKey ||
     auditRetention.projectKey !== config.projectKey
@@ -565,6 +680,24 @@ export function buildProductionEvidenceManifest(
     ],
     "Marketplace validation"
   );
+  requireExactNames(
+    appEvidenceHealth.checks.map((check) => check.name),
+    [...appEvidenceCheckNames],
+    "App evidence health validation"
+  );
+  const appEvidenceStatuses = new Map(
+    appEvidenceHealth.checks.map((check) => [check.name, check.status])
+  );
+  if (
+    appEvidenceStatuses.get("unauthenticated_denial") !== 401 ||
+    appEvidenceStatuses.get("cross_tenant_denial") !== 403 ||
+    appEvidenceStatuses.get("authorized_health_projection") !== 202 ||
+    ![403, 409].includes(appEvidenceStatuses.get("replay_denial") ?? 0) ||
+    appEvidenceStatuses.get("aggregate_only_contract") !== undefined ||
+    appEvidenceStatuses.get("metrics_projection_parity") !== 200
+  ) {
+    throw new Error("App evidence health validation returned an unexpected control status");
+  }
   requireExactNames(
     appSnapshotFenceProbe.checks.map((check) => check.name),
     [...appSnapshotFenceProbeCheckNames],
@@ -735,6 +868,20 @@ export function buildProductionEvidenceManifest(
       auditHeadHash: marketplace.auditEvidence.headHash,
       artifactDigest: marketplace.app.artifactDigest
     }),
+    appEvidenceHealth: descriptor(appEvidenceHealth, appEvidenceHealth.checkedAt, {
+      checks: appEvidenceHealth.checks.length,
+      health: appEvidenceHealth.projection.health,
+      totalInstallations: appEvidenceHealth.projection.totalInstallations,
+      totalMatched: appEvidenceHealth.projection.totalMatched,
+      itemsReturned: appEvidenceHealth.projection.itemsReturned,
+      truncated: appEvidenceHealth.projection.truncated,
+      invalid: appEvidenceHealth.projection.counts.invalid,
+      expired: appEvidenceHealth.projection.counts.expired,
+      renewSoon: appEvidenceHealth.projection.counts.renewSoon,
+      incomplete: appEvidenceHealth.projection.counts.incomplete,
+      current: appEvidenceHealth.projection.counts.current,
+      notApplicable: appEvidenceHealth.projection.counts.notApplicable
+    }),
     appSnapshotFenceProbe: descriptor(appSnapshotFenceProbe, appSnapshotFenceProbe.checkedAt, {
       scopeDigest: appSnapshotFenceProbe.scopeDigest,
       checks: appSnapshotFenceProbe.checks.length,
@@ -807,7 +954,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v9",
+    schemaVersion: "loopgraph-production-promotion-evidence/v10",
     release,
     scope,
     evidence,
@@ -833,6 +980,7 @@ export function verifyProductionEvidenceManifest(input: {
     staging: stagingReceiptSchema.parse(input.receipts.staging),
     appActionExactlyOnce: verifyAppActionExactlyOnceProof(input.receipts.appActionExactlyOnce),
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
+    appEvidenceHealth: appEvidenceHealthReceiptSchema.parse(input.receipts.appEvidenceHealth),
     appSnapshotFenceProbe: appSnapshotFenceProbeReceiptSchema.parse(
       input.receipts.appSnapshotFenceProbe
     ),
@@ -849,6 +997,7 @@ export function verifyProductionEvidenceManifest(input: {
     ["staging validation", receiptsAtPromotion.staging.checkedAt],
     ["App action exactly-once proof", receiptsAtPromotion.appActionExactlyOnce.checkedAt],
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
+    ["App evidence health validation", receiptsAtPromotion.appEvidenceHealth.checkedAt],
     ["App snapshot mutation fence probe", receiptsAtPromotion.appSnapshotFenceProbe.checkedAt],
     ["hosted learning and entity validation", receiptsAtPromotion.learningEntities.checkedAt],
     ["App snapshot validation", receiptsAtPromotion.appSnapshots.checkedAt],
@@ -987,6 +1136,7 @@ async function main() {
     staging: await readJsonReceipt("LOOPGRAPH_STAGING_RECEIPT_FILE"),
     appActionExactlyOnce: await readJsonReceipt("LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE"),
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
+    appEvidenceHealth: await readJsonReceipt("LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE"),
     appSnapshotFenceProbe: await readJsonReceipt(
       "LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE"
     ),

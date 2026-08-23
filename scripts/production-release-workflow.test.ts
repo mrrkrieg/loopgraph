@@ -40,6 +40,7 @@ describe("staging release workflow contract", () => {
     expect(jobs.verify.if).toBe("github.ref == 'refs/heads/loopgraph/canvas-first'");
 
     expect(jobs.marketplace.environment).toBe("marketplace-staging");
+    expect(jobs["app-evidence-health"].environment).toBe("app-evidence-health-staging");
     expect(jobs["app-snapshots"].environment).toBe("app-snapshot-staging");
     expect(jobs["learning-entities"].environment).toBe("learning-entity-staging");
     expect(jobs["app-snapshot-recovery"].environment).toBe("app-snapshot-recovery");
@@ -49,6 +50,7 @@ describe("staging release workflow contract", () => {
     expect(jobs.evidence.environment).toBe("release-evidence");
     expect(jobs.promote.environment).toBe("production");
     expect(asNeeds(jobs.evidence.needs)).toEqual([
+      "app-evidence-health",
       "app-snapshot-reconciliation",
       "app-snapshot-recovery",
       "app-snapshots",
@@ -95,6 +97,7 @@ describe("staging release workflow contract", () => {
 
     for (const jobName of [
       "marketplace",
+      "app-evidence-health",
       "learning-entities",
       "app-snapshots",
       "app-snapshot-recovery",
@@ -106,6 +109,7 @@ describe("staging release workflow contract", () => {
       expect(jobSource).not.toContain("secrets.LOOPGRAPH_");
     }
     expect(source).toContain("npm run --silent validate:staging > staging-validation-receipt.json");
+    expect(source).toContain("npm run --silent validate:app-evidence-health-staging > app-evidence-health-staging-receipt.json");
     expect(source).toContain("npm run --silent prove:app-action-exactly-once > app-action-exactly-once-receipt.json");
     expect(source).toContain("npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json");
     expect(source).toContain("npm run --silent probe:app-snapshot-fence > app-snapshot-fence-probe-receipt.json");
@@ -141,6 +145,22 @@ describe("staging release workflow contract", () => {
       LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS:
         "${{ vars.LOOPGRAPH_STAGING_USER_API_QUOTA_MAX_WAIT_SECONDS }}"
     });
+    const appEvidenceHealthStep = (jobs["app-evidence-health"].steps ?? []).find(
+      (step) => step.run?.includes("validate:app-evidence-health-staging")
+    );
+    expect(asNeeds(jobs["app-evidence-health"].needs)).toEqual(["marketplace", "staging"]);
+    expect(appEvidenceHealthStep?.env).toEqual({
+      LOOPGRAPH_STAGING_APP_EVIDENCE_URL: "${{ needs.staging.outputs.deployment_url }}",
+      LOOPGRAPH_STAGING_APP_EVIDENCE_ORGANIZATION_ID:
+        "${{ needs.marketplace.outputs.organization_id }}",
+      LOOPGRAPH_STAGING_APP_EVIDENCE_PROJECT_KEY:
+        "${{ needs.marketplace.outputs.project_key }}",
+      LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE }}",
+      LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE:
+        "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+    });
+    expect(source).toContain('value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v1"');
     const snapshotValidationStep = (jobs["app-snapshots"].steps ?? []).find(
       (step) => step.run?.includes("validate:app-snapshots-staging")
     );
@@ -238,6 +258,8 @@ describe("staging release workflow contract", () => {
     expect(source.match(/LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE/g)).toHaveLength(2);
+    expect(source.match(/name: app-evidence-health-staging-evidence/g)).toHaveLength(3);
     expect(source.match(/name: learning-entity-staging-evidence/g)).toHaveLength(3);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE/g)).toHaveLength(2);
     expect(source.match(/LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE/g)).toHaveLength(2);

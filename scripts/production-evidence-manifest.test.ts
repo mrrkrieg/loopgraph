@@ -60,7 +60,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v9",
+      schemaVersion: "loopgraph-production-promotion-evidence/v10",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -114,6 +114,22 @@ describe("production promotion evidence manifest", () => {
           }
         },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
+        appEvidenceHealth: {
+          summary: {
+            checks: 6,
+            health: "degraded",
+            totalInstallations: 5,
+            totalMatched: 2,
+            itemsReturned: 2,
+            truncated: false,
+            invalid: 0,
+            expired: 0,
+            renewSoon: 1,
+            incomplete: 1,
+            current: 2,
+            notApplicable: 1
+          }
+        },
         appSnapshotFenceProbe: {
           summary: {
             scopeDigest: canonicalAppDigest({
@@ -202,7 +218,7 @@ describe("production promotion evidence manifest", () => {
         auditRetention: { summary: { throughSequence: 50 } }
       }
     });
-    expect(Object.keys(manifest.evidence)).toHaveLength(10);
+    expect(Object.keys(manifest.evidence)).toHaveLength(11);
     expect(manifest.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
 
     expect(verifyProductionEvidenceManifest({
@@ -222,6 +238,72 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(receipts, config))
       .toThrow(/exact promoted deployment origin/i);
+  });
+
+  it("rejects App evidence health from another deployment, tenant, or stale projection", () => {
+    const wrongOrigin = releaseReceipts();
+    wrongOrigin.appEvidenceHealth = {
+      ...(wrongOrigin.appEvidenceHealth as Record<string, unknown>),
+      targetOrigin: "https://other.loopgraph.test"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongOrigin, config))
+      .toThrow(/exact promoted deployment origin/i);
+
+    const wrongTenant = releaseReceipts();
+    wrongTenant.appEvidenceHealth = {
+      ...(wrongTenant.appEvidenceHealth as Record<string, unknown>),
+      organizationId: "00000000-0000-4000-8000-000000000001"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongTenant, config))
+      .toThrow(/exact tenant and project scope/i);
+
+    const staleProjection = releaseReceipts();
+    const receipt = staleProjection.appEvidenceHealth as Record<string, unknown>;
+    staleProjection.appEvidenceHealth = {
+      ...receipt,
+      projection: {
+        ...(receipt.projection as Record<string, unknown>),
+        generatedAt: "2026-08-17T01:00:00.000Z"
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(staleProjection, config)).toThrow();
+  });
+
+  it("rejects App evidence metric drift or an inexact control set", () => {
+    const drift = releaseReceipts();
+    const receipt = drift.appEvidenceHealth as Record<string, unknown>;
+    drift.appEvidenceHealth = {
+      ...receipt,
+      metrics: {
+        ...(receipt.metrics as Record<string, unknown>),
+        totalInstallations: 6
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(drift, config))
+      .toThrow(/metrics must match/i);
+
+    const duplicated = releaseReceipts();
+    const duplicatedReceipt = duplicated.appEvidenceHealth as {
+      checks: Array<Record<string, unknown>>;
+    };
+    duplicated.appEvidenceHealth = {
+      ...duplicatedReceipt,
+      checks: [duplicatedReceipt.checks[0], ...duplicatedReceipt.checks.slice(0, -1)]
+    };
+    expect(() => buildProductionEvidenceManifest(duplicated, config))
+      .toThrow(/omitted or duplicated/i);
+
+    const wrongStatus = releaseReceipts();
+    const statusReceipt = wrongStatus.appEvidenceHealth as {
+      checks: Array<Record<string, unknown>>;
+    };
+    wrongStatus.appEvidenceHealth = {
+      ...statusReceipt,
+      checks: statusReceipt.checks.map((check) =>
+        check.name === "authorized_health_projection" ? { ...check, status: 200 } : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
   });
 
   it("rejects snapshot evidence from another Storage origin or with a missing denial control", () => {
@@ -669,6 +751,57 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "replay_denial",
         "independent_audit_evidence"
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
+    },
+    appEvidenceHealth: {
+      schemaVersion: "hosted-app-evidence-health-staging-validation/v1",
+      targetOrigin: deploymentOrigin,
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 500,
+      projection: {
+        generatedAt: checkedAt,
+        health: "degraded",
+        totalInstallations: 5,
+        totalMatched: 2,
+        itemsReturned: 2,
+        truncated: false,
+        counts: {
+          invalid: 0,
+          expired: 0,
+          renewSoon: 1,
+          incomplete: 1,
+          current: 2,
+          notApplicable: 1
+        }
+      },
+      metrics: {
+        health: 0,
+        totalInstallations: 5,
+        itemsReturned: 2,
+        truncated: 0,
+        counts: {
+          invalid: 0,
+          expired: 0,
+          renewSoon: 1,
+          incomplete: 1,
+          current: 2,
+          notApplicable: 1
+        }
+      },
+      checks: [
+        { name: "unauthenticated_denial", status: 401 },
+        { name: "cross_tenant_denial", status: 403 },
+        { name: "authorized_health_projection", status: 202 },
+        { name: "replay_denial", status: 409 },
+        { name: "aggregate_only_contract" },
+        { name: "metrics_projection_parity", status: 200 }
+      ].map(({ name, status }) => ({
+        name,
+        ...(status === undefined ? {} : { status }),
+        ok: true,
+        detail: `${name} passed`
+      }))
     },
     appSnapshotFenceProbe: {
       schemaVersion: "hosted-app-snapshot-fence-probe/v1",

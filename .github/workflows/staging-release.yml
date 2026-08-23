@@ -109,6 +109,34 @@ jobs:
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("marketplace-validation-receipt.json","utf8"));const fields={organization_id:value.organizationId,project_key:value.projectKey,app_id:value.app?.id,app_version:value.app?.version,artifact_digest:value.app?.artifactDigest};const patterns={organization_id:/^[0-9a-f-]{36}$/i,project_key:/^[a-z0-9][a-z0-9_-]{0,63}$/,app_id:/^[A-Za-z0-9._:-]{1,256}$/,app_version:/^[A-Za-z0-9._+-]{1,128}$/,artifact_digest:/^sha256:[a-f0-9]{64}$/};for(const [name,field] of Object.entries(fields)){if(typeof field!=="string"||!patterns[name].test(field))process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`${name}=${field}\n`);}'
 
+  app-evidence-health:
+    needs: [staging, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: app-evidence-health-staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:app-evidence-health-staging > app-evidence-health-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_APP_EVIDENCE_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_APP_EVIDENCE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_APP_EVIDENCE_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-evidence-health-staging-receipt.json","utf8"));const names=["unauthenticated_denial","cross_tenant_denial","authorized_health_projection","replay_denial","aggregate_only_contract","metrics_projection_parity"];if(value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v1"||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-evidence-health-staging-evidence
+          path: app-evidence-health-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
   app-snapshots:
     needs: [staging, marketplace]
     runs-on: [self-hosted, loopgraph-staging]
@@ -318,7 +346,7 @@ jobs:
           retention-days: 90
 
   evidence:
-    needs: [staging, marketplace, learning-entities, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
+    needs: [staging, marketplace, app-evidence-health, learning-entities, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
     runs-on: ubuntu-latest
     environment: release-evidence
     permissions:
@@ -349,6 +377,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: app-evidence-health-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: recovery-rehearsal-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -376,6 +408,7 @@ jobs:
           LOOPGRAPH_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/staging-validation-receipt.json"
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
+          LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-evidence-health-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
           LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
@@ -431,6 +464,10 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: app-evidence-health-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: recovery-rehearsal-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -462,6 +499,7 @@ jobs:
           LOOPGRAPH_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/staging-validation-receipt.json"
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
+          LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-evidence-health-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
           LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
