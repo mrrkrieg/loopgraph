@@ -17,6 +17,10 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   ```
 
   Send `false` to exercise the full evidence chain without entering the protected production job.
+  Every third-party action in this credential-bearing workflow is pinned to one reviewed 40-character
+  commit SHA. Every checkout also binds the dispatch SHA explicitly and disables persisted Git
+  credentials. Update those pins only through a reviewed dependency change that resolves the
+  vendor's release tag to its exact commit.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
 - `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.

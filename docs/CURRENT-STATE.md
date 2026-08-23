@@ -160,6 +160,9 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   substitution, incomplete controls, empty inventory without explicit policy, every non-zero
   failure class, and stale evidence. The release workflow is repository-dispatch-only so the
   credential-bearing chain always resolves from the protected default branch.
+- Every third-party action in that release chain is now pinned to an immutable commit, and all jobs
+  explicitly check out the dispatch SHA with persisted Git credentials disabled. Mutable action
+  tags can no longer change staging, evidence, attestation, or promotion behavior between reviews.
 
 ### Verification
 

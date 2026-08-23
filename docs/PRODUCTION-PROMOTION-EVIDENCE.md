@@ -82,6 +82,9 @@ match that branch as a second independent control; do not approve a credential-b
 from a pull-request or feature ref. The workflow accepts only the `staging-release`
 `repository_dispatch` event; GitHub therefore loads its workflow and source SHA from the default
 branch rather than accepting a caller-selected ref.
+Every third-party workflow action is resolved to an immutable commit SHA, and every job checks out
+that exact dispatch SHA with persisted Git credentials disabled. Human-readable release-major
+comments are informational; the commit is the executable authority.
 
 ### `staging`
 

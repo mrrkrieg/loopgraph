@@ -16,8 +16,11 @@ jobs:
     if: github.ref == 'refs/heads/loopgraph/canvas-first'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run typecheck
@@ -32,8 +35,11 @@ jobs:
     outputs:
       deployment_url: ${{ steps.deploy.outputs.url }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npx vercel pull --yes --environment=preview --token="${VERCEL_TOKEN}"
@@ -56,8 +62,11 @@ jobs:
       app_version: ${{ steps.receipt.outputs.app_version }}
       artifact_digest: ${{ steps.receipt.outputs.artifact_digest }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run --silent validate:staging > staging-validation-receipt.json
@@ -87,7 +96,7 @@ jobs:
           LOOPGRAPH_STAGING_MARKETPLACE_FOREIGN_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_FOREIGN_TOKEN_FILE }}"
           LOOPGRAPH_STAGING_MARKETPLACE_REVOKED_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_REVOKED_TOKEN_FILE }}"
           LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: marketplace-staging-evidence
           path: |
@@ -107,8 +116,11 @@ jobs:
     outputs:
       storage_origin: ${{ steps.receipt.outputs.storage_origin }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json
@@ -119,7 +131,7 @@ jobs:
           LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_ALLOWED_USER_SESSION_FILE }}"
           LOOPGRAPH_STAGING_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
           LOOPGRAPH_STAGING_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-snapshot-staging-evidence
           path: app-snapshot-staging-receipt.json
@@ -136,8 +148,11 @@ jobs:
     outputs:
       restore_origin: ${{ steps.receipt.outputs.restore_origin }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run --silent rehearse:app-snapshot-restore > app-snapshot-recovery-receipt.json
@@ -150,7 +165,7 @@ jobs:
           LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RESTORE_ORIGIN: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RESTORE_ORIGIN }}"
           LOOPGRAPH_APP_SNAPSHOT_RESTORE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
           LOOPGRAPH_APP_SNAPSHOT_RESTORE_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-snapshot-recovery-evidence
           path: app-snapshot-recovery-receipt.json
@@ -197,8 +212,11 @@ jobs:
     outputs:
       source_identity_digest: ${{ steps.receipt.outputs.source_identity_digest }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run --silent rehearse:restore > recovery-rehearsal-receipt.json
@@ -208,7 +226,7 @@ jobs:
           LOOPGRAPH_REHEARSAL_RESTORE_DB_URL_FILE: "${{ vars.LOOPGRAPH_REHEARSAL_RESTORE_DB_URL_FILE }}"
           LOOPGRAPH_REHEARSAL_TARGET_MARKER: "${{ vars.LOOPGRAPH_REHEARSAL_TARGET_MARKER }}"
           LOOPGRAPH_EXPECTED_SOURCE_DB_IDENTITY_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_SOURCE_DB_IDENTITY_DIGEST }}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: recovery-rehearsal-evidence
           path: recovery-rehearsal-receipt.json
@@ -223,11 +241,14 @@ jobs:
     runs-on: [self-hosted, loopgraph-staging]
     environment: audit-retention-staging
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: marketplace-staging-evidence
           path: release-checkpoints
@@ -248,7 +269,7 @@ jobs:
           LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE: "${{ vars.LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE }}"
           LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/staging-validation-receipt.json"
           LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/marketplace-validation-receipt.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: audit-retention-receipt
           path: audit-retention-receipt.json
@@ -274,31 +295,34 @@ jobs:
       app_version: ${{ needs.marketplace.outputs.app_version }}
       artifact_digest: ${{ needs.marketplace.outputs.artifact_digest }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: marketplace-staging-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: recovery-rehearsal-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-staging-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-recovery-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-reconciliation-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: audit-retention-receipt
           path: release-evidence
@@ -327,10 +351,10 @@ jobs:
       - id: manifest
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("release-evidence/production-evidence-manifest.json","utf8"));if(!/^sha256:[a-f0-9]{64}$/.test(value.evidenceSetDigest))process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`digest=${value.evidenceSetDigest}\n`);'
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: release-evidence/production-evidence-manifest.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: production-promotion-evidence
           path: release-evidence/production-evidence-manifest.json
@@ -346,35 +370,38 @@ jobs:
       contents: read
       attestations: read
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: marketplace-staging-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: recovery-rehearsal-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-staging-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-recovery-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-reconciliation-evidence
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: audit-retention-receipt
           path: release-evidence
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: production-promotion-evidence
           path: release-evidence

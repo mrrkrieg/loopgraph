@@ -128,6 +128,9 @@ input to `loopgraph-production-promotion-evidence/v5`; a missing, stale, cross-s
 unhealthy receipt blocks promotion. The credential-bearing release workflow is accepted only as a
 `staging-release` repository dispatch, which resolves the workflow and commit from the protected
 default branch instead of accepting an arbitrary workflow ref.
+The complete release chain uses immutable commit SHAs for checkout, Node setup, artifact transfer,
+and provenance attestation. Each checkout binds the default-branch dispatch SHA and leaves no
+persisted Git credential on hosted or self-hosted runners.
 
 Production activation still requires organization-specific provider sandbox validation, backup and
 restore rehearsal, SLOs and alerts, revocation drills, audit export retention, and policy approval.

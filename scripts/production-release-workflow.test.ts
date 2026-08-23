@@ -6,7 +6,7 @@ type WorkflowStep = {
   uses?: string;
   run?: string;
   env?: Record<string, string>;
-  with?: Record<string, string>;
+  with?: Record<string, string | boolean | number>;
 };
 
 type WorkflowJob = {
@@ -16,6 +16,15 @@ type WorkflowJob = {
   permissions?: Record<string, string>;
   steps?: WorkflowStep[];
 };
+
+const pinnedActions = {
+  checkout: "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+  setupNode: "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+  uploadArtifact: "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+  downloadArtifact: "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+  attestBuildProvenance:
+    "actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be"
+} as const;
 
 describe("staging release workflow contract", () => {
   it("requires every protected and commit-bound receipt before an attested manifest can be promoted", async () => {
@@ -52,7 +61,7 @@ describe("staging release workflow contract", () => {
 
     const evidenceSteps = jobs.evidence.steps ?? [];
     expect(evidenceSteps.some((step) => step.run?.includes("release:evidence:build"))).toBe(true);
-    expect(evidenceSteps.some((step) => step.uses === "actions/attest-build-provenance@v2")).toBe(true);
+    expect(evidenceSteps.some((step) => step.uses === pinnedActions.attestBuildProvenance)).toBe(true);
     expect(jobs.evidence.permissions).toMatchObject({
       contents: "read",
       "id-token": "write",
@@ -67,6 +76,20 @@ describe("staging release workflow contract", () => {
     expect(attestIndex).toBeGreaterThan(verifyIndex);
     expect(promoteIndex).toBeGreaterThan(attestIndex);
     expect(jobs.promote.permissions).toMatchObject({ attestations: "read" });
+
+    const allSteps = Object.values(jobs).flatMap((job) => job.steps ?? []);
+    const actionSteps = allSteps.filter((step) => step.uses);
+    expect(actionSteps.length).toBeGreaterThan(0);
+    expect(actionSteps.every((step) =>
+      /^actions\/[a-z-]+@[0-9a-f]{40}$/.test(step.uses ?? "")
+    )).toBe(true);
+    expect(new Set(actionSteps.map((step) => step.uses))).toEqual(new Set(Object.values(pinnedActions)));
+    for (const checkout of actionSteps.filter((step) => step.uses === pinnedActions.checkout)) {
+      expect(checkout.with).toMatchObject({
+        ref: "${{ github.sha }}",
+        "persist-credentials": false
+      });
+    }
 
     for (const jobName of [
       "marketplace",
