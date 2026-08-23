@@ -4,7 +4,7 @@ export const HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_FUNCTION_DIGESTS = {
   storageTrigger: "sha256:2076106e25557bcf474066ebb977c8aeec3b4c4edad4f7560e96bb85217af7f2",
   registryTrigger: "sha256:c1229bddf6e58df5a9bfb6b7c5d233fc0e3dfb1a7dffbe8ec04750d43c01fb5c",
   generationReader: "sha256:4839d46f4659cbdc05aed473e737ca7b8a4ea1410eeb082c0fe9252f28cf1048",
-  fenceAttestation: "sha256:84f0ab042198372835f469c69f8bb32931459b4514a4f6f352c4807367c7922b"
+  fenceAttestation: "sha256:d88fe8d85cc425470028fe2193001aa75f6aed03e46e94f9802a08dc8c50de08"
 } as const;
 
 export const HOSTED_APP_SNAPSHOT_INVENTORY_FENCE_EXPECTED_STATUS = {

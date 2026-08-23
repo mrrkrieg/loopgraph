@@ -19,6 +19,7 @@ describe("hosted App snapshot inventory fence attestation migration", () => {
     expect(sql).toMatch(/trigger_row\.tgenabled in \('O', 'A'\)/i);
     expect(sql.match(/trigger_row\.tgtype = 29/gi)).toHaveLength(2);
     expect(sql.match(/trigger_row\.tgqual is null/gi)).toHaveLength(2);
+    expect(sql.match(/trigger_row\.tgattr = ''::pg_catalog\.int2vector/gi)).toHaveLength(2);
     expect(sql).toMatch(/not pg_catalog\.has_function_privilege\([\s\S]*?'anon'/i);
     expect(sql).toMatch(/not pg_catalog\.has_function_privilege\([\s\S]*?'authenticated'/i);
     expect(sql).toMatch(/pg_catalog\.has_function_privilege\([\s\S]*?'service_role'/i);

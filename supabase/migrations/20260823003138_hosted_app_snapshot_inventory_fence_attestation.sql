@@ -34,6 +34,7 @@ begin
       and trigger_row.tgenabled in ('O', 'A')
       and trigger_row.tgtype = 29
       and trigger_row.tgqual is null
+      and trigger_row.tgattr = ''::pg_catalog.int2vector
       and not trigger_row.tgisinternal
   ) into v_storage_trigger_enabled;
 
@@ -51,6 +52,7 @@ begin
       and trigger_row.tgenabled in ('O', 'A')
       and trigger_row.tgtype = 29
       and trigger_row.tgqual is null
+      and trigger_row.tgattr = ''::pg_catalog.int2vector
       and not trigger_row.tgisinternal
   ) into v_registry_trigger_enabled;
 

@@ -109,8 +109,8 @@ evidence.
 
 Before reading any inventory, reconciliation calls a service-role-only live attestation RPC. The
 RPC inspects PostgreSQL catalogs and returns only bounded booleans plus opaque SHA-256 function-body
-fingerprints. Both triggers must be enabled, row-level, unconditional `AFTER INSERT OR UPDATE OR
-DELETE` triggers bound to the expected functions. The generation reader, four mutation functions,
+fingerprints. Both triggers must be enabled, row-level, unconditional, non-column-restricted `AFTER
+INSERT OR UPDATE OR DELETE` triggers bound to the expected functions. The generation reader, four mutation functions,
 and attestation RPC must match independently pinned function-body fingerprints, remain owned by
 `postgres`, preserve their empty search paths, and expose exactly the expected effective execute
 capabilities. A missing, disabled, predicate-restricted, event-reduced, replaced, re-owned, or
