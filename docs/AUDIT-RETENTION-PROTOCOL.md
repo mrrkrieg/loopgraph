@@ -93,7 +93,7 @@ minimum retention duration. The acknowledgement digest becomes the predecessor o
 A replayed older local receipt therefore fails at the independently stateful receiver instead of
 silently rewinding retention.
 
-The final `audit-drain/v6` receipt contains the selected chain head, the five exact verified release
+The final `audit-drain/v7` receipt contains the selected chain head, the six exact verified release
 checkpoints, and the last signed external acknowledgement. Store it outside the application database.
 The production manifest recomputes the acknowledgement digest instead of trusting the supplied digest.
 A protected runner should set
@@ -123,6 +123,7 @@ LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE=/var/run/release/marketplace-validation
 LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE=/var/run/release/app-evidence-health-staging-receipt.json
 LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE=/var/run/release/cli-session-staging-receipt.json
 LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE=/var/run/release/cli-admin-staging-receipt.json
+LOOPGRAPH_AUDIT_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE=/var/run/release/marketplace-release-revocation-staging-receipt.json
 # Optional for one rotation window while the previous receipt still uses the old key:
 LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_KEY_ID=retention_ed25519_2025_04
 LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_PUBLIC_KEY_FILE=/var/run/trust/retention/ed25519-previous.pem

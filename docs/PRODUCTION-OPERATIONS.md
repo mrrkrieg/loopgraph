@@ -152,11 +152,11 @@ contract, and parity between the schedule projection and protected Prometheus ga
 ## Release evidence
 
 The protected workflow stores the staging, App action, marketplace, hosted App evidence-health,
-cross-replica CLI-session, CLI-administrator MFA/revocation,
+cross-replica CLI-session, CLI-administrator MFA/revocation, exact marketplace-release revocation,
 active App snapshot
 mutation-fence, distributed learning/entity, App snapshot isolation, App snapshot recovery,
 App snapshot reconciliation, database recovery, and audit-retention receipts as separate artifacts,
-compiles `loopgraph-production-promotion-evidence/v14`, and creates a GitHub OIDC
+compiles `loopgraph-production-promotion-evidence/v15`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured
@@ -165,7 +165,7 @@ must not be replaced with a checkbox or an environment variable claiming a check
 [Production promotion evidence](./PRODUCTION-PROMOTION-EVIDENCE.md) for the schemas and protected
 environment setup.
 
-The `audit-drain/v6` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
+The `audit-drain/v7` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
 the application database through the protected runner's `LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE`; the
 sender atomically advances this predecessor only after verification. Production promotion depends
 on the protected `audit-retention-staging` job; an unavailable

@@ -59,5 +59,7 @@ random temporary directory and is removed even after failure.
 The `hosted-marketplace-release-revocation-staging-validation/v1` receipt contains only deployment
 origin, tenant/project, exact non-secret release identity, six named control results, changed flag,
 correlation ID, and audit checkpoint. It excludes cookies, JWTs, users, provider data, archive bytes,
-and reason text. An environment-specific run remains external evidence until this receipt is bound
-into the protected release workflow and production promotion manifest.
+and reason text. The protected release workflow validates and retains this receipt, the independent
+audit drain proves its exact checkpoint, and the v15 production manifest rejects a missing, stale,
+cross-scope, digest-substituted, status-altered, or audit-unbound receipt. The first
+environment-specific execution remains external operational evidence.
