@@ -235,6 +235,11 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   lifecycle transitions, and commits the exact transition with a reason digest in the append-only
   tenant audit chain. The older direct authenticated RPC path is revoked, so clients cannot bypass
   the step-up and audit boundary.
+- A destructive, disposable-release staging validator now proves that boundary end to end. It
+  verifies and caches one exact active signed release, proves AAL1 denial does not mutate it, uses
+  AAL2 to revoke it, re-authorizes through the workload API, proves exact cache eviction, and finds
+  the correlated active-to-revoked event in the verified audit chain. Its secret-free receipt is
+  implemented; the first environment-specific run and protected promotion binding remain external.
 - Hosted routing state, route jobs, Hermes design tasks, and Hermes callback receipts use
   tenant/project-scoped Supabase stores. Active design-task creation is idempotent, and task plus
   callback updates use revision fencing so independent replicas cannot overwrite one another.
@@ -307,8 +312,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    rejection, exact signed staging, and audit presence are already part of the executable marketplace
    gate. The CLI-session matrix, exact workflow validator, fifth retained audit checkpoint, and v14
    promotion binding are implemented; the environment-specific receipt, live issuer propagation,
-   first live MFA administrator-control receipt, release revocation
-   proof, migration application, and real alert delivery remain external. The aggregate CLI security
+   first live MFA administrator-control receipt, first live release-revocation receipt and its
+   protected promotion binding, migration application, and real alert delivery remain external. The aggregate CLI security
    projection, v2 SLO/runbook contract, and bounded MFA staging validator are implemented in the
    repository.
 7. Configure the protected App evidence-health staging workload identities and run

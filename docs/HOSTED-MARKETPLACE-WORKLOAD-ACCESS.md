@@ -121,4 +121,6 @@ same-`kid` signature change, shares concurrent refreshes, and rate-limits unknow
 refresh attempts. The live issuer drill must still prove the provider publishes the
 overlap set and that separate deployed replicas observe it. Rate-limit saturation,
 backup/restore, external retention, and cross-replica human refresh-token rotation
-remain separate operational drills.
+remain separate operational drills. Exact release revocation now has its own executable destructive
+staging gate, including workload denial and local cache eviction; see
+[Hosted marketplace release revocation staging gate](./HOSTED-MARKETPLACE-RELEASE-REVOCATION-STAGING-GATE.md).
