@@ -86,6 +86,17 @@ loopgraph hermes webhooks activation-status --project .
 
 In the hosted runtime, Installed App maturity, activation gates, the Management routing read model, and measurement reconciliation resolve the same tenant-scoped distributed receipt. Hosted storage configuration fails closed instead of falling back to deployment-local disk, so separate replicas cannot disagree about whether Hermes actually applied the route contract.
 
+Hosted deployment automation can use `GET /api/hermes/routes/activation?view=plan` to read the current secret-free server-derived plan, then submit only this strict body to `POST /api/hermes/routes/activation`:
+
+```json
+{
+  "schemaVersion": "hosted-hermes-route-activation-request/v1alpha1",
+  "confirmationDigest": "<current 16-character plan digest>"
+}
+```
+
+Both calls require a replay-protected workload identity with only `hermes.route_activation` for the server-bound organization and project. Bind its durable principal with `LOOPGRAPH_HERMES_ROUTE_ACTIVATION_CREDENTIAL_ID`; the boundary is capped at ten authenticated requests per minute. The server derives the project root, workspace, distributed receipt store, controller URL, controller audience, and outbound workload identity. The request cannot select a tenant, path, controller, audience, token, route, connection, provider, or receipt. Configure the controller target through `LOOPGRAPH_HERMES_ROUTE_CONTROLLER_URL` and `LOOPGRAPH_HERMES_ROUTE_CONTROLLER_AUDIENCE`; use `LOOPGRAPH_HERMES_ROUTE_CONTROLLER_TOKEN_FILE` for a dedicated absolute `0600` projected token, or a supported ambient cloud workload identity. The response deliberately omits local project and storage paths. The static `LOOPGRAPH_HERMES_ROUTE_ACTIVATION_API_TOKEN` exists for non-production compatibility only; production rejects that mode unless the global temporary legacy-machine-token escape hatch is explicitly enabled.
+
 Trusted Hermes administration turns can inspect the same plan and status through `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status`. Those tools are read-only and are absent from the isolated webhook-router and lifecycle-router MCP profiles. The mutating activation operation remains CLI/deployment-only so an incoming event can never change its own route or request a controller credential.
 
 `ready=false` is expected while a provider connection or administrator confirmation is pending. It grants no execution authority. Provider writes remain controlled by connector capabilities, action fingerprints, approvals, and the normal Loopgraph promotion gates.
@@ -96,4 +107,4 @@ Installed App readiness uses this same receipt at Loop-ID granularity. Loopgraph
 
 The Hermes-side controller is intentionally a narrow adapter, not an arbitrary shell or HTTP proxy. It should implement one operation: reconcile the supplied additions and updates into shadow routes, then return the versioned receipt. It must not accept caller-supplied commands, scripts, provider URLs, secrets, or tool names outside the desired contract.
 
-The current Loopgraph repository contains the client schemas, validation, CLI, local and distributed receipt stores, RLS migration, and fake-controller contract tests. Deploying a real controller, applying the migration to a hosted environment, and registering real provider applications remain environment-specific operations because an open-source repository cannot contain an enterprise's credentials, public domains, or cloud workload identities.
+The current Loopgraph repository contains the client schemas, validation, CLI, workload-authenticated hosted activation API, local and distributed receipt stores, RLS migration, and fake-controller contract tests. Deploying a real controller, applying the migration to a hosted environment, and registering real provider applications remain environment-specific operations because an open-source repository cannot contain an enterprise's credentials, public domains, or cloud workload identities.
