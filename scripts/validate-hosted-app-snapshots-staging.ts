@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { mkdtemp, open, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,9 +14,12 @@ import {
   HOSTED_APP_SNAPSHOT_BUCKET,
   HOSTED_APP_SNAPSHOT_MEDIA_TYPE,
   MAX_HOSTED_APP_SNAPSHOT_BYTES,
-  SupabaseAppSnapshotStore
+  SupabaseAppSnapshotStore,
+  hostedAppSnapshotLogicalPrefix,
+  hostedAppSnapshotObjectKey
 } from "../lib/db/adapters/supabase-app-snapshot-store";
 import { readProjectedSupabaseSessionFile } from "./projected-supabase-session";
+import { readProjectedSecretFile } from "./projected-secret-file";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -95,7 +97,7 @@ export async function validateHostedAppSnapshotsStaging(
   const scope = { organizationId: config.organizationId, projectKey: config.projectKey, workspaceId };
   const writer = new SupabaseAppSnapshotStore(dependencies.adminClient, scope, roots[0]!);
   const reader = new SupabaseAppSnapshotStore(dependencies.adminClient, scope, roots[1]!);
-  const objectKey = hostedSnapshotObjectKey(scope, descriptor);
+  const objectKey = hostedAppSnapshotObjectKey(scope, descriptor);
   const clientProbeKey = `${objectKey}.client-probe`;
   const bucket = dependencies.adminClient.storage.from(HOSTED_APP_SNAPSHOT_BUCKET);
   const clientBucket = dependencies.authenticatedClient.storage.from(HOSTED_APP_SNAPSHOT_BUCKET);
@@ -106,7 +108,8 @@ export async function validateHostedAppSnapshotsStaging(
     if (
       bucketResult.error || !bucketResult.data || bucketResult.data.public !== false ||
       bucketResult.data.file_size_limit !== MAX_HOSTED_APP_SNAPSHOT_BYTES ||
-      !bucketResult.data.allowed_mime_types?.includes(HOSTED_APP_SNAPSHOT_MEDIA_TYPE)
+      bucketResult.data.allowed_mime_types?.length !== 1 ||
+      bucketResult.data.allowed_mime_types[0] !== HOSTED_APP_SNAPSHOT_MEDIA_TYPE
     ) {
       throw new Error("Hosted App snapshot bucket is not private and bounded as required");
     }
@@ -127,7 +130,7 @@ export async function validateHostedAppSnapshotsStaging(
     }
     await writer.materialize({ ...descriptor, operationId: `staging-${workspaceId}`, source });
     await writer.assertExact(descriptor);
-    const listed = await bucket.list(hostedSnapshotLogicalPrefix(scope, descriptor), { limit: 2 });
+    const listed = await bucket.list(hostedAppSnapshotLogicalPrefix(scope, descriptor), { limit: 2 });
     if (listed.error || !listed.data || listed.data.length !== 1) {
       throw new Error("Hosted App snapshot first-writer identity was not immutable");
     }
@@ -240,25 +243,6 @@ export async function validateHostedAppSnapshotsStaging(
   };
 }
 
-function hostedSnapshotObjectKey(
-  scope: { organizationId: string; projectKey: string; workspaceId: string },
-  descriptor: AppSnapshotDescriptor
-) {
-  return [
-    hostedSnapshotLogicalPrefix(scope, descriptor),
-    descriptor.artifactDigest.slice("sha256:".length),
-    `${descriptor.filesDigest.slice("sha256:".length)}.loopgraph-pack.json`
-  ].join("/");
-}
-
-function hostedSnapshotLogicalPrefix(
-  scope: { organizationId: string; projectKey: string; workspaceId: string },
-  descriptor: AppSnapshotDescriptor
-) {
-  const logicalPath = canonicalAppDigest({ snapshotPath: descriptor.snapshotPath }).slice("sha256:".length);
-  return [scope.organizationId, scope.projectKey, scope.workspaceId, logicalPath].join("/");
-}
-
 function trustedSupabaseOrigin(value: string) {
   const url = new URL(value);
   if (
@@ -270,28 +254,6 @@ function trustedSupabaseOrigin(value: string) {
   return url;
 }
 
-async function readPrivateSecretFile(file: string, label: string) {
-  if (!path.isAbsolute(file)) throw new Error(`${label} must be an absolute secret-file path`);
-  let handle;
-  try {
-    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const metadata = await handle.stat();
-    if (!metadata.isFile() || metadata.size < 20 || metadata.size > 64 * 1024) {
-      throw new Error(`${label} must reference one bounded regular file`);
-    }
-    if ((metadata.mode & 0o077) !== 0) {
-      throw new Error(`${label} must not be readable or writable by group or other users`);
-    }
-    const value = (await handle.readFile("utf8")).trim();
-    if (value.length < 20 || value.length > 64 * 1024 || /[\r\n\0]/.test(value)) {
-      throw new Error(`${label} did not contain one bounded secret`);
-    }
-    return value;
-  } finally {
-    await handle?.close();
-  }
-}
-
 function required(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required; App snapshot staging validation cannot pass without it`);
@@ -301,7 +263,7 @@ function required(name: string) {
 async function main() {
   const supabaseUrl = required("LOOPGRAPH_STAGING_SUPABASE_URL");
   const publishableKey = required("LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY");
-  const serviceRoleKey = await readPrivateSecretFile(
+  const serviceRoleKey = await readProjectedSecretFile(
     required("LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE"),
     "LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE"
   );

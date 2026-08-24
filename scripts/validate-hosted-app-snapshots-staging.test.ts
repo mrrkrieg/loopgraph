@@ -79,6 +79,15 @@ describe("hosted App snapshot staging validation", () => {
       temporaryRoot
     })).rejects.toThrow(/HTTPS origin/);
   });
+
+  it("rejects a bucket that permits an additional media type", async () => {
+    const storage = new FakeHostedSnapshotStorage({ extraMediaType: true });
+    await expect(validateHostedAppSnapshotsStaging(config, {
+      adminClient: storage.adminClient,
+      authenticatedClient: storage.authenticatedClient,
+      temporaryRoot
+    })).rejects.toThrow(/private and bounded/);
+  });
 });
 
 async function temporaryRoot(prefix: string) {
@@ -94,7 +103,7 @@ class FakeHostedSnapshotStorage {
   readonly adminClient: SupabaseClient;
   readonly authenticatedClient: SupabaseClient;
 
-  constructor(private readonly options: { exposeReads?: boolean } = {}) {
+  constructor(private readonly options: { exposeReads?: boolean; extraMediaType?: boolean } = {}) {
     this.adminClient = this.client("admin");
     this.authenticatedClient = this.client("authenticated");
   }
@@ -110,7 +119,9 @@ class FakeHostedSnapshotStorage {
                 name: bucket,
                 public: false,
                 file_size_limit: MAX_HOSTED_APP_SNAPSHOT_BYTES,
-                allowed_mime_types: [HOSTED_APP_SNAPSHOT_MEDIA_TYPE]
+                allowed_mime_types: this.options.extraMediaType
+                  ? [HOSTED_APP_SNAPSHOT_MEDIA_TYPE, "text/plain"]
+                  : [HOSTED_APP_SNAPSHOT_MEDIA_TYPE]
               },
               error: null
             }
