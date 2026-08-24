@@ -312,6 +312,48 @@ function RoutingDecisionDetails({ row }: { row: EventRoutingOperationsRow }) {
             <span className="rounded border border-line bg-paper px-2 py-1">policy {row.decisionDetail.policyVersion}</span>
           </div>
         </div>
+        {row.decisionDetail.learningContextBinding ? (
+          <div className="rounded border border-line bg-white p-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium text-ink/70">Cross-loop evidence Hermes received</div>
+              <span className={row.decisionDetail.learningContextBinding.acknowledged
+                ? "text-emerald-700"
+                : "text-amber-700"}
+              >
+                {row.decisionDetail.learningContextBinding.acknowledged ? "digest acknowledged" : "digest not acknowledged"}
+              </span>
+            </div>
+            <div className="mt-1 font-mono text-[10px] text-ink/40">
+              {row.decisionDetail.learningContextBinding.contextDigest}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1 text-ink/60">
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.status}
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.eligibleLoopIds.length} eligible
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.totals.routingCorrections} corrections
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.totals.observedOutcomes} outcomes
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.totals.valueEntries} value entries
+              </span>
+            </div>
+            {row.decisionDetail.learningContextBinding.context.loopEvidence.length > 0 ? (
+              <div className="mt-2 space-y-1 text-ink/60">
+                {row.decisionDetail.learningContextBinding.context.loopEvidence.map((evidence) => (
+                  <div key={`${evidence.loopId}:${evidence.relation}`}>
+                    {evidence.loopId} · {evidence.relation.replace(/_/g, " ")} · {evidence.routingQuality.passed}/{evidence.routingQuality.evaluated} evals · {evidence.outcomes.observed} observed outcomes
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div>
           <div className="font-medium text-ink/70">Hermes selected routes</div>
           {row.decisionDetail.selectedRoutes.length === 0 ? (

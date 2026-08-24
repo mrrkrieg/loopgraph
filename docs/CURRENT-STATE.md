@@ -14,7 +14,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - `loopgraph setup` now prepares the empty workspace, project-local Hermes contract, synchronized route manifest, and Studio plan through one safe path; `--activate` is explicit because it updates Hermes registrations.
 - `loopgraph start` now owns the local Studio plus an exclusive, gracefully stopped supervisor for route synchronization, connector checks, measurement scheduling, route jobs, opportunity scans, app update checks, controller scheduling, and aggregate health. Component cadences prevent expensive reconciliation work from running at the fast worker poll rate, errors are secret-redacted, and status is atomically persisted for the Brain UI.
 - `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
-- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph skill from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
+- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph design plus isolated event-router skills from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
 - Hermes immediately presents canonical departments and guides the user through five compact question bundles.
 - Project inspection reads allowlisted manifests and environment key names only after permission.
 - Durable Hermes design tasks can be dispatched over a signed transport, request focused evidence gaps, resume after answers, and submit schema-constrained proposals.
@@ -50,6 +50,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - A durable warehouse detector scheduler now provisions company-metric, forecast-variance, and capacity-plan windows, fences concurrent workers with hashed leases, validates explicit material-event rows, signs normalized evidence, forwards it to Hermes with workload identity, retries the exact window, and advances checkpoints only after complete delivery. Raw query rows remain process-local; durable state contains hashes and receipt/event identities only.
 - Exact provider aliases resolve Account, Campaign, Incident, Customer, Contract, and related company objects to tenant-scoped canonical entities before routing; ambiguous deterministic matches require human review and fuzzy auto-merge is disabled.
 - Loopgraph validates route eligibility, evidence, confidence, readiness, deduplication, cooldown, concurrency, fan-out, policy, and immutable LoopSpec identity.
+- Event ingest returns `routing-learning-context/v1alpha1`, a workspace/company/subject-scoped advisory projection of routing evaluations, human corrections, observed outcomes, and observed value for eligible and historically related loops. It contains bounded record identities and aggregates rather than provider payloads or correction prose. Duplicate deliveries receive a `not_applicable` context, unavailable evidence stays explicitly unknown, and historical results cannot override current eligibility, fan-out, policy, or execution authority.
+- Event ingest also returns a stable semantic digest for that packet. The native and generated Hermes router skills echo it on decision submission; Loopgraph recomputes the current packet, rejects a supplied stale digest before creating a route commit, and stores the exact bounded context plus acknowledgement state inside the durable routing attempt. Legacy callers without a digest remain readable and valid but are explicitly marked unacknowledged. Management decision detail, the correlation timeline, and the event-routing graph expose the evidence-to-decision binding without treating it as execution authority.
 - Accepted routes create durable jobs with atomic claims, leases, retries, dead-letter state, activation gates, and review reconciliation.
 - Shadow, recommendation, and simulation jobs run locally. Live jobs carry an explicit Hermes execution target and are dispatched only to a healthy registered runtime with the required capabilities.
 - Hermes reports assignment, run, task, tool, approval, output, outcome, and terminal facts through signed APIs or trusted MCP tools. Loopgraph projects those facts into the same durable run trace without storing provider secrets.
@@ -287,12 +289,17 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ## Safety boundary
 
 - Webhook turns cannot invoke discovery, design, controller, worker, graph mutation, promotion, lifecycle, or rollback tools.
+- The isolated Hermes webhook-router contract requires every decision to echo the exact learning-context digest returned by event ingest; missing or stale acknowledgements cannot create route commits.
+- The Learning operations view aggregates evidence-binding coverage, stale-context rejection, abstention, human corrections, golden-event quality, per-loop selection/evaluation counts, outcome truth status, and value without treating routing volume as proof of correctness.
+- Hosted Learning operations compile routing, measurement, and outcome evidence from tenant/project-scoped distributed stores; authenticated hosted mode fails closed instead of showing replica-local file state.
 - Provider secrets, OAuth tokens, signing keys, and raw payloads remain in Hermes or an approved credential store. Loopgraph accepts only constrained opaque credential references.
 - Model output, repository text, and webhook text are untrusted until validated by Loopgraph contracts.
 - Simulation and shadow routing do not perform external writes.
 - Live execution remains experimental and requires connector readiness, policy, approvals, and exact prepared-action fingerprints.
 
 ## Remaining product layers
+
+The repository now also includes a Hermes-native distribution boundary at `integrations/hermes-plugin`. It provides direct GitHub installation through `hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable`, an official-Doctor-compatible manifest, bundled design and isolated event-router skills, a read-only install plan, an exact-revision and package-lock-bound runtime bootstrap, and Hermes-native plan/install/doctor/start/webhook commands. Registration performs no disk or network work, and the provider credential boundary is unchanged.
 
 1. Apply the evidence/entity/probe migrations to each staging environment, configure the protected
    `learning-entity-staging` runner and independently pinned scope digest, and produce the first
@@ -342,6 +349,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ## Key documentation
 
 - [Hermes quickstart](./HERMES-QUICKSTART.md)
+- [Hermes shared routing learning](./HERMES-SHARED-ROUTING-LEARNING.md)
 - [Local supervisor](./LOCAL-SUPERVISOR.md)
 - [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md)
 - [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md)

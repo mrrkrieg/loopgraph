@@ -4,6 +4,7 @@ import {
   compileRoutingCardFromLoopSpec,
   contentHash,
   eventEnvelopeSchema,
+  getEligibleRoutingCards,
   loopSpecHash,
   safeEventSubject,
   safeEventSubjectLabel,
@@ -49,6 +50,13 @@ import { simulateLoop } from "./simulator";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
 import { FileEntityResolutionStore, resolveCompanyEntity, type EntityResolutionStore } from "./entity-resolution";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import {
+  bindRoutingLearningContext,
+  compileRoutingLearningContext,
+  routingLearningContextDigest,
+  unavailableRoutingLearningContext
+} from "./routing-learning-context";
 
 export const LOOPGRAPH_ROUTING_TOOL_NAMES = [
   "loopgraph_routing_catalog_get",
@@ -77,6 +85,7 @@ export type LoopgraphRoutingToolRuntimeOptions = {
   trustedCatalogVersion?: string;
   trustedConnections?: ConnectionInstance[];
   entityStore?: EntityResolutionStore;
+  outcomeStore?: OutcomeStore;
 };
 
 export const routingCatalogGetInputSchema = z.object({
@@ -92,7 +101,12 @@ export const eventsIngestInputSchema = z.object({
 export const routingDecisionSubmitInputSchema = z.object({
   projectRoot: z.string().optional(),
   decision: routingDecisionSchema,
+  learningContextDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   hermesMetadata: z.record(z.string(), z.unknown()).default({})
+});
+
+export const evidenceBoundRoutingDecisionSubmitInputSchema = routingDecisionSubmitInputSchema.extend({
+  learningContextDigest: z.string().regex(/^[a-f0-9]{64}$/)
 });
 
 export const eventsReplayInputSchema = z.object({
@@ -263,6 +277,21 @@ export async function loopgraph_events_ingest(
     replay: parsed.replay,
     now: options.now
   });
+  const learningContext = result.duplicate
+    ? unavailableRoutingLearningContext({
+        event: resolvedEvent,
+        now: options.now,
+        status: "not_applicable",
+        warning: "Duplicate delivery: reuse the original route decision and do not reason again."
+      })
+    : await compileLearningContextBestEffort({
+        event: resolvedEvent,
+        eligibleRoutes: result.eligibleRoutes,
+        routingCards: catalog.routingCards,
+        routingStore: store,
+        outcomeStore: options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot)),
+        now: options.now
+      });
   const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
     projectRoot,
     type: "routing_event",
@@ -276,8 +305,57 @@ export async function loopgraph_events_ingest(
   return {
     ...result,
     catalogVersion: catalog.catalogVersion,
+    learningContext,
+    learningContextDigest: routingLearningContextDigest(learningContext),
     controllerTrigger
   };
+}
+
+async function compileLearningContextBestEffort(input: Parameters<typeof compileRoutingLearningContext>[0]) {
+  try {
+    return await compileRoutingLearningContext(input);
+  } catch {
+    return unavailableRoutingLearningContext({
+      event: input.event,
+      now: input.now,
+      warning: "Shared learning evidence is unavailable; do not infer historical performance or value."
+    });
+  }
+}
+
+async function compileLearningContextBindingBestEffort(input: {
+  event: EventEnvelope;
+  routingCards: RoutingCard[];
+  routingStore: RoutingStore;
+  outcomeStore: OutcomeStore;
+  acknowledgedDigest?: string;
+  now?: Date;
+}) {
+  const context = await compileLearningContextBestEffort({
+    event: input.event,
+    eligibleRoutes: getEligibleRoutingCards(input.event, input.routingCards),
+    routingCards: input.routingCards,
+    routingStore: input.routingStore,
+    outcomeStore: input.outcomeStore,
+    now: input.now
+  });
+  try {
+    return bindRoutingLearningContext({
+      context,
+      acknowledgedDigest: input.acknowledgedDigest,
+      boundAt: input.now
+    });
+  } catch {
+    return bindRoutingLearningContext({
+      context: unavailableRoutingLearningContext({
+        event: input.event,
+        now: input.now,
+        warning: "Shared learning evidence could not be safely bound; do not infer historical performance or value."
+      }),
+      acknowledgedDigest: input.acknowledgedDigest,
+      boundAt: input.now
+    });
+  }
 }
 
 function canonicalEntityType(subjectType: string) {
@@ -402,6 +480,17 @@ export async function loopgraph_routing_decision_submit(
     projectRoot
   }, options);
   const store = options.store ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
+  const receipt = await findEventReceipt(store, parsed.decision.eventId);
+  const learningContextBinding = receipt
+    ? await compileLearningContextBindingBestEffort({
+        event: receipt.event,
+        routingCards: catalog.routingCards,
+        routingStore: store,
+        outcomeStore: options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot)),
+        acknowledgedDigest: parsed.learningContextDigest,
+        now: options.now
+      })
+    : undefined;
 
   return submitRoutingDecisionWithAcceptedLifecycle({
     projectRoot,
@@ -411,7 +500,8 @@ export async function loopgraph_routing_decision_submit(
     catalogVersion: catalog.catalogVersion,
     now: options.now,
     controllerStore: options.controllerStore,
-    hermesMetadata: parsed.hermesMetadata
+    hermesMetadata: parsed.hermesMetadata,
+    learningContextBinding
   });
 }
 
@@ -534,7 +624,14 @@ export async function loopgraph_routing_human_choice_submit(
       ...parsed.hermesMetadata,
       humanChoice: true,
       correctionId: correction.id
-    }
+    },
+    learningContextBinding: await compileLearningContextBindingBestEffort({
+      event: receipt.event,
+      routingCards: catalog.routingCards,
+      routingStore: store,
+      outcomeStore: options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot)),
+      now: options.now
+    })
   });
 
   return {
@@ -554,6 +651,7 @@ async function submitRoutingDecisionWithAcceptedLifecycle(input: {
   now?: Date;
   controllerStore?: LoopControllerStore;
   hermesMetadata?: Record<string, unknown>;
+  learningContextBinding?: ReturnType<typeof bindRoutingLearningContext>;
 }): Promise<RoutingDecisionSubmissionWithLifecycle> {
   const submission = await submitRoutingDecision({
     store: input.store,
@@ -561,7 +659,8 @@ async function submitRoutingDecisionWithAcceptedLifecycle(input: {
     routingCards: input.routingCards,
     catalogVersion: input.catalogVersion,
     now: input.now,
-    hermesMetadata: input.hermesMetadata
+    hermesMetadata: input.hermesMetadata,
+    learningContextBinding: input.learningContextBinding
   });
 
   const receipt = submission.valid && submission.routeCommits.length > 0
