@@ -22,6 +22,7 @@ export type MachineCapability =
   | "hermes.agent_heartbeat"
   | "hermes.execution_events"
   | "hermes.app_operations"
+  | "hermes.route_activation"
   | "measurements.collect"
   | "marketplace.consume"
   | "marketplace.verify"
@@ -39,6 +40,7 @@ export type MachineCapability =
   | "schedule.connector_detectors"
   | "schedule.hermes_design"
   | "schedule.hermes_callbacks"
+  | "schedule.app_evidence_health"
   | "schedule.app_action_reconciliation"
   | "schedule.management"
   | "schedule.measurements"
@@ -349,7 +351,7 @@ async function authorizeHostedMachineRequest(
     }
     throw error;
   }
-  if (workloadIdentity && shouldRequireDurableWorkloadGrant(options.capability)) {
+  if (workloadIdentity && machineCapabilityRequiresDurableGrant(options.capability)) {
     const grantDenied = await authorizeDurableWorkloadGrant({
       request,
       identity: workloadIdentity,
@@ -456,10 +458,11 @@ function verifySenderBinding(request: Request, expected?: string): string | null
   return supplied;
 }
 
-function shouldRequireDurableWorkloadGrant(capability: MachineCapability) {
+export function machineCapabilityRequiresDurableGrant(capability: MachineCapability) {
   if (!capability.startsWith("provider.") &&
       capability !== "marketplace.consume" &&
-      capability !== "hermes.app_operations") return false;
+      capability !== "hermes.app_operations" &&
+      capability !== "hermes.route_activation") return false;
   return process.env.NODE_ENV === "production" || process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS === "true";
 }
 
