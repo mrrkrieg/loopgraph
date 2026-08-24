@@ -290,6 +290,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 - Webhook turns cannot invoke discovery, design, controller, worker, graph mutation, promotion, lifecycle, or rollback tools.
 - The isolated Hermes webhook-router contract requires every decision to echo the exact learning-context digest returned by event ingest; missing or stale acknowledgements cannot create route commits.
+- The Learning operations view aggregates evidence-binding coverage, stale-context rejection, abstention, human corrections, golden-event quality, per-loop selection/evaluation counts, outcome truth status, and value without treating routing volume as proof of correctness.
+- Hosted Learning operations compile routing, measurement, and outcome evidence from tenant/project-scoped distributed stores; authenticated hosted mode fails closed instead of showing replica-local file state.
 - Provider secrets, OAuth tokens, signing keys, and raw payloads remain in Hermes or an approved credential store. Loopgraph accepts only constrained opaque credential references.
 - Model output, repository text, and webhook text are untrusted until validated by Loopgraph contracts.
 - Simulation and shadow routing do not perform external writes.

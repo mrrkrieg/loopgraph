@@ -197,19 +197,25 @@ export function getRoutingStore(options?: {
   rootDir?: string;
   forceFile?: boolean;
 }): RoutingStore {
-  const rootDir = path.resolve(options?.rootDir ?? getLoopgraphRoot());
   const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
-  const cacheKey = isSupabaseRoutingStoreEnabled()
+  const useSupabase = !options?.forceFile && isSupabaseRoutingStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed routing storage is required for the hosted runtime");
+  }
+  const rootDir = useSupabase
+    ? undefined
+    : path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const cacheKey = useSupabase
     ? `supabase-routing:${organizationId}:${projectKey}`
-    : `file-routing:${rootDir}`;
+    : `file-routing:${rootDir!}`;
   if (!options?.forceFile && cachedRoutingStores.has(cacheKey)) {
     return cachedRoutingStores.get(cacheKey)!;
   }
 
-  const store = !options?.forceFile && isSupabaseRoutingStoreEnabled()
+  const store = useSupabase
     ? createSupabaseRoutingStore()
-    : new FileRoutingStore(rootDir);
+    : new FileRoutingStore(rootDir!);
   if (!options?.forceFile) cachedRoutingStores.set(cacheKey, store);
   return store;
 }

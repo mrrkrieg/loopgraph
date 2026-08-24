@@ -58,6 +58,7 @@ import {
   routeJobsGetInputSchema,
   routingEvaluationsGetInputSchema,
   routingDecisionGetInputSchema,
+  routingLearningEffectivenessGetInputSchema,
   type LoopgraphRoutingOpsToolName
 } from "../runtime/routing-ops-tools";
 import {
@@ -448,6 +449,7 @@ const toolInputSchemas = {
   loopgraph_events_get: eventsGetInputSchema,
   loopgraph_problems_get: problemsGetInputSchema,
   loopgraph_routing_decision_get: routingDecisionGetInputSchema,
+  loopgraph_routing_learning_effectiveness_get: routingLearningEffectivenessGetInputSchema,
   loopgraph_route_jobs_get: routeJobsGetInputSchema,
   loopgraph_routing_evaluations_get: routingEvaluationsGetInputSchema,
   loopgraph_lifecycle_events_get: lifecycleEventsGetInputSchema,
