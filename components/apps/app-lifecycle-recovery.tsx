@@ -55,6 +55,9 @@ export function AppLifecycleRecoveryNotice({
                   {operation.configure ? <div><dt className="inline font-sans font-semibold">Source configuration: </dt><dd className="inline break-all">{operation.configure.sourceConfigurationDigest}</dd></div> : null}
                   {operation.overlay ? <div><dt className="inline font-sans font-semibold">Operations digest: </dt><dd className="inline break-all">{operation.overlay.operationsDigest}</dd></div> : null}
                   {operation.overlay ? <div><dt className="inline font-sans font-semibold">Source overlay revision: </dt><dd className="inline">{operation.overlay.expectedOverlayRevision}</dd></div> : null}
+                  {operation.repair ? <div><dt className="inline font-sans font-semibold">Repair source: </dt><dd className="inline break-all">{operation.repair.sourceArtifactDigest}</dd></div> : null}
+                  {operation.duplicate ? <div><dt className="inline font-sans font-semibold">Private App: </dt><dd className="inline break-all">{operation.duplicate.derivedAppId}</dd></div> : null}
+                  {operation.detach ? <div><dt className="inline font-sans font-semibold">Snapshot: </dt><dd className="inline break-all">{operation.detach.snapshotPath}</dd></div> : null}
                   {operation.update ? <div><dt className="inline font-sans font-semibold">Plan digest: </dt><dd className="inline break-all">{operation.update.planDigest}</dd></div> : null}
                   {operation.update ? <div><dt className="inline font-sans font-semibold">Source artifact: </dt><dd className="inline break-all">{operation.update.sourceArtifactDigest}</dd></div> : null}
                   {operation.rollback ? <div><dt className="inline font-sans font-semibold">Source artifact: </dt><dd className="inline break-all">{operation.rollback.sourceArtifactDigest}</dd></div> : null}
@@ -85,6 +88,15 @@ export function recoveryInstruction(operation: AppLifecycleOperation): string {
   }
   if (operation.action === "overlay") {
     return "Return to the Hermes, CLI, or browser session that submitted the overlay and retry the exact operations as the same actor. Loopgraph stores only their digest and reconciles only the recorded source or target owned LoopSpec topology before returning the original receipt.";
+  }
+  if (operation.action === "repair") {
+    return "Retry repair as the same actor with the recorded source artifact and installation revision. Loopgraph accepts only the recorded source or regenerated owned LoopSpec topology and returns the original receipt after completion.";
+  }
+  if (operation.action === "duplicate") {
+    return "Return to the session that still holds the original private App ID and overlay operations, then retry as the same actor. Loopgraph reconciles only the recorded derived topology, shared mappings, approved context, ownership, and installation; it does not retain the overlay values.";
+  }
+  if (operation.action === "detach") {
+    return "Retry detach as the same actor with the recorded source artifact and installation revision. Loopgraph verifies the confined immutable snapshot and unchanged App-owned topology before disabling upstream updates, then returns the original receipt.";
   }
   if (operation.action === "update") {
     return "Return to the Hermes, CLI, or browser session that submitted the reviewed update and retry that exact plan as the same actor. Loopgraph accepts only the recorded permission approvals and exact source or target LoopSpec topology; the journaled plan may finish after its original approval window expires.";

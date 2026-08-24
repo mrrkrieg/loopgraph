@@ -20,6 +20,7 @@ import type { LoopControllerTriggerType } from "../core";
 import { normalizeLoopgraphMcpExposure, runLoopgraphMcpStdioServer } from "../mcp/server";
 import {
   doctorHermesIntegration,
+  deactivateHermesIntegration,
   installHermesIntegration,
   setupHermesIntegration,
   type HermesInstallScope,
@@ -31,6 +32,12 @@ import {
   syncHermesWebhookRoutes,
   testHermesWebhookFixture
 } from "../runtime/hermes-webhooks";
+import {
+  activateHermesRoutes,
+  getHermesRouteActivationStatus,
+  prepareHermesRouteActivation
+} from "../runtime/hermes-route-activation";
+import { ProjectedFileWorkloadTokenProvider } from "../runtime/workload-token-provider";
 import { initLoopgraphWorkspace, inspectLoopgraphWorkspace } from "../runtime/workspace";
 import {
   prepareLoopgraphStudio,
@@ -178,7 +185,7 @@ program
   .description("Prepare an empty local workspace, install the project-local Hermes integration, and synchronize safe routes")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--name <name>", "Workspace display name")
-  .option("--activate", "Register generated MCP servers and the Loopgraph skill with Hermes")
+  .option("--activate", "Register generated MCP servers and the Loopgraph design/router skills with Hermes")
   .option("--host <host>", "Host for the local Studio launch plan", "localhost")
   .option("--port <port>", "Port for the local Studio launch plan", "3000")
   .option("--json", "Print the setup result as JSON")
@@ -691,6 +698,24 @@ apps
   });
 
 apps
+  .command("renewal-plan")
+  .description("Rank installed Apps by missing, expiring, expired, or invalid operating proof")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--status <statuses...>", "Only return these statuses: not_applicable, incomplete, current, renew_soon, expired, invalid")
+  .option("--limit <count>", "Maximum Apps to return", "100")
+  .action(async (options: { project: string; workspace?: string; company?: string; status?: string[]; limit: string }) => {
+    await printAppTool("loopgraph_apps_renewal_plan", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      statuses: options.status,
+      limit: Number(options.limit)
+    });
+  });
+
+apps
   .command("verifier-trust")
   .description("Trust an approved verifier public key; the JSON file must not contain private key material")
   .requiredOption("--file <path>", "JSON AppVerifierTrustKey containing approval accountability")
@@ -832,6 +857,24 @@ for (const action of ["test", "pause", "resume"] as const) {
       await printAppTool(tool, { projectRoot: options.project, installationId, workspaceId: options.workspace, companyId: options.company, actor: options.actor });
     });
 }
+
+apps
+  .command("activation-gate")
+  .description("Explain the current evidence-derived gate for one ordered App mode transition")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--mode <mode>", "shadow, recommend, or execute_with_approval")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { mode: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_activation_gate_get", {
+      projectRoot: options.project,
+      installationId,
+      mode: options.mode,
+      workspaceId: options.workspace,
+      companyId: options.company
+    });
+  });
 
 apps
   .command("activation-approve")
@@ -1053,21 +1096,23 @@ apps
   });
 
 for (const action of ["rollback", "detach"] as const) {
-  apps
+  const command = apps
     .command(action)
     .description(action === "rollback" ? "Restore the exact prior installation revision" : "Pin a local immutable snapshot and stop upstream updates")
     .argument("<installation-id>", "Installed app ID")
     .requiredOption("--expected <digest>", "Current installed artifact digest")
     .option("--project <root>", "Explicit project root", process.cwd())
-    .option("--actor <id>", "Accountable actor identity", "cli")
-    .action(async (installationId: string, options: { expected: string; project: string; actor: string }) => {
-      await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
-        projectRoot: options.project,
-        installationId,
-        expectedArtifactDigest: options.expected,
-        actor: options.actor
-      });
+    .option("--actor <id>", "Accountable actor identity", "cli");
+  if (action === "detach") command.requiredOption("--updated-at <timestamp>", "Exact current installation revision time");
+  command.action(async (installationId: string, options: { expected: string; updatedAt?: string; project: string; actor: string }) => {
+    await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
+      projectRoot: options.project,
+      installationId,
+      expectedArtifactDigest: options.expected,
+      ...(action === "detach" ? { expectedUpdatedAt: options.updatedAt } : {}),
+      actor: options.actor
     });
+  });
 }
 
 apps
@@ -2069,7 +2114,7 @@ hermes
   .description("Initialize, install, and check the project-local Hermes Brain integration")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--scope <scope>", "Install scope (project)", "project")
-  .option("--activate", "Register MCP servers and the GitHub-hosted skill with Hermes")
+  .option("--activate", "Register MCP servers and the GitHub-hosted design/router skills with Hermes")
   .option("--json", "Print the setup result as JSON")
   .action(async (options: { project: string; scope: string; json?: boolean; activate?: boolean }) => {
     await runHermesSetup(options);
@@ -2127,6 +2172,19 @@ hermes
     await runHermesDoctor(options);
   });
 
+hermes
+  .command("disconnect")
+  .description("Remove Loopgraph MCP registrations while preserving company data and credentials")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--yes", "Explicitly confirm the disconnect")
+  .action(async (options: { project: string; yes?: boolean }) => {
+    if (!options.yes) throw new Error("hermes disconnect requires --yes");
+    const result = await deactivateHermesIntegration({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
 hermesWebhooks
   .command("plan")
   .description("Plan non-secret Hermes webhook routes from registered Loopgraph routing contracts")
@@ -2149,6 +2207,54 @@ hermesWebhooks
       dryRun: Boolean(options.dryRun)
     });
     console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("prepare")
+  .description("Prepare the exact secret-free route contract a Hermes-owned controller may activate in shadow mode")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    const result = await prepareHermesRouteActivation({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("activate")
+  .description("Apply a confirmed shadow-route plan through a workload-authenticated Hermes route controller")
+  .requiredOption("--controller-url <url>", "Exact Hermes route controller reconcile endpoint")
+  .requiredOption("--token-file <path>", "Absolute 0600 projected workload-token file")
+  .requiredOption("--confirm <digest>", "Exact planDigest returned by hermes webhooks prepare")
+  .option("--audience <audience>", "Workload-token audience", "loopgraph-hermes-route-controller")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: {
+    project: string;
+    controllerUrl: string;
+    tokenFile: string;
+    confirm: string;
+    audience: string;
+  }) => {
+    const result = await activateHermesRoutes({
+      projectRoot: path.resolve(options.project),
+      controllerUrl: options.controllerUrl,
+      audience: options.audience,
+      confirmationDigest: options.confirm,
+      tokenProvider: new ProjectedFileWorkloadTokenProvider(options.tokenFile)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("activation-status")
+  .description("Verify the last secret-free Hermes route receipt still matches the current Loopgraph plan")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    const result = await getHermesRouteActivationStatus({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ready) process.exitCode = 1;
   });
 
 hermesWebhooks

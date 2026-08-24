@@ -309,4 +309,51 @@ describe("AppLifecycleRecoveryNotice", () => {
       completedAt: "2026-08-21T10:02:00.000Z"
     })).toThrow(/require their exact lifecycle receipt/);
   });
+
+  it("explains exact detach snapshot recovery", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.detach123",
+      idempotencyKey: "detach1234567890",
+      installationId: "install.acme.private-sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "detach",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["private.sales.qualify"], fieldMappingIds: ["mapping.lead.id"], companyContextKeys: ["company.icp"] },
+      detach: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"a".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"b".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"c".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"d".repeat(64)}`,
+        sourceLoopIds: ["private.sales.qualify"],
+        snapshotPath: ".loopgraph/apps/private-snapshots/private.sales.qualify/1.0.0",
+        snapshotArtifactDigest: `sha256:${"a".repeat(64)}`,
+        snapshotFilesDigest: `sha256:${"f".repeat(64)}`,
+        targetInstallationDigest: `sha256:${"e".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"c".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"d".repeat(64)}`,
+        targetLoopIds: ["private.sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("confined immutable snapshot");
+    expect(html).toContain(operation.detach?.snapshotPath ?? "missing");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      detach: { ...operation.detach, targetLoopIds: ["private.sales.other"] }
+    })).toThrow(/preserve one unique owned LoopSpec inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
 });

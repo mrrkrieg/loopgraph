@@ -36,7 +36,6 @@ import {
   type LoopPackManifest,
   type MarketplaceApp
 } from "../core";
-import { assessAppOperationalMaturity } from "./app-operational-maturity";
 import { AppInstallationService } from "./app-installation-service";
 import { AppOperationExecutionService, type AppOperationTransport } from "./app-operation-execution";
 import {
@@ -49,6 +48,7 @@ import {
   type AppRuntimeOperationTransport
 } from "./app-runtime-operations";
 import { FileAppInstallationStore, type AppInstallationStore } from "./app-installation-store";
+import { FileAppSnapshotStore, type AppSnapshotStore } from "./app-snapshot-store";
 import {
   FileAppVerificationStore,
   type AppVerificationRegistry,
@@ -91,6 +91,8 @@ import {
   searchOfficialCompanyBlueprints
 } from "./company-blueprint-catalog";
 import { assertSecretFree } from "./secret-redaction";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import type { HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
@@ -124,6 +126,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_operation_action_commit",
   "loopgraph_app_operation_action_reconcile",
   "loopgraph_app_maturity_get",
+  "loopgraph_apps_renewal_plan",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
   "loopgraph_app_verifier_trust_revoke",
@@ -145,6 +148,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_rollback",
   "loopgraph_app_detach",
   "loopgraph_app_uninstall",
+  "loopgraph_app_activation_gate_get",
   "loopgraph_app_activation_approve",
   "loopgraph_app_activate",
   "loopgraph_app_pause",
@@ -359,6 +363,20 @@ export const appMaturityGetInputSchema = projectSchema.extend({
   installationId: z.string().min(1)
 }).strict();
 
+export const appsRenewalPlanInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  statuses: z.array(z.enum([
+    "not_applicable",
+    "incomplete",
+    "current",
+    "renew_soon",
+    "expired",
+    "invalid"
+  ])).max(6).optional(),
+  limit: z.number().int().min(1).max(100).default(100)
+}).strict();
+
 export const appVerificationRegistryGetInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional()
@@ -482,7 +500,10 @@ export const appUpdateApplyInputSchema = projectSchema.extend({
   actor: z.string().min(1).default("hermes")
 }).strict();
 export const appRollbackInputSchema = appInstallationActionInputSchema.extend({ expectedArtifactDigest: artifactDigestSchema }).strict();
-export const appDetachInputSchema = appRollbackInputSchema;
+export const appDetachInputSchema = appInstallationActionInputSchema.extend({
+  expectedArtifactDigest: artifactDigestSchema,
+  expectedUpdatedAt: z.string().datetime()
+}).strict();
 export const appUninstallInputSchema = appInstallationActionInputSchema.extend({
   expectedArtifactDigest: artifactDigestSchema,
   reason: z.string().min(1).max(2000),
@@ -490,6 +511,12 @@ export const appUninstallInputSchema = appInstallationActionInputSchema.extend({
 }).strict();
 export const appPauseInputSchema = appInstallationActionInputSchema;
 export const appResumeInputSchema = appInstallationActionInputSchema;
+export const appActivationGateGetInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  installationId: z.string().min(1),
+  mode: z.enum(["shadow", "recommend", "execute_with_approval"])
+}).strict();
 export const appActivationApproveInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional(),
@@ -568,6 +595,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_operation_action_commit", description: "Ask the exact assigned Hermes route to commit one App-owned prepared action after Loopgraph revalidates its pinned artifact, LoopSpec, company object, connection, agent assignment, fingerprint, and approval receipt. Provider parameters are never caller-selectable.", readOnly: false, idempotent: true, destructive: true },
   { name: "loopgraph_app_operation_action_reconcile", description: "Recover an interrupted App action commit from the Connector Broker's durable receipt without repeating the provider write or guessing an unknown outcome.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_apps_renewal_plan", description: "Rank the tenant's installed Apps by missing, expiring, expired, or invalid operating evidence and return the exact read-only renewal action Hermes should recommend next.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_revoke", description: "Immediately revoke one trusted verifier public key with an accountable actor and revocation reference.", readOnly: false, idempotent: true, destructive: true },
@@ -587,8 +615,9 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_update_plan", description: "Create a content-bound three-way update plan with graph, overlay-conflict, and permission diffs.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_update_apply", description: "Apply an exact reviewed update plan, or safely resume its journaled cross-store recovery, while preserving overlays and requiring fresh evidence.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_rollback", description: "Restore the exact prior installed revision and return to write-blocked conformance.", readOnly: false, idempotent: true, destructive: true },
-  { name: "loopgraph_app_detach", description: "Pin a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app.", readOnly: false, idempotent: false, destructive: true },
+  { name: "loopgraph_app_detach", description: "Pin or exactly replay a workspace-local immutable snapshot and permanently stop upstream updates for a private derived app. Bind the request to the exact source artifact and installation revision.", readOnly: false, idempotent: true, destructive: true },
   { name: "loopgraph_app_uninstall", description: "Remove only installation-owned runtime assets while retaining shared company resources and evidence.", readOnly: false, idempotent: false, destructive: true },
+  { name: "loopgraph_app_activation_gate_get", description: "Evaluate the exact evidence-derived maturity, replay, lifecycle, and permission gate for one App mode without creating approval authority.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_activation_approve", description: "Record an accountable, short-lived, content-bound approval for one exact non-live App mode transition.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_activate", description: "Consume a matching one-time approval receipt to promote a tested app to shadow, recommend, or execute-with-approval; live remains separately governed.", readOnly: false, idempotent: false, destructive: false },
   { name: "loopgraph_app_pause", description: "Pause an installed app without deleting shared connectors, mappings, context, entities, or evidence.", readOnly: false, idempotent: true, destructive: false },
@@ -627,10 +656,19 @@ export async function callLoopgraphAppTool(
     hermesOperationsStore?: HermesOperationsStore;
     loopSpecStore?: LoopSpecRegistryStore;
     appInstallationStoreFactory?: (workspaceId: string) => AppInstallationStore;
+    appSnapshotStoreFactory?: (workspaceId: string) => AppSnapshotStore;
     companyContextStoreFactory?: (workspaceId: string, companyId: string) => CompanyContextStore;
     connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
     providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
+    routeActivationStatusProvider?: (input: {
+      projectRoot?: string;
+      now?: Date;
+    }) => Promise<HermesRouteActivationStatus>;
+    webhookDoctorProvider?: (input: {
+      projectRoot?: string;
+      now?: Date;
+    }) => Promise<HermesWebhookDoctorResult>;
     connectorBroker?: AppOperationTransport;
     connectorTenant?: ConnectorTenant;
     routingStore?: RoutingStore;
@@ -752,7 +790,18 @@ export async function callLoopgraphAppTool(
       projectRoot,
       identity.workspaceId,
       identity.companyId,
-      { installationStore, contextStore, mappingStore, loopSpecStore: options.loopSpecStore }
+      {
+        installationStore,
+        contextStore,
+        mappingStore,
+        loopSpecStore: options.loopSpecStore,
+        snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId),
+        outcomeStore: options.outcomeStore,
+        operationsStore: options.hermesOperationsStore,
+        verificationStore: appVerificationStore(options, path.join(projectRoot, ".loopgraph", "apps"), identity.workspaceId),
+        routeActivationStatusProvider: options.routeActivationStatusProvider,
+        webhookDoctorProvider: options.webhookDoctorProvider
+      }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
     const applications = await Promise.all(orderedDefinitions.map(async (definition) => {
@@ -1098,7 +1147,18 @@ export async function callLoopgraphAppTool(
     projectRoot,
     identity.workspaceId,
     identity.companyId,
-    { installationStore, contextStore, mappingStore, loopSpecStore: options.loopSpecStore }
+    {
+      installationStore,
+      contextStore,
+      mappingStore,
+      loopSpecStore: options.loopSpecStore,
+      snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId),
+      outcomeStore: options.outcomeStore,
+      operationsStore: options.hermesOperationsStore,
+      verificationStore: appVerificationStore(options, appsRoot, identity.workspaceId),
+      routeActivationStatusProvider: options.routeActivationStatusProvider,
+      webhookDoctorProvider: options.webhookDoctorProvider
+    }
   );
   if (name === "loopgraph_app_onboarding_get") {
     const parsed = appOnboardingGetInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -1568,44 +1628,11 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_maturity_get") {
     const parsed = appMaturityGetInputSchema.parse({ ...raw, projectRoot, ...identity });
-    const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
-    const registry = await installationStore.read();
-    const installation = registry.installations.find((candidate) => candidate.id === parsed.installationId);
-    if (!installation) throw new Error(`App installation not found: ${parsed.installationId}`);
-    const workspace = await appWorkspaceRegistry(projectRoot, options.loopSpecStore);
-    const loopIds = new Set(workspace.registeredSpecs
-      .filter((entry) => entry.path.split(/[\\/]/).includes(installation.id))
-      .map((entry) => entry.id));
-    const outcomeStore = options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot));
-    const operationsStore = options.hermesOperationsStore ?? new FileHermesOperationsStore(getLoopgraphRoot(projectRoot));
-    const [outcomes, valueEntries, completedEvents, verificationRegistry] = await Promise.all([
-      outcomeStore.listObservedOutcomes({ workspaceId: parsed.workspaceId!, companyId: parsed.companyId! }),
-      outcomeStore.listValueLedgerEntries({ workspaceId: parsed.workspaceId!, companyId: parsed.companyId! }),
-      operationsStore.listExecutionEvents({
-        workspaceId: parsed.workspaceId!,
-        companyId: parsed.companyId!,
-        eventType: "run.completed"
-      }),
-      appVerificationStore(options, appsRoot, parsed.workspaceId!).read()
-    ]);
-    const relevantOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
-    const relevantValue = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
-    const completedRunRefs = uniqueStrings(completedEvents
-      .filter((event) => loopIds.has(event.loopId))
-      .map((event) => `run:${event.runId}`));
-    return assessAppOperationalMaturity({
-      installation,
-      readiness: await service.readiness(installation.id, options.now),
-      evaluations: registry.evaluations,
-      operatingEvidence: {
-        completedRunRefs,
-        observedOutcomeRefs: relevantOutcomes.map((outcome) => `outcome:${outcome.id}`),
-        observedValueRefs: relevantValue.map((entry) => `value:${entry.id}`)
-      },
-      verificationReceipts: verificationRegistry.receipts,
-      trustedVerifierKeys: verificationRegistry.trustedVerifierKeys,
-      now: options.now
-    });
+    return service.operationalMaturity(parsed.installationId, options.now);
+  }
+  if (name === "loopgraph_apps_renewal_plan") {
+    const parsed = appsRenewalPlanInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.evidenceRenewalPlan({ statuses: parsed.statuses, limit: parsed.limit }, options.now);
   }
   if (name === "loopgraph_app_verification_registry_get") {
     const parsed = appVerificationRegistryGetInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -1758,7 +1785,13 @@ export async function callLoopgraphAppTool(
   }
   if (name === "loopgraph_app_detach") {
     const parsed = appDetachInputSchema.parse({ ...raw, projectRoot, ...identity });
-    return service.detach(parsed.installationId, parsed.expectedArtifactDigest, parsed.actor, options.now);
+    return service.detach({
+      installationId: parsed.installationId,
+      expectedArtifactDigest: parsed.expectedArtifactDigest,
+      expectedUpdatedAt: parsed.expectedUpdatedAt,
+      actor: parsed.actor,
+      now: options.now
+    });
   }
   if (name === "loopgraph_app_uninstall") {
     const parsed = appUninstallInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -1770,6 +1803,10 @@ export async function callLoopgraphAppTool(
       confirmed: parsed.confirmed,
       now: options.now
     });
+  }
+  if (name === "loopgraph_app_activation_gate_get") {
+    const gate = appActivationGateGetInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.activationGate(gate.installationId, gate.mode, options.now);
   }
   if (name === "loopgraph_app_activation_approve") {
     const approval = appActivationApproveInputSchema.parse({ ...raw, projectRoot, ...identity });
@@ -2176,9 +2213,6 @@ function providerMatchesConnection(providerId: string, manifestId: string): bool
   return actual === expected || actual.startsWith(`${expected}.`) || actual.startsWith(`${expected}-`);
 }
 
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values)].sort();
-}
 
 function publicVerificationRegistry(registry: AppVerificationRegistry) {
   return {
@@ -2206,6 +2240,14 @@ function appInstallationStore(
   workspaceId: string
 ): AppInstallationStore {
   return options.appInstallationStoreFactory?.(workspaceId) ?? new FileAppInstallationStore(appsRoot, workspaceId);
+}
+
+function appSnapshotStore(
+  options: { appSnapshotStoreFactory?: (workspaceId: string) => AppSnapshotStore },
+  projectRoot: string,
+  workspaceId: string
+): AppSnapshotStore {
+  return options.appSnapshotStoreFactory?.(workspaceId) ?? new FileAppSnapshotStore(projectRoot);
 }
 
 function connectorFieldMappingStore(
