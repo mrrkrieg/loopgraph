@@ -1,7 +1,16 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
-import { appIdSchema, appVersionSchema, artifactDigestSchema, isoDateTimeSchema } from "../core";
+import {
+  APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+  appIdSchema,
+  appMaturityEvidenceSchema,
+  appVersionSchema,
+  artifactDigestSchema,
+  canonicalAppDigest,
+  isoDateTimeSchema,
+  type AppMaturityEvidence
+} from "../core";
 
 export const PUBLISHED_CATALOG_SCHEMA_VERSION = "loopgraph-published-catalog/v1alpha1" as const;
 export const PUBLISHED_CATALOG_FILE = "loopgraph.catalog.json" as const;
@@ -15,7 +24,8 @@ export const publishedCatalogReleaseSchema = z.object({
   status: z.enum(["active", "deprecated", "revoked"]),
   message: z.string().min(1).optional(),
   publishedAt: isoDateTimeSchema,
-  updatedAt: isoDateTimeSchema
+  updatedAt: isoDateTimeSchema,
+  validation: appMaturityEvidenceSchema.optional()
 }).strict();
 
 export const publishedCatalogSchema = z.object({
@@ -39,4 +49,31 @@ export async function readPublishedCatalog(root: string): Promise<PublishedCatal
 
 export function publishedReleaseKey(appId: string, version: string, digest: string): string {
   return `${appId}@${version}#${digest}`;
+}
+
+export function createSyntheticMaturityEvidence(input: {
+  artifactDigest: string;
+  status: "passed" | "failed";
+  scenarioCount: number;
+  passedScenarioCount: number;
+  providerWrites?: number;
+  evidenceRefs?: string[];
+  evaluatedAt: string;
+}): AppMaturityEvidence {
+  const evidence = {
+    schemaVersion: APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+    artifactDigest: input.artifactDigest,
+    basis: "synthetic_conformance" as const,
+    status: input.status,
+    writeBlocked: true as const,
+    providerWrites: input.providerWrites ?? 0,
+    scenarioCount: input.scenarioCount,
+    passedScenarioCount: input.passedScenarioCount,
+    evidenceRefs: input.evidenceRefs ?? [],
+    evaluatedAt: input.evaluatedAt
+  };
+  return appMaturityEvidenceSchema.parse({
+    ...evidence,
+    evidenceDigest: canonicalAppDigest({ ...evidence, evidenceDigest: undefined })
+  });
 }

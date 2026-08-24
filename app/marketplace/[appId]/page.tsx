@@ -150,6 +150,7 @@ export default async function MarketplaceAppPage({ params }: { params: Promise<{
             <div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Version</span><span className="font-mono text-xs">v{data.selectedVersion.version}</span></div>
             <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Publisher</span><span className="text-sm font-semibold">{data.app.publisher.name}{data.app.publisher.verified ? " ✓" : ""}</span></div>
             <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Maturity</span><span className="text-sm font-semibold">{maturityLabel(data.selectedVersion.maturity)}</span></div>
+            <p className="mt-2 text-xs leading-5 text-ink/45">{maturityEvidenceDescription(data.selectedVersion)}</p>
             <div className="mt-3 flex items-center justify-between gap-3"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Source</span><span className="truncate font-mono text-xs">{data.provenance.sourceId}</span></div>
             {data.provenance.sourceRef ? <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Commit</span><span className="font-mono text-xs">{data.provenance.sourceRef.slice(0, 12)}</span></div> : null}
             <div className="mt-3 flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">Artifact</span><span className="font-mono text-xs">{data.provenance.verified ? "verified" : "unverified"}</span></div>
@@ -187,6 +188,11 @@ function AvailabilityCard({ available, label, detail }: { available: boolean; la
 
 function maturityLabel(value: string): string {
   return value.split("_").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
+}
+
+function maturityEvidenceDescription(version: { maturity: string; maturityEvidence?: { passedScenarioCount: number; scenarioCount: number; evaluatedAt: string } }): string {
+  if (!version.maturityEvidence) return "No digest-bound evaluation receipt is recorded for this release.";
+  return `${version.maturityEvidence.passedScenarioCount}/${version.maturityEvidence.scenarioCount} write-blocked synthetic scenarios passed for this exact artifact digest.`;
 }
 
 function GraphPreview({

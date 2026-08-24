@@ -3,6 +3,8 @@ import {
   CONNECTOR_BROKER_PROTOCOL_VERSION,
   CONNECTOR_PREPARED_ACTION_VERSION,
   connectorActionCommitRequestSchema,
+  connectorActionReconcileRequestSchema,
+  connectorActionReconcileResponseSchema,
   connectorActionPrepareRequestSchema,
   connectorActionPrepareResponseSchema,
   connectorInstallationHasExpectedNamespace,
@@ -10,6 +12,8 @@ import {
   connectorBrokerResponseSchema,
   type ConnectorAuditReceipt,
   type ConnectorActionCommitRequest,
+  type ConnectorActionReconcileRequest,
+  type ConnectorActionReconcileResponse,
   type ConnectorActionPrepareRequest,
   type ConnectorActionPrepareResponse,
   type ConnectorBrokerRequest,
@@ -448,6 +452,72 @@ export class HermesConnectorBroker {
         known?.retryable ?? true
       );
     }
+  }
+
+  async reconcileAction(rawRequest: unknown): Promise<ConnectorActionReconcileResponse> {
+    let request: ConnectorActionReconcileRequest;
+    try {
+      request = connectorActionReconcileRequestSchema.parse(rawRequest);
+    } catch {
+      throw new ConnectorBrokerError("invalid_request", "Connector action reconciliation request does not match the broker protocol.", false, true);
+    }
+    this.assertFresh(request.issuedAt, request.expiresAt);
+    const store = this.dependencies.preparedActions;
+    if (!store) throw new ConnectorBrokerError("prepared_action_store_unavailable", "Durable prepared-action storage is required.", true, true);
+    const prepared = await store.getPrepared({ ...request.tenant, actionId: request.preparedActionId });
+    if (!prepared) throw new ConnectorBrokerError("prepared_action_not_found", "Prepared action was not found.", false, true);
+    const identityMatches = prepared.fingerprint === request.preparedActionFingerprint &&
+      prepared.providerId === request.providerId &&
+      prepared.installationId === request.installationId &&
+      prepared.capability === request.capability &&
+      prepared.operation === request.operation &&
+      prepared.preparedBy === request.actor.subject &&
+      hash(prepared.context) === hash(request.context);
+    if (!identityMatches) throw new ConnectorBrokerError("prepared_action_mismatch", "Prepared action identity or reconciliation context does not match.", false, true);
+
+    const response = await this.dependencies.idempotency.getResponse({
+      ...request.tenant,
+      idempotencyKey: request.originalIdempotencyKey
+    });
+    if (response) {
+      const originalRequest = connectorBrokerRequestSchema.parse({
+        protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+        requestId: request.originalRequestId,
+        idempotencyKey: request.originalIdempotencyKey,
+        tenant: request.tenant,
+        actor: request.actor,
+        providerId: request.providerId,
+        installationId: request.installationId,
+        capability: request.capability,
+        operation: request.operation,
+        input: prepared.canonicalInput,
+        context: request.context,
+        issuedAt: request.issuedAt,
+        expiresAt: request.expiresAt,
+        correlationId: request.correlationId
+      });
+      if (response.requestId !== request.originalRequestId || response.receipt.requestId !== request.originalRequestId ||
+        !responseMatchesRequest(response, originalRequest)) {
+        throw new ConnectorBrokerError("reconciliation_receipt_mismatch", "Durable connector response does not match the original App action commit.", false, true);
+      }
+      return connectorActionReconcileResponseSchema.parse({
+        protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        originalRequestId: request.originalRequestId,
+        status: "resolved",
+        preparedActionStatus: prepared.status,
+        brokerResponse: response
+      });
+    }
+
+    return connectorActionReconcileResponseSchema.parse({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      originalRequestId: request.originalRequestId,
+      status: prepared.status === "committing" ? "pending" : "unresolved",
+      preparedActionStatus: prepared.status,
+      reasonCode: prepared.status === "committing" ? "connector_commit_in_progress" : "connector_commit_receipt_unavailable"
+    });
   }
 
   private assertFresh(issuedAt: string, expiresAt: string) {

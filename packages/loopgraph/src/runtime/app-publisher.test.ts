@@ -110,6 +110,16 @@ describe("Loopgraph App publisher", () => {
     expect(first.idempotent).toBe(false);
     expect(second.idempotent).toBe(true);
     expect(first.release.digest).toBe(signed.digest);
+    expect(first.release.validation).toMatchObject({
+      artifactDigest: signed.digest,
+      status: "passed",
+      writeBlocked: true,
+      providerWrites: 0,
+      scenarioCount: 13,
+      passedScenarioCount: 13
+    });
+    expect(first.release.validation?.evidenceDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(second.release.validation?.evidenceDigest).toBe(first.release.validation?.evidenceDigest);
     expect(first.snapshotDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(second.snapshotDigest).toBe(first.snapshotDigest);
 

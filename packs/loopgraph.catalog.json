@@ -1,0 +1,332 @@
+{
+  "schemaVersion": "loopgraph-published-catalog/v1alpha1",
+  "catalogId": "loopgraph-official",
+  "releases": [
+    {
+      "appId": "loopgraph.customer-success.catch-renewal-risk",
+      "version": "1.0.0",
+      "digest": "sha256:2980f19d28e2de53d073c8480a8cbce05da4ad3cc87a223d68d7f947a1c6d1d4",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:2980f19d28e2de53d073c8480a8cbce05da4ad3cc87a223d68d7f947a1c6d1d4",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:customer-success-risk-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:2310b869aba81dab4962af7877d082b051e9ca1188b81177affb50ca90065df5"
+      }
+    },
+    {
+      "appId": "loopgraph.customer-success.escalate-strategic-accounts",
+      "version": "1.0.0",
+      "digest": "sha256:8d424247ada7deed9bc0c387439aff93cfff19fdf4f5e8882c36beacf03ae7fd",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:8d424247ada7deed9bc0c387439aff93cfff19fdf4f5e8882c36beacf03ae7fd",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:strategic-account-escalation-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:2dedcedaa2b1275bb0710f1382b2065de154f64df15bb9d017f955572214302e"
+      }
+    },
+    {
+      "appId": "loopgraph.customer-success.triage-support-tickets",
+      "version": "1.0.0",
+      "digest": "sha256:b800d72c0d99482e7a032c7f61266b52db5dd1636e14c062555d2453559d4090",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:b800d72c0d99482e7a032c7f61266b52db5dd1636e14c062555d2453559d4090",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:support-ticket-triage-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:9f0c63c31f0b82ce8fda91072a588e394e00757082feba10a95515c7dc1c624f"
+      }
+    },
+    {
+      "appId": "loopgraph.engineering.run-issue-incident-operations",
+      "version": "1.0.0",
+      "digest": "sha256:35c56f12ffa547771e9998fcd8cdc5c60dac1b87b934cd11e5aa776e4987f1b6",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:35c56f12ffa547771e9998fcd8cdc5c60dac1b87b934cd11e5aa776e4987f1b6",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:engineering-operations-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:bc9260a93eadcd8351322fb4b75d579368fad94e2307d79206343aeaf4c016c8"
+      }
+    },
+    {
+      "appId": "loopgraph.engineering.triage-github-issues",
+      "version": "1.0.0",
+      "digest": "sha256:14b6a173ec5312d26017594ea36bf27f614150a3837942be81d20188eb201fa9",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:14b6a173ec5312d26017594ea36bf27f614150a3837942be81d20188eb201fa9",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:github-issue-triage-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:ebd49205c86f95dfc53fb2236e10bef22c4f5abddfcdfafa39d6006332ec5b14"
+      }
+    },
+    {
+      "appId": "loopgraph.hr-talent.operate-people-workflows",
+      "version": "1.0.0",
+      "digest": "sha256:67382f11db695fca22aaa33d80ff505be54fabff9da9fb820726adc0466beec0",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:67382f11db695fca22aaa33d80ff505be54fabff9da9fb820726adc0466beec0",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:hr-people-workflow-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:a0c157e863fc6f405c1cde69beabc4e085d44b5d0e0ce030fa6c86eb0f10fe00"
+      }
+    },
+    {
+      "appId": "loopgraph.legal-compliance.govern-evidence-and-exceptions",
+      "version": "1.0.0",
+      "digest": "sha256:c140e03c66e878262ae1ec679a95a506e4c553ae3c98e9512307ca11f0775c2f",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:c140e03c66e878262ae1ec679a95a506e4c553ae3c98e9512307ca11f0775c2f",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:legal-compliance-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:cae454cd59833bac6ee93238ba7faac9ec001a0f8d613d3254eb19d576066ea8"
+      }
+    },
+    {
+      "appId": "loopgraph.management.run-company-operating-system",
+      "version": "1.0.0",
+      "digest": "sha256:3f6a9c1f4c995336683d5d953275d871667bfec40801352df5867ee9558110b3",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:3f6a9c1f4c995336683d5d953275d871667bfec40801352df5867ee9558110b3",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:management-company-operating-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:0cace05edb1f2ba4398292098688c42ed4120c759577203a2d53b55ddc83e6b7"
+      }
+    },
+    {
+      "appId": "loopgraph.marketing.learn-qualified-pipeline",
+      "version": "1.0.0",
+      "digest": "sha256:2634b6e7d81fb9a357aec44839b12a012188969c72e1230357ba1d51da368e80",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:2634b6e7d81fb9a357aec44839b12a012188969c72e1230357ba1d51da368e80",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:marketing-qualified-pipeline-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:5b6dee61947ba413ffbc9ee895dc50b335ac9dd45220443bc8aeaede76f6c257"
+      }
+    },
+    {
+      "appId": "loopgraph.ops-finance.manage-forecast-controls",
+      "version": "1.0.0",
+      "digest": "sha256:94c2081ecb80fc3d246d7fe6cef4dfc95eb26490d4d5cea27ef52cec065c775d",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:94c2081ecb80fc3d246d7fe6cef4dfc95eb26490d4d5cea27ef52cec065c775d",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:ops-finance-control-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:d3f82f2c2b6b43985f74c83a249a34513ee5e55c18e95a8d79bb968d88b00f3d"
+      }
+    },
+    {
+      "appId": "loopgraph.product.turn-feedback-into-product-problems",
+      "version": "1.0.0",
+      "digest": "sha256:825619e9e8bf41262237f0efb5b99c2c30f347881d32f90b04b7b936c95ac4cf",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:825619e9e8bf41262237f0efb5b99c2c30f347881d32f90b04b7b936c95ac4cf",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:product-feedback-to-problems-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:2a0fe294ef54b952aec16540b091a41b1c1d7b4abb153633ffcea2766c296bee"
+      }
+    },
+    {
+      "appId": "loopgraph.sales.find-recover-cold-deals",
+      "version": "1.0.0",
+      "digest": "sha256:24893e74250fade969fa028ef293978fbf592a30f1d3bf71251e772b2ba85734",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:24893e74250fade969fa028ef293978fbf592a30f1d3bf71251e772b2ba85734",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 13,
+        "passedScenarioCount": 13,
+        "evidenceRefs": [
+          "eval-suite:sales-deal-risk-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:e6e45f942b9b9b276ae990f65d3c986336c917b95e4976253b8d42a61761d449"
+      }
+    },
+    {
+      "appId": "loopgraph.sales.qualify-route-inbound-leads",
+      "version": "1.0.0",
+      "digest": "sha256:0335eedc12c9497f70752b5f5aa8fe103f7672847e9a938402d7fb0ec92e9c81",
+      "publisherId": "loopgraph",
+      "keyId": "loopgraph.official.catalog",
+      "status": "active",
+      "publishedAt": "2026-08-21T04:28:49.736Z",
+      "updatedAt": "2026-08-21T04:28:49.736Z",
+      "validation": {
+        "schemaVersion": "loopgraph-app-maturity-evidence/v1alpha1",
+        "artifactDigest": "sha256:0335eedc12c9497f70752b5f5aa8fe103f7672847e9a938402d7fb0ec92e9c81",
+        "basis": "synthetic_conformance",
+        "status": "passed",
+        "writeBlocked": true,
+        "providerWrites": 0,
+        "scenarioCount": 14,
+        "passedScenarioCount": 14,
+        "evidenceRefs": [
+          "eval-suite:sales-inbound-conformance"
+        ],
+        "evaluatedAt": "2026-08-21T04:28:49.736Z",
+        "evidenceDigest": "sha256:24cbed33cd3e171a9d3f62e9145454fb20e8a02af0ff996e554c9c0f5afc5cf9"
+      }
+    }
+  ],
+  "updatedAt": "2026-08-21T04:28:49.736Z"
+}

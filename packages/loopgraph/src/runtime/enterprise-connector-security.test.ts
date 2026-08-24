@@ -439,6 +439,29 @@ describe("enterprise connector security boundary", () => {
         routeJobId: "route-job-draft-1"
       }
     });
+    await expect(broker.reconcileAction({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: "request_slack_draft_reconcile",
+      idempotencyKey: "idempotency_slack_draft_reconcile",
+      tenant: installation.tenant,
+      actor: { type: "workload", subject: "spiffe://example/hermes" },
+      providerId: "slack",
+      installationId: installation.id,
+      capability: "provider.draft.write",
+      operation: "message.draft.create",
+      context,
+      preparedActionId: prepared.preparedAction.actionId,
+      preparedActionFingerprint: prepared.preparedAction.fingerprint,
+      originalRequestId: "request_slack_draft_commit",
+      originalIdempotencyKey: "idempotency_slack_draft_commit",
+      issuedAt: "2026-08-01T00:00:00.000Z",
+      expiresAt: "2026-08-01T00:01:00.000Z",
+      correlationId: "correlation_slack_draft_reconcile"
+    })).resolves.toMatchObject({
+      status: "resolved",
+      originalRequestId: "request_slack_draft_commit",
+      brokerResponse: { status: "succeeded", requestId: "request_slack_draft_commit" }
+    });
     expect(handler).toHaveBeenCalledTimes(1);
   });
 

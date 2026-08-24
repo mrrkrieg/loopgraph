@@ -63,6 +63,9 @@ export default async function SettingsPage() {
           <Link href="/settings/integrations" className="inline-flex rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white">
             Open provider integrations
           </Link>
+          <Link href="/settings/app-verification" className="inline-flex rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold">
+            Manage App verification trust
+          </Link>
           {hosted ? (
             <Link href="/settings/cli-sessions" className="inline-flex rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold">
               Manage CLI sessions
