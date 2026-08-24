@@ -32,6 +32,7 @@ import {
   requireDepartmentType,
   routingCardSchema,
   routingDecisionSchema,
+  routingLearningContextSchema,
   valueLedgerEntrySchema
 } from "../core";
 import {
@@ -569,6 +570,7 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/event-envelope",
   "loopgraph://schemas/routing-card",
   "loopgraph://schemas/routing-decision",
+  "loopgraph://schemas/routing-learning-context",
   "loopgraph://schemas/evidence-gap-set",
   "loopgraph://schemas/hermes-design-task",
   "loopgraph://schemas/loop-opportunity",
@@ -595,7 +597,8 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
 const LOOPGRAPH_ROUTER_SCHEMA_RESOURCE_URIS = new Set([
   "loopgraph://schemas/event-envelope",
   "loopgraph://schemas/routing-card",
-  "loopgraph://schemas/routing-decision"
+  "loopgraph://schemas/routing-decision",
+  "loopgraph://schemas/routing-learning-context"
 ]);
 
 export function normalizeLoopgraphMcpExposure(value: unknown): LoopgraphMcpExposure {
@@ -666,127 +669,133 @@ export async function listLoopgraphMcpResources(
     },
     {
       uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[5],
+      name: "RoutingLearningContext schema",
+      description: "Bounded advisory routing evaluations, corrections, observed outcomes, and value evidence for Hermes.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[6],
       name: "EvidenceGapSet schema",
       description: "Focused missing-evidence contract Loopgraph uses to drive adaptive Hermes questions.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[6],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
       name: "HermesDesignTask schema",
       description: "Durable Loopgraph-initiated design task and delivery state exposed to trusted Hermes sessions.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[8],
       name: "LoopOpportunity schema",
       description: "Explainable, scored opportunity to create, improve, split, merge, or retire a business loop.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[8],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[9],
       name: "GraphChangeSet schema",
       description: "Versioned proposed changes to the company loop graph derived from observed evidence.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[9],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[10],
       name: "MetricSample schema",
       description: "Source-qualified observed, modeled, or incomplete metric evidence.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[10],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[11],
       name: "ObservedOutcome schema",
       description: "Versioned comparison between baseline and post-loop business measurements.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[11],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[12],
       name: "ValueLedgerEntry schema",
       description: "Net loop value after review, rework, supervision, escalation, and governance cost.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[12],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[13],
       name: "LoopControllerPolicy schema",
       description: "Project-local policy boundaries for continuous evidence evaluation and automatic shadow changes.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[13],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[14],
       name: "LoopControllerRun schema",
       description: "Durable controller trigger, evidence, decision, policy receipt, and error record.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[14],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[15],
       name: "GraphSnapshot schema",
       description: "Content-bound registered LoopSpecs and generated assets captured before and after graph mutation.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[15],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[16],
       name: "GraphChangeApprovalReceipt schema",
       description: "Accountable approval bound to an exact graph, operation set, policy, actor, and evidence.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[16],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[17],
       name: "GraphTransaction schema",
       description: "Atomic semantic graph change, promotion, lifecycle, or rollback transaction record.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[17],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
       name: "LoopPromotionReceipt schema",
       description: "Evidence-bound receipt for one ordered loop activation-mode promotion.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
       name: "PromotionRehearsal schema",
       description: "Content-bound simulation, routing, ambiguity, regression, and policy gate report required for promotion.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[20],
       name: "MetricBinding schema",
       description: "Exact contract between a LoopSpec metric and one scheduled Hermes connector query.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[20],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[21],
       name: "MeasurementJob schema",
       description: "Leased, idempotent provider measurement job with a durable evidence result.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[21],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
       name: "ConnectionReconciliation schema",
       description: "Connector, scope, webhook, health, and overdue-measurement reconciliation report.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[23],
       name: "HermesAgentInstance schema",
       description: "Capability-bounded Hermes runtime registration and heartbeat contract.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[23],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
       name: "HermesExecutionEvent schema",
       description: "Assignment-bound task, tool, approval, output, outcome, and run telemetry contract.",
       mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[25],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
   }];
   const companyCatalogResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[25],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[26],
     name: "Prebuilt company loop library",
     description: "Canonical department operating skills, Hermes routing questions, prebuilt loop claims, and shared-learning playbooks.",
     mimeType: "application/json"
@@ -1352,6 +1361,13 @@ function schemaResource(id: string) {
       schemaVersion: "mcp-schema-resource/v1alpha1",
       id,
       jsonSchema: zodToJsonSchema(routingDecisionSchema, "RoutingDecision")
+    };
+  }
+  if (id === "routing-learning-context") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(routingLearningContextSchema, "RoutingLearningContext")
     };
   }
   if (id === "evidence-gap-set") {

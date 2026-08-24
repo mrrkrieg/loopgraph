@@ -983,11 +983,12 @@ Runtime routing should be optimized for bounded, reliable decisions:
 
 1. Hermes receives a narrow normalized event, never the unrestricted raw payload by default.
 2. Loopgraph returns a small eligible candidate set.
-3. Exact high-confidence events may use a fast routing profile.
-4. Ambiguous or high-impact events may use a stronger reasoning profile.
-5. Low-confidence decisions request human choice rather than guessing.
-6. The router never modifies a loop definition during an event turn.
-7. An event with no safe match becomes an unhandled business problem, not an excuse to call an arbitrary tool.
+3. Loopgraph returns a bounded advisory learning context compiled from scoped routing evaluations, human corrections, observed outcomes, net value, and subject history. The context cannot expand eligibility or authority.
+4. Exact high-confidence events may use a fast routing profile.
+5. Ambiguous or high-impact events may use a stronger reasoning profile.
+6. Low-confidence decisions request human choice rather than guessing.
+7. The router never modifies a loop definition during an event turn.
+8. An event with no safe match becomes an unhandled business problem, not an excuse to call an arbitrary tool.
 
 This separation prevents a noisy webhook from entering the expensive loop-design workflow and prevents the design workflow from becoming the execution authority.
 

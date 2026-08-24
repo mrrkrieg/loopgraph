@@ -8,6 +8,7 @@ export const ROUTING_CONTRACT_SCHEMA_VERSION = "routing-contract/v1alpha1" as co
 export const ROUTING_CARD_SCHEMA_VERSION = "routing-card/v1alpha1" as const;
 export const ROUTING_DECISION_SCHEMA_VERSION = "routing-decision/v1alpha1" as const;
 export const ROUTE_JOB_SCHEMA_VERSION = "route-job/v1alpha1" as const;
+export const ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION = "routing-learning-context/v1alpha1" as const;
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
@@ -359,6 +360,82 @@ export const routerEvaluationSchema = z.object({
   evaluatedAt: z.string().datetime()
 });
 
+const routingLearningCountSchema = z.number().int().min(0);
+
+export const routingLearningLoopEvidenceSchema = z.object({
+  loopId: z.string().min(1),
+  relation: z.enum(["eligible_candidate", "declared_supporting", "subject_history"]),
+  eligibleForCurrentEvent: z.boolean(),
+  routingQuality: z.object({
+    evaluated: routingLearningCountSchema,
+    passed: routingLearningCountSchema,
+    failed: routingLearningCountSchema,
+    expectedSelections: routingLearningCountSchema,
+    actualSelections: routingLearningCountSchema,
+    passRate: z.number().min(0).max(1).optional(),
+    evaluationRefs: z.array(z.string().min(1)).max(20).default([])
+  }),
+  humanFeedback: z.object({
+    corrections: routingLearningCountSchema,
+    selected: routingLearningCountSchema,
+    correctionRefs: z.array(z.string().min(1)).max(20).default([])
+  }),
+  outcomes: z.object({
+    total: routingLearningCountSchema,
+    observed: routingLearningCountSchema,
+    improved: routingLearningCountSchema,
+    targetMet: routingLearningCountSchema,
+    unchanged: routingLearningCountSchema,
+    regressed: routingLearningCountSchema,
+    incomplete: routingLearningCountSchema,
+    latestAt: z.string().datetime().optional(),
+    outcomeRefs: z.array(z.string().min(1)).max(20).default([])
+  }),
+  value: z.object({
+    entries: routingLearningCountSchema,
+    observedEntries: routingLearningCountSchema,
+    observedNetSavedMinutes: z.number().finite(),
+    latestAt: z.string().datetime().optional(),
+    valueRefs: z.array(z.string().min(1)).max(20).default([])
+  })
+});
+
+export const routingLearningContextSchema = z.object({
+  schemaVersion: z.literal(ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION)
+    .default(ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION),
+  status: z.enum(["available", "not_applicable", "unavailable"]),
+  authority: z.literal("advisory").default("advisory"),
+  generatedAt: z.string().datetime(),
+  scope: z.object({
+    workspaceId: z.string().min(1),
+    companyId: z.string().min(1),
+    subject: eventSubjectSchema,
+    canonicalEntityId: z.string().min(1).optional()
+  }),
+  eligibleLoopIds: z.array(z.string().min(1)).max(100).default([]),
+  subjectProblemIds: z.array(z.string().min(1)).max(100).default([]),
+  loopEvidence: z.array(routingLearningLoopEvidenceSchema).max(32).default([]),
+  totals: z.object({
+    routingEvaluations: routingLearningCountSchema,
+    routingCorrections: routingLearningCountSchema,
+    observedOutcomes: routingLearningCountSchema,
+    valueEntries: routingLearningCountSchema
+  }),
+  truncated: z.object({
+    eligibleLoops: z.boolean(),
+    subjectProblems: z.boolean(),
+    loops: z.boolean(),
+    routingEvaluations: z.boolean(),
+    routingCorrections: z.boolean(),
+    observedOutcomes: z.boolean(),
+    valueEntries: z.boolean()
+  }),
+  decisionRule: z.literal(
+    "Only currently eligible routing cards may be selected; learning evidence cannot authorize a route, fan-out, execution, or provider action."
+  ),
+  warnings: z.array(z.string().min(1)).max(10).default([])
+});
+
 export const unhandledBusinessProblemSchema = businessProblemSchema.extend({
   status: z.literal("unhandled"),
   recurrenceCount: z.number().int().min(1).default(1),
@@ -379,6 +456,8 @@ export type RouteJobStatus = z.infer<typeof routeJobStatusSchema>;
 export type RouteExecutionTarget = z.infer<typeof routeExecutionTargetSchema>;
 export type RoutingCorrection = z.infer<typeof routingCorrectionSchema>;
 export type RouterEvaluation = z.infer<typeof routerEvaluationSchema>;
+export type RoutingLearningLoopEvidence = z.infer<typeof routingLearningLoopEvidenceSchema>;
+export type RoutingLearningContext = z.infer<typeof routingLearningContextSchema>;
 export type UnhandledBusinessProblem = z.infer<typeof unhandledBusinessProblemSchema>;
 
 export type RoutingEligibilityResult = {

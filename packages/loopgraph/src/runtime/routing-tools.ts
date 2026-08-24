@@ -49,6 +49,11 @@ import { simulateLoop } from "./simulator";
 import { getLoopgraphRoot } from "./storage-resolver";
 import { readLoopgraphWorkspace } from "./workspace";
 import { FileEntityResolutionStore, resolveCompanyEntity, type EntityResolutionStore } from "./entity-resolution";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import {
+  compileRoutingLearningContext,
+  unavailableRoutingLearningContext
+} from "./routing-learning-context";
 
 export const LOOPGRAPH_ROUTING_TOOL_NAMES = [
   "loopgraph_routing_catalog_get",
@@ -77,6 +82,7 @@ export type LoopgraphRoutingToolRuntimeOptions = {
   trustedCatalogVersion?: string;
   trustedConnections?: ConnectionInstance[];
   entityStore?: EntityResolutionStore;
+  outcomeStore?: OutcomeStore;
 };
 
 export const routingCatalogGetInputSchema = z.object({
@@ -263,6 +269,21 @@ export async function loopgraph_events_ingest(
     replay: parsed.replay,
     now: options.now
   });
+  const learningContext = result.duplicate
+    ? unavailableRoutingLearningContext({
+        event: resolvedEvent,
+        now: options.now,
+        status: "not_applicable",
+        warning: "Duplicate delivery: reuse the original route decision and do not reason again."
+      })
+    : await compileLearningContextBestEffort({
+        event: resolvedEvent,
+        eligibleRoutes: result.eligibleRoutes,
+        routingCards: catalog.routingCards,
+        routingStore: store,
+        outcomeStore: options.outcomeStore ?? new FileOutcomeStore(getLoopgraphRoot(projectRoot)),
+        now: options.now
+      });
   const controllerTrigger = await enqueueLoopControllerTriggerBestEffort({
     projectRoot,
     type: "routing_event",
@@ -276,8 +297,21 @@ export async function loopgraph_events_ingest(
   return {
     ...result,
     catalogVersion: catalog.catalogVersion,
+    learningContext,
     controllerTrigger
   };
+}
+
+async function compileLearningContextBestEffort(input: Parameters<typeof compileRoutingLearningContext>[0]) {
+  try {
+    return await compileRoutingLearningContext(input);
+  } catch {
+    return unavailableRoutingLearningContext({
+      event: input.event,
+      now: input.now,
+      warning: "Shared learning evidence is unavailable; do not infer historical performance or value."
+    });
+  }
 }
 
 function canonicalEntityType(subjectType: string) {

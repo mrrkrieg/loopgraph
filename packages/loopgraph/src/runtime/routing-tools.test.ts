@@ -28,6 +28,7 @@ import {
   createStoredLoopSpecArtifact,
   type LoopSpecRegistryStore
 } from "./loop-spec-store";
+import type { OutcomeStore } from "./outcome-store";
 
 async function createProjectWithRoutingSpec(
   spec = marketingAdsSpec()
@@ -235,12 +236,76 @@ describe("routing tool surface", () => {
 
     expect(result.duplicate).toBe(false);
     expect(result.eligibleRoutes.map((route) => route.card.loopId)).toEqual(["marketing_ads"]);
+    expect(result.learningContext).toMatchObject({
+      schemaVersion: "routing-learning-context/v1alpha1",
+      status: "available",
+      authority: "advisory",
+      eligibleLoopIds: ["marketing_ads"],
+      loopEvidence: [expect.objectContaining({
+        loopId: "marketing_ads",
+        relation: "eligible_candidate",
+        eligibleForCurrentEvent: true
+      })]
+    });
     expect(await store.getEventReceipt(event.id)).toBeTruthy();
     expect(result.controllerTrigger).toMatchObject({
       enqueued: true,
       duplicate: false,
       triggerRecordId: expect.stringMatching(/^controller_trigger_/)
     });
+  });
+
+  it("does not make Hermes reason again for a duplicate delivery", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = adsEvent("delivery_tool_duplicate_1");
+    await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+
+    const duplicate = await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      now: new Date("2026-07-21T12:00:03.000Z")
+    });
+
+    expect(duplicate).toMatchObject({
+      duplicate: true,
+      eligibleRoutes: [],
+      learningContext: {
+        status: "not_applicable",
+        authority: "advisory",
+        eligibleLoopIds: [],
+        loopEvidence: []
+      }
+    });
+  });
+
+  it("keeps current routing available while marking historical evidence unavailable", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = adsEvent("delivery_tool_learning_unavailable_1");
+    const unavailableOutcomeStore = {
+      listObservedOutcomes: async () => {
+        throw new Error("database details must not escape");
+      },
+      listValueLedgerEntries: async () => []
+    } as unknown as OutcomeStore;
+
+    const result = await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      outcomeStore: unavailableOutcomeStore,
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+
+    expect(result.eligibleRoutes.map((route) => route.card.loopId)).toEqual(["marketing_ads"]);
+    expect(result.learningContext).toMatchObject({
+      status: "unavailable",
+      authority: "advisory",
+      loopEvidence: [],
+      warnings: ["Shared learning evidence is unavailable; do not infer historical performance or value."]
+    });
+    expect(JSON.stringify(result.learningContext)).not.toContain("database details");
   });
 
   it("ignores caller-supplied routing cards on Hermes-facing ingest calls", async () => {
