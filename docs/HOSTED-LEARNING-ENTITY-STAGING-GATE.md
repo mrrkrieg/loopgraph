@@ -4,10 +4,10 @@ Loopgraph's hosted evidence and entity-resolution stores are production authorit
 cross-loop learning. Unit tests prove the adapters, but production promotion also needs evidence
 that the deployed PostgreSQL functions preserve their concurrency and immutability guarantees.
 
-The repository now contains the active check and its database authority. This change deliberately
-does not activate a release-workflow job on its own: the protected job must ship together with the
-signed promotion-evidence binding so a failed or pending proof can never be bypassed. The command
-never runs during local startup, preview rendering, webhook intake, or a production request.
+The repository contains the active check, its database authority, and a protected release-workflow
+job whose receipt is mandatory for signed promotion evidence. A failed, pending, stale, or
+wrong-scope proof therefore blocks production instead of becoming an optional workflow result. The
+command never runs during local startup, preview rendering, webhook intake, or a production request.
 
 ## What the gate proves
 
@@ -47,7 +47,7 @@ All three functions use an empty search path and fully qualified relations; the 
 RLS-enabled with no direct grants, default/public execution is revoked, and only `service_role` can
 invoke the functions.
 
-## Protected environment configuration for workflow activation
+## Protected environment configuration
 
 Create a GitHub environment named `learning-entity-staging` with required reviewers. Configure:
 
@@ -86,3 +86,9 @@ A failed assertion, authorization, or cleanup returns a non-zero exit and no hea
 abruptly terminated runner leaves only a short-lived authorization; a later run can sweep it after
 expiry. Database restore remains a separate isolated recovery rehearsal; this probe never treats
 deletion in the primary staging database as restore proof.
+
+The workflow uploads `learning-entity-staging-receipt.json` as a 90-day artifact. The v9 production
+evidence compiler independently reconstructs the scope from the validated release Storage origin,
+lowercase organization UUID, and `learning_probe` namespace, requires all nine controls exactly
+once, rechecks freshness, and includes the receipt digest in the signed evidence-set digest. The
+production job downloads the same artifact and repeats the reconstruction before promotion.

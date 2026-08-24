@@ -12,6 +12,14 @@ users, organizations, and machine workers must not share an implicit administrat
 - Independently authenticated machine routes verify signed workload identity against configured
   issuer/JWKS/audience/capability policy. Legacy worker bearer tokens are a temporary, explicit
   compatibility mode; provider webhooks use provider-specific raw-body verification and replay claims.
+- Workload identity tolerates legitimate signing-key rotation through one bounded JWKS refresh on a
+  new key ID or cached-key signature mismatch. Concurrent refreshes within one runtime share one
+  fetch, malformed or oversized key sets fail closed, redirects are rejected, and unknown key IDs
+  are refresh-throttled.
+- Browser-authorized CLI refresh tokens rotate as one database-owned family. Prior generations are
+  retained only as private expiry-bounded digests; reuse atomically revokes the current family,
+  appends one digest-free tenant audit event, and is visible to an administrator without exposing
+  token hashes.
 - Organization access comes from `organization_memberships`, never editable user metadata.
 - Roles are monotonic: `viewer`, `operator`, `admin`, and `owner`.
 - Request-bound Design Studio reads and writes use the user's cookie-bound Supabase client.
@@ -131,9 +139,10 @@ and effective execute capabilities have not drifted. It never emits object keys 
 automatically.
 
 The protected production release chain first actively rehearses the exact deployed registry and
-Storage mutation fence in a random reserved staging scope, then repeats reconciliation for the exact
-Storage origin and tenant/project proven earlier in the same run. Both fresh, healthy aggregate
-receipts are mandatory inputs to `loopgraph-production-promotion-evidence/v8`; a missing, stale,
+Storage mutation fence and the distributed learning/entity stores in random reserved staging
+scopes, then repeats reconciliation for the exact Storage origin and tenant/project proven earlier
+in the same run. All fresh, healthy aggregate receipts are mandatory inputs to
+`loopgraph-production-promotion-evidence/v16`; a missing, stale,
 cross-scope, incomplete,
 retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
 pinned in reconciliation, release-evidence, and production environments. The credential-bearing
