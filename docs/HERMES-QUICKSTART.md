@@ -4,7 +4,7 @@ This is the local-first path for using Loopgraph with Hermes Agent as the compan
 
 Hermes owns the conversation and all production webhook ingress. Loopgraph owns the local workspace, discovery state, validated LoopSpecs, routing contracts, durable receipts, route validation, simulation, traces, and approvals.
 
-## 1. Install Hermes and clone Loopgraph
+## 1. Install Hermes and choose an integration path
 
 Install Hermes Agent from the upstream GitHub project first:
 
@@ -15,6 +15,30 @@ Then confirm the Hermes CLI is visible in your shell:
 ```bash
 hermes --version
 ```
+
+### Recommended: install the native Hermes plugin
+
+Create or open the directory that should own this company's empty Loopgraph workspace:
+
+```bash
+mkdir loopgraph-company
+cd loopgraph-company
+hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable
+hermes plugins doctor loopgraph --ci
+```
+
+Preview and confirm the immutable runtime bootstrap:
+
+```bash
+hermes loopgraph plan --project .
+hermes loopgraph install --project . --yes
+```
+
+Hermes records the plugin's exact repository revision. The adapter fetches only that 40-character commit, requires the package-lock digest declared by that same revision, installs with npm lifecycle scripts disabled, builds the Loopgraph CLI, and requires `npm audit --omit=dev` to pass before it initializes the project. The plugin is dependency-free at Hermes registration time and stores no provider credentials.
+
+Restart Hermes after setup so it discovers the three generated MCP profiles. Then say `start Loopgraph`.
+
+### Alternative: use a source checkout
 
 Clone Loopgraph into a normal local folder:
 
@@ -31,7 +55,14 @@ Use `npm run loopgraph --` from this repository clone. Do not use `npx loopgraph
 
 ## 2. Run the guided Loopgraph and Hermes setup
 
-From a Loopgraph clone:
+The native plugin path already ran setup. From the company project, use these commands afterward:
+
+```bash
+hermes loopgraph doctor --project .
+hermes loopgraph start --project .
+```
+
+For the source-checkout path, run:
 
 ```bash
 npm run loopgraph -- setup --project . --activate
@@ -44,13 +75,13 @@ The setup command does the safe local work in one step:
 - writes `.loopgraph/hermes/mcp.loopgraph.yaml`;
 - writes the generated Hermes skills under `.loopgraph/hermes/skills/`;
 - registers the admin, webhook-router, and lifecycle-router MCP servers with Hermes;
-- installs the Loopgraph skill from the GitHub skill tap;
+- installs the Loopgraph design and isolated event-router skills from the GitHub skill tap;
 - synchronizes the project-local, non-secret Hermes route manifest;
 - prepares the local Studio launch plan without copying preview loops;
 - runs the same protocol, MCP, workspace, and catalog checks as `hermes doctor`;
 - prints the exact file paths and first Hermes prompt.
 
-From an installed package, use `loopgraph setup --project . --activate` instead. Omit `--activate` to review the generated configuration before Loopgraph asks Hermes to apply it.
+From an installed npm package, use `loopgraph setup --project . --activate` instead. Omit `--activate` to review the generated configuration before Loopgraph asks Hermes to apply it. With the native plugin, pass `--no-activate` to `hermes loopgraph install` for the same review-first behavior.
 
 If setup says Hermes is not on `PATH`, the local Loopgraph files were still generated. Install Hermes, confirm `hermes --version`, then rerun:
 
@@ -181,7 +212,26 @@ npm run loopgraph -- hermes webhooks doctor --project .
 
 Sync writes `.loopgraph/hermes-routes.json` with non-secret route metadata only, including the lifecycle callback route. It preserves unrelated external route references in sanitized form and removes stale Loopgraph-managed entries.
 
-Doctor checks whether the manifest still matches the current routing catalog. These commands are advanced recovery controls; the supervisor performs the same safe local synchronization. Applying routes to real provider subscriptions remains a Hermes-owned/configured step.
+Doctor checks whether the manifest still matches the current routing catalog. These commands are advanced recovery controls; the supervisor performs the same safe local synchronization.
+
+For an enterprise Hermes deployment, prepare and apply the exact shadow-route contract through a Hermes-owned Route Controller:
+
+```bash
+npm run loopgraph -- hermes webhooks prepare --project .
+
+npm run loopgraph -- hermes webhooks activate --project . \
+  --controller-url https://hermes.example.com/v1/loopgraph/routes/reconcile \
+  --token-file /run/secrets/loopgraph/hermes-route-controller.jwt \
+  --confirm <planDigest>
+
+npm run loopgraph -- hermes webhooks activation-status --project .
+```
+
+The first command returns the digest to confirm. Activation accepts only a short-lived workload token from an absolute, user-only file. Hermes retains provider credentials and signing material; Loopgraph persists only a secret-free receipt proving the exact profile, skill, tool boundary, transformer, signature state, and provider subscription state. The v1 protocol can add or update shadow routes but cannot delete routes or enable live execution. See [Hermes Route Controller contract](./HERMES-ROUTE-CONTROLLER.md).
+
+Hermes can call the read-only `loopgraph_hermes_webhooks_prepare` and `loopgraph_hermes_webhooks_activation_status` admin tools to explain this state. It never receives the mutating controller call or token. Connection reconciliation and the Event Routing screen treat a local manifest without a current controller receipt as planned-only, not ready event intake.
+
+Installed App onboarding enforces the same boundary. After conformance, the shared Hermes/browser/CLI journey first asks to synchronize a missing or stale local manifest, then prepares the exact controller plan when activation proof is absent. The App cannot reach `connected` maturity or create a shadow approval until every event route covering its owned Loop IDs has a current controller receipt and verified authentication, with every required provider subscription active. Provider-agnostic App routes bind to the exact provider connections selected during installation. Hermes- and Loopgraph-generated business events use authenticated internal routes without inventing provider subscriptions. A pending route owned only by another App does not block it.
 
 ## 8. Rehearse an event before live webhooks
 
@@ -212,7 +262,7 @@ The fixture test:
 - asks the local shadow router for a decision;
 - validates expected action and loop IDs.
 
-It does not send a real provider webhook, apply a live Hermes route, or store provider credentials.
+It does not send a real provider webhook, apply a Hermes route, or store provider credentials. Route activation is the separate confirmed controller operation above.
 
 ## 9. Run the durable local worker separately only for diagnosis
 

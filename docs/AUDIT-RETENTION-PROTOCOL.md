@@ -45,13 +45,16 @@ The sender independently rejects:
 - a final event hash different from the verified checkpoint.
 
 For a production release, the sender also reads the exact `staging-validation/v5`,
-`hosted-marketplace-staging-validation/v2`, and
-`hosted-app-evidence-health-staging-validation/v3`, and
-`hosted-cli-session-staging-validation/v1`, and
-`hosted-cli-admin-staging-validation/v1` receipts. It rejects a different source origin,
-tenant, or project, requires the CLI receipt to name that source as its primary and a distinct
-secondary replica, binds the administrator receipt to one exact MFA-gated session revocation, then
-proves all five named sequence/hash checkpoints while traversing the pinned chain. A
+`hosted-marketplace-staging-validation/v2`,
+`hosted-app-evidence-health-staging-validation/v3`,
+`hosted-cli-session-staging-validation/v1`,
+`hosted-cli-admin-staging-validation/v1`,
+`hosted-marketplace-release-revocation-staging-validation/v1`, and
+`hosted-workload-issuer-rotation-staging-validation/v1` receipts. It rejects a different source
+origin, tenant, or project; requires each cross-replica receipt to name that source as its primary
+and a distinct secondary replica; binds the administrator and marketplace receipts to their exact
+MFA-gated revocations; and proves all seven named sequence/hash checkpoints while traversing the
+pinned chain. A
 checkpoint older than the protected predecessor state fails closed because it can no longer be
 independently replayed by the current drain.
 
@@ -93,7 +96,7 @@ minimum retention duration. The acknowledgement digest becomes the predecessor o
 A replayed older local receipt therefore fails at the independently stateful receiver instead of
 silently rewinding retention.
 
-The final `audit-drain/v6` receipt contains the selected chain head, the five exact verified release
+The final `audit-drain/v8` receipt contains the selected chain head, the seven exact verified release
 checkpoints, and the last signed external acknowledgement. Store it outside the application database.
 The production manifest recomputes the acknowledgement digest instead of trusting the supplied digest.
 A protected runner should set
@@ -123,6 +126,8 @@ LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE=/var/run/release/marketplace-validation
 LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE=/var/run/release/app-evidence-health-staging-receipt.json
 LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE=/var/run/release/cli-session-staging-receipt.json
 LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE=/var/run/release/cli-admin-staging-receipt.json
+LOOPGRAPH_AUDIT_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE=/var/run/release/marketplace-release-revocation-staging-receipt.json
+LOOPGRAPH_AUDIT_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE=/var/run/release/workload-issuer-rotation-staging-receipt.json
 # Optional for one rotation window while the previous receipt still uses the old key:
 LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_KEY_ID=retention_ed25519_2025_04
 LOOPGRAPH_AUDIT_RETENTION_PREVIOUS_PUBLIC_KEY_FILE=/var/run/trust/retention/ed25519-previous.pem
