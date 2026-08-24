@@ -1,4 +1,4 @@
-version: loopgraph-slo/v1
+version: loopgraph-slo/v2
 service: loopgraph-hosted
 windows:
   rolling_days: 30
@@ -41,6 +41,17 @@ objectives:
     target: 100
     indicator: successful_revoked_workload_denials / scheduled_marketplace_revocation_checks
     alert: { consecutive_failures: 1 }
+  - id: cli_refresh_replay_containment
+    target: 100
+    indicator: loopgraph_cli_refresh_reuse_unrevoked == 0
+    alert:
+      recent_replay_families: 1
+      unrevoked_replay_families: 1
+  - id: cli_device_authorization_freshness
+    target: 100
+    indicator: loopgraph_cli_device_authorization_oldest_pending_seconds <= 600
+    alert:
+      maximum_pending_seconds: 600
   - id: app_lifecycle_recovery_freshness
     target: 100
     indicator: completed_or_reconciled_app_lifecycle_operations / started_app_lifecycle_operations
@@ -54,6 +65,13 @@ objectives:
     alert:
       stale_nonterminal_commits: 1
       default_stale_after_seconds: 300
+  - id: app_evidence_freshness
+    target: 100
+    indicator: loopgraph_app_evidence_health
+    alert:
+      invalid_evidence: 1
+      expired_evidence: 1
+      renew_soon_evidence: 1
 ownership:
   primary: platform-on-call
   security: security-owner
@@ -64,3 +82,5 @@ runbooks:
   audit: docs/PRODUCTION-OPERATIONS.md
   app_lifecycle_recovery: docs/PRODUCTION-OPERATIONS.md
   app_action_reconciliation: docs/PRODUCTION-OPERATIONS.md
+  app_evidence_freshness: docs/PRODUCTION-OPERATIONS.md
+  cli_sessions: docs/OPERATIONAL-AUDIT-OBSERVABILITY.md

@@ -206,6 +206,8 @@ export async function duplicateInstalledAppAction(formData: FormData) {
     installationId,
     derivedAppId: requiredFormString(formData, "derivedAppId"),
     overlayOperations: overlay.operations ?? [],
+    expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
     actor
   }) as { installation?: { id?: unknown } };
   const derivedInstallationId = result.installation?.id;
@@ -247,6 +249,7 @@ export async function detachInstalledAppAction(formData: FormData) {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
     actor
   });
   revalidateInstalledApp(installationId);
