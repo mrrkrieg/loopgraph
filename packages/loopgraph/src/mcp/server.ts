@@ -32,6 +32,7 @@ import {
   requireDepartmentType,
   routingCardSchema,
   routingDecisionSchema,
+  routingLearningContextBindingSchema,
   routingLearningContextSchema,
   valueLedgerEntrySchema
 } from "../core";
@@ -591,14 +592,16 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/hermes-agent-instance",
   "loopgraph://schemas/hermes-execution-event",
   "loopgraph://graph/company",
-  "loopgraph://catalog/company-loops"
+  "loopgraph://catalog/company-loops",
+  "loopgraph://schemas/routing-learning-context-binding"
 ] as const;
 
 const LOOPGRAPH_ROUTER_SCHEMA_RESOURCE_URIS = new Set([
   "loopgraph://schemas/event-envelope",
   "loopgraph://schemas/routing-card",
   "loopgraph://schemas/routing-decision",
-  "loopgraph://schemas/routing-learning-context"
+  "loopgraph://schemas/routing-learning-context",
+  "loopgraph://schemas/routing-learning-context-binding"
 ]);
 
 export function normalizeLoopgraphMcpExposure(value: unknown): LoopgraphMcpExposure {
@@ -785,6 +788,12 @@ export async function listLoopgraphMcpResources(
       uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
       name: "HermesExecutionEvent schema",
       description: "Assignment-bound task, tool, approval, output, outcome, and run telemetry contract.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[27],
+      name: "RoutingLearningContextBinding schema",
+      description: "Content-bound snapshot proving which advisory cross-loop evidence accompanied a Hermes route decision.",
       mimeType: "application/json"
     }
   ];
@@ -1368,6 +1377,13 @@ function schemaResource(id: string) {
       schemaVersion: "mcp-schema-resource/v1alpha1",
       id,
       jsonSchema: zodToJsonSchema(routingLearningContextSchema, "RoutingLearningContext")
+    };
+  }
+  if (id === "routing-learning-context-binding") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(routingLearningContextBindingSchema, "RoutingLearningContextBinding")
     };
   }
   if (id === "evidence-gap-set") {

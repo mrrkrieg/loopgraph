@@ -14,6 +14,11 @@ import {
   type RoutingCard
 } from "../core";
 import { emitLoopRunLifecycleEvent } from "./lifecycle-events";
+import {
+  bindRoutingLearningContext,
+  routingLearningContextDigest,
+  unavailableRoutingLearningContext
+} from "./routing-learning-context";
 import { FileRoutingStore, ingestRoutingEvent, submitRoutingDecision } from "./routing-store";
 import {
   loopgraph_events_get,
@@ -230,6 +235,12 @@ describe("Hermes routing operations tools", () => {
       routingCards: [card],
       now: new Date("2026-07-21T12:00:02.000Z")
     });
+    const learningContext = unavailableRoutingLearningContext({
+      event,
+      now: new Date("2026-07-21T12:00:02.000Z"),
+      warning: "No prior cross-loop evidence exists yet."
+    });
+    const learningContextDigest = routingLearningContextDigest(learningContext);
     const decision = await submitRoutingDecision({
       store,
       decision: {
@@ -260,7 +271,12 @@ describe("Hermes routing operations tools", () => {
       routingCards: [card],
       catalogVersion: "catalog_v1",
       now: new Date("2026-07-21T12:00:03.000Z"),
-      hermesMetadata: { route: "google_ads_detector" }
+      hermesMetadata: { route: "google_ads_detector" },
+      learningContextBinding: bindRoutingLearningContext({
+        context: learningContext,
+        acknowledgedDigest: learningContextDigest,
+        boundAt: new Date("2026-07-21T12:00:03.000Z")
+      })
     });
 
     const events = await loopgraph_events_get({ projectRoot, eventId: event.id }, { store });
@@ -368,6 +384,7 @@ describe("Hermes routing operations tools", () => {
       expect.objectContaining({ id: "company_brain", label: "Hermes Brain" }),
       expect.objectContaining({ id: `event:${event.id}`, type: "event" }),
       expect.objectContaining({ id: `problem:${decision.problem?.id}`, type: "problem" }),
+      expect.objectContaining({ id: `learning:${decision.attempt.id}`, type: "learning_context" }),
       expect.objectContaining({ id: `commit:${decision.routeCommits[0].id}`, type: "route_commit" }),
       expect.objectContaining({ id: `job:${routeJob.id}`, type: "route_job" }),
       expect.objectContaining({ id: `run:${completedCommit.runId}`, type: "loop" }),
@@ -376,6 +393,8 @@ describe("Hermes routing operations tools", () => {
     ]));
     expect(graph.graphProjection.edges).toEqual(expect.arrayContaining([
       expect.objectContaining({ source: "company_brain", target: `event:${event.id}`, label: "received" }),
+      expect.objectContaining({ source: `event:${event.id}`, target: `learning:${decision.attempt.id}`, label: "bounded learning evidence", executable: false }),
+      expect.objectContaining({ source: `learning:${decision.attempt.id}`, target: `attempt:${decision.attempt.id}`, label: "advisory evidence used", executable: false }),
       expect.objectContaining({ source: `attempt:${decision.attempt.id}`, target: `commit:${decision.routeCommits[0].id}`, label: "validated route" }),
       expect.objectContaining({ source: `commit:${decision.routeCommits[0].id}`, target: `job:${routeJob.id}`, label: "durable queue" }),
       expect.objectContaining({ source: `job:${routeJob.id}`, target: `run:${completedCommit.runId}`, label: "idempotent run" }),

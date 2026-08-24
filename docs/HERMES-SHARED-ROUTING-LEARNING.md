@@ -2,7 +2,7 @@
 
 Hermes should not route a company event from static trigger rules alone. It should be able to see whether similar routing decisions were correct, whether humans corrected them, whether the selected loops changed an observed business outcome, and whether the work created net value after supervision and connector cost.
 
-Loopgraph compiles that evidence into `routing-learning-context/v1alpha1` and returns it from `loopgraph_events_ingest` beside the eligible routing cards. The context is a bounded, provider-payload-free projection; it is not a second router and it grants no authority.
+Loopgraph compiles that evidence into `routing-learning-context/v1alpha1` and returns it from `loopgraph_events_ingest` beside the eligible routing cards. The context is a bounded, provider-payload-free projection; it is not a second router and it grants no authority. Ingest also returns `learningContextDigest`, a full SHA-256 semantic digest that intentionally excludes only the packet generation timestamp.
 
 ## Evidence joined for one event
 
@@ -45,10 +45,22 @@ Hermes Brain
 
 Hermes can use this packet to explain a route, lower confidence, append evidence to an existing problem, or abstain. Loopgraph still validates the submitted decision against the current immutable LoopSpec catalog before it creates any route commit.
 
+## Evidence-to-decision binding
+
+The event-router skill must echo `learningContextDigest` through `loopgraph_routing_decision_submit`. At submission time Loopgraph reloads the event, current routing catalog, evaluations, corrections, outcomes, and value ledger; recompiles the bounded packet; and compares its semantic digest with the one Hermes acknowledged.
+
+- A match stores `routing-learning-context-binding/v1alpha1` with the complete bounded packet, digest, acknowledgement, and binding time inside the durable routing attempt.
+- A supplied mismatch creates a durable rejected attempt and no route commit. Hermes must re-ingest before it reasons again.
+- An omitted digest remains valid for older clients, but the attempt is marked unacknowledged so the UI never implies stronger proof than exists.
+- If evidence cannot be loaded or safely bounded, Loopgraph records a small typed `unavailable` packet with a fixed redacted warning. It never stores the underlying infrastructure error.
+
+The Management routing receipt shows the acknowledgement state, digest, evidence counts, and per-loop summary. The correlation timeline adds the binding as a separate event. The event-routing projection draws a non-executable advisory-evidence node into the Hermes decision while preserving the executable event-to-decision edge. This makes the evidence that influenced one historical decision inspectable even after newer outcomes and corrections arrive.
+
 ## Interfaces
 
 - Event tool: `loopgraph_events_ingest`
 - Schema resource: `loopgraph://schemas/routing-learning-context`
+- Binding schema resource: `loopgraph://schemas/routing-learning-context-binding`
 - Native skill: `loopgraph:event-router`
 - Source-checkout skill: `loopgraph-event-router`
 - Compiler: `packages/loopgraph/src/runtime/routing-learning-context.ts`

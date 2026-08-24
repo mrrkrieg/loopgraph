@@ -186,6 +186,7 @@ export type GraphProjectionResult = {
     loopCount?: number;
     eventCount?: number;
     problemCount?: number;
+    learningContextCount?: number;
     routeCommitCount?: number;
     routeJobCount?: number;
   };
@@ -459,6 +460,7 @@ export async function loopgraph_graph_get(
       ...(parsed.projection === "event_routing" ? {
         eventCount: graphProjection.nodes.filter((node) => node.type === "event").length,
         problemCount: graphProjection.nodes.filter((node) => node.type === "problem").length,
+        learningContextCount: graphProjection.nodes.filter((node) => node.type === "learning_context").length,
         routeCommitCount: graphProjection.nodes.filter((node) => node.type === "route_commit").length,
         routeJobCount: graphProjection.nodes.filter((node) => node.type === "route_job").length
       } : {})
@@ -621,17 +623,39 @@ async function eventRoutingGraphProjection(input: {
 
   for (const attempt of attempts) {
     const attemptNodeId = `attempt:${attempt.id}`;
+    const learningContextNodeId = `learning:${attempt.id}`;
     projection.nodes.push({
       id: attemptNodeId,
       label: `${attempt.action ?? "received"} · ${attempt.status}`,
       type: "loop"
     });
+    if (attempt.learningContextBinding) {
+      projection.nodes.push({
+        id: learningContextNodeId,
+        label: `Cross-loop evidence · ${attempt.learningContextBinding.acknowledged ? "acknowledged" : "unacknowledged"}`,
+        type: "learning_context"
+      });
+      projection.edges.push({
+        source: `event:${attempt.eventId}`,
+        target: learningContextNodeId,
+        label: "bounded learning evidence",
+        executable: false
+      });
+    }
     projection.edges.push({
       source: `event:${attempt.eventId}`,
       target: attemptNodeId,
       label: "Hermes decision",
       executable: attempt.status === "committed"
     });
+    if (attempt.learningContextBinding) {
+      projection.edges.push({
+        source: learningContextNodeId,
+        target: attemptNodeId,
+        label: "advisory evidence used",
+        executable: false
+      });
+    }
     for (const alternative of attempt.decision?.alternatives ?? []) {
       const loopNodeId = `loop:${alternative.loopId}`;
       projection.nodes.push({ id: loopNodeId, label: alternative.loopId, type: "loop" });

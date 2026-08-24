@@ -581,6 +581,7 @@ describe("Loopgraph MCP server", () => {
       "loopgraph://schemas/routing-card",
       "loopgraph://schemas/routing-decision",
       "loopgraph://schemas/routing-learning-context",
+      "loopgraph://schemas/routing-learning-context-binding",
       "loopgraph://graph/company"
     ]);
 
@@ -729,6 +730,7 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/routing-card" }),
           expect.objectContaining({ uri: "loopgraph://schemas/routing-decision" }),
           expect.objectContaining({ uri: "loopgraph://schemas/routing-learning-context" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/routing-learning-context-binding" }),
           expect.objectContaining({ uri: "loopgraph://schemas/evidence-gap-set" }),
           expect.objectContaining({ uri: "loopgraph://schemas/hermes-design-task" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-opportunity" }),

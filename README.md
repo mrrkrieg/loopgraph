@@ -76,7 +76,7 @@ For every verified event, Hermes can ask:
 6. Is there one clear route, or is explicit fan-out permitted?
 7. Should Hermes abstain and request more context or human judgment?
 
-Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run.
+Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run. Every new Hermes decision can echo the learning-context digest returned by ingest; Loopgraph recomputes it, rejects stale evidence, and stores the exact bounded evidence packet with the durable routing attempt.
 
 ## Product example
 
