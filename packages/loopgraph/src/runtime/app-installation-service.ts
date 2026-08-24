@@ -1,14 +1,19 @@
-import { cp, readFile, rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
+  APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
+  APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
+  appActivationGateSchema,
   appActivationApprovalReceiptSchema,
+  appConfigurationSchema,
   appIdSchema,
   appEvalJudgmentSchema,
+  appEvidenceRenewalPlanSchema,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
@@ -21,16 +26,19 @@ import {
   canonicalAppDigest,
   contentHash,
   loopSpecVersionHash,
+  type AppActivationGate,
   type AppConfigField,
   type AppConnectorOperationBinding,
   type AppConfiguration,
   type AppActivationApprovalReceipt,
   type AppEvalRun,
+  type AppEvidenceRenewalPlan,
   type AppEvalJudgment,
   type AppHistoricalReplayRequest,
   type AppInstallPlan,
   type AppInstallationLock,
   type AppLifecycleReceipt,
+  type AppOperationalMaturityAssessment,
   type AppOverlay,
   type AppOperationResolution,
   type AppReadiness,
@@ -44,7 +52,12 @@ import {
 } from "../core";
 import { appSetupDefinitionSchema } from "../core/app-pack-content";
 import { compileLoopPack } from "./app-pack-compiler";
-import { loadLoopPackDirectory, type LoopPackLoadResult } from "./app-pack-loader";
+import type { LoopPackLoadResult } from "./app-pack-loader";
+import {
+  appSnapshotFilesDigest,
+  FileAppSnapshotStore,
+  type AppSnapshotStore
+} from "./app-snapshot-store";
 import {
   loadConnectorRecipes,
   resolveConnectorCapabilities,
@@ -62,7 +75,8 @@ import {
 import {
   FileLoopSpecRegistryStore,
   createStoredLoopSpecArtifact,
-  type LoopSpecRegistryStore
+  type LoopSpecRegistryStore,
+  type StoredLoopSpecArtifact
 } from "./loop-spec-store";
 import {
   type LoopgraphWorkspaceRegistry
@@ -80,6 +94,29 @@ import {
   runAppHistoricalReplay,
   runAppSyntheticConformance
 } from "./app-quality-engine";
+import { assessAppOperationalMaturity } from "./app-operational-maturity";
+import {
+  APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS,
+  APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS,
+  appEvidenceFreshnessFailure,
+  historicalReplayEvidenceTimestamp,
+  type TimestampedAppEvidence
+} from "./app-evidence-freshness";
+import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
+import {
+  getHermesRouteActivationStatus,
+  type HermesRouteActivationStatus
+} from "./hermes-route-activation";
+import {
+  doctorHermesWebhookRoutes,
+  type HermesWebhookDoctorResult
+} from "./hermes-webhooks";
+import {
+  FileAppVerificationStore,
+  type AppVerificationRegistry,
+  type AppVerificationStore
+} from "./app-verification-store";
 import { assertSecretFree } from "./secret-redaction";
 
 export type PlanAppInstallationInput = {
@@ -163,11 +200,32 @@ type PrepareLifecycleOperationInput = Omit<AppLifecycleOperation, "status" | "st
   now: Date;
 };
 
+type AppOperationalEvidenceSnapshot = {
+  completedRunRefs: string[];
+  observedOutcomeRefs: string[];
+  observedValueRefs: string[];
+  latestCompletedRun?: TimestampedAppEvidence;
+  latestObservedOutcome?: TimestampedAppEvidence;
+  latestObservedValue?: TimestampedAppEvidence;
+};
+
 export class AppInstallationService {
   private readonly installationStore: AppInstallationStore;
   private readonly contextStore: CompanyContextStore;
   private readonly mappingStore: ConnectorFieldMappingStore;
   private readonly loopSpecStore: LoopSpecRegistryStore;
+  private readonly snapshotStore: AppSnapshotStore;
+  private readonly outcomeStore: OutcomeStore;
+  private readonly operationsStore: HermesOperationsStore;
+  private readonly verificationStore: AppVerificationStore;
+  private readonly routeActivationStatusProvider: (input: {
+    projectRoot?: string;
+    now?: Date;
+  }) => Promise<HermesRouteActivationStatus>;
+  private readonly webhookDoctorProvider: (input: {
+    projectRoot?: string;
+    now?: Date;
+  }) => Promise<HermesWebhookDoctorResult>;
 
   constructor(
     private readonly marketplace: LocalAppMarketplace,
@@ -179,6 +237,18 @@ export class AppInstallationService {
       contextStore?: CompanyContextStore;
       mappingStore?: ConnectorFieldMappingStore;
       loopSpecStore?: LoopSpecRegistryStore;
+      snapshotStore?: AppSnapshotStore;
+      outcomeStore?: OutcomeStore;
+      operationsStore?: HermesOperationsStore;
+      verificationStore?: AppVerificationStore;
+      routeActivationStatusProvider?: (input: {
+        projectRoot?: string;
+        now?: Date;
+      }) => Promise<HermesRouteActivationStatus>;
+      webhookDoctorProvider?: (input: {
+        projectRoot?: string;
+        now?: Date;
+      }) => Promise<HermesWebhookDoctorResult>;
     } = {}
   ) {
     const appsRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps");
@@ -186,10 +256,17 @@ export class AppInstallationService {
     this.contextStore = dependencies.contextStore ?? new FileCompanyContextStore(path.join(appsRoot, "company-context.json"));
     this.mappingStore = dependencies.mappingStore ?? new FileConnectorFieldMappingStore(path.join(appsRoot, "field-mappings.json"), workspaceId);
     this.loopSpecStore = dependencies.loopSpecStore ?? new FileLoopSpecRegistryStore(projectRoot);
+    this.snapshotStore = dependencies.snapshotStore ?? new FileAppSnapshotStore(projectRoot);
+    this.outcomeStore = dependencies.outcomeStore ?? new FileOutcomeStore(path.join(path.resolve(projectRoot), ".loopgraph"));
+    this.operationsStore = dependencies.operationsStore ?? new FileHermesOperationsStore(path.join(path.resolve(projectRoot), ".loopgraph"));
+    this.verificationStore = dependencies.verificationStore ?? new FileAppVerificationStore(appsRoot, workspaceId);
+    this.routeActivationStatusProvider = dependencies.routeActivationStatusProvider ?? getHermesRouteActivationStatus;
+    this.webhookDoctorProvider = dependencies.webhookDoctorProvider ?? doctorHermesWebhookRoutes;
   }
 
   private async prepareLifecycleOperation(input: PrepareLifecycleOperationInput): Promise<AppLifecycleOperation> {
     return this.installationStore.withExclusiveUpdate(async (registry) => {
+      assertLifecyclePreparationSource(registry, input);
       const existing = registry.lifecycleOperations.find((operation) => operation.id === input.id);
       if (existing) {
         assertSameLifecycleOperation(existing, input);
@@ -215,7 +292,7 @@ export class AppInstallationService {
       const conflicting = registry.lifecycleOperations.find((operation) =>
         operation.installationId === input.installationId && operation.status !== "completed");
       if (conflicting) {
-        throw new Error(`App lifecycle operation ${conflicting.id} requires reconciliation before another operation can start`);
+        throw new Error(`App lifecycle operation ${conflicting.id} must be reconciled before another operation can start`);
       }
       const timestamp = input.now.toISOString();
       const { now: _now, ...operationInput } = input;
@@ -616,169 +693,590 @@ export class AppInstallationService {
 
   async configure(input: ConfigureAppInstallationInput): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, input.installationId);
-      if (canonicalAppDigest(installation.configuration) !== input.expectedConfigurationDigest) {
-        throw new Error("Installed app configuration changed; create a fresh configure request");
-      }
-      const resolution = resolveAppConfiguration({
-        appId: installation.appId,
-        version: installation.version,
-        fields: installation.configuration.fields,
-        installValues: { ...installation.configuration.values, ...input.values },
-        overlay: installation.overlay,
-        now
-      });
-      if (resolution.missing.length > 0 || resolution.needsConfirmation.length > 0) {
-        throw new Error(`Configuration remains incomplete: ${[
-          ...resolution.missing.map((field) => field.key),
-          ...resolution.needsConfirmation.map(({ field }) => `confirmation:${field.key}`)
-        ].join(", ")}`);
-      }
-      const timestamp = now.toISOString();
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        configuration: resolution.configuration,
-        state: "ready_to_test",
-        mode: "simulation",
-        history: appendHistory(installation, input.actor, "configure", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "configure",
-        actor: input.actor,
-        reason: "Applied confirmed company configuration and reset the app to write-blocked testing.",
-        evidenceRetained: true,
-        reversible: true,
-        createdAt: timestamp
-      });
+    const valuesDigest = canonicalAppDigest(input.values);
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "configure" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.actor === input.actor &&
+      candidate.configure?.sourceConfigurationDigest === input.expectedConfigurationDigest &&
+      candidate.configure.valuesDigest === valuesDigest &&
+      observedInstallation !== undefined &&
+      canonicalAppDigest(observedInstallation) === candidate.configure.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!receipt || !observedInstallation) throw new Error("Completed configure operation is missing its durable result");
+      assertConfigureReplayAuthority(completed, receipt, observedInstallation, input.actor, input.expectedConfigurationDigest, valuesDigest);
+      return { installation: observedInstallation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const installation = requireInstallation(observedRegistry, input.installationId);
+    const sourceConfigurationDigest = canonicalAppDigest(installation.configuration);
+    if (sourceConfigurationDigest !== input.expectedConfigurationDigest) {
+      throw new Error("Installed app configuration changed; create a fresh configure request");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(installation);
+    const idempotencyKey = canonicalAppDigest({
+      action: "configure",
+      installationId: installation.id,
+      actor: input.actor,
+      sourceInstallationDigest,
+      sourceConfigurationDigest,
+      valuesDigest
     });
+    const operationId = lifecycleOperationId("configure", installation.id, installation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const conflictingOperation = observedRegistry.lifecycleOperations.find((candidate) =>
+      candidate.installationId === installation.id && candidate.status !== "completed" && candidate.id !== operationId);
+    if (conflictingOperation) {
+      throw new Error(`App lifecycle operation ${conflictingOperation.id} must be reconciled before another operation can run`);
+    }
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const operationTime = new Date(timestamp);
+    const resolution = resolveAppConfiguration({
+      appId: installation.appId,
+      version: installation.version,
+      fields: installation.configuration.fields,
+      installValues: { ...installation.configuration.values, ...input.values },
+      overlay: installation.overlay,
+      now: operationTime
+    });
+    if (resolution.missing.length > 0 || resolution.needsConfirmation.length > 0) {
+      throw new Error(`Configuration remains incomplete: ${[
+        ...resolution.missing.map((field) => field.key),
+        ...resolution.needsConfirmation.map(({ field }) => `confirmation:${field.key}`)
+      ].join(", ")}`);
+    }
+    const updated: WorkspaceAppInstallation = {
+      ...installation,
+      configuration: resolution.configuration,
+      state: "ready_to_test",
+      mode: "simulation",
+      history: appendHistory(installation, input.actor, "configure", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: installation.id,
+      appId: installation.appId,
+      action: "configure",
+      targetArtifactDigest: installation.artifactDigest,
+      desired: { loopIds: [], fieldMappingIds: [], companyContextKeys: [] },
+      configure: existingOperation?.configure ?? {
+        fromUpdatedAt: installation.updatedAt,
+        sourceConfigurationDigest,
+        sourceInstallationDigest,
+        valuesDigest,
+        targetConfigurationDigest: canonicalAppDigest(updated.configuration),
+        targetInstallationDigest: canonicalAppDigest(updated)
+      },
+      actor: input.actor,
+      now
+    });
+    if (!operation.configure) throw new Error(`App configure recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const currentInstallation = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.configure || currentOperation.status === "completed") {
+          throw new Error(`App configure recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.configure;
+        const currentResolution = resolveAppConfiguration({
+          appId: currentInstallation.appId,
+          version: currentInstallation.version,
+          fields: currentInstallation.configuration.fields,
+          installValues: { ...currentInstallation.configuration.values, ...input.values },
+          overlay: currentInstallation.overlay,
+          now: new Date(currentOperation.startedAt)
+        });
+        if (currentResolution.missing.length > 0 || currentResolution.needsConfirmation.length > 0) {
+          throw new Error("Configuration recovery no longer resolves to a complete confirmed configuration");
+        }
+        const currentUpdated: WorkspaceAppInstallation = {
+          ...currentInstallation,
+          configuration: currentResolution.configuration,
+          state: "ready_to_test",
+          mode: "simulation",
+          history: appendHistory(currentInstallation, input.actor, "configure", currentOperation.startedAt),
+          updatedAt: currentOperation.startedAt,
+          failureReason: undefined
+        };
+        if (
+          currentOperation.action !== "configure" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== currentInstallation.appId ||
+          currentOperation.targetArtifactDigest !== currentInstallation.artifactDigest ||
+          currentInstallation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(currentInstallation.configuration) !== recovery.sourceConfigurationDigest ||
+          canonicalAppDigest(currentInstallation) !== recovery.sourceInstallationDigest ||
+          recovery.sourceConfigurationDigest !== input.expectedConfigurationDigest ||
+          recovery.valuesDigest !== valuesDigest ||
+          canonicalAppDigest(currentUpdated.configuration) !== recovery.targetConfigurationDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest
+        ) {
+          throw new Error("App configure recovery record does not match the current installation or exact confirmed values");
+        }
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "configure",
+          actor: input.actor,
+          reason: "Applied confirmed company configuration and reset the app to write-blocked testing.",
+          evidenceRetained: true,
+          reversible: true,
+          createdAt: currentOperation.startedAt
+        });
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async applyOverlay(input: ApplyAppOverlayInput): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, input.installationId);
-      if (installation.artifactDigest !== input.expectedArtifactDigest) {
-        throw new Error("Installed artifact changed; create a fresh overlay request");
-      }
-      if ((installation.overlay?.revision ?? 0) !== (input.expectedOverlayRevision ?? 0)) {
-        throw new Error("Installed app overlay revision changed; reload before editing");
-      }
-      const loaded = await this.loadInstallationArtifact(installation);
-      validateOverlayOperations(input.operations, loaded, installation.configuration.fields.map((field) => field.key));
-      const timestamp = now.toISOString();
-      const overlay = appOverlaySchema.parse({
-        schemaVersion: "loopgraph-app-configuration/v1alpha1",
-        id: `overlay.${contentHash({ installationId: installation.id, revision: (installation.overlay?.revision ?? 0) + 1, operations: input.operations })}`,
-        installationId: installation.id,
-        basedOnVersion: installation.version,
-        basedOnDigest: installation.artifactDigest,
-        revision: (installation.overlay?.revision ?? 0) + 1,
-        operations: input.operations,
-        createdAt: timestamp,
-        createdBy: input.actor
-      });
-      const selectedModules = applyModuleOverlay(loaded.manifest.modules, installation.selectedModules, overlay.operations);
-      const compiled = await compileLoopPack(loaded, { selectedModules });
-      const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
-      const configuration = resolveAppConfiguration({
-        appId: installation.appId,
-        version: installation.version,
-        fields: installation.configuration.fields,
-        installValues: installation.configuration.values,
-        overlay,
-        now
-      }).configuration;
-      const namespace = installationNamespace(installation);
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
-      for (const asset of ownedAssets) {
-        const existing = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
-        if (existing && existing.digest !== asset.digest && existing.ownerInstallationIds.some((ownerId) => ownerId !== installation.id)) {
-          throw new Error(`Module composition conflicts with shared asset ${asset.assetId}; create a fresh install plan`);
-        }
-      }
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-overlay-${overlay.id}`,
-        idempotencyKey: canonicalAppDigest({ action: "overlay", installationId: installation.id, overlay }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        overlay,
-        selectedModules,
-        configuration,
-        permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
-        ownedAssets,
-        state: "ready_to_test",
-        mode: "simulation",
-        history: appendHistory(installation, input.actor, "overlay", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "overlay",
-        actor: input.actor,
-        reason: "Applied the version-bound overlay and atomically rematerialized the selected module composition without mutating the pinned LoopPack.",
-        evidenceRetained: true,
-        reversible: true,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, ownedAssets));
+    const expectedOverlayRevision = input.expectedOverlayRevision ?? 0;
+    const operationsDigest = canonicalAppDigest(input.operations);
+    const observedRegistry = await this.installationStore.read();
+    const observedCurrentInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "overlay" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.actor === input.actor &&
+      candidate.overlay?.sourceArtifactDigest === input.expectedArtifactDigest &&
+      candidate.overlay.expectedOverlayRevision === expectedOverlayRevision &&
+      candidate.overlay.operationsDigest === operationsDigest &&
+      observedCurrentInstallation !== undefined &&
+      canonicalAppDigest(observedCurrentInstallation) === candidate.overlay.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!receipt || !observedCurrentInstallation) throw new Error("Completed overlay operation is missing its durable result");
+      assertOverlayReplayAuthority(
+        completed,
+        receipt,
+        observedCurrentInstallation,
+        input.actor,
+        input.expectedArtifactDigest,
+        expectedOverlayRevision,
+        operationsDigest
+      );
+      return { installation: observedCurrentInstallation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const installation = requireInstallation(observedRegistry, input.installationId);
+    if (installation.artifactDigest !== input.expectedArtifactDigest) {
+      throw new Error("Installed artifact changed; create a fresh overlay request");
+    }
+    if ((installation.overlay?.revision ?? 0) !== expectedOverlayRevision) {
+      throw new Error("Installed app overlay revision changed; reload before editing");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(installation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, installation.id);
+    const idempotencyKey = canonicalAppDigest({
+      action: "overlay",
+      workspaceId: this.workspaceId,
+      installationId: installation.id,
+      actor: input.actor,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      expectedOverlayRevision,
+      operationsDigest
     });
+    const operationId = lifecycleOperationId("overlay", installation.id, installation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const conflictingOperation = observedRegistry.lifecycleOperations.find((candidate) =>
+      candidate.installationId === installation.id && candidate.status !== "completed" && candidate.id !== operationId);
+    if (conflictingOperation) {
+      throw new Error(`App lifecycle operation ${conflictingOperation.id} must be reconciled before another operation can run`);
+    }
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const operationTime = new Date(timestamp);
+    const loaded = await this.loadInstallationArtifact(installation);
+    validateOverlayOperations(input.operations, loaded, installation.configuration.fields.map((field) => field.key));
+    const overlay = appOverlaySchema.parse({
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      id: `overlay.${contentHash({ installationId: installation.id, revision: expectedOverlayRevision + 1, operations: input.operations })}`,
+      installationId: installation.id,
+      basedOnVersion: installation.version,
+      basedOnDigest: installation.artifactDigest,
+      revision: expectedOverlayRevision + 1,
+      operations: input.operations,
+      createdAt: timestamp,
+      createdBy: input.actor
+    });
+    const selectedModules = applyModuleOverlay(loaded.manifest.modules, installation.selectedModules, overlay.operations);
+    const compiled = await compileLoopPack(loaded, { selectedModules });
+    const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
+    const configuration = resolveAppConfiguration({
+      appId: installation.appId,
+      version: installation.version,
+      fields: installation.configuration.fields,
+      installValues: installation.configuration.values,
+      overlay,
+      now: operationTime
+    }).configuration;
+    const namespace = installationNamespace(installation);
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      installation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
+    for (const asset of ownedAssets) {
+      const existing = observedRegistry.assets.find((candidate) => candidate.assetId === asset.assetId);
+      if (existing && existing.digest !== asset.digest && existing.ownerInstallationIds.some((ownerId) => ownerId !== installation.id)) {
+        throw new Error(`Module composition conflicts with shared asset ${asset.assetId}; create a fresh install plan`);
+      }
+    }
+    const updated: WorkspaceAppInstallation = {
+      ...installation,
+      overlay,
+      selectedModules,
+      configuration,
+      permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+      ownedAssets,
+      state: "ready_to_test",
+      mode: "simulation",
+      history: appendHistory(installation, input.actor, "overlay", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, installation.id, ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopIds = existingOperation?.overlay?.sourceLoopIds ?? installationLoopIds(observedWorkspace.workspace, installation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: installation.id,
+      appId: installation.appId,
+      action: "overlay",
+      targetArtifactDigest: installation.artifactDigest,
+      desired: existingOperation?.desired ?? { loopIds: targetLoopIds, fieldMappingIds: [], companyContextKeys: [] },
+      overlay: existingOperation?.overlay ?? {
+        fromUpdatedAt: installation.updatedAt,
+        sourceArtifactDigest: installation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        expectedOverlayRevision,
+        operationsDigest,
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, installation.id),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now
+    });
+    if (!operation.overlay) throw new Error(`App overlay recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const currentInstallation = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.overlay || currentOperation.status === "completed") {
+          throw new Error(`App overlay recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.overlay;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, currentInstallation.id, ownedAssets);
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "overlay" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== currentInstallation.appId ||
+          currentOperation.targetArtifactDigest !== input.expectedArtifactDigest ||
+          recovery.sourceArtifactDigest !== input.expectedArtifactDigest ||
+          recovery.expectedOverlayRevision !== expectedOverlayRevision ||
+          recovery.operationsDigest !== operationsDigest ||
+          currentInstallation.artifactDigest !== recovery.sourceArtifactDigest ||
+          (currentInstallation.overlay?.revision ?? 0) !== recovery.expectedOverlayRevision ||
+          currentInstallation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(currentInstallation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, currentInstallation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, currentInstallation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds)
+        ) {
+          throw new Error("App overlay recovery record does not match the current installation or exact overlay operations");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, currentInstallation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after overlay recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, currentInstallation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Overlay LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "overlay",
+          actor: input.actor,
+          reason: "Applied the version-bound overlay and atomically rematerialized the selected module composition without mutating the pinned LoopPack.",
+          evidenceRetained: true,
+          reversible: true,
+          removedAssetIds: currentInstallation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
-  async repair(installationId: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      const loaded = await this.loadInstallationArtifact(installation);
-      const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
-      const activeCapabilities = assertInstalledCompositionAuthority(compiled, installation);
-      const timestamp = now.toISOString();
-      const namespace = installationNamespace(installation);
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-repair-${contentHash({ installationId, digest: installation.artifactDigest, timestamp })}`,
-        idempotencyKey: canonicalAppDigest({ action: "repair", installationId, digest: installation.artifactDigest, timestamp }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, installation.ownedAssets);
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        state: "ready_to_test",
-        mode: "simulation",
-        permissions: installation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
-        ownedAssets,
-        history: appendHistory(installation, actor, "repair", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "repair",
-        actor,
-        reason: "Recompiled the pinned immutable artifact and restored generated assets in write-blocked test mode.",
-        evidenceRetained: true,
-        reversible: true,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, ownedAssets));
+  async repair(input: {
+    installationId: string;
+    actor: string;
+    expectedArtifactDigest: string;
+    expectedUpdatedAt: string;
+    now?: Date;
+  }): Promise<AppLifecycleMutationResult> {
+    const now = input.now ?? new Date();
+    const observedRegistry = await this.installationStore.read();
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) => {
+      const repair = candidate.repair;
+      return candidate.action === "repair" &&
+        candidate.installationId === input.installationId &&
+        repair !== undefined &&
+        repair.fromUpdatedAt === input.expectedUpdatedAt &&
+        repair.sourceArtifactDigest === input.expectedArtifactDigest &&
+        candidate.status === "completed";
     });
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      const installation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+      if (!receipt || !installation) throw new Error("Completed repair operation is missing its durable result");
+      assertRepairReplayAuthority(completed, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const observedInstallation = requireInstallation(observedRegistry, input.installationId);
+    if (observedInstallation.artifactDigest !== input.expectedArtifactDigest) {
+      throw new Error("Installed app changed; create a fresh repair request");
+    }
+    if (observedInstallation.updatedAt !== input.expectedUpdatedAt) {
+      throw new Error("Installed app revision changed; create a fresh repair request");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, observedInstallation.id);
+    const idempotencyKey = canonicalAppDigest({
+      action: "repair",
+      workspaceId: this.workspaceId,
+      installationId: observedInstallation.id,
+      sourceInstallationDigest,
+      sourceOwnershipDigest
+    });
+    const operationId = lifecycleOperationId("repair", observedInstallation.id, observedInstallation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? new Date(
+      Math.max(now.getTime(), Date.parse(observedInstallation.updatedAt) + 1)
+    ).toISOString();
+    const effectiveNow = new Date(Math.max(now.getTime(), Date.parse(timestamp)));
+    const loaded = await this.loadInstallationArtifact(observedInstallation);
+    const compiled = await compileLoopPack(loaded, { selectedModules: observedInstallation.selectedModules });
+    const activeCapabilities = assertInstalledCompositionAuthority(compiled, observedInstallation);
+    const namespace = installationNamespace(observedInstallation);
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      observedInstallation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const ownedAssets = ownershipFromCompiled(compiled, observedInstallation.id, namespace, observedInstallation.ownedAssets);
+    const updated: WorkspaceAppInstallation = {
+      ...observedInstallation,
+      state: "ready_to_test",
+      mode: "simulation",
+      permissions: observedInstallation.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+      ownedAssets,
+      history: appendHistory(observedInstallation, input.actor, "repair", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, observedInstallation.id, ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopIds = existingOperation?.repair?.sourceLoopIds ?? installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: observedInstallation.id,
+      appId: observedInstallation.appId,
+      action: "repair",
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...observedInstallation.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(observedInstallation.configuration).sort()
+      },
+      repair: existingOperation?.repair ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceArtifactDigest: observedInstallation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopObservedInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, observedInstallation.id),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now: effectiveNow
+    });
+    if (!operation.repair) throw new Error(`App repair recovery record is incomplete: ${operation.id}`);
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      const receipt = operation.resultReceiptId
+        ? registry.lifecycleReceipts.find((candidate) => candidate.id === operation.resultReceiptId)
+        : undefined;
+      const installation = registry.installations.find((candidate) => candidate.id === input.installationId);
+      if (!receipt || !installation) throw new Error("Completed repair operation is missing its durable result");
+      assertRepairReplayAuthority(operation, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      return { installation, receipt, lock: createInstallationLock(registry) };
+    }
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.repair || currentOperation.status === "completed") {
+          throw new Error(`App repair recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.repair;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, installation.id, ownedAssets);
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "repair" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== installation.artifactDigest ||
+          installation.artifactDigest !== recovery.sourceArtifactDigest ||
+          installation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, installation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...installation.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(installation.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App repair recovery record does not match the current installation or pinned artifact");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopObservedInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after repair recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Repair LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "repair",
+          actor: input.actor,
+          reason: "Recompiled the pinned immutable artifact and restored generated assets in write-blocked test mode.",
+          evidenceRetained: true,
+          reversible: true,
+          removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, effectiveNow, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, effectiveNow);
+      throw error;
+    }
   }
 
   async duplicate(input: {
@@ -786,122 +1284,306 @@ export class AppInstallationService {
     derivedAppId: string;
     overlayOperations?: AppOverlay["operations"];
     actor: string;
+    expectedArtifactDigest: string;
+    expectedUpdatedAt: string;
     now?: Date;
   }): Promise<AppLifecycleMutationResult> {
     const now = input.now ?? new Date();
     const derivedAppId = appIdSchema.parse(input.derivedAppId);
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const source = requireOperableInstallation(registry, input.installationId);
-      if (registry.installations.some((installation) => installation.derivation?.derivedAppId === derivedAppId)) {
-        throw new Error(`Private derived app already exists: ${derivedAppId}`);
-      }
-      const timestamp = now.toISOString();
-      const installationId = installationIdFor(this.workspaceId, `${source.appId}:${derivedAppId}`);
-      const loaded = await this.loadInstallationArtifact(source);
-      const namespace = contentHash({ installationId }).slice(0, 10);
-      const overlay = appOverlaySchema.parse({
-        schemaVersion: "loopgraph-app-configuration/v1alpha1",
-        id: `overlay.${contentHash({ installationId, operations: input.overlayOperations ?? [] })}`,
-        installationId,
-        basedOnVersion: source.version,
-        basedOnDigest: source.artifactDigest,
-        revision: 1,
-        operations: input.overlayOperations ?? [],
+    const overlayOperations = input.overlayOperations ?? [];
+    const operationsDigest = canonicalAppDigest(overlayOperations);
+    const observedRegistry = await this.installationStore.read();
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "duplicate" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.duplicate?.derivedAppId === derivedAppId &&
+      candidate.duplicate.operationsDigest === operationsDigest &&
+      candidate.duplicate.fromUpdatedAt === input.expectedUpdatedAt &&
+      candidate.duplicate.sourceArtifactDigest === input.expectedArtifactDigest
+    );
+    if (completed?.duplicate) {
+      const target = observedRegistry.installations.find((candidate) => candidate.id === completed.duplicate?.targetInstallationId);
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!target || !receipt) throw new Error("Completed duplicate operation is missing its durable result");
+      assertDuplicateReplayAuthority(completed, receipt, target, input.actor, derivedAppId, operationsDigest, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      return { installation: target, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const source = requireInstallation(observedRegistry, input.installationId);
+    if (source.artifactDigest !== input.expectedArtifactDigest) throw new Error("Source App changed; create a fresh duplicate request");
+    if (source.updatedAt !== input.expectedUpdatedAt) throw new Error("Source App revision changed; create a fresh duplicate request");
+    const targetInstallationId = installationIdFor(this.workspaceId, `${source.appId}:${derivedAppId}`);
+    const conflictingTarget = observedRegistry.installations.find((installation) =>
+      installation.id === targetInstallationId || installation.derivation?.derivedAppId === derivedAppId);
+    if (conflictingTarget) throw new Error(`Private derived app already exists: ${derivedAppId}`);
+
+    const sourceInstallationDigest = canonicalAppDigest(source);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, source.id);
+    const sourceMappings = await this.mappingStore.list();
+    const sourceFieldMappingsDigest = fieldMappingInventoryDigest(sourceMappings, source.fieldMappingIds);
+    const idempotencyKey = canonicalAppDigest({
+      action: "duplicate",
+      workspaceId: this.workspaceId,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      sourceFieldMappingsDigest,
+      derivedAppId,
+      operationsDigest
+    });
+    const operationId = lifecycleOperationId("duplicate", source.id, source.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? new Date(
+      Math.max(now.getTime(), Date.parse(source.updatedAt) + 1)
+    ).toISOString();
+    const operationTime = new Date(timestamp);
+    const loaded = await this.loadInstallationArtifact(source);
+    const namespace = contentHash({ installationId: targetInstallationId }).slice(0, 10);
+    const overlay = appOverlaySchema.parse({
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      id: `overlay.${contentHash({ installationId: targetInstallationId, operations: overlayOperations })}`,
+      installationId: targetInstallationId,
+      basedOnVersion: source.version,
+      basedOnDigest: source.artifactDigest,
+      revision: 1,
+      operations: overlayOperations,
+      createdAt: timestamp,
+      createdBy: input.actor
+    });
+    validateOverlayOperations(overlay.operations, loaded, source.configuration.fields.map((field) => field.key));
+    const selectedModules = applyModuleOverlay(loaded.manifest.modules, source.selectedModules, overlay.operations);
+    const compiled = await compileLoopPack(loaded, { selectedModules });
+    const activeCapabilities = assertInstalledCompositionAuthority(compiled, source);
+    const resolvedConfiguration = resolveAppConfiguration({
+      appId: source.appId,
+      version: source.version,
+      fields: source.configuration.fields,
+      installValues: source.configuration.values,
+      overlay,
+      now: operationTime
+    }).configuration;
+    const overlaidValueKeys = new Set(overlay.operations.flatMap((operation) =>
+      "path" in operation && operation.path.startsWith("/values/")
+        ? [decodePointerToken(operation.path.slice("/values/".length))]
+        : []));
+    const configuration = appConfigurationSchema.parse({
+      ...resolvedConfiguration,
+      provenance: Object.fromEntries(Object.keys(resolvedConfiguration.values).map((key) => [
+        key,
+        overlaidValueKeys.has(key)
+          ? resolvedConfiguration.provenance[key]
+          : source.configuration.provenance[key] ?? resolvedConfiguration.provenance[key]
+      ]))
+    });
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      targetInstallationId,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const contextKeys = companyContextKeys(configuration);
+    if (contextKeys.length > 0) {
+      const context = await this.contextStore.get(this.workspaceId, this.companyId);
+      assertCompanyContextStillMatches(configuration, context);
+    }
+    const ownedAssets = ownershipFromCompiled(compiled, targetInstallationId, namespace, source.ownedAssets);
+    const duplicate: WorkspaceAppInstallation = {
+      ...source,
+      id: targetInstallationId,
+      state: "ready_to_test",
+      mode: "simulation",
+      selectedModules,
+      configuration,
+      permissions: source.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
+      overlay,
+      ownedAssets,
+      derivation: {
+        derivedAppId,
+        upstreamAppId: source.appId,
+        upstreamVersion: source.version,
+        upstreamDigest: source.artifactDigest,
+        parentInstallationId: source.id,
         createdAt: timestamp,
         createdBy: input.actor
-      });
-      validateOverlayOperations(overlay.operations, loaded, source.configuration.fields.map((field) => field.key));
-      const selectedModules = applyModuleOverlay(loaded.manifest.modules, source.selectedModules, overlay.operations);
-      const compiled = await compileLoopPack(loaded, { selectedModules });
-      const activeCapabilities = assertInstalledCompositionAuthority(compiled, source);
-      const configuration = resolveAppConfiguration({
-        appId: source.appId,
-        version: source.version,
-        fields: source.configuration.fields,
-        installValues: source.configuration.values,
-        overlay,
-        now
-      }).configuration;
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installationId, loaded.manifest.metadata.department, timestamp, namespace);
-      const contextKeys = companyContextKeys(source.configuration);
-      const context = contextKeys.length > 0
-        ? await this.contextStore.get(this.workspaceId, this.companyId)
-        : undefined;
-      if (context) assertCompanyContextStillMatches(source.configuration, context);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-duplicate-${contentHash({ installationId, timestamp })}`,
-        idempotencyKey: canonicalAppDigest({ action: "duplicate", installationId, digest: source.artifactDigest, timestamp }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts
-      });
-      const ownedAssets = ownershipFromCompiled(compiled, installationId, namespace, source.ownedAssets);
-      const duplicate: WorkspaceAppInstallation = {
-        ...source,
-        id: installationId,
-        state: "ready_to_test",
-        mode: "simulation",
-        selectedModules,
-        configuration,
-        permissions: source.permissions.filter((permission) => activeCapabilities.has(permission.capability)),
-        overlay,
-        ownedAssets,
-        derivation: {
-          derivedAppId,
-          upstreamAppId: source.appId,
-          upstreamVersion: source.version,
-          upstreamDigest: source.artifactDigest,
-          parentInstallationId: source.id,
-          createdAt: timestamp,
-          createdBy: input.actor
-        },
-        history: [],
-        installedAt: timestamp,
-        updatedAt: timestamp,
-        installedBy: input.actor,
-        lastHealthyAt: undefined,
-        failureReason: undefined
-      };
-      const nextRevision = registry.revision + 1;
-      const receipt = createLifecycleReceipt(registry, {
-        installationId,
-        action: "duplicate",
-        actor: input.actor,
-        reason: "Created an independently configurable private derived installation with namespaced LoopSpecs.",
-        previousArtifactDigest: source.artifactDigest,
-        resultingArtifactDigest: duplicate.artifactDigest,
-        evidenceRetained: true,
-        reversible: true,
-        createdAt: timestamp,
-        resultingRevision: nextRevision
-      });
-      const nextRegistry: AppInstallationRegistry = {
-        ...registry,
-        revision: nextRevision,
-        installations: [...registry.installations, duplicate].sort((left, right) => left.id.localeCompare(right.id)),
-        assets: mergeAssetOwnership(registry.assets, ownedAssets),
-        lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
-        updatedAt: timestamp
-      };
-      if (duplicate.fieldMappingIds.length > 0) {
-        await this.mappingStore.attachInstallation(duplicate.fieldMappingIds, installationId);
-      }
-      if (context && contextKeys.length > 0) {
-        await this.contextStore.attachConsumer({
-          workspaceId: this.workspaceId,
-          companyId: this.companyId,
-          contextKeys,
-          installationId,
-          expectedRevision: context.revision,
-          actor: input.actor,
-          now
-        });
-      }
-      const lock = createInstallationLock(nextRegistry);
-      return { registry: nextRegistry, lock, value: { installation: duplicate, receipt, lock } };
+      },
+      history: [],
+      installedAt: timestamp,
+      updatedAt: timestamp,
+      installedBy: input.actor,
+      lastHealthyAt: undefined,
+      failureReason: undefined
+    };
+    const targetRegistry = {
+      ...observedRegistry,
+      assets: mergeAssetOwnership(observedRegistry.assets, ownedAssets)
+    };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    if (!existingOperation && installationLoopIds(observedWorkspace.workspace, targetInstallationId).length > 0) {
+      throw new Error("Private derived App target namespace already contains LoopSpecs");
+    }
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: source.id,
+      appId: source.appId,
+      action: "duplicate",
+      targetArtifactDigest: source.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...source.fieldMappingIds].sort(),
+        companyContextKeys: contextKeys
+      },
+      duplicate: existingOperation?.duplicate ?? {
+        fromUpdatedAt: source.updatedAt,
+        sourceArtifactDigest: source.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceFieldMappingsDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        derivedAppId,
+        operationsDigest,
+        targetInstallationId,
+        targetInstallationDigest: canonicalAppDigest(duplicate),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, targetInstallationId),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now: operationTime
     });
+    if (!operation.duplicate) throw new Error(`App duplicate recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const currentSource = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.duplicate || currentOperation.status === "completed") {
+          throw new Error(`App duplicate recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.duplicate;
+        if (
+          currentOperation.action !== "duplicate" ||
+          currentOperation.actor !== input.actor ||
+          currentSource.updatedAt !== recovery.fromUpdatedAt ||
+          currentSource.artifactDigest !== recovery.sourceArtifactDigest ||
+          canonicalAppDigest(currentSource) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, currentSource.id) !== recovery.sourceOwnershipDigest ||
+          recovery.derivedAppId !== derivedAppId ||
+          recovery.operationsDigest !== operationsDigest ||
+          recovery.targetInstallationId !== targetInstallationId ||
+          canonicalAppDigest(duplicate) !== recovery.targetInstallationDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...currentSource.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(configuration)) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App duplicate recovery record does not match the exact source or derived target");
+        }
+        if (registry.installations.some((candidate) =>
+          candidate.id === targetInstallationId || candidate.derivation?.derivedAppId === derivedAppId)) {
+          throw new Error(`Private derived app already exists outside this recovery: ${derivedAppId}`);
+        }
+        const currentMappings = await this.mappingStore.list();
+        if (fieldMappingInventoryDigest(currentMappings, currentSource.fieldMappingIds) !== recovery.sourceFieldMappingsDigest) {
+          throw new Error("Source App field mappings changed after duplicate recovery was prepared");
+        }
+        const context = currentOperation.desired.companyContextKeys.length > 0
+          ? await this.contextStore.get(this.workspaceId, this.companyId)
+          : undefined;
+        if (context) assertCompanyContextStillMatches(configuration, context);
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentTargetLoopIds = installationLoopIds(workspaceSnapshot.workspace, targetInstallationId);
+        const currentArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const targetAbsent = currentTargetLoopIds.length === 0;
+        const targetMaterialized =
+          canonicalAppDigest(currentTargetLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          installationLoopObservedInventoryDigest(currentArtifacts, currentTargetLoopIds) === recovery.targetLoopInventoryDigest;
+        if (!targetAbsent && !targetMaterialized) {
+          throw new Error("Private derived App LoopSpec topology changed after duplicate recovery was prepared");
+        }
+        if (targetAbsent) {
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts
+          });
+        }
+        const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, targetInstallationId);
+        const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        if (
+          canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+        ) {
+          throw new Error("Duplicate LoopSpec materialization did not produce the exact recorded target topology");
+        }
+
+        if (currentOperation.desired.fieldMappingIds.length > 0) {
+          await this.mappingStore.attachInstallation(currentOperation.desired.fieldMappingIds, targetInstallationId);
+          const attachedMappings = await this.mappingStore.list();
+          if (currentOperation.desired.fieldMappingIds.some((mappingId) =>
+            !attachedMappings.find((mapping) => mapping.id === mappingId)?.dependentInstallationIds.includes(targetInstallationId))) {
+            throw new Error("Duplicate field mappings were not attached to the exact derived installation");
+          }
+        }
+        if (context && currentOperation.desired.companyContextKeys.length > 0) {
+          await this.contextStore.attachConsumer({
+            workspaceId: this.workspaceId,
+            companyId: this.companyId,
+            contextKeys: currentOperation.desired.companyContextKeys,
+            installationId: targetInstallationId,
+            expectedRevision: context.revision,
+            actor: input.actor,
+            now: operationTime
+          });
+          const attachedContext = await this.contextStore.get(this.workspaceId, this.companyId);
+          if (currentOperation.desired.companyContextKeys.some((key) =>
+            !attachedContext.values.find((value) => value.key === key)?.consumerInstallationIds.includes(targetInstallationId))) {
+            throw new Error("Duplicate company context was not attached to the exact derived installation");
+          }
+        }
+
+        const targetAssets = mergeAssetOwnership(registry.assets, ownedAssets);
+        if (installationOwnershipDigest({ ...registry, assets: targetAssets }, targetInstallationId) !== recovery.targetOwnershipDigest) {
+          throw new Error("Duplicate ownership materialization does not match the recorded target");
+        }
+        const nextRevision = registry.revision + 1;
+        const receipt = createLifecycleReceipt(registry, {
+          installationId: targetInstallationId,
+          action: "duplicate",
+          actor: input.actor,
+          reason: "Created an independently configurable private derived installation with namespaced LoopSpecs.",
+          previousArtifactDigest: currentSource.artifactDigest,
+          resultingArtifactDigest: duplicate.artifactDigest,
+          evidenceRetained: true,
+          reversible: true,
+          createdAt: currentOperation.startedAt,
+          resultingRevision: nextRevision
+        });
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: nextRevision,
+          installations: [...registry.installations, duplicate].sort((left, right) => left.id.localeCompare(right.id)),
+          assets: targetAssets,
+          lifecycleReceipts: [...registry.lifecycleReceipts, receipt],
+          updatedAt: currentOperation.startedAt
+        }, currentOperation.id, operationTime, receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: duplicate, receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, operationTime);
+      throw error;
+    }
   }
 
   async planUpdate(input: PlanAppUpdateInput): Promise<AppUpdatePlan> {
@@ -974,184 +1656,637 @@ export class AppInstallationService {
   async applyUpdate(input: ApplyAppUpdateInput): Promise<AppLifecycleMutationResult> {
     const plan = appUpdatePlanSchema.parse(input.plan);
     const now = input.now ?? new Date();
-    if (Date.parse(plan.expiresAt) <= now.getTime()) throw new Error("Update plan expired; create a fresh content-bound plan");
     if (installPlanBlockers(plan.baseInstallPlan).length > 0) throw new Error("Update plan contains unresolved installation blockers");
     const unresolvedConflicts = plan.merge.conflicts.filter((conflict) => conflict.resolution === "unresolved");
     if (unresolvedConflicts.length > 0) throw new Error(`Update has unresolved overlay conflicts: ${unresolvedConflicts.map((conflict) => conflict.path).join(", ")}`);
-    const approved = new Set(input.approvedPermissionCapabilities ?? []);
-    const unapproved = plan.permissionChanges.filter((change) => change.requiresReview && !approved.has(change.capability));
-    if (unapproved.length > 0) throw new Error(`Permission changes require explicit review: ${unapproved.map((change) => change.capability).join(", ")}`);
+    const requiredPermissionCapabilities = Array.from(new Set(plan.permissionChanges
+      .filter((change) => change.requiresReview)
+      .map((change) => change.capability))).sort();
+    const approvedPermissionCapabilities = Array.from(new Set(input.approvedPermissionCapabilities ?? [])).sort();
+    const unapproved = requiredPermissionCapabilities.filter((capability) => !approvedPermissionCapabilities.includes(capability));
+    if (unapproved.length > 0) throw new Error(`Permission changes require explicit review: ${unapproved.join(", ")}`);
+    const unexpectedApprovals = approvedPermissionCapabilities.filter((capability) => !requiredPermissionCapabilities.includes(capability));
+    if (unexpectedApprovals.length > 0) throw new Error(`Update approval contains capabilities that do not require review: ${unexpectedApprovals.join(", ")}`);
 
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, plan.installationId);
-      if (installation.version !== plan.fromVersion || installation.artifactDigest !== plan.fromDigest) {
-        throw new Error("Installed app changed after the update plan was created");
-      }
-      const loaded = await this.marketplace.getAppArtifact(installation.appId, plan.toVersion, plan.toDigest);
-      const compiled = await compileLoopPack(loaded, { selectedModules: plan.baseInstallPlan.selectedModules });
-      const timestamp = now.toISOString();
-      const namespace = installationNamespace(installation);
-      const overlay = installation.overlay ? appOverlaySchema.parse({
-        ...installation.overlay,
-        basedOnVersion: plan.toVersion,
-        basedOnDigest: plan.toDigest,
-        revision: installation.overlay.revision + 1,
-        createdAt: timestamp,
-        createdBy: input.actor
-      }) : undefined;
-      const configuration = resolveAppConfiguration({
-        appId: installation.appId,
-        version: plan.toVersion,
-        fields: plan.baseInstallPlan.configuration.fields,
-        installValues: plan.baseInstallPlan.configuration.values,
-        overlay,
-        now
-      }).configuration;
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-update-${plan.id}`,
-        idempotencyKey: plan.planDigest,
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const reusableOwnership = plan.baseInstallPlan.assets
-        .filter((asset) => asset.action === "reuse" && ["connection_binding", "field_mapping"].includes(asset.kind))
-        .map((asset) => ({
-          assetId: asset.id,
-          kind: asset.kind,
-          ownerInstallationIds: [installation.id],
-          refCount: 1,
-          shared: true,
-          digest: asset.digest ?? canonicalAppDigest(asset)
-        }));
-      const ownedAssets = ownershipFromCompiled(compiled, installation.id, namespace, reusableOwnership);
-      const updated: WorkspaceAppInstallation = {
-        ...installation,
-        version: plan.toVersion,
-        artifactDigest: plan.toDigest,
-        state: "ready_to_test",
-        mode: "simulation",
-        configuration,
-        overlay,
-        connectionBindings: connectionBindingsFromPlan(plan.baseInstallPlan.capabilityResolutions),
-        operationBindings: operationBindingsFromPlan(plan.baseInstallPlan.capabilityResolutions),
-        fieldMappingIds: plan.baseInstallPlan.fieldMappingIds,
-        permissions: plan.baseInstallPlan.permissions,
-        ownedAssets,
-        history: appendHistory(installation, input.actor, "update", timestamp),
-        updatedAt: timestamp,
-        failureReason: undefined,
-        derivation: installation.derivation ? {
-          ...installation.derivation,
-          upstreamVersion: plan.toVersion,
-          upstreamDigest: plan.toDigest
-        } : undefined
-      };
-      return lifecycleMutation(registry, updated, {
-        action: "update",
-        actor: input.actor,
-        reason: `Updated the pinned base from ${plan.fromVersion} to ${plan.toVersion}; activation requires fresh evidence.`,
-        evidenceRetained: true,
-        reversible: true,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, ownedAssets));
+    const observedRegistry = await this.installationStore.read();
+    const observedCurrentInstallation = observedRegistry.installations.find((candidate) => candidate.id === plan.installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "update" &&
+      candidate.installationId === plan.installationId &&
+      candidate.status === "completed" &&
+      candidate.update?.planDigest === plan.planDigest &&
+      observedCurrentInstallation !== undefined &&
+      canonicalAppDigest(observedCurrentInstallation) === candidate.update.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      const installation = observedCurrentInstallation;
+      if (!receipt || !installation) throw new Error("Completed update operation is missing its durable result");
+      assertUpdateReplayAuthority(completed, receipt, installation, input.actor, plan.planDigest, approvedPermissionCapabilities);
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const observedInstallation = requireInstallation(observedRegistry, plan.installationId);
+    if (observedInstallation.version !== plan.fromVersion || observedInstallation.artifactDigest !== plan.fromDigest) {
+      throw new Error("Installed app changed after the update plan was created");
+    }
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, observedInstallation.id);
+    const idempotencyKey = canonicalAppDigest({
+      action: "update",
+      workspaceId: this.workspaceId,
+      installationId: observedInstallation.id,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      planDigest: plan.planDigest,
+      approvedPermissionCapabilities
     });
+    const operationId = lifecycleOperationId("update", observedInstallation.id, plan.toDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    if (Date.parse(plan.expiresAt) <= now.getTime() && !existingOperation) {
+      throw new Error("Update plan expired; create a fresh content-bound plan");
+    }
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const operationTime = new Date(timestamp);
+    const loaded = await this.marketplace.getAppArtifact(observedInstallation.appId, plan.toVersion, plan.toDigest);
+    const compiled = await compileLoopPack(loaded, { selectedModules: plan.baseInstallPlan.selectedModules });
+    const namespace = installationNamespace(observedInstallation);
+    const overlay = observedInstallation.overlay ? appOverlaySchema.parse({
+      ...observedInstallation.overlay,
+      basedOnVersion: plan.toVersion,
+      basedOnDigest: plan.toDigest,
+      revision: observedInstallation.overlay.revision + 1,
+      createdAt: timestamp,
+      createdBy: input.actor
+    }) : undefined;
+    const configuration = resolveAppConfiguration({
+      appId: observedInstallation.appId,
+      version: plan.toVersion,
+      fields: plan.baseInstallPlan.configuration.fields,
+      installValues: plan.baseInstallPlan.configuration.values,
+      overlay,
+      now: operationTime
+    }).configuration;
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      observedInstallation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const reusableOwnership = plan.baseInstallPlan.assets
+      .filter((asset) => asset.action === "reuse" && ["connection_binding", "field_mapping"].includes(asset.kind))
+      .map((asset) => ({
+        assetId: asset.id,
+        kind: asset.kind,
+        ownerInstallationIds: [observedInstallation.id],
+        refCount: 1,
+        shared: true,
+        digest: asset.digest ?? canonicalAppDigest(asset)
+      }));
+    const ownedAssets = ownershipFromCompiled(compiled, observedInstallation.id, namespace, reusableOwnership);
+    const updated: WorkspaceAppInstallation = {
+      ...observedInstallation,
+      version: plan.toVersion,
+      artifactDigest: plan.toDigest,
+      state: "ready_to_test",
+      mode: "simulation",
+      configuration,
+      overlay,
+      connectionBindings: connectionBindingsFromPlan(plan.baseInstallPlan.capabilityResolutions),
+      operationBindings: operationBindingsFromPlan(plan.baseInstallPlan.capabilityResolutions),
+      fieldMappingIds: plan.baseInstallPlan.fieldMappingIds,
+      permissions: plan.baseInstallPlan.permissions,
+      ownedAssets,
+      history: appendHistory(observedInstallation, input.actor, "update", timestamp),
+      updatedAt: timestamp,
+      failureReason: undefined,
+      derivation: observedInstallation.derivation ? {
+        ...observedInstallation.derivation,
+        upstreamVersion: plan.toVersion,
+        upstreamDigest: plan.toDigest
+      } : undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, observedInstallation.id, ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopIds = existingOperation?.update?.sourceLoopIds ?? installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: observedInstallation.id,
+      appId: observedInstallation.appId,
+      action: "update",
+      targetArtifactDigest: plan.toDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...plan.baseInstallPlan.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(plan.baseInstallPlan.configuration).sort()
+      },
+      update: existingOperation?.update ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceArtifactDigest: observedInstallation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        planDigest: plan.planDigest,
+        approvedPermissionCapabilities,
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, observedInstallation.id),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now
+    });
+    if (!operation.update) throw new Error(`App update recovery record is incomplete: ${operation.id}`);
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      const receipt = operation.resultReceiptId
+        ? registry.lifecycleReceipts.find((candidate) => candidate.id === operation.resultReceiptId)
+        : undefined;
+      const installation = registry.installations.find((candidate) => candidate.id === plan.installationId);
+      if (!receipt || !installation) throw new Error("Completed update operation is missing its durable result");
+      assertUpdateReplayAuthority(operation, receipt, installation, input.actor, plan.planDigest, approvedPermissionCapabilities);
+      return { installation, receipt, lock: createInstallationLock(registry) };
+    }
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, plan.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.update || currentOperation.status === "completed") {
+          throw new Error(`App update recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.update;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, installation.id, ownedAssets);
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "update" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== plan.toDigest ||
+          recovery.planDigest !== plan.planDigest ||
+          canonicalAppDigest(recovery.approvedPermissionCapabilities) !== canonicalAppDigest(approvedPermissionCapabilities) ||
+          installation.version !== plan.fromVersion ||
+          installation.artifactDigest !== recovery.sourceArtifactDigest ||
+          installation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, installation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...plan.baseInstallPlan.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(plan.baseInstallPlan.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App update recovery record does not match the current installation or exact reviewed update plan");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after update recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Update LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "update",
+          actor: input.actor,
+          reason: `Updated the pinned base from ${plan.fromVersion} to ${plan.toVersion}; activation requires fresh evidence.`,
+          evidenceRetained: true,
+          reversible: true,
+          removedAssetIds: installation.ownedAssets.filter((asset) => !ownedAssets.some((next) => next.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   async rollback(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      if (installation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh rollback request");
-      const revision = installation.history.at(-1);
-      if (!revision) throw new Error("No reversible installed-app revision is available");
-      const loaded = await this.loadArtifactRevision(installation, revision.version, revision.artifactDigest);
-      const compiled = await compileLoopPack(loaded, { selectedModules: revision.selectedModules });
-      const timestamp = now.toISOString();
-      const namespace = installationNamespace(installation);
-      const artifacts = await createInstallationArtifacts(compiled, loaded.root, installation.id, loaded.manifest.metadata.department, timestamp, namespace);
-      const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
-      const existingLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-      const nextLoopIds = new Set(artifacts.map((artifact) => artifact.loopId));
-      await this.loopSpecStore.commitMaterializationAtomically({
-        commitId: `app-rollback-${contentHash({ installationId, from: installation.artifactDigest, to: revision.artifactDigest, timestamp })}`,
-        idempotencyKey: canonicalAppDigest({ action: "rollback", installationId, from: installation.artifactDigest, to: revision.artifactDigest, timestamp }),
-        expectedRevision: workspaceSnapshot.revision,
-        projectRoot: this.projectRoot,
-        committedAt: timestamp,
-        artifacts,
-        removeLoopIds: existingLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
-      });
-      const restored: WorkspaceAppInstallation = {
-        ...installation,
-        version: revision.version,
-        artifactDigest: revision.artifactDigest,
-        state: "rolled_back",
-        mode: "simulation",
-        selectedModules: revision.selectedModules,
-        presetId: revision.presetId,
-        configuration: revision.configuration,
-        overlay: revision.overlay,
-        connectionBindings: revision.connectionBindings,
-        operationBindings: revision.operationBindings,
-        fieldMappingIds: revision.fieldMappingIds,
-        permissions: revision.permissions,
-        ownedAssets: revision.ownedAssets,
-        history: installation.history.slice(0, -1),
-        updatedAt: timestamp,
-        failureReason: undefined
-      };
-      return lifecycleMutation(registry, restored, {
-        action: "rollback",
-        actor,
-        reason: `Restored the exact ${revision.version} installation snapshot; fresh conformance is required before activation.`,
-        evidenceRetained: true,
-        reversible: installation.history.length > 1,
-        removedAssetIds: installation.ownedAssets.filter((asset) => !revision.ownedAssets.some((restoredAsset) => restoredAsset.assetId === asset.assetId)).map((asset) => asset.assetId),
-        createdAt: timestamp
-      }, replaceOwnedAssets(registry.assets, installation.id, revision.ownedAssets));
+    const observedRegistry = await this.installationStore.read();
+    const observedCurrentInstallation = observedRegistry.installations.find((candidate) => candidate.id === installationId);
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "rollback" &&
+      candidate.installationId === installationId &&
+      candidate.status === "completed" &&
+      candidate.rollback?.sourceArtifactDigest === expectedArtifactDigest &&
+      observedCurrentInstallation !== undefined &&
+      canonicalAppDigest(observedCurrentInstallation) === candidate.rollback.targetInstallationDigest
+    );
+    if (completed) {
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      const installation = observedCurrentInstallation;
+      if (!receipt || !installation) throw new Error("Completed rollback operation is missing its durable result");
+      assertRollbackReplayAuthority(completed, receipt, installation, actor);
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const observedInstallation = requireInstallation(observedRegistry, installationId);
+    if (observedInstallation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh rollback request");
+    const revision = observedInstallation.history.at(-1);
+    if (!revision) throw new Error("No reversible installed-app revision is available");
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, installationId);
+    const idempotencyKey = canonicalAppDigest({
+      action: "rollback",
+      workspaceId: this.workspaceId,
+      installationId,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      targetArtifactDigest: revision.artifactDigest,
+      revisionDigest: canonicalAppDigest(revision)
     });
+    const operationId = lifecycleOperationId("rollback", installationId, revision.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? now.toISOString();
+    const loaded = await this.loadArtifactRevision(observedInstallation, revision.version, revision.artifactDigest);
+    const compiled = await compileLoopPack(loaded, { selectedModules: revision.selectedModules });
+    const namespace = installationNamespace(observedInstallation);
+    const artifacts = await createInstallationArtifacts(
+      compiled,
+      loaded.root,
+      observedInstallation.id,
+      loaded.manifest.metadata.department,
+      timestamp,
+      namespace
+    );
+    const targetLoopIds = artifacts.map((artifact) => artifact.loopId).sort();
+    const targetLoopInventoryDigest = installationLoopInventoryDigest(artifacts, targetLoopIds);
+    const restored: WorkspaceAppInstallation = {
+      ...observedInstallation,
+      version: revision.version,
+      artifactDigest: revision.artifactDigest,
+      state: "rolled_back",
+      mode: "simulation",
+      selectedModules: revision.selectedModules,
+      presetId: revision.presetId,
+      configuration: revision.configuration,
+      overlay: revision.overlay,
+      connectionBindings: revision.connectionBindings,
+      operationBindings: revision.operationBindings,
+      fieldMappingIds: revision.fieldMappingIds,
+      permissions: revision.permissions,
+      ownedAssets: revision.ownedAssets,
+      history: observedInstallation.history.slice(0, -1),
+      updatedAt: timestamp,
+      failureReason: undefined
+    };
+    const targetAssets = replaceOwnedAssets(observedRegistry.assets, observedInstallation.id, revision.ownedAssets);
+    const targetRegistry = { ...observedRegistry, assets: targetAssets };
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const sourceLoopIds = installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const observedArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId,
+      appId: observedInstallation.appId,
+      action: "rollback",
+      targetArtifactDigest: revision.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...revision.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(revision.configuration).sort()
+      },
+      rollback: existingOperation?.rollback ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceArtifactDigest: observedInstallation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest: installationLoopInventoryDigest(observedArtifacts, sourceLoopIds),
+        sourceLoopIds,
+        targetInstallationDigest: canonicalAppDigest(restored),
+        targetOwnershipDigest: installationOwnershipDigest(targetRegistry, installationId),
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor,
+      now
+    });
+    if (!operation.rollback) throw new Error(`App rollback recovery record is incomplete: ${operation.id}`);
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      const receipt = operation.resultReceiptId
+        ? registry.lifecycleReceipts.find((candidate) => candidate.id === operation.resultReceiptId)
+        : undefined;
+      const installation = registry.installations.find((candidate) => candidate.id === installationId);
+      if (!receipt || !installation) throw new Error("Completed rollback operation is missing its durable result");
+      assertRollbackReplayAuthority(operation, receipt, installation, actor);
+      return { installation, receipt, lock: createInstallationLock(registry) };
+    }
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.rollback || currentOperation.status === "completed") {
+          throw new Error(`App rollback recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.rollback;
+        const currentTargetAssets = replaceOwnedAssets(registry.assets, installation.id, revision.ownedAssets);
+        const currentRestored = { ...restored, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "rollback" ||
+          currentOperation.actor !== actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== revision.artifactDigest ||
+          installation.artifactDigest !== recovery.sourceArtifactDigest ||
+          installation.updatedAt !== recovery.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== recovery.sourceOwnershipDigest ||
+          canonicalAppDigest(currentRestored) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest({ ...registry, assets: currentTargetAssets }, installation.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          canonicalAppDigest([...revision.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(revision.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App rollback recovery record does not match the current installation or exact target revision");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, currentLoopIds);
+        const sourceInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.sourceLoopIds) &&
+          currentInventoryDigest === recovery.sourceLoopInventoryDigest;
+        const targetInventoryPresent =
+          canonicalAppDigest(currentLoopIds) === canonicalAppDigest(recovery.targetLoopIds) &&
+          currentInventoryDigest === recovery.targetLoopInventoryDigest;
+        if (!sourceInventoryPresent && !targetInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after rollback recovery was prepared");
+        }
+        if (sourceInventoryPresent) {
+          const nextLoopIds = new Set(recovery.targetLoopIds);
+          await this.loopSpecStore.commitMaterializationAtomically({
+            commitId: operation.id,
+            idempotencyKey: operation.idempotencyKey,
+            expectedRevision: workspaceSnapshot.revision,
+            projectRoot: this.projectRoot,
+            committedAt: currentOperation.startedAt,
+            artifacts,
+            removeLoopIds: recovery.sourceLoopIds.filter((loopId) => !nextLoopIds.has(loopId))
+          });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== recovery.targetLoopInventoryDigest
+          ) {
+            throw new Error("Rollback LoopSpec materialization did not produce the exact recorded target topology");
+          }
+        }
+
+        const mutation = lifecycleMutation(registry, currentRestored, {
+          action: "rollback",
+          actor,
+          reason: `Restored the exact ${revision.version} installation snapshot; fresh conformance is required before activation.`,
+          evidenceRetained: true,
+          reversible: installation.history.length > 1,
+          removedAssetIds: installation.ownedAssets.filter((asset) => !revision.ownedAssets.some((restoredAsset) => restoredAsset.assetId === asset.assetId)).map((asset) => asset.assetId),
+          createdAt: currentOperation.startedAt
+        }, currentTargetAssets);
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, now, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentRestored, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
-  async detach(installationId: string, expectedArtifactDigest: string, actor: string, now = new Date()): Promise<AppLifecycleMutationResult> {
-    const registry = await this.installationStore.read();
-    const installation = requireOperableInstallation(registry, installationId);
+  async detach(input: {
+    installationId: string;
+    expectedArtifactDigest: string;
+    expectedUpdatedAt: string;
+    actor: string;
+    now?: Date;
+  }): Promise<AppLifecycleMutationResult> {
+    const now = input.now ?? new Date();
+    const observedRegistry = await this.installationStore.read();
+    const completed = [...observedRegistry.lifecycleOperations].reverse().find((candidate) =>
+      candidate.action === "detach" &&
+      candidate.installationId === input.installationId &&
+      candidate.status === "completed" &&
+      candidate.detach?.fromUpdatedAt === input.expectedUpdatedAt &&
+      candidate.detach.sourceArtifactDigest === input.expectedArtifactDigest
+    );
+    if (completed?.detach) {
+      const installation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
+      const receipt = completed.resultReceiptId
+        ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
+        : undefined;
+      if (!installation || !receipt) throw new Error("Completed detach operation is missing its durable result");
+      assertDetachReplayAuthority(completed, receipt, installation, input.actor, input.expectedArtifactDigest, input.expectedUpdatedAt);
+      await this.snapshotStore.assertExact({
+        snapshotPath: completed.detach.snapshotPath,
+        artifactDigest: completed.detach.snapshotArtifactDigest,
+        filesDigest: completed.detach.snapshotFilesDigest
+      });
+      return { installation, receipt, lock: createInstallationLock(observedRegistry) };
+    }
+
+    const installation = requireInstallation(observedRegistry, input.installationId);
     if (!installation.derivation) throw new Error("Only a private derived app can detach from upstream");
     if (installation.derivation.detachedAt) throw new Error("Private app is already detached from upstream");
-    if (installation.artifactDigest !== expectedArtifactDigest) throw new Error("Installed app changed; create a fresh detach request");
+    if (installation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh detach request");
+    if (installation.updatedAt !== input.expectedUpdatedAt) throw new Error("Installed app revision changed; create a fresh detach request");
     const loaded = await this.loadInstallationArtifact(installation);
-    const timestamp = now.toISOString();
-    const snapshotPath = path.join(".loopgraph", "apps", "private-snapshots", installation.derivation.derivedAppId, installation.version);
-    await cp(loaded.root, path.join(this.projectRoot, snapshotPath), { recursive: true, force: true });
-    return this.installationStore.withExclusiveUpdate(async (current) => {
-      const fresh = requireOperableInstallation(current, installationId);
-      if (fresh.artifactDigest !== expectedArtifactDigest || fresh.derivation?.detachedAt) throw new Error("Installed app changed while detaching");
-      const updated: WorkspaceAppInstallation = {
-        ...fresh,
-        derivation: {
-          ...fresh.derivation!,
-          detachedAt: timestamp,
-          detachedBy: actor,
-          snapshotPath
-        },
-        history: appendHistory(fresh, actor, "detach", timestamp),
-        updatedAt: timestamp
-      };
-      return lifecycleMutation(current, updated, {
-        action: "detach",
-        actor,
-        reason: "Pinned a workspace-local immutable snapshot and disabled future upstream updates for this private app.",
-        evidenceRetained: true,
-        reversible: false,
-        createdAt: timestamp
-      });
+    if (loaded.artifact.digest !== input.expectedArtifactDigest) throw new Error("Source App artifact no longer matches the installed digest");
+    const sourceInstallationDigest = canonicalAppDigest(installation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, installation.id);
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const sourceLoopIds = installationLoopIds(observedWorkspace.workspace, installation.id);
+    const sourceArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopInventoryDigest = installationLoopInventoryDigest(sourceArtifacts, sourceLoopIds);
+    const idempotencyKey = canonicalAppDigest({
+      action: "detach",
+      workspaceId: this.workspaceId,
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      sourceLoopInventoryDigest,
+      sourceLoopIds
     });
+    const operationId = lifecycleOperationId("detach", installation.id, installation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    const timestamp = existingOperation?.startedAt ?? new Date(
+      Math.max(now.getTime(), Date.parse(installation.updatedAt) + 1)
+    ).toISOString();
+    const operationTime = new Date(timestamp);
+    const snapshotPath = path.posix.join(
+      ".loopgraph",
+      "apps",
+      "private-snapshots",
+      installation.derivation.derivedAppId,
+      installation.version
+    );
+    const snapshotDescriptor = {
+      snapshotPath,
+      artifactDigest: loaded.artifact.digest,
+      filesDigest: appSnapshotFilesDigest(loaded)
+    };
+    if (!existingOperation && await this.snapshotStore.exists(snapshotDescriptor)) {
+      throw new Error(`Private App snapshot target already exists: ${snapshotPath}`);
+    }
+    const updated: WorkspaceAppInstallation = {
+      ...installation,
+      derivation: {
+        ...installation.derivation,
+        detachedAt: timestamp,
+        detachedBy: input.actor,
+        snapshotPath,
+        snapshotFilesDigest: snapshotDescriptor.filesDigest
+      },
+      history: appendHistory(installation, input.actor, "detach", timestamp),
+      updatedAt: timestamp
+    };
+    const targetLoopIds = [...sourceLoopIds].sort();
+    const targetLoopInventoryDigest = sourceLoopInventoryDigest;
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: installation.id,
+      appId: installation.appId,
+      action: "detach",
+      targetArtifactDigest: installation.artifactDigest,
+      desired: existingOperation?.desired ?? {
+        loopIds: targetLoopIds,
+        fieldMappingIds: [...installation.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(installation.configuration).sort()
+      },
+      detach: existingOperation?.detach ?? {
+        fromUpdatedAt: installation.updatedAt,
+        sourceArtifactDigest: installation.artifactDigest,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest,
+        sourceLoopIds: [...sourceLoopIds].sort(),
+        snapshotPath,
+        snapshotArtifactDigest: loaded.artifact.digest,
+        snapshotFilesDigest: snapshotDescriptor.filesDigest,
+        targetInstallationDigest: canonicalAppDigest(updated),
+        targetOwnershipDigest: sourceOwnershipDigest,
+        targetLoopInventoryDigest,
+        targetLoopIds
+      },
+      actor: input.actor,
+      now: operationTime
+    });
+    if (!operation.detach) throw new Error(`App detach recovery record is incomplete: ${operation.id}`);
+
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const current = requireInstallation(registry, input.installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.detach || currentOperation.status === "completed") {
+          throw new Error(`App detach recovery record is unavailable: ${operation.id}`);
+        }
+        const recovery = currentOperation.detach;
+        const currentUpdated = { ...updated, updatedAt: currentOperation.startedAt };
+        if (
+          currentOperation.action !== "detach" ||
+          currentOperation.actor !== input.actor ||
+          current.updatedAt !== recovery.fromUpdatedAt ||
+          current.artifactDigest !== recovery.sourceArtifactDigest ||
+          current.derivation?.detachedAt !== undefined ||
+          canonicalAppDigest(current) !== recovery.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, current.id) !== recovery.sourceOwnershipDigest ||
+          recovery.snapshotPath !== snapshotPath ||
+          recovery.snapshotArtifactDigest !== loaded.artifact.digest ||
+          recovery.snapshotFilesDigest !== appSnapshotFilesDigest(loaded) ||
+          canonicalAppDigest(currentUpdated) !== recovery.targetInstallationDigest ||
+          installationOwnershipDigest(registry, current.id) !== recovery.targetOwnershipDigest ||
+          canonicalAppDigest([...current.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(current.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys) ||
+          canonicalAppDigest(currentOperation.desired.loopIds) !== canonicalAppDigest(recovery.targetLoopIds)
+        ) {
+          throw new Error("App detach recovery record does not match the exact source or detached target");
+        }
+
+        const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
+        const currentLoopIds = installationLoopIds(workspaceSnapshot.workspace, current.id);
+        const currentArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(currentArtifacts, currentLoopIds);
+        if (
+          canonicalAppDigest(currentLoopIds) !== canonicalAppDigest(recovery.sourceLoopIds) ||
+          canonicalAppDigest(currentLoopIds) !== canonicalAppDigest(recovery.targetLoopIds) ||
+          currentInventoryDigest !== recovery.sourceLoopInventoryDigest ||
+          currentInventoryDigest !== recovery.targetLoopInventoryDigest
+        ) {
+          throw new Error("Owned LoopSpec topology changed after detach recovery was prepared");
+        }
+
+        await this.snapshotStore.materialize({
+          source: loaded,
+          snapshotPath: recovery.snapshotPath,
+          artifactDigest: recovery.snapshotArtifactDigest,
+          filesDigest: recovery.snapshotFilesDigest,
+          operationId: currentOperation.id
+        });
+        const mutation = lifecycleMutation(registry, currentUpdated, {
+          action: "detach",
+          actor: input.actor,
+          reason: "Pinned a workspace-local immutable snapshot and disabled future upstream updates for this private app.",
+          evidenceRetained: true,
+          reversible: false,
+          createdAt: currentOperation.startedAt
+        });
+        const nextRegistry = completeLifecycleOperation(mutation.registry, currentOperation.id, operationTime, mutation.value.receipt.id);
+        const lock = createInstallationLock(nextRegistry);
+        return { registry: nextRegistry, lock, value: { installation: currentUpdated, receipt: mutation.value.receipt, lock } };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, operationTime);
+      throw error;
+    }
   }
 
   async uninstall(input: {
@@ -1164,6 +2299,10 @@ export class AppInstallationService {
   }): Promise<AppLifecycleMutationResult> {
     if (!input.confirmed) throw new Error("Uninstall requires an explicit confirmation");
     const now = input.now ?? new Date();
+    const reason = input.reason.trim();
+    if (!reason) throw new Error("Uninstall requires an accountable reason");
+    assertSecretFree({ reason }, "app_uninstall_reason");
+    const reasonDigest = canonicalAppDigest({ reason });
     const observedRegistry = await this.installationStore.read();
     const observedInstallation = observedRegistry.installations.find((candidate) => candidate.id === input.installationId);
     if (!observedInstallation) {
@@ -1178,15 +2317,20 @@ export class AppInstallationService {
         ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === completed.resultReceiptId)
         : undefined;
       if (!receipt) throw new Error(`App installation not found: ${input.installationId}`);
+      assertUninstallReplayAuthority(completed!, receipt, input.actor, reasonDigest);
       return { receipt, lock: createInstallationLock(observedRegistry) };
     }
     if (observedInstallation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
+    const sourceInstallationDigest = canonicalAppDigest(observedInstallation);
+    const sourceOwnershipDigest = installationOwnershipDigest(observedRegistry, observedInstallation.id);
     const idempotencyKey = canonicalAppDigest({
       action: "uninstall",
       workspaceId: this.workspaceId,
       installationId: input.installationId,
       artifactDigest: input.expectedArtifactDigest,
-      installedAt: observedInstallation.installedAt
+      sourceInstallationDigest,
+      sourceOwnershipDigest,
+      reasonDigest
     });
     const operationId = lifecycleOperationId("uninstall", input.installationId, input.expectedArtifactDigest, idempotencyKey);
     const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
@@ -1195,9 +2339,15 @@ export class AppInstallationService {
         ? observedRegistry.lifecycleReceipts.find((candidate) => candidate.id === existingOperation.resultReceiptId)
         : undefined;
       if (!receipt) throw new Error("Completed uninstall operation is missing its durable lifecycle receipt");
+      assertUninstallReplayAuthority(existingOperation, receipt, input.actor, reasonDigest);
       return { receipt, lock: createInstallationLock(observedRegistry) };
     }
     const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const observedLoopIds = installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const observedLoopArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+    const sourceLoopInventoryDigest = installationLoopInventoryDigest(observedLoopArtifacts, observedLoopIds);
+    const remainingLoopIds = sharedInstallationLoopIds(observedRegistry, observedInstallation).filter((loopId) => observedLoopIds.includes(loopId));
+    const remainingLoopInventoryDigest = installationLoopInventoryDigest(observedLoopArtifacts, remainingLoopIds);
     const operation = await this.prepareLifecycleOperation({
       id: operationId,
       idempotencyKey,
@@ -1206,28 +2356,67 @@ export class AppInstallationService {
       action: "uninstall",
       targetArtifactDigest: observedInstallation.artifactDigest,
       desired: existingOperation?.desired ?? {
-        loopIds: installationLoopIds(observedWorkspace.workspace, observedInstallation.id),
-        fieldMappingIds: observedInstallation.fieldMappingIds,
-        companyContextKeys: companyContextKeys(observedInstallation.configuration)
+        loopIds: observedLoopIds,
+        fieldMappingIds: [...observedInstallation.fieldMappingIds].sort(),
+        companyContextKeys: companyContextKeys(observedInstallation.configuration).sort()
+      },
+      uninstall: existingOperation?.uninstall ?? {
+        fromUpdatedAt: observedInstallation.updatedAt,
+        sourceInstallationDigest,
+        sourceOwnershipDigest,
+        reasonDigest,
+        sourceWorkspaceRevision: observedWorkspace.revision,
+        sourceLoopInventoryDigest,
+        remainingLoopInventoryDigest,
+        remainingLoopIds
       },
       actor: input.actor,
       now
     });
+    if (!operation.uninstall) {
+      throw new Error(`Legacy App uninstall recovery record ${operation.id} cannot be resumed automatically; reconcile it with an administrator`);
+    }
     try {
       return await this.installationStore.withExclusiveUpdate(async (registry) => {
         const installation = requireInstallation(registry, input.installationId);
-        if (installation.artifactDigest !== input.expectedArtifactDigest) throw new Error("Installed app changed; create a fresh uninstall request");
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.uninstall || currentOperation.status === "completed") {
+          throw new Error(`App uninstall recovery record is unavailable: ${operation.id}`);
+        }
+        const removal = currentOperation.uninstall;
+        if (
+          currentOperation.action !== "uninstall" ||
+          currentOperation.actor !== input.actor ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== installation.artifactDigest ||
+          installation.artifactDigest !== input.expectedArtifactDigest ||
+          installation.updatedAt !== removal.fromUpdatedAt ||
+          canonicalAppDigest(installation) !== removal.sourceInstallationDigest ||
+          installationOwnershipDigest(registry, installation.id) !== removal.sourceOwnershipDigest ||
+          removal.reasonDigest !== reasonDigest ||
+          canonicalAppDigest([...installation.fieldMappingIds].sort()) !== canonicalAppDigest(currentOperation.desired.fieldMappingIds) ||
+          canonicalAppDigest(companyContextKeys(installation.configuration).sort()) !== canonicalAppDigest(currentOperation.desired.companyContextKeys)
+        ) {
+          throw new Error("App uninstall recovery record does not match the current installation or confirmed removal intent");
+        }
         const timestamp = now.toISOString();
         const workspaceSnapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
         const loopIds = installationLoopIds(workspaceSnapshot.workspace, installation.id);
-        const sharedLoopIds = new Set(installation.ownedAssets.flatMap((asset) => {
-          const registryAsset = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
-          return asset.kind === "loop_spec" && (registryAsset?.ownerInstallationIds.length ?? 0) > 1 && asset.assetId.startsWith("loop.")
-            ? [asset.assetId.slice("loop.".length)]
-            : [];
-        }));
-        const removableLoopIds = loopIds.filter((loopId) => !sharedLoopIds.has(loopId));
-        if (removableLoopIds.length > 0) {
+        const activeArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+        const currentInventoryDigest = installationLoopInventoryDigest(activeArtifacts, loopIds);
+        const sourceInventoryPresent = currentInventoryDigest === removal.sourceLoopInventoryDigest &&
+          canonicalAppDigest(loopIds) === canonicalAppDigest(currentOperation.desired.loopIds);
+        const remainingInventoryPresent = currentInventoryDigest === removal.remainingLoopInventoryDigest &&
+          canonicalAppDigest(loopIds) === canonicalAppDigest(removal.remainingLoopIds);
+        if (!sourceInventoryPresent && !remainingInventoryPresent) {
+          throw new Error("Owned LoopSpec topology changed after uninstall recovery was prepared");
+        }
+        const sharedLoopIds = sharedInstallationLoopIds(registry, installation);
+        if (canonicalAppDigest(sharedLoopIds) !== canonicalAppDigest(removal.remainingLoopIds)) {
+          throw new Error("Shared App ownership changed after uninstall recovery was prepared");
+        }
+        const removableLoopIds = currentOperation.desired.loopIds.filter((loopId) => !sharedLoopIds.includes(loopId));
+        if (sourceInventoryPresent && removableLoopIds.length > 0) {
           await this.loopSpecStore.commitMaterializationAtomically({
             commitId: operation.id,
             idempotencyKey: operation.idempotencyKey,
@@ -1237,6 +2426,15 @@ export class AppInstallationService {
             artifacts: [],
             removeLoopIds: removableLoopIds
           });
+          const reconciledWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+          const reconciledLoopIds = installationLoopIds(reconciledWorkspace.workspace, installation.id);
+          const reconciledArtifacts = await this.loopSpecStore.listActiveLoopSpecs(this.projectRoot);
+          if (
+            canonicalAppDigest(reconciledLoopIds) !== canonicalAppDigest(removal.remainingLoopIds) ||
+            installationLoopInventoryDigest(reconciledArtifacts, reconciledLoopIds) !== removal.remainingLoopInventoryDigest
+          ) {
+            throw new Error("Uninstall LoopSpec materialization did not produce the exact recorded remaining topology");
+          }
         }
         const { assets, removedAssetIds, preservedSharedAssetIds } = releaseOwnedAssets(registry.assets, installation.id);
         await this.mappingStore.detachInstallation(installation.id, now);
@@ -1247,7 +2445,7 @@ export class AppInstallationService {
           actor: input.actor,
           now
         });
-        if (sharedLoopIds.size === 0) {
+        if (sharedLoopIds.length === 0) {
           await rm(path.join(this.projectRoot, ".loopgraph", "apps", "installations", installation.id), { recursive: true, force: true });
         }
         const nextRevision = registry.revision + 1;
@@ -1255,7 +2453,7 @@ export class AppInstallationService {
           installationId: installation.id,
           action: "uninstall",
           actor: input.actor,
-          reason: input.reason,
+          reason,
           previousArtifactDigest: installation.artifactDigest,
           removedAssetIds,
           preservedSharedAssetIds,
@@ -1373,8 +2571,12 @@ export class AppInstallationService {
 
   async promotionRecommendation(installationId: string, now = new Date()): Promise<AppPromotionRecommendation> {
     const registry = await this.installationStore.read();
-    requireInstallation(registry, installationId);
-    return createPromotionRecommendation({ installationId, evaluations: registry.evaluations, now });
+    const installation = requireInstallation(registry, installationId);
+    return createPromotionRecommendation({
+      installationId,
+      evaluations: registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest),
+      now
+    });
   }
 
   async diff(installationId: string): Promise<{
@@ -1414,12 +2616,8 @@ export class AppInstallationService {
     }
     return this.installationStore.withExclusiveUpdate(async (registry) => {
       const installation = requireOperableInstallation(registry, input.installationId);
-      assertLifecycleTransition(installation.state, input.mode, input.mode);
-      const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installation.id && run.status === "passed");
-      if (!latestPassed) throw new Error("App must pass conformance before activation");
-      if (input.mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
-        throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
-      }
+      const activationGate = await this.buildActivationGate(registry, installation, input.mode, now);
+      assertActivationGateReady(activationGate);
       const approvedAt = now.toISOString();
       const expiresAt = new Date(now.getTime() + expiresInSeconds * 1000).toISOString();
       const approvalContent = {
@@ -1432,6 +2630,7 @@ export class AppInstallationService {
         approvedBy: input.approvedBy,
         reason: input.reason,
         evidenceRefs: input.evidenceRefs ?? [],
+        activationGate,
         approvedAt,
         expiresAt
       } as const;
@@ -1450,7 +2649,27 @@ export class AppInstallationService {
         activationApprovals: [...registry.activationApprovals, receipt],
         updatedAt: approvedAt
       };
-      return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: receipt };
+      return {
+        registry: nextRegistry,
+        lock: createInstallationLock(nextRegistry),
+        audit: {
+          actor: input.approvedBy,
+          action: "app.activation.approved" as const,
+          targetType: "app_activation_approval" as const,
+          targetId: receipt.id,
+          metadata: {
+            installationIdDigest: canonicalAppDigest(installation.id),
+            appIdDigest: canonicalAppDigest(installation.appId),
+            artifactDigest: receipt.artifactDigest,
+            approvalDigest: receipt.approvalDigest,
+            fromState: receipt.fromState,
+            requestedMode: receipt.requestedMode,
+            evidenceRefCount: receipt.evidenceRefs.length,
+            expiresAt: receipt.expiresAt
+          }
+        },
+        value: receipt
+      };
     });
   }
 
@@ -1461,55 +2680,148 @@ export class AppInstallationService {
     actor: string,
     now = new Date()
   ): Promise<WorkspaceAppInstallation> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      const approval = registry.activationApprovals.find((candidate) => candidate.id === approvalReceiptId);
-      if (!approval) throw new Error(`App activation approval receipt not found: ${approvalReceiptId}`);
-      if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
-      if (Date.parse(approval.expiresAt) <= now.getTime()) throw new Error("App activation approval receipt has expired");
-      if (approval.workspaceId !== registry.workspaceId || approval.installationId !== installation.id || approval.appId !== installation.appId) {
-        throw new Error("App activation approval receipt belongs to another workspace, installation, or app");
-      }
-      if (approval.artifactDigest !== installation.artifactDigest || approval.fromState !== installation.state || approval.requestedMode !== mode) {
-        throw new Error("App activation approval receipt does not match the current artifact, state, and requested mode");
-      }
-      const latestPassed = [...registry.evaluations].reverse().find((run) => run.installationId === installationId && run.status === "passed");
-      if (!latestPassed) throw new Error("App must pass conformance before activation");
-      if (mode === "execute_with_approval" && installation.permissions.some((permission) => permission.authority === "execute" && permission.decision === "allow")) {
-        throw new Error("Execute-with-approval mode cannot contain an unapproved execute permission");
-      }
-      assertLifecycleTransition(installation.state, mode, mode);
-      const timestamp = now.toISOString();
-      await this.synchronizeOwnedLoopActivation(installation.id, mode, timestamp);
-      const updated: WorkspaceAppInstallation = { ...installation, state: mode, mode, updatedAt: timestamp, failureReason: undefined };
-      const consumedApproval = appActivationApprovalReceiptSchema.parse({ ...approval, consumedAt: timestamp, consumedBy: actor });
-      const nextRegistry: AppInstallationRegistry = {
-        ...registry,
-        revision: registry.revision + 1,
-        installations: replaceInstallation(registry.installations, updated),
-        activationApprovals: registry.activationApprovals.map((candidate) => candidate.id === approval.id ? consumedApproval : candidate),
-        updatedAt: timestamp
-      };
-      return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: updated };
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = requireInstallation(observedRegistry, installationId);
+    const observedApproval = observedRegistry.activationApprovals.find((candidate) => candidate.id === approvalReceiptId);
+    if (!observedApproval) throw new Error(`App activation approval receipt not found: ${approvalReceiptId}`);
+    const idempotencyKey = canonicalAppDigest({
+      action: "activate",
+      workspaceId: observedRegistry.workspaceId,
+      installationId,
+      appId: observedInstallation.appId,
+      artifactDigest: observedInstallation.artifactDigest,
+      approvalReceiptId,
+      approvalDigest: observedApproval.approvalDigest,
+      fromState: observedApproval.fromState,
+      targetMode: mode
     });
+    const operationId = lifecycleOperationId("activate", installationId, observedInstallation.artifactDigest, idempotencyKey);
+    const existingOperation = observedRegistry.lifecycleOperations.find((candidate) => candidate.id === operationId);
+    if (existingOperation?.status === "completed") {
+      if (observedInstallation.state !== mode || observedInstallation.mode !== mode || !observedApproval.consumedAt) {
+        throw new Error("Completed App activation recovery record does not match the installed state");
+      }
+      return observedInstallation;
+    }
+    const observedGate = await this.buildActivationGate(
+      observedRegistry,
+      observedInstallation,
+      mode,
+      now
+    );
+    assertActivationReady({
+      registry: observedRegistry,
+      installation: observedInstallation,
+      approval: observedApproval,
+      currentGate: observedGate,
+      mode,
+      now,
+      allowExpired: Boolean(existingOperation)
+    });
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const loopIds = installationLoopIds(observedWorkspace.workspace, observedInstallation.id);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId: observedInstallation.id,
+      appId: observedInstallation.appId,
+      action: "activate",
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: {
+        loopIds,
+        fieldMappingIds: [],
+        companyContextKeys: []
+      },
+      activation: {
+        approvalReceiptId: observedApproval.id,
+        approvalDigest: observedApproval.approvalDigest,
+        fromState: observedApproval.fromState,
+        targetMode: mode
+      },
+      actor,
+      now
+    });
+    if (operation.status === "completed") {
+      const registry = await this.installationStore.read();
+      return requireInstallation(registry, installationId);
+    }
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.activation || currentOperation.status === "completed") {
+          throw new Error(`App activation recovery record is unavailable: ${operation.id}`);
+        }
+        const approval = registry.activationApprovals.find((candidate) => candidate.id === currentOperation.activation!.approvalReceiptId);
+        if (!approval || approval.approvalDigest !== currentOperation.activation.approvalDigest) {
+          throw new Error("App activation recovery approval no longer matches its durable authority record");
+        }
+        if (Date.parse(currentOperation.startedAt) >= Date.parse(approval.expiresAt)) {
+          throw new Error("App activation recovery began after its approval expired");
+        }
+        const currentGate = await this.buildActivationGate(registry, installation, mode, now);
+        assertActivationReady({ registry, installation, approval, currentGate, mode, now, allowExpired: true });
+        if (currentOperation.activation.fromState !== installation.state || currentOperation.activation.targetMode !== mode) {
+          throw new Error("App activation recovery record does not match the current lifecycle transition");
+        }
+        const timestamp = now.toISOString();
+        await this.synchronizeOwnedLoopActivation(installation.id, mode, timestamp, currentOperation.desired.loopIds);
+        const updated: WorkspaceAppInstallation = { ...installation, state: mode, mode, updatedAt: timestamp, failureReason: undefined };
+        const consumedApproval = appActivationApprovalReceiptSchema.parse({ ...approval, consumedAt: timestamp, consumedBy: actor });
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: registry.revision + 1,
+          installations: replaceInstallation(registry.installations, updated),
+          activationApprovals: registry.activationApprovals.map((candidate) => candidate.id === approval.id ? consumedApproval : candidate),
+          updatedAt: timestamp
+        }, currentOperation.id, now);
+        return {
+          registry: nextRegistry,
+          lock: createInstallationLock(nextRegistry),
+          audit: {
+            actor,
+            action: "app.activation.consumed" as const,
+            targetType: "app_activation_approval" as const,
+            targetId: approval.id,
+            metadata: {
+              installationIdDigest: canonicalAppDigest(installation.id),
+              appIdDigest: canonicalAppDigest(installation.appId),
+              artifactDigest: approval.artifactDigest,
+              approvalDigest: approval.approvalDigest,
+              fromState: approval.fromState,
+              requestedMode: approval.requestedMode,
+              evidenceRefCount: approval.evidenceRefs.length,
+              expiresAt: approval.expiresAt
+            }
+          },
+          value: updated
+        };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
-  async pause(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, actor, () => "paused");
+  async pause(installationId: string, actor: string, now = new Date()): Promise<WorkspaceAppInstallation> {
+    return this.transition(installationId, actor, "pause", now);
   }
 
-  async resume(installationId: string, actor: string): Promise<WorkspaceAppInstallation> {
-    return this.transition(installationId, actor, (installation) => {
-      if (installation.mode !== "shadow" && installation.mode !== "recommend" && installation.mode !== "execute_with_approval") {
-        throw new Error("Paused installation has no safe resumable rollout mode");
-      }
-      return installation.mode;
-    });
+  async resume(installationId: string, actor: string, now = new Date()): Promise<WorkspaceAppInstallation> {
+    return this.transition(installationId, actor, "resume", now);
   }
 
   async readiness(installationId: string, now = new Date()): Promise<AppReadiness> {
     const registry = await this.installationStore.read();
     const installation = requireInstallation(registry, installationId);
+    return this.buildReadiness(registry, installation, now);
+  }
+
+  private async buildReadiness(
+    registry: AppInstallationRegistry,
+    installation: WorkspaceAppInstallation,
+    now: Date
+  ): Promise<AppReadiness> {
     const loaded = await this.loadInstallationArtifact(installation);
     const compiled = await compileLoopPack(loaded, { selectedModules: installation.selectedModules });
     const activeCapabilities = compiledCapabilityKeys(compiled);
@@ -1532,13 +2844,40 @@ export class AppInstallationService {
     const recipe = (await loadConnectorRecipes(loaded)).find((candidate) => candidate.id === recipeId);
     const mappingsRequired = Boolean(recipe?.fieldMappings.some((mapping) => mapping.requiredLogicalFields.length > 0));
     const exactEvaluations = registry.evaluations.filter((run) =>
-      run.installationId === installationId && run.artifactDigest === installation.artifactDigest);
+      run.installationId === installation.id && run.artifactDigest === installation.artifactDigest);
     const latestSynthetic = [...exactEvaluations].reverse().find((run) => run.level === "synthetic");
     const syntheticPassed = latestSynthetic?.status === "passed" &&
       latestSynthetic.writeBlocked &&
       latestSynthetic.metrics.providerWrites === 0;
     const connectionsPassed = requiredCapabilities.size > 0 && missingCapabilities.length === 0;
     const mappingsPassed = !mappingsRequired || installation.fieldMappingIds.length > 0;
+    const declaredRoutedLoopIds = compiled.loopSpecs
+      .filter((spec) => (spec.routing?.accepts.length ?? 0) > 0)
+      .map((spec) => spec.metadata.id)
+      .sort();
+    const [webhookDoctor, routeActivation] = declaredRoutedLoopIds.length > 0
+      ? await Promise.all([
+          this.webhookDoctorProvider({ projectRoot: this.projectRoot, now }),
+          this.safeRouteActivationStatus(now)
+        ])
+      : [undefined, undefined];
+    const ownedLoopIdSet = new Set(declaredRoutedLoopIds);
+    const routedLoopIds = [...new Set((webhookDoctor?.plan.routes ?? [])
+      .filter((route) => route.routeKind !== "loopgraph_lifecycle")
+      .flatMap((route) => route.loopIds)
+      .filter((loopId) => ownedLoopIdSet.has(loopId)))].sort();
+    const routedLoopIdSet = new Set(routedLoopIds);
+    const appRouteStates = routeActivation?.routeStates.filter((route) =>
+      route.routeKind !== "loopgraph_lifecycle" && route.loopIds.some((loopId) => routedLoopIdSet.has(loopId))) ?? [];
+    const coveredLoopIds = new Set(appRouteStates.flatMap((route) => route.loopIds).filter((loopId) => routedLoopIdSet.has(loopId)));
+    const missingRouteLoopIds = routedLoopIds.filter((loopId) => !coveredLoopIds.has(loopId));
+    const appRoutesReady = Boolean(
+      routeActivation?.exists &&
+      routeActivation.current &&
+      appRouteStates.length > 0 &&
+      missingRouteLoopIds.length === 0 &&
+      appRouteStates.every((route) => route.ready)
+    );
     const checks: AppReadiness["checks"] = [
       { id: "artifact", category: "artifact", status: "pass", summary: "Pinned artifact version and digest are recorded.", evidenceRefs: [installation.artifactDigest] },
       {
@@ -1570,6 +2909,39 @@ export class AppInstallationService {
       },
       { id: "configuration", category: "configuration", status: installation.configuration.completedAt ? "pass" : "fail", summary: installation.configuration.completedAt ? "Required configuration is complete." : "Configuration is incomplete.", evidenceRefs: [] },
       { id: "simulation", category: "simulation", status: syntheticPassed ? "pass" : latestSynthetic ? "fail" : "warn", summary: syntheticPassed ? "Latest exact-digest synthetic conformance run passed with writes blocked." : "A passing exact-digest synthetic conformance run is required.", evidenceRefs: latestSynthetic ? [latestSynthetic.id] : [] },
+      {
+        id: "hermes-route-manifest",
+        category: "routing",
+        status: declaredRoutedLoopIds.length === 0 ? "not_applicable" : webhookDoctor?.ok ? "pass" : "fail",
+        summary: declaredRoutedLoopIds.length === 0
+          ? "This App declares no event routing contracts."
+          : webhookDoctor?.ok
+            ? `The local Hermes route manifest covers the current catalog for ${declaredRoutedLoopIds.length} routed App loop(s).`
+            : "The local Hermes route manifest is missing or stale for the current runtime catalog.",
+        evidenceRefs: webhookDoctor?.ok ? [webhookDoctor.plan.catalogVersion] : [],
+        ...(declaredRoutedLoopIds.length > 0 && !webhookDoctor?.ok ? { remediation: "Synchronize the current non-secret Hermes route manifest, then rehearse the exact event contracts again." } : {})
+      },
+      {
+        id: "hermes-route-activation",
+        category: "routing",
+        status: routedLoopIds.length === 0 ? "not_applicable" : appRoutesReady ? "pass" : "fail",
+        summary: routedLoopIds.length === 0
+          ? "This App does not require a Hermes event route."
+          : appRoutesReady
+            ? `${appRouteStates.length} exact Hermes event route(s) cover every routed App loop with signature verification and every required provider subscription active.`
+            : !routeActivation?.exists
+              ? "No Hermes Route Controller receipt proves that this App can receive routed business events."
+              : !routeActivation.current
+                ? "The Hermes Route Controller receipt is stale for the current App routing catalog."
+                : missingRouteLoopIds.length > 0
+                  ? `No active Hermes route covers App loop(s): ${missingRouteLoopIds.join(", ")}.`
+                  : `Hermes route(s) for this App are not ready: ${appRouteStates.filter((route) => !route.ready).map((route) => `${route.routeName} (${route.state}/${route.subscriptionState})`).join(", ")}.`,
+        evidenceRefs: routeActivation?.planDigest ? [
+          `hermes-route-plan:${routeActivation.planDigest}`,
+          ...appRouteStates.map((route) => `hermes-route:${route.routeId}`)
+        ] : [],
+        ...(routedLoopIds.length > 0 && !appRoutesReady ? { remediation: "Prepare the exact current Hermes route plan and apply it through the workload-authenticated Route Controller; every required provider subscription must be active before App promotion." } : {})
+      },
       { id: "permissions", category: "permission", status: installation.permissions.some((permission) => permission.decision === "unresolved") ? "fail" : "pass", summary: "Permission decisions are explicit and provider execution was not enabled by install.", evidenceRefs: [] }
     ];
     const failureCount = checks.filter((check) => check.status === "fail").length;
@@ -1577,13 +2949,276 @@ export class AppInstallationService {
     const state = failureCount > 0 ? "blocked" : installation.state === "shadow" ? "ready_for_recommend" : "ready_for_shadow";
     return appReadinessSchema.parse({
       schemaVersion: APP_EVAL_SCHEMA_VERSION,
-      installationId,
+      installationId: installation.id,
       state,
       score: Math.round((passCount / checks.length) * 100),
       maturity: syntheticPassed && connectionsPassed && mappingsPassed ? "connected" : syntheticPassed ? "tested" : "concept",
       checks,
       evaluatedAt: now.toISOString(),
       evidenceDerived: true
+    });
+  }
+
+  private async safeRouteActivationStatus(now: Date): Promise<HermesRouteActivationStatus> {
+    try {
+      return await this.routeActivationStatusProvider({ projectRoot: this.projectRoot, now });
+    } catch {
+      return {
+        projectRoot: path.resolve(this.projectRoot),
+        recordPath: path.join(path.resolve(this.projectRoot), ".loopgraph", "hermes-route-activation.json"),
+        checkedAt: now.toISOString(),
+        exists: true,
+        current: false,
+        ready: false,
+        routeStates: [],
+        warnings: ["The stored Hermes route activation receipt is invalid."],
+        nextActions: ["Apply the current exact route plan again through the Hermes Route Controller."]
+      };
+    }
+  }
+
+  async operationalMaturity(
+    installationId: string,
+    now = new Date()
+  ): Promise<AppOperationalMaturityAssessment> {
+    const registry = await this.installationStore.read();
+    const installation = requireInstallation(registry, installationId);
+    const readiness = await this.buildReadiness(registry, installation, now);
+    return this.buildOperationalMaturity(registry, installation, readiness, now);
+  }
+
+  async evidenceRenewalPlan(input: {
+    statuses?: Array<AppEvidenceRenewalPlan["items"][number]["status"]>;
+    limit?: number;
+  } = {}, now = new Date()): Promise<AppEvidenceRenewalPlan> {
+    const registry = await this.installationStore.read();
+    const installations = registry.installations;
+    const [evidenceByInstallation, verificationRegistry] = await Promise.all([
+      this.loadOperationalEvidenceBatch(installations),
+      this.verificationStore.read()
+    ]);
+    const readiness = await Promise.all(installations.map((installation) =>
+      this.buildReadiness(registry, installation, now)));
+    const assessments = await Promise.all(installations.map((installation, index) =>
+      this.buildOperationalMaturity(
+        registry,
+        installation,
+        readiness[index]!,
+        now,
+        true,
+        evidenceByInstallation.get(installation.id),
+        verificationRegistry
+      )));
+    const allItems = assessments.map((assessment) => renewalPlanItem(assessment));
+    const counts = {
+      notApplicable: allItems.filter((item) => item.status === "not_applicable").length,
+      incomplete: allItems.filter((item) => item.status === "incomplete").length,
+      current: allItems.filter((item) => item.status === "current").length,
+      renewSoon: allItems.filter((item) => item.status === "renew_soon").length,
+      expired: allItems.filter((item) => item.status === "expired").length,
+      invalid: allItems.filter((item) => item.status === "invalid").length
+    };
+    const selectedStatuses = input.statuses ? new Set(input.statuses) : undefined;
+    const matched = allItems
+      .filter((item) => !selectedStatuses || selectedStatuses.has(item.status))
+      .sort(compareRenewalPlanItems);
+    const limit = Math.min(Math.max(input.limit ?? 100, 1), 100);
+    return appEvidenceRenewalPlanSchema.parse({
+      schemaVersion: APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
+      workspaceId: this.workspaceId,
+      companyId: this.companyId,
+      generatedAt: now.toISOString(),
+      totalInstallations: installations.length,
+      totalMatched: matched.length,
+      counts,
+      items: matched.slice(0, limit)
+    });
+  }
+
+  async activationGate(
+    installationId: string,
+    mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">,
+    now = new Date()
+  ): Promise<AppActivationGate> {
+    const registry = await this.installationStore.read();
+    const installation = requireInstallation(registry, installationId);
+    return this.buildActivationGate(registry, installation, mode, now);
+  }
+
+  private async buildOperationalMaturity(
+    registry: AppInstallationRegistry,
+    installation: WorkspaceAppInstallation,
+    readiness: AppReadiness,
+    now: Date,
+    includeIndependentVerification = true,
+    evidenceSnapshot?: AppOperationalEvidenceSnapshot,
+    verificationSnapshot?: AppVerificationRegistry
+  ): Promise<AppOperationalMaturityAssessment> {
+    const operatingEvidence = evidenceSnapshot ?? await this.loadOperationalEvidence(installation);
+    const verificationRegistry = includeIndependentVerification
+      ? verificationSnapshot ?? await this.verificationStore.read()
+      : undefined;
+    return assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: registry.evaluations,
+      operatingEvidence: {
+        completedRunRefs: operatingEvidence.completedRunRefs,
+        observedOutcomeRefs: operatingEvidence.observedOutcomeRefs,
+        observedValueRefs: operatingEvidence.observedValueRefs,
+        latestCompletedRun: operatingEvidence.latestCompletedRun,
+        latestObservedOutcome: operatingEvidence.latestObservedOutcome,
+        latestObservedValue: operatingEvidence.latestObservedValue
+      },
+      verificationReceipts: verificationRegistry?.receipts,
+      trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
+      now
+    });
+  }
+
+  private async loadOperationalEvidence(
+    installation: WorkspaceAppInstallation
+  ): Promise<AppOperationalEvidenceSnapshot> {
+    const snapshots = await this.loadOperationalEvidenceBatch([installation]);
+    return snapshots.get(installation.id) ?? emptyOperationalEvidenceSnapshot();
+  }
+
+  private async loadOperationalEvidenceBatch(
+    installations: WorkspaceAppInstallation[]
+  ): Promise<Map<string, AppOperationalEvidenceSnapshot>> {
+    const workspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const [outcomes, valueEntries, completedEvents] = await Promise.all([
+      this.outcomeStore.listObservedOutcomes({ workspaceId: this.workspaceId, companyId: this.companyId }),
+      this.outcomeStore.listValueLedgerEntries({ workspaceId: this.workspaceId, companyId: this.companyId }),
+      this.operationsStore.listExecutionEvents({
+        workspaceId: this.workspaceId,
+        companyId: this.companyId,
+        eventType: "run.completed"
+      })
+    ]);
+    return new Map(installations.map((installation) => {
+      const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
+      const appRuns = completedEvents.filter((event) => loopIds.has(event.loopId));
+      const appOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
+      const appValueEntries = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
+      return [installation.id, {
+        completedRunRefs: uniqueStrings(appRuns.map((event) => `run:${event.runId}`)),
+        observedOutcomeRefs: uniqueStrings(appOutcomes.map((outcome) => `outcome:${outcome.id}`)),
+        observedValueRefs: uniqueStrings(appValueEntries.map((entry) => `value:${entry.id}`)),
+        latestCompletedRun: latestTimestampedEvidence(
+          appRuns,
+          (event) => `run:${event.runId}`,
+          (event) => event.recordedAt
+        ),
+        latestObservedOutcome: latestTimestampedEvidence(
+          appOutcomes,
+          (outcome) => `outcome:${outcome.id}`,
+          (outcome) => outcome.evaluationWindow.end
+        ),
+        latestObservedValue: latestTimestampedEvidence(
+          appValueEntries,
+          (entry) => `value:${entry.id}`,
+          (entry) => entry.window.end
+        )
+      } satisfies AppOperationalEvidenceSnapshot] as const;
+    }));
+  }
+
+  private async buildActivationGate(
+    registry: AppInstallationRegistry,
+    installation: WorkspaceAppInstallation,
+    mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">,
+    now: Date
+  ): Promise<AppActivationGate> {
+    const readiness = await this.buildReadiness(registry, installation, now);
+    const operatingEvidence = await this.loadOperationalEvidence(installation);
+    const maturity = await this.buildOperationalMaturity(registry, installation, readiness, now, false, operatingEvidence);
+    const exactEvaluations = registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest);
+    const recommendation = createPromotionRecommendation({
+      installationId: installation.id,
+      evaluations: exactEvaluations,
+      now
+    });
+    const latestReplay = [...exactEvaluations].reverse().find((evaluation) =>
+      evaluation.installationId === installation.id && evaluation.level === "historical_replay");
+    const requiredMaturity = mode === "execute_with_approval" ? "production_proven" as const : "connected" as const;
+    const requiredMaturityGate = maturity.gates.find((gate) => gate.level === requiredMaturity)!;
+    let lifecycleError: string | undefined;
+    try {
+      assertLifecycleTransition(installation.state, mode, mode);
+    } catch (error) {
+      lifecycleError = error instanceof Error ? error.message : "The requested activation transition is invalid.";
+    }
+    const recommendationReady = mode !== "recommend" || recommendation.recommendedMode === "recommend";
+    const permissionReady = mode !== "execute_with_approval" || !installation.permissions.some((permission) =>
+      permission.authority === "execute" && permission.decision === "allow");
+    const freshnessCheck = activationEvidenceFreshnessCheck({
+      mode,
+      replay: latestReplay,
+      operatingEvidence,
+      now
+    });
+    const checks: AppActivationGate["checks"] = [
+      {
+        id: "ordered-lifecycle",
+        status: lifecycleError ? "blocked" : "pass",
+        summary: lifecycleError ?? `The ordered ${installation.state} → ${mode} transition is valid.`,
+        evidenceRefs: [installation.updatedAt],
+        ...(lifecycleError ? { remediation: "Complete the preceding rollout stage or reconcile the unfinished lifecycle operation before requesting approval." } : {})
+      },
+      {
+        id: "operational-maturity",
+        status: requiredMaturityGate.status === "achieved" ? "pass" : "blocked",
+        summary: requiredMaturityGate.status === "achieved"
+          ? `The exact installed artifact has achieved ${requiredMaturity} maturity.`
+          : `${mode} requires ${requiredMaturity} maturity. ${requiredMaturityGate.summary}`,
+        evidenceRefs: requiredMaturityGate.evidenceRefs,
+        ...(requiredMaturityGate.status === "blocked" ? { remediation: requiredMaturityGate.remediation ?? "Resolve the blocked maturity gate." } : {})
+      },
+      {
+        id: "promotion-evidence",
+        status: mode === "recommend" ? recommendationReady ? "pass" : "blocked" : "not_applicable",
+        summary: mode === "recommend"
+          ? recommendationReady
+            ? "Historical replay is passing, fully reviewed, and the evidence-derived recommendation is recommend mode."
+            : `The current evidence recommends ${recommendation.recommendedMode}; recommendation mode is not yet justified.`
+          : `${mode} uses its operational-maturity gate instead of the recommend-mode replay gate.`,
+        evidenceRefs: mode === "recommend" ? recommendation.evidenceRefs.slice(-100) : [],
+        ...(!recommendationReady ? { remediation: "Run and completely label a bounded historical replay, then resolve every failing promotion gate." } : {})
+      },
+      freshnessCheck,
+      {
+        id: "permission-boundary",
+        status: permissionReady ? "pass" : "blocked",
+        summary: permissionReady
+          ? mode === "execute_with_approval"
+            ? "Every execute capability remains approval-bound or forbidden; no direct execute grant is present."
+            : "This mode cannot commit provider writes."
+          : "Execute-with-approval cannot contain a direct allow decision for an execute capability.",
+        evidenceRefs: installation.permissions
+          .map((permission) => `${permission.capability}:${permission.authority}:${permission.decision}`)
+          .slice(0, 100),
+        ...(!permissionReady ? { remediation: "Change every execute capability to approval_required or forbid before promotion." } : {})
+      }
+    ];
+    const evidenceRefs = uniqueStrings(checks.flatMap((check) => check.evidenceRefs)).slice(0, 100);
+    const gateWithoutDigest = {
+      schemaVersion: APP_ACTIVATION_GATE_SCHEMA_VERSION,
+      installationId: installation.id,
+      appId: installation.appId,
+      artifactDigest: installation.artifactDigest,
+      fromState: installation.state,
+      requestedMode: mode,
+      status: checks.some((check) => check.status === "blocked") ? "blocked" as const : "ready" as const,
+      requiredMaturity,
+      observedMaturity: maturity.maturity,
+      checks,
+      evidenceRefs,
+      evaluatedAt: now.toISOString()
+    };
+    return appActivationGateSchema.parse({
+      ...gateWithoutDigest,
+      gateDigest: canonicalAppDigest(gateWithoutDigest)
     });
   }
 
@@ -1661,40 +3296,115 @@ export class AppInstallationService {
   private async transition(
     installationId: string,
     actor: string,
-    validate: (installation: WorkspaceAppInstallation, registry: AppInstallationRegistry) => WorkspaceAppInstallation["state"]
+    action: "pause" | "resume",
+    now: Date
   ): Promise<WorkspaceAppInstallation> {
-    return this.installationStore.withExclusiveUpdate(async (registry) => {
-      const installation = requireOperableInstallation(registry, installationId);
-      const state = validate(installation, registry);
-      assertLifecycleTransition(installation.state, state, state);
-      const timestamp = new Date().toISOString();
-      const mode = ["shadow", "recommend", "execute_with_approval", "live"].includes(state) ? state as AppRolloutMode : installation.mode;
-      const routingMode = state === "paused"
-        ? "shadow"
-        : state === "shadow" || state === "recommend" || state === "execute_with_approval"
-          ? state
-          : undefined;
-      if (!routingMode) throw new Error(`App state ${state} has no safe LoopSpec routing mode`);
-      await this.synchronizeOwnedLoopActivation(
-        installation.id,
-        routingMode,
-        timestamp
-      );
-      const updated = { ...installation, state, mode, updatedAt: timestamp, failureReason: undefined };
-      return {
-        registry: { ...registry, revision: registry.revision + 1, installations: replaceInstallation(registry.installations, updated), updatedAt: timestamp },
-        value: updated
-      };
+    const observedRegistry = await this.installationStore.read();
+    const observedInstallation = requireInstallation(observedRegistry, installationId);
+    const unfinished = observedRegistry.lifecycleOperations.find((operation) =>
+      operation.installationId === installationId && operation.status !== "completed");
+    if (!unfinished && isCompletedRolloutRequest(observedInstallation, action)) return observedInstallation;
+    const intent = rolloutTransitionIntent(observedInstallation, action);
+    const idempotencyKey = canonicalAppDigest({
+      action,
+      workspaceId: observedRegistry.workspaceId,
+      installationId,
+      appId: observedInstallation.appId,
+      artifactDigest: observedInstallation.artifactDigest,
+      ...intent
     });
+    const operationId = lifecycleOperationId(action, installationId, observedInstallation.artifactDigest, idempotencyKey);
+    const observedWorkspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
+    const operation = await this.prepareLifecycleOperation({
+      id: operationId,
+      idempotencyKey,
+      installationId,
+      appId: observedInstallation.appId,
+      action,
+      targetArtifactDigest: observedInstallation.artifactDigest,
+      desired: {
+        loopIds: installationLoopIds(observedWorkspace.workspace, installationId),
+        fieldMappingIds: [],
+        companyContextKeys: []
+      },
+      rollout: {
+        fromState: intent.fromState,
+        fromMode: intent.fromMode,
+        fromUpdatedAt: intent.fromUpdatedAt,
+        targetState: intent.targetState,
+        targetMode: intent.targetMode
+      },
+      actor,
+      now
+    });
+    if (operation.status === "completed") {
+      return requireInstallation(await this.installationStore.read(), installationId);
+    }
+    try {
+      return await this.installationStore.withExclusiveUpdate(async (registry) => {
+        const installation = requireInstallation(registry, installationId);
+        const currentOperation = registry.lifecycleOperations.find((candidate) => candidate.id === operation.id);
+        if (!currentOperation?.rollout || currentOperation.status === "completed") {
+          throw new Error(`App rollout recovery record is unavailable: ${operation.id}`);
+        }
+        const rollout = currentOperation.rollout;
+        if (
+          currentOperation.action !== action ||
+          currentOperation.appId !== installation.appId ||
+          currentOperation.targetArtifactDigest !== installation.artifactDigest ||
+          installation.state !== rollout.fromState ||
+          installation.mode !== rollout.fromMode ||
+          installation.updatedAt !== rollout.fromUpdatedAt
+        ) {
+          throw new Error("App rollout recovery record does not match the current lifecycle transition");
+        }
+        const expected = rolloutTransitionIntent(installation, action);
+        if (
+          expected.targetState !== rollout.targetState ||
+          expected.targetMode !== rollout.targetMode ||
+          expected.routingMode !== rolloutRoutingMode(action, rollout.targetMode)
+        ) {
+          throw new Error("App rollout recovery target no longer matches the governed transition");
+        }
+        const timestamp = now.toISOString();
+        await this.synchronizeOwnedLoopActivation(
+          installation.id,
+          expected.routingMode,
+          timestamp,
+          currentOperation.desired.loopIds
+        );
+        const updated: WorkspaceAppInstallation = {
+          ...installation,
+          state: rollout.targetState,
+          mode: rollout.targetMode,
+          updatedAt: timestamp,
+          failureReason: undefined
+        };
+        const nextRegistry = completeLifecycleOperation({
+          ...registry,
+          revision: registry.revision + 1,
+          installations: replaceInstallation(registry.installations, updated),
+          updatedAt: timestamp
+        }, currentOperation.id, now);
+        return { registry: nextRegistry, lock: createInstallationLock(nextRegistry), value: updated };
+      });
+    } catch (error) {
+      await this.markLifecycleOperationInterrupted(operation.id, now);
+      throw error;
+    }
   }
 
   private async synchronizeOwnedLoopActivation(
     installationId: string,
     activationMode: "shadow" | "recommend" | "execute_with_approval",
-    timestamp: string
+    timestamp: string,
+    expectedLoopIds?: string[]
   ): Promise<void> {
     const snapshot = await this.loopSpecStore.getWorkspace(this.projectRoot);
     const loopIds = installationLoopIds(snapshot.workspace, installationId);
+    if (expectedLoopIds && canonicalAppDigest([...loopIds].sort()) !== canonicalAppDigest([...expectedLoopIds].sort())) {
+      throw new Error(`App installation ${installationId} owned LoopSpecs changed after rollout recovery was prepared`);
+    }
     if (loopIds.length === 0) {
       throw new Error(`App installation ${installationId} owns no active LoopSpecs`);
     }
@@ -1739,10 +3449,26 @@ export class AppInstallationService {
 
   private async loadInstallationArtifact(installation: WorkspaceAppInstallation): Promise<LoopPackLoadResult> {
     if (installation.derivation?.detachedAt && installation.derivation.snapshotPath) {
-      const snapshotRoot = resolvePackFile(this.projectRoot, installation.derivation.snapshotPath);
-      const loaded = await loadLoopPackDirectory(snapshotRoot);
-      if (loaded.artifact.digest !== installation.artifactDigest) throw new Error("Detached app snapshot no longer matches its pinned digest");
-      return loaded;
+      if (installation.derivation.snapshotFilesDigest) {
+        return this.snapshotStore.loadExact({
+          snapshotPath: installation.derivation.snapshotPath,
+          artifactDigest: installation.artifactDigest,
+          filesDigest: installation.derivation.snapshotFilesDigest
+        });
+      }
+      const completed = [...(await this.installationStore.read()).lifecycleOperations].reverse().find((operation) =>
+        operation.action === "detach" &&
+        operation.installationId === installation.id &&
+        operation.status === "completed" &&
+        operation.detach?.snapshotPath === installation.derivation?.snapshotPath &&
+        operation.detach?.targetInstallationDigest === canonicalAppDigest(installation)
+      );
+      if (!completed?.detach) throw new Error("Detached app is missing its exact snapshot receipt");
+      return this.snapshotStore.loadExact({
+        snapshotPath: completed.detach.snapshotPath,
+        artifactDigest: completed.detach.snapshotArtifactDigest,
+        filesDigest: completed.detach.snapshotFilesDigest
+      });
     }
     return this.marketplace.getAppArtifact(installation.appId, installation.version, installation.artifactDigest);
   }
@@ -2100,6 +3826,98 @@ function installationLoopIds(workspace: LoopgraphWorkspaceRegistry, installation
   }).map((entry) => entry.id).sort();
 }
 
+function installationLoopInventoryDigest(artifacts: StoredLoopSpecArtifact[], loopIds: string[]): string {
+  const byId = new Map(artifacts.map((artifact) => [artifact.loopId, artifact]));
+  const inventory = [...loopIds].sort().map((loopId) => {
+    const artifact = byId.get(loopId);
+    if (!artifact) throw new Error(`Active LoopSpec inventory is missing ${loopId}`);
+    return { loopId, versionHash: artifact.versionHash };
+  });
+  return canonicalAppDigest(inventory);
+}
+
+function installationLoopObservedInventoryDigest(artifacts: StoredLoopSpecArtifact[], loopIds: string[]): string {
+  const byId = new Map(artifacts.map((artifact) => [artifact.loopId, artifact]));
+  return canonicalAppDigest([...loopIds].sort().map((loopId) => ({
+    loopId,
+    versionHash: byId.get(loopId)?.versionHash ?? null
+  })));
+}
+
+function sharedInstallationLoopIds(
+  registry: AppInstallationRegistry,
+  installation: WorkspaceAppInstallation
+): string[] {
+  return installation.ownedAssets.flatMap((asset) => {
+    const registryAsset = registry.assets.find((candidate) => candidate.assetId === asset.assetId);
+    return asset.kind === "loop_spec" && (registryAsset?.ownerInstallationIds.length ?? 0) > 1 && asset.assetId.startsWith("loop.")
+      ? [asset.assetId.slice("loop.".length)]
+      : [];
+  }).sort();
+}
+
+function installationOwnershipDigest(registry: AppInstallationRegistry, installationId: string): string {
+  return canonicalAppDigest(registry.assets
+    .filter((asset) => asset.ownerInstallationIds.includes(installationId))
+    .sort((left, right) => left.assetId.localeCompare(right.assetId)));
+}
+
+function assertUninstallReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  actor: string,
+  reasonDigest: string
+): void {
+  const recordedReasonDigest = operation.uninstall?.reasonDigest ?? canonicalAppDigest({ reason: receipt.reason.trim() });
+  if (operation.action !== "uninstall" || operation.actor !== actor || receipt.actor !== actor || recordedReasonDigest !== reasonDigest) {
+    throw new Error("Completed uninstall result is bound to a different actor or removal reason");
+  }
+}
+
+function assertRollbackReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string
+): void {
+  if (
+    operation.action !== "rollback" ||
+    !operation.rollback ||
+    operation.actor !== actor ||
+    receipt.action !== "rollback" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id ||
+    receipt.resultingArtifactDigest !== operation.targetArtifactDigest ||
+    canonicalAppDigest(installation) !== operation.rollback.targetInstallationDigest
+  ) {
+    throw new Error("Completed rollback result is bound to a different actor or installation revision");
+  }
+}
+
+function assertUpdateReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  planDigest: string,
+  approvedPermissionCapabilities: string[]
+): void {
+  if (
+    operation.action !== "update" ||
+    !operation.update ||
+    operation.actor !== actor ||
+    receipt.action !== "update" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id ||
+    receipt.resultingArtifactDigest !== operation.targetArtifactDigest ||
+    operation.update.planDigest !== planDigest ||
+    canonicalAppDigest(operation.update.approvedPermissionCapabilities) !== canonicalAppDigest(approvedPermissionCapabilities) ||
+    canonicalAppDigest(installation) !== operation.update.targetInstallationDigest
+  ) {
+    throw new Error("Completed update result is bound to a different actor, reviewed plan, or installation revision");
+  }
+}
+
 function ownershipFromCompiled(
   compiled: Awaited<ReturnType<typeof compileLoopPack>>,
   installationId: string,
@@ -2282,6 +4100,15 @@ function fieldMappingAssetDigest(mapping: ConnectorFieldMapping): string {
   });
 }
 
+function fieldMappingInventoryDigest(mappings: ConnectorFieldMapping[], mappingIds: string[]): string {
+  const byId = new Map(mappings.map((mapping) => [mapping.id, mapping]));
+  return canonicalAppDigest([...mappingIds].sort().map((mappingId) => {
+    const mapping = byId.get(mappingId);
+    if (!mapping) throw new Error(`Field mapping inventory is missing ${mappingId}`);
+    return { mappingId, digest: fieldMappingAssetDigest(mapping) };
+  }));
+}
+
 function companyContextKeys(configuration: AppConfiguration): string[] {
   return [...new Set(Object.values(configuration.provenance).flatMap((provenance) =>
     provenance.layer === "company_context" && provenance.sourceRef ? [provenance.sourceRef] : []
@@ -2337,6 +4164,129 @@ function requireInstallation(registry: AppInstallationRegistry, id: string): Wor
   return installation;
 }
 
+function assertActivationReady(input: {
+  registry: AppInstallationRegistry;
+  installation: WorkspaceAppInstallation;
+  approval: AppActivationApprovalReceipt;
+  currentGate: AppActivationGate;
+  mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  now: Date;
+  allowExpired: boolean;
+}): void {
+  const { registry, installation, approval, currentGate, mode, now, allowExpired } = input;
+  if (approval.consumedAt) throw new Error("App activation approval receipt has already been consumed");
+  if (!allowExpired && Date.parse(approval.expiresAt) <= now.getTime()) {
+    throw new Error("App activation approval receipt has expired");
+  }
+  if (approval.workspaceId !== registry.workspaceId || approval.installationId !== installation.id || approval.appId !== installation.appId) {
+    throw new Error("App activation approval receipt belongs to another workspace, installation, or app");
+  }
+  if (approval.artifactDigest !== installation.artifactDigest || approval.fromState !== installation.state || approval.requestedMode !== mode) {
+    throw new Error("App activation approval receipt does not match the current artifact, state, and requested mode");
+  }
+  if (!("activationGate" in approval)) {
+    throw new Error("Legacy App activation approvals are not evidence-bound; create a fresh activation approval");
+  }
+  const approvedGate = approval.activationGate;
+  if (
+    approvedGate.installationId !== installation.id ||
+    approvedGate.appId !== installation.appId ||
+    approvedGate.artifactDigest !== installation.artifactDigest ||
+    approvedGate.fromState !== installation.state ||
+    approvedGate.requestedMode !== mode ||
+    approvedGate.requiredMaturity !== currentGate.requiredMaturity
+  ) {
+    throw new Error("App activation approval gate does not match the current installation transition");
+  }
+  assertActivationGateReady(currentGate);
+  const currentEvidence = new Set(currentGate.evidenceRefs);
+  const missingApprovedEvidence = approvedGate.evidenceRefs.filter((reference) => !currentEvidence.has(reference));
+  if (missingApprovedEvidence.length > 0) {
+    throw new Error("App activation evidence changed after approval; create a fresh evidence-bound approval");
+  }
+  assertLifecycleTransition(installation.state, mode, mode);
+}
+
+function assertActivationGateReady(gate: AppActivationGate): void {
+  if (gate.status === "ready") return;
+  const blockers = gate.checks
+    .filter((check) => check.status === "blocked")
+    .map((check) => `${check.id}: ${check.summary}`);
+  throw new Error(`App activation gate is blocked:\n- ${blockers.join("\n- ")}`);
+}
+
+type RolloutTransitionIntent = {
+  fromState: WorkspaceAppInstallation["state"];
+  fromMode: AppRolloutMode;
+  fromUpdatedAt: string;
+  targetState: WorkspaceAppInstallation["state"];
+  targetMode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  routingMode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+};
+
+function rolloutTransitionIntent(
+  installation: WorkspaceAppInstallation,
+  action: "pause" | "resume"
+): RolloutTransitionIntent {
+  if (action === "pause") {
+    if (
+      installation.state !== "shadow" &&
+      installation.state !== "recommend" &&
+      installation.state !== "execute_with_approval"
+    ) {
+      throw new Error(`Invalid app lifecycle transition: ${installation.state} -> paused`);
+    }
+    if (installation.mode !== installation.state) {
+      throw new Error("Active App state and approved rollout mode do not match");
+    }
+    return {
+      fromState: installation.state,
+      fromMode: installation.mode,
+      fromUpdatedAt: installation.updatedAt,
+      targetState: "paused",
+      targetMode: installation.mode,
+      routingMode: "shadow"
+    };
+  }
+  if (installation.state !== "paused") {
+    throw new Error(`Invalid app lifecycle transition: ${installation.state} -> resume`);
+  }
+  if (
+    installation.mode !== "shadow" &&
+    installation.mode !== "recommend" &&
+    installation.mode !== "execute_with_approval"
+  ) {
+    throw new Error("Paused installation has no safe resumable rollout mode");
+  }
+  return {
+    fromState: "paused",
+    fromMode: installation.mode,
+    fromUpdatedAt: installation.updatedAt,
+    targetState: installation.mode,
+    targetMode: installation.mode,
+    routingMode: installation.mode
+  };
+}
+
+function rolloutRoutingMode(
+  action: "pause" | "resume",
+  targetMode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">
+): Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval"> {
+  return action === "pause" ? "shadow" : targetMode;
+}
+
+function isCompletedRolloutRequest(
+  installation: WorkspaceAppInstallation,
+  action: "pause" | "resume"
+): boolean {
+  if (action === "pause") return installation.state === "paused";
+  return (
+    installation.state === "shadow" ||
+    installation.state === "recommend" ||
+    installation.state === "execute_with_approval"
+  ) && installation.mode === installation.state;
+}
+
 function requireOperableInstallation(registry: AppInstallationRegistry, id: string): WorkspaceAppInstallation {
   const installation = requireInstallation(registry, id);
   const unfinished = registry.lifecycleOperations.find((operation) =>
@@ -2367,10 +4317,178 @@ function assertSameLifecycleOperation(existing: AppLifecycleOperation, input: Pr
     action: existing.action,
     targetArtifactDigest: existing.targetArtifactDigest,
     desired: existing.desired,
+    activation: existing.activation,
+    rollout: existing.rollout,
+    configure: existing.configure,
+    overlay: existing.overlay,
+    repair: existing.repair,
+    duplicate: existing.duplicate,
+    detach: existing.detach,
+    uninstall: existing.uninstall,
+    update: existing.update,
+    rollback: existing.rollback,
     actor: existing.actor
   };
   if (canonicalAppDigest(existingIntent) !== canonicalAppDigest(intent)) {
     throw new Error(`App lifecycle idempotency conflict for ${existing.id}`);
+  }
+}
+
+function assertLifecyclePreparationSource(
+  registry: AppInstallationRegistry,
+  input: PrepareLifecycleOperationInput
+): void {
+  const source = input.configure ?? input.overlay ?? input.repair ?? input.duplicate ?? input.detach ?? input.update ?? input.rollback ?? input.uninstall;
+  if (!source) return;
+  const sourceArtifactDigest = input.overlay?.sourceArtifactDigest ?? input.repair?.sourceArtifactDigest ?? input.duplicate?.sourceArtifactDigest ?? input.detach?.sourceArtifactDigest ?? input.update?.sourceArtifactDigest ?? input.rollback?.sourceArtifactDigest;
+  const installation = requireInstallation(registry, input.installationId);
+  if (
+    installation.updatedAt !== source.fromUpdatedAt ||
+    canonicalAppDigest(installation) !== source.sourceInstallationDigest ||
+    ("sourceOwnershipDigest" in source && installationOwnershipDigest(registry, installation.id) !== source.sourceOwnershipDigest) ||
+    (input.configure && canonicalAppDigest(installation.configuration) !== input.configure.sourceConfigurationDigest) ||
+    (sourceArtifactDigest !== undefined && installation.artifactDigest !== sourceArtifactDigest)
+  ) {
+    throw new Error(`App ${input.action} source changed before its recovery record could be prepared`);
+  }
+}
+
+function assertConfigureReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedConfigurationDigest: string,
+  valuesDigest: string
+): void {
+  if (
+    operation.action !== "configure" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.configure ||
+    operation.configure.sourceConfigurationDigest !== expectedConfigurationDigest ||
+    operation.configure.valuesDigest !== valuesDigest ||
+    operation.configure.targetConfigurationDigest !== canonicalAppDigest(installation.configuration) ||
+    operation.configure.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "configure" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed configure operation does not authorize this exact replay");
+  }
+}
+
+function assertOverlayReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedArtifactDigest: string,
+  expectedOverlayRevision: number,
+  operationsDigest: string
+): void {
+  if (
+    operation.action !== "overlay" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.overlay ||
+    operation.overlay.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.overlay.expectedOverlayRevision !== expectedOverlayRevision ||
+    operation.overlay.operationsDigest !== operationsDigest ||
+    operation.overlay.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "overlay" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed overlay operation does not authorize this exact replay");
+  }
+}
+
+function assertRepairReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedArtifactDigest: string,
+  expectedUpdatedAt: string
+): void {
+  if (
+    operation.action !== "repair" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.repair ||
+    operation.repair.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.repair.fromUpdatedAt !== expectedUpdatedAt ||
+    operation.repair.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "repair" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed repair operation does not authorize this exact replay");
+  }
+}
+
+function assertDuplicateReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  derivedAppId: string,
+  operationsDigest: string,
+  expectedArtifactDigest: string,
+  expectedUpdatedAt: string
+): void {
+  if (
+    operation.action !== "duplicate" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.duplicate ||
+    operation.duplicate.derivedAppId !== derivedAppId ||
+    operation.duplicate.operationsDigest !== operationsDigest ||
+    operation.duplicate.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.duplicate.fromUpdatedAt !== expectedUpdatedAt ||
+    operation.duplicate.targetInstallationId !== installation.id ||
+    operation.duplicate.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "duplicate" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed duplicate operation does not authorize this exact replay");
+  }
+}
+
+function assertDetachReplayAuthority(
+  operation: AppLifecycleOperation,
+  receipt: AppLifecycleReceipt,
+  installation: WorkspaceAppInstallation,
+  actor: string,
+  expectedArtifactDigest: string,
+  expectedUpdatedAt: string
+): void {
+  if (
+    operation.action !== "detach" ||
+    operation.status !== "completed" ||
+    operation.actor !== actor ||
+    !operation.detach ||
+    operation.detach.sourceArtifactDigest !== expectedArtifactDigest ||
+    operation.detach.fromUpdatedAt !== expectedUpdatedAt ||
+    operation.detach.targetInstallationDigest !== canonicalAppDigest(installation) ||
+    operation.detach.snapshotPath !== installation.derivation?.snapshotPath ||
+    operation.detach.snapshotArtifactDigest !== installation.artifactDigest ||
+    (
+      installation.derivation?.snapshotFilesDigest !== undefined &&
+      operation.detach.snapshotFilesDigest !== installation.derivation.snapshotFilesDigest
+    ) ||
+    operation.resultReceiptId !== receipt.id ||
+    receipt.action !== "detach" ||
+    receipt.actor !== actor ||
+    receipt.installationId !== installation.id
+  ) {
+    throw new Error("Completed detach operation does not authorize this exact replay");
   }
 }
 
@@ -2437,4 +4555,184 @@ function assertLifecycleTransition(from: WorkspaceAppInstallation["state"], requ
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function activationEvidenceFreshnessCheck(input: {
+  mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  replay?: AppEvalRun;
+  operatingEvidence: AppOperationalEvidenceSnapshot;
+  now: Date;
+}): AppActivationGate["checks"][number] {
+  if (input.mode === "shadow") {
+    return {
+      id: "evidence-freshness",
+      status: "not_applicable",
+      summary: "Shadow mode uses current connection readiness and exact-artifact conformance; historical operating evidence is not required.",
+      evidenceRefs: []
+    };
+  }
+  const replayObservedAt = input.replay ? historicalReplayEvidenceTimestamp(input.replay) : undefined;
+  const replayEvidence = input.replay && replayObservedAt ? {
+    reference: input.replay.id,
+    observedAt: replayObservedAt
+  } : undefined;
+  const requiredEvidence: Array<{
+    label: string;
+    evidence?: TimestampedAppEvidence;
+    maxAgeSeconds: number;
+  }> = [
+    {
+      label: "historical replay",
+      evidence: replayEvidence,
+      maxAgeSeconds: APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS
+    },
+    ...(input.mode === "execute_with_approval" ? [
+      {
+        label: "completed App run",
+        evidence: input.operatingEvidence.latestCompletedRun,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      },
+      {
+        label: "observed outcome",
+        evidence: input.operatingEvidence.latestObservedOutcome,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      },
+      {
+        label: "observed value",
+        evidence: input.operatingEvidence.latestObservedValue,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      }
+    ] : [])
+  ];
+  const failures = requiredEvidence.flatMap((requirement) =>
+    appEvidenceFreshnessFailure(requirement, input.now));
+  const evidenceRefs = requiredEvidence.flatMap((requirement) =>
+    requirement.evidence ? [requirement.evidence.reference] : []);
+  const maxAgeDays = APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS / (24 * 60 * 60);
+  return {
+    id: "evidence-freshness",
+    status: failures.length === 0 ? "pass" : "blocked",
+    summary: failures.length === 0
+      ? input.mode === "recommend"
+        ? `The reviewed historical replay is no older than ${maxAgeDays} days.`
+        : `The reviewed replay and latest completed-run, observed-outcome, and observed-value evidence are no older than ${maxAgeDays} days.`
+      : `Activation evidence is not current: ${failures.join("; ")}.`,
+    evidenceRefs,
+    ...(failures.length > 0 ? {
+      remediation: input.mode === "recommend"
+        ? "Run and completely review a new bounded historical replay before requesting recommendation approval."
+        : "Run a fresh reviewed replay and record recent completed work, observed outcomes, and observed net value before requesting execution approval."
+    } : {})
+  };
+}
+
+function latestTimestampedEvidence<T>(
+  values: T[],
+  reference: (value: T) => string,
+  observedAt: (value: T) => string
+): TimestampedAppEvidence | undefined {
+  const latest = [...values].sort((left, right) =>
+    Date.parse(observedAt(right)) - Date.parse(observedAt(left)) || reference(left).localeCompare(reference(right)))[0];
+  return latest ? { reference: reference(latest), observedAt: observedAt(latest) } : undefined;
+}
+
+function emptyOperationalEvidenceSnapshot(): AppOperationalEvidenceSnapshot {
+  return {
+    completedRunRefs: [],
+    observedOutcomeRefs: [],
+    observedValueRefs: []
+  };
+}
+
+function renewalPlanItem(
+  assessment: AppOperationalMaturityAssessment
+): AppEvidenceRenewalPlan["items"][number] {
+  const affectedEvidence: AppEvidenceRenewalPlan["items"][number]["affectedEvidence"] =
+    assessment.freshness.requirements.flatMap((requirement) => requirement.status === "current" ? [] : [{
+      id: requirement.id,
+      status: requirement.status,
+      summary: requirement.summary
+    }]);
+  const firstBlockedGate = assessment.gates.find((gate) => gate.status === "blocked");
+  const status = assessment.freshness.status;
+  const priority: AppEvidenceRenewalPlan["items"][number]["priority"] = ["expired", "invalid"].includes(status)
+    ? "critical"
+    : status === "renew_soon"
+      ? "high"
+      : status === "incomplete"
+        ? "medium"
+        : "none";
+  let nextAction: AppEvidenceRenewalPlan["items"][number]["nextAction"];
+  if (status === "invalid") {
+    nextAction = {
+      kind: "repair_evidence",
+      summary: "Inspect and replace missing, unbound, malformed, or future-dated production evidence before promotion."
+    };
+  } else if (["expired", "renew_soon"].includes(status)) {
+    nextAction = {
+      kind: "renew_proof",
+      summary: status === "expired"
+        ? "Run a new bounded replay and record recent completed work, observed outcomes, and observed net value."
+        : `Renew the affected proof before ${assessment.freshness.validUntil ?? "the current evidence window expires"}.`
+    };
+  } else if (["not_applicable", "incomplete"].includes(status)) {
+    const replayMissing = assessment.freshness.requirements.find((requirement) =>
+      requirement.id === "historical_replay")?.status === "missing";
+    const operatingEvidenceMissing = assessment.freshness.requirements.some((requirement) =>
+      requirement.id !== "historical_replay" && requirement.status === "missing");
+    nextAction = firstBlockedGate?.level === "tested" || firstBlockedGate?.level === "connected"
+      ? {
+          kind: "complete_setup",
+          summary: firstBlockedGate.remediation ?? "Complete conformance, connection, mapping, configuration, and permission readiness."
+        }
+      : replayMissing
+        ? {
+            kind: "run_historical_replay",
+            summary: "Run and completely review a bounded write-blocked historical replay for this exact App artifact."
+          }
+        : operatingEvidenceMissing
+          ? {
+              kind: "record_operating_evidence",
+              summary: "Record recent completed App work, observed outcomes, and observed net value."
+            }
+          : {
+              kind: "complete_setup",
+              summary: firstBlockedGate?.remediation ?? "Complete the remaining evidence-derived maturity gate."
+            };
+  } else {
+    nextAction = {
+      kind: "monitor",
+      summary: assessment.freshness.renewalRecommendedAt
+        ? `Monitor the App and renew production proof by ${assessment.freshness.renewalRecommendedAt}.`
+        : "Monitor routing quality, review burden, outcomes, and value."
+    };
+  }
+  return {
+    installationId: assessment.installationId,
+    appId: assessment.appId,
+    artifactDigest: assessment.artifactDigest,
+    maturity: assessment.maturity,
+    status,
+    priority,
+    ...(assessment.freshness.validUntil ? { validUntil: assessment.freshness.validUntil } : {}),
+    ...(assessment.freshness.renewalRecommendedAt
+      ? { renewalRecommendedAt: assessment.freshness.renewalRecommendedAt }
+      : {}),
+    affectedEvidence,
+    nextAction
+  };
+}
+
+function compareRenewalPlanItems(
+  left: AppEvidenceRenewalPlan["items"][number],
+  right: AppEvidenceRenewalPlan["items"][number]
+): number {
+  const priority = { critical: 0, high: 1, medium: 2, none: 3 } as const;
+  return priority[left.priority] - priority[right.priority] ||
+    (left.validUntil ?? "9999").localeCompare(right.validUntil ?? "9999") ||
+    left.installationId.localeCompare(right.installationId);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)].sort();
 }

@@ -257,7 +257,18 @@ export class CliSessionTokenProvider implements WorkloadTokenProvider {
 
   private async refresh(profile: CliSessionProfile, store: LocalCliCredentialStore) {
     const client = this.options.client ?? new CliDeviceAuthorizationClient(profile.baseUrl);
-    const tokens = await client.refresh(profile.refreshToken);
+    let tokens: CliTokenResponse;
+    try {
+      tokens = await client.refresh(profile.refreshToken);
+    } catch (error) {
+      if (
+        error instanceof CliDeviceAuthorizationError &&
+        ["refresh_token_reused", "invalid_grant", "membership_required"].includes(error.code)
+      ) {
+        await store.removeProfile(profile.id);
+      }
+      throw error;
+    }
     const updated = profileFromTokens({
       baseUrl: profile.baseUrl,
       audience: profile.audience,

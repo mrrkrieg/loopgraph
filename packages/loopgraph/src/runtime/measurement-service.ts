@@ -22,6 +22,12 @@ import {
   readConnectionInstances
 } from "./connector-registry";
 import { doctorHermesWebhookRoutes } from "./hermes-webhooks";
+import {
+  getHermesRouteActivationStatus,
+  type HermesRouteActivationAuthorityProvider,
+  type HermesRouteActivationStore,
+  type HermesRouteActivationStatus
+} from "./hermes-route-activation";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
 import { FileMeasurementStore, type MeasurementStore } from "./measurement-store";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
@@ -101,7 +107,10 @@ export async function scheduleDueMeasurements(input: {
   backfillWindows?: number;
   maxAttempts?: number;
   now?: Date;
-}, options: { store?: MeasurementStore } = {}): Promise<{
+}, options: {
+  store?: MeasurementStore;
+  routeActivationStore?: HermesRouteActivationStore;
+} = {}): Promise<{
   schemaVersion: "measurement-scheduler/v1alpha1";
   scheduledAt: string;
   created: MeasurementJob[];
@@ -371,7 +380,11 @@ export async function reconcileConnectionsAndMeasurements(input: {
   healthStaleAfterHours?: number;
   measurementOverdueAfterHours?: number;
   now?: Date;
-}, options: { store?: MeasurementStore } = {}): Promise<{
+}, options: {
+  store?: MeasurementStore;
+  routeActivationStore?: HermesRouteActivationStore;
+  routeActivationAuthorityProvider?: HermesRouteActivationAuthorityProvider;
+} = {}): Promise<{
   report: ConnectionReconciliationReport;
   controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 }> {
@@ -386,9 +399,15 @@ export async function reconcileConnectionsAndMeasurements(input: {
   );
   const store = options.store ?? new FileMeasurementStore(getLoopgraphRoot(projectRoot));
   const workspace = await readLoopgraphWorkspace(projectRoot);
-  const [plan, webhook, bindings, instances, jobs] = await Promise.all([
+  const [plan, webhook, activation, bindings, instances, jobs] = await Promise.all([
     buildConnectionPlan({ projectRoot, now }),
     doctorHermesWebhookRoutes({ projectRoot, now }),
+    safeHermesRouteActivationStatus(
+      projectRoot,
+      now,
+      options.routeActivationStore,
+      options.routeActivationAuthorityProvider
+    ),
     store.listMetricBindings(),
     readConnectionInstances(projectRoot),
     store.listMeasurementJobs()
@@ -490,6 +509,45 @@ export async function reconcileConnectionsAndMeasurements(input: {
     });
   }
 
+  const routedEventCount = webhook.plan.routes.filter((route) => route.routeKind !== "loopgraph_lifecycle").length;
+  if (webhook.ok && routedEventCount > 0) {
+    const activationEvidence = activation.planDigest
+      ? [`hermes-route-activation:${activation.planDigest}`]
+      : [];
+    if (!activation.exists) {
+      addIssue({
+        severity: "blocking",
+        kind: "webhook_activation_missing",
+        summary: `${routedEventCount} routed event contract${routedEventCount === 1 ? " has" : "s have"} no Hermes controller activation receipt.`,
+        repairAction: "Prepare and confirm the current Hermes shadow-route plan through the workload-authenticated Route Controller.",
+        evidenceRefs: []
+      });
+    } else if (!activation.current) {
+      addIssue({
+        severity: "blocking",
+        kind: "webhook_activation_stale",
+        summary: "The last Hermes controller receipt does not match the current Loopgraph route catalog and manifest.",
+        repairAction: "Prepare the current route plan, review its new digest, and apply it through the Hermes Route Controller.",
+        evidenceRefs: activationEvidence
+      });
+    } else if (!activation.ready) {
+      const unready = activation.routeStates.filter((route) => !route.ready);
+      for (const route of unready.length > 0 ? unready : [{
+        routeName: "Hermes route set",
+        state: "degraded" as const,
+        subscriptionState: "failed" as const
+      }]) {
+        addIssue({
+          severity: "blocking",
+          kind: "webhook_route_not_ready",
+          summary: `${route.routeName} is ${route.state}; provider subscription is ${route.subscriptionState}.`,
+          repairAction: "Repair the Hermes connection, signature verifier, transformer, or pending provider confirmation, then reconcile the exact plan again.",
+          evidenceRefs: activationEvidence
+        });
+      }
+    }
+  }
+
   const overdueCutoff = new Date(now.getTime() - overdueAfterHours * 60 * 60 * 1000).toISOString();
   for (const job of jobs.filter((candidate) =>
     ["pending", "failed", "claimed"].includes(candidate.status) && candidate.dueAt < overdueCutoff
@@ -518,6 +576,8 @@ export async function reconcileConnectionsAndMeasurements(input: {
       connectionPlanHash: contentHash(plan),
       metricBindingsHash: contentHash(bindings),
       webhookCatalogVersion: webhook.plan.catalogVersion,
+      webhookActivationPlanDigest: activation.planDigest,
+      webhookActivationReady: routedEventCount === 0 || activation.ready,
       issues,
       checkedAt: now.toISOString()
     })}`,
@@ -527,6 +587,8 @@ export async function reconcileConnectionsAndMeasurements(input: {
     metricBindingsHash: contentHash(bindings),
     webhookCatalogVersion: webhook.plan.catalogVersion,
     webhookManifestOk: webhook.ok,
+    webhookActivationReady: routedEventCount === 0 || activation.ready,
+    webhookActivationPlanDigest: activation.planDigest,
     checkedConnectionIds: instances.map((instance) => instance.id).sort(),
     checkedBindingIds: bindings.map((binding) => binding.id).sort(),
     issues,
@@ -543,6 +605,34 @@ export async function reconcileConnectionsAndMeasurements(input: {
     evidenceRefs: [report.id, ...issues.flatMap((issue) => issue.evidenceRefs)]
   }, { now });
   return { report, controllerTrigger };
+}
+
+async function safeHermesRouteActivationStatus(
+  projectRoot: string,
+  now: Date,
+  recordStore?: HermesRouteActivationStore,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
+): Promise<HermesRouteActivationStatus> {
+  try {
+    return await getHermesRouteActivationStatus({
+      projectRoot,
+      now,
+      recordStore,
+      authorityProvider
+    });
+  } catch (error) {
+    return {
+      projectRoot,
+      recordPath: recordStore?.reference ?? path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
+      checkedAt: now.toISOString(),
+      exists: true,
+      current: false,
+      ready: false,
+      routeStates: [],
+      warnings: [error instanceof Error ? error.message : "Hermes route activation receipt is invalid."],
+      nextActions: ["Replace the invalid receipt by applying the current confirmed plan through the Hermes Route Controller."]
+    };
+  }
 }
 
 async function requireClaimedJob(

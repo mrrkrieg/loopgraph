@@ -89,6 +89,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     requirement.missingRequiredFields.length > 0 || requirement.unverifiedRequiredFields.length > 0
   ) ?? [];
   const permissionGaps = input.plan?.permissions.filter((permission) => permission.decision === "unresolved") ?? [];
+  const routeManifestReady = input.readiness?.checks.find((check) => check.id === "hermes-route-manifest")?.status !== "fail";
+  const routeActivationReady = input.readiness?.checks.find((check) => check.id === "hermes-route-activation")?.status !== "fail";
   const questions = input.setupQuestions
     .filter((question) => missingConfigurationKeys.has(question.key))
     .map((question) => ({
@@ -150,6 +152,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     configurationGaps: missingConfiguration.length,
     mappingGaps: mappingGaps.length,
     permissionGaps: permissionGaps.length,
+    routeManifestReady,
+    routeActivationReady,
     activationApprovalReceiptId: pendingShadowApproval?.id,
     lifecycleOperation: recovery
   });
@@ -160,7 +164,23 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
       summary: `${recovery.action} is ${recovery.status.replace(/_/g, " ")}.`,
       remediation: recovery.action === "install"
         ? "Retry the exact previously approved install request; do not generate or approve a different plan for this App."
-        : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
+        : recovery.action === "activate"
+          ? "Retry activation with the exact recorded approval receipt and target mode; do not create a replacement approval."
+          : recovery.action === "pause" || recovery.action === "resume"
+            ? `Retry the exact recorded ${recovery.action} request; do not start another lifecycle action until its LoopSpec state is reconciled.`
+          : recovery.action === "configure"
+            ? "Retry the exact confirmed configuration request with the same actor; do not replace its values while recovery is pending."
+          : recovery.action === "overlay"
+            ? "Retry the exact recorded overlay operations with the same actor; do not substitute a different graph customization."
+          : recovery.action === "repair"
+            ? "Retry repair against the exact recorded artifact and source revision with the same actor; do not start another lifecycle action until its generated topology is reconciled."
+          : recovery.action === "duplicate"
+            ? "Retry the exact private App ID and overlay against the recorded source artifact and revision with the same actor; do not start another lifecycle action until every derived asset is reconciled."
+          : recovery.action === "update"
+            ? "Retry the exact recorded update plan with the same actor and permission approvals; do not create a replacement plan or start another lifecycle action."
+          : recovery.action === "rollback"
+            ? "Retry the exact recorded rollback request with the same actor; do not select another revision or start another lifecycle action."
+          : "Retry the uninstall with the same installation and artifact digest after accountable confirmation."
     });
   }
   if (decision.stage === "resolve_test_failures") {
@@ -260,6 +280,8 @@ function decideStage(input: {
   configurationGaps: number;
   mappingGaps: number;
   permissionGaps: number;
+  routeManifestReady: boolean;
+  routeActivationReady: boolean;
   activationApprovalReceiptId?: string;
   lifecycleOperation?: AppLifecycleOperation;
 }): {
@@ -275,18 +297,105 @@ function decideStage(input: {
       currentStep: action === "install" ? "review" : "operate",
       headline: action === "install"
         ? "An exact App installation was interrupted and must be resumed before another plan can be applied."
-        : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
+        : action === "activate"
+          ? "App activation was interrupted and its exact approved transition must be reconciled before another lifecycle action can run."
+            : action === "pause" || action === "resume"
+              ? `App ${action} was interrupted and its exact rollout transition must be reconciled before another lifecycle action can run.`
+              : action === "configure"
+                ? "App configuration was interrupted and its exact confirmed-value request must be reconciled before another lifecycle action can run."
+              : action === "overlay"
+                ? "An App overlay was interrupted and its exact customization and source or target topology must be reconciled before another lifecycle action can run."
+              : action === "repair"
+                ? "App repair was interrupted and its exact pinned artifact, source revision, and regenerated topology must be reconciled before another lifecycle action can run."
+              : action === "duplicate"
+                ? "App duplication was interrupted and its exact source, private App ID, overlay, shared dependencies, and derived topology must be reconciled before another lifecycle action can run."
+              : action === "update"
+                ? "An App update was interrupted and its exact reviewed plan, permission approvals, and source or target topology must be reconciled before another lifecycle action can run."
+              : action === "rollback"
+                ? "App rollback was interrupted and its exact source and target revisions must be reconciled before another lifecycle action can run."
+                : "App removal was interrupted and must be reconciled before another lifecycle action can run.",
       nextAction: {
         kind: "retry_exact_request",
         summary: action === "install"
           ? "Retry the exact previously approved install request. Loopgraph will replay only unfinished idempotent work."
-          : "Repeat the uninstall confirmation for this exact installation and artifact digest. Loopgraph will replay only unfinished idempotent work.",
+          : action === "activate"
+            ? "Retry the exact recorded activation receipt and target mode. Loopgraph will reconcile LoopSpec state and consume authority only once."
+            : action === "pause" || action === "resume"
+              ? `Retry the exact recorded ${action} request. Loopgraph will reconcile only the pinned owned LoopSpecs and complete the state transition once.`
+              : action === "configure"
+                ? "Retry the exact confirmed configuration request as the same actor. Loopgraph will compare only bounded digests in the recovery journal and return the original receipt after completion."
+              : action === "overlay"
+                ? "Retry the exact overlay operations as the same actor. Loopgraph will compare only bounded digests, reconcile the recorded source or target owned LoopSpec topology, and return the original receipt after completion."
+              : action === "repair"
+                ? "Retry repair against the exact source artifact and revision as the same actor. Loopgraph will reconcile only the recorded source or regenerated target topology and return the original receipt after completion."
+              : action === "duplicate"
+                ? "Retry the exact private App ID and overlay as the same actor. Loopgraph will reconcile namespaced LoopSpecs, field mappings, company context, ownership, and the derived installation without duplicating completed work."
+              : action === "detach"
+                ? "Retry detach against the exact source artifact and revision as the same actor. Loopgraph will accept only the recorded owned topology and immutable snapshot, then return the original receipt after completion."
+              : action === "update"
+                ? "Retry the exact reviewed update plan as the same actor with the recorded permission approvals. Loopgraph will replay only unfinished idempotent work, even if the plan window has since expired."
+              : action === "rollback"
+                ? "Retry the exact rollback request as the same actor. Loopgraph will accept only the recorded source installation and exact source or target LoopSpec topology."
+                : "Repeat the uninstall confirmation with the same accountable actor and exact original reason. Loopgraph will accept only the recorded installation revision and pre-removal or post-removal LoopSpec topology.",
         requiresHumanConfirmation: true,
         input: {
           operationId: input.lifecycleOperation.id,
           action,
           installationId: input.lifecycleOperation.installationId,
-          targetArtifactDigest: input.lifecycleOperation.targetArtifactDigest
+          targetArtifactDigest: input.lifecycleOperation.targetArtifactDigest,
+          ...(input.lifecycleOperation.activation ? {
+            approvalReceiptId: input.lifecycleOperation.activation.approvalReceiptId,
+            mode: input.lifecycleOperation.activation.targetMode
+          } : input.lifecycleOperation.rollout ? {
+            targetState: input.lifecycleOperation.rollout.targetState,
+            mode: input.lifecycleOperation.rollout.targetMode
+          } : input.lifecycleOperation.configure ? {
+            fromUpdatedAt: input.lifecycleOperation.configure.fromUpdatedAt,
+            sourceConfigurationDigest: input.lifecycleOperation.configure.sourceConfigurationDigest,
+            valuesDigest: input.lifecycleOperation.configure.valuesDigest,
+            targetConfigurationDigest: input.lifecycleOperation.configure.targetConfigurationDigest
+          } : input.lifecycleOperation.overlay ? {
+            fromUpdatedAt: input.lifecycleOperation.overlay.fromUpdatedAt,
+            sourceArtifactDigest: input.lifecycleOperation.overlay.sourceArtifactDigest,
+            expectedOverlayRevision: input.lifecycleOperation.overlay.expectedOverlayRevision,
+            operationsDigest: input.lifecycleOperation.overlay.operationsDigest,
+            sourceLoopIds: input.lifecycleOperation.overlay.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.overlay.targetLoopIds
+          } : input.lifecycleOperation.repair ? {
+            expectedUpdatedAt: input.lifecycleOperation.repair.fromUpdatedAt,
+            expectedArtifactDigest: input.lifecycleOperation.repair.sourceArtifactDigest,
+            sourceLoopIds: input.lifecycleOperation.repair.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.repair.targetLoopIds
+          } : input.lifecycleOperation.duplicate ? {
+            expectedUpdatedAt: input.lifecycleOperation.duplicate.fromUpdatedAt,
+            expectedArtifactDigest: input.lifecycleOperation.duplicate.sourceArtifactDigest,
+            derivedAppId: input.lifecycleOperation.duplicate.derivedAppId,
+            operationsDigest: input.lifecycleOperation.duplicate.operationsDigest,
+            targetInstallationId: input.lifecycleOperation.duplicate.targetInstallationId,
+            targetLoopIds: input.lifecycleOperation.duplicate.targetLoopIds
+          } : input.lifecycleOperation.detach ? {
+            expectedUpdatedAt: input.lifecycleOperation.detach.fromUpdatedAt,
+            expectedArtifactDigest: input.lifecycleOperation.detach.sourceArtifactDigest,
+            snapshotPath: input.lifecycleOperation.detach.snapshotPath,
+            sourceLoopIds: input.lifecycleOperation.detach.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.detach.targetLoopIds
+          } : input.lifecycleOperation.uninstall ? {
+            reasonDigest: input.lifecycleOperation.uninstall.reasonDigest,
+            fromUpdatedAt: input.lifecycleOperation.uninstall.fromUpdatedAt,
+            remainingLoopIds: input.lifecycleOperation.uninstall.remainingLoopIds
+          } : input.lifecycleOperation.update ? {
+            planDigest: input.lifecycleOperation.update.planDigest,
+            fromUpdatedAt: input.lifecycleOperation.update.fromUpdatedAt,
+            sourceArtifactDigest: input.lifecycleOperation.update.sourceArtifactDigest,
+            approvedPermissionCapabilities: input.lifecycleOperation.update.approvedPermissionCapabilities,
+            sourceLoopIds: input.lifecycleOperation.update.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.update.targetLoopIds
+          } : input.lifecycleOperation.rollback ? {
+            fromUpdatedAt: input.lifecycleOperation.rollback.fromUpdatedAt,
+            sourceArtifactDigest: input.lifecycleOperation.rollback.sourceArtifactDigest,
+            sourceLoopIds: input.lifecycleOperation.rollback.sourceLoopIds,
+            targetLoopIds: input.lifecycleOperation.rollback.targetLoopIds
+          } : {})
         }
       }
     };
@@ -316,6 +425,27 @@ function decideStage(input: {
       return toolDecision("run_conformance", "test", "Run deterministic conformance with every provider write blocked.", "loopgraph_app_test", installationId!, false);
     }
     if (input.installation.state === "simulation_passed") {
+      if (!input.routeManifestReady) {
+        return toolDecision(
+          "activate_shadow",
+          "shadow",
+          "Rehearsal passed. Synchronize the current non-secret Hermes route manifest before preparing runtime activation.",
+          "loopgraph_hermes_webhooks_sync",
+          undefined,
+          true,
+          { dryRun: false }
+        );
+      }
+      if (!input.routeActivationReady) {
+        return toolDecision(
+          "activate_shadow",
+          "shadow",
+          "The route manifest is current, but Hermes has not proven every required event route and provider subscription. Prepare the exact controller plan for accountable activation.",
+          "loopgraph_hermes_webhooks_prepare",
+          undefined,
+          false
+        );
+      }
       return input.activationApprovalReceiptId
         ? toolDecision("activate_shadow", "shadow", "Shadow activation has an exact, unexpired approval receipt and is ready to be applied with provider writes still blocked.", "loopgraph_app_activate", installationId!, false, { mode: "shadow", approvalReceiptId: input.activationApprovalReceiptId })
         : toolDecision("activate_shadow", "shadow", "Rehearsal passed. An accountable operator must approve the exact shadow transition before Hermes can activate it.", "loopgraph_app_activation_approve", installationId!, true, { mode: "shadow" });
