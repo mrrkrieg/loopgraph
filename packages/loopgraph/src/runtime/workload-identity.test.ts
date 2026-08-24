@@ -92,6 +92,28 @@ describe("workload identity JWKS rotation", () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it("caps a provider's long JWKS TTL so a retired key stops verifying within five minutes", async () => {
+    const previous = rsaKey("key-a");
+    const next = rsaKey("key-b");
+    let clock = NOW;
+    const fetcher = sequenceJwks([
+      [previous.jwk, next.jwk],
+      [next.jwk]
+    ]);
+    const verifier = new WorkloadIdentityVerifier(
+      [issuerConfig()],
+      fetcher,
+      () => clock
+    );
+
+    await expect(verifier.verifyBearer(jwt(previous, 900), required())).resolves.toBeDefined();
+    clock += 301_000;
+    await expect(verifier.verifyBearer(jwt(previous, 900), required())).rejects.toMatchObject({
+      code: "signing_key_not_found"
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it("fails closed for malformed, oversized, or unavailable JWKS responses", async () => {
     const key = rsaKey("key-a");
     const malformed = createVerifier(vi.fn(async () => new Response("not-json", { status: 200 })));
@@ -150,13 +172,13 @@ function rsaKey(kid: string) {
   };
 }
 
-function jwt(key: { kid: string; privateKey: KeyObject }) {
+function jwt(key: { kid: string; privateKey: KeyObject }, lifetimeSeconds = 300) {
   const header = encode({ alg: "RS256", kid: key.kid, typ: "JWT" });
   const claims = encode({
     iss: ISSUER,
     sub: "hermes:staging",
     aud: AUDIENCE,
-    exp: Math.floor(NOW / 1_000) + 300,
+    exp: Math.floor(NOW / 1_000) + lifetimeSeconds,
     iat: Math.floor(NOW / 1_000),
     jti: `request-${key.kid}`,
     capabilities: [CAPABILITY],

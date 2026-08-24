@@ -248,6 +248,29 @@ describe("Hermes webhook route planning", () => {
     expect(plan.nextActions.join(" ")).toContain("Materialize at least one LoopSpec");
   });
 
+  it("keeps Hermes and Loopgraph business events routable without treating them as provider subscriptions", async () => {
+    for (const sourcePattern of ["hermes", "loopgraph"] as const) {
+      const { projectRoot } = await createProjectWithWebhookSpecs();
+      const specPath = path.join(projectRoot, "loops", "marketing_content_creation.loopgraph.json");
+      const spec = JSON.parse(await readFile(specPath, "utf8")) as {
+        routing: { accepts: Array<{ sourcePattern: string }> };
+      };
+      spec.routing.accepts[0]!.sourcePattern = sourcePattern;
+      await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+
+      const plan = await planHermesWebhookRoutes({ projectRoot });
+      const internalRoute = plan.routes.find((route) =>
+        route.routeName === `loopgraph-${sourcePattern}-events` && route.loopIds.includes("marketing_content_creation"));
+
+      expect(internalRoute).toMatchObject({
+        routeKind: "internal_business_event",
+        sourcePattern,
+        loopIds: ["marketing_content_creation"]
+      });
+      expect(internalRoute?.restrictedMcpTools).toContain("loopgraph_routing_decision_submit");
+    }
+  });
+
   it("syncs a non-secret Hermes route manifest while preserving unrelated route references", async () => {
     const { projectRoot } = await createProjectWithWebhookSpecs();
     const manifestPath = path.join(projectRoot, ".loopgraph", "hermes-routes.json");

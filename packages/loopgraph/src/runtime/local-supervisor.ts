@@ -373,6 +373,8 @@ export async function runLocalSupervisorCycle(
       details: {
         checkedConnections: result.report.checkedConnectionIds.length,
         checkedBindings: result.report.checkedBindingIds.length,
+        routeActivationReady: result.report.webhookActivationReady,
+        routeActivationPlanDigest: result.report.webhookActivationPlanDigest,
         blockingIssues: result.report.issues.filter((issue) => issue.severity === "blocking").length,
         warningIssues: result.report.issues.filter((issue) => issue.severity === "warning").length
       }
@@ -641,7 +643,11 @@ function recommendedActionsFor(components: LocalSupervisorComponentStatus[]): st
   }
   const connectionBlocking = Number(byName.get("connections")?.details.blockingIssues ?? 0);
   if (connectionBlocking > 0) {
-    actions.push("Ask Hermes to repair the blocked provider connection or mapping before promoting affected loops.");
+    if (byName.get("connections")?.details.routeActivationReady === false) {
+      actions.push("Prepare and activate the exact Hermes shadow-route plan, then resolve pending signature or provider-subscription state.");
+    } else {
+      actions.push("Ask Hermes to repair the blocked provider connection or mapping before promoting affected loops.");
+    }
   }
   const measurementBlocking = Number(byName.get("measurements")?.details.blockedBindings ?? 0);
   if (measurementBlocking > 0) {
