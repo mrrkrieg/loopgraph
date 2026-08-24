@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   callLoopgraphAppTool as callRuntimeAppTool,
   connectionInstanceFromBrokerInstallation,
+  getHermesRouteActivationStatus,
   type LoopgraphAppToolName
 } from "loopgraph/runtime";
 import { marketplaceAppSchema, type ConnectionInstance, type MarketplaceApp } from "loopgraph/core";
@@ -15,11 +16,14 @@ import {
 } from "@/lib/connector-broker/admin";
 import {
   getActiveLoopgraphProjectRoot,
+  getAppOperationActionStore,
   getAppInstallationStore,
+  getAppSnapshotStore,
   getAppVerificationStore,
   getCompanyContextStore,
   getConnectorFieldMappingStore,
   getHermesOperationsStore,
+  getHermesRouteActivationStore,
   getLoopSpecRegistryStore,
   getOutcomeStore,
   getProviderSchemaSnapshotStore,
@@ -31,11 +35,16 @@ import {
   hasCachedHostedMarketplaceArtifact
 } from "./hosted-marketplace-cache";
 import { SupabaseMarketplaceRegistryStore } from "@/lib/db/adapters/supabase-marketplace-registry-store";
+import {
+  createHostedHermesRouteActivationAuthorityProvider,
+  createHostedHermesWebhookDoctorProvider
+} from "@/lib/loopgraph-runtime/hosted-hermes-route-authority";
 
 const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_onboarding_get",
   "loopgraph_app_install_plan",
   "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_action_commit",
   "loopgraph_connector_schema_record",
   "loopgraph_app_field_mappings_get",
   "loopgraph_app_field_mapping_confirm",
@@ -44,11 +53,25 @@ const CONNECTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
 
 const EVIDENCE_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
-  "loopgraph_app_operation_invoke"
+  "loopgraph_apps_renewal_plan",
+  "loopgraph_app_activation_gate_get",
+  "loopgraph_app_activation_approve",
+  "loopgraph_app_activate",
+  "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_action_commit",
+  "loopgraph_app_operation_action_reconcile"
+]);
+
+const APP_ACTION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
+  "loopgraph_app_operation_invoke",
+  "loopgraph_app_operation_actions_get",
+  "loopgraph_app_operation_action_commit",
+  "loopgraph_app_operation_action_reconcile"
 ]);
 
 const VERIFICATION_AWARE_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_maturity_get",
+  "loopgraph_apps_renewal_plan",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
   "loopgraph_app_verifier_trust_revoke",
@@ -104,22 +127,52 @@ export async function callLoopgraphAppTool(
     });
   }
   const projectRoot = pathFromInput(effectiveInput, options.projectRoot);
-  const operationExecutionOptions = name === "loopgraph_app_operation_invoke"
+  const routeAuthoritySource = hostedMode
+    ? createHostedHermesRouteActivationAuthorityProvider({
+        projectRoot,
+        workspaceId: hostedWorkspaceId()
+      })
+    : undefined;
+  let routeAuthoritySnapshot: ReturnType<NonNullable<typeof routeAuthoritySource>> | undefined;
+  const routeAuthorityProvider = routeAuthoritySource
+    ? (input: Parameters<typeof routeAuthoritySource>[0]) => {
+        routeAuthoritySnapshot ??= routeAuthoritySource(input);
+        return routeAuthoritySnapshot;
+      }
+    : undefined;
+  const operationExecutionOptions = ["loopgraph_app_operation_invoke", "loopgraph_app_operation_action_commit", "loopgraph_app_operation_action_reconcile"].includes(name)
     ? await trustedOperationExecution(projectRoot)
     : undefined;
   const callOptions = {
     ...options,
     appInstallationStoreFactory: (workspaceId: string) => getAppInstallationStore({ projectRoot, workspaceId }),
+    appSnapshotStoreFactory: (workspaceId: string) => getAppSnapshotStore({ projectRoot, workspaceId }),
     companyContextStoreFactory: (workspaceId: string, companyId: string) => getCompanyContextStore({ projectRoot, workspaceId, companyId }),
     connectorFieldMappingStoreFactory: (workspaceId: string) => getConnectorFieldMappingStore({ projectRoot, workspaceId }),
     providerSchemaSnapshotStoreFactory: (workspaceId: string) => getProviderSchemaSnapshotStore({ projectRoot, workspaceId }),
     loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
+    ...(hostedMode ? {
+      routeActivationStatusProvider: (input: { projectRoot?: string; now?: Date }) =>
+        getHermesRouteActivationStatus({
+          ...input,
+          projectRoot,
+          authorityProvider: routeAuthorityProvider,
+          recordStore: getHermesRouteActivationStore({
+            projectRoot,
+            workspaceId: hostedWorkspaceId()
+          })
+        }),
+      webhookDoctorProvider: createHostedHermesWebhookDoctorProvider(routeAuthorityProvider!)
+    } : {}),
     ...(CONNECTION_AWARE_TOOLS.has(name) ? {
       connections: await trustedConnections(operationExecutionOptions?.connectorTenant.organizationId)
     } : {}),
     ...(EVIDENCE_AWARE_TOOLS.has(name) ? {
       outcomeStore: getOutcomeStore({ projectRoot }),
       hermesOperationsStore: getHermesOperationsStore({ rootDir: path.join(projectRoot, ".loopgraph") })
+    } : {}),
+    ...(hostedMode && APP_ACTION_AWARE_TOOLS.has(name) ? {
+      appOperationActionStore: getAppOperationActionStore({ projectRoot, workspaceId: hostedWorkspaceId() })
     } : {}),
     ...(VERIFICATION_AWARE_TOOLS.has(name) ? {
       appVerificationStoreFactory: (workspaceId: string) => getAppVerificationStore({ projectRoot, workspaceId })
