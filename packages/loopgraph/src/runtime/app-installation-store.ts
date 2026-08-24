@@ -11,6 +11,7 @@ import {
   appRolloutModeSchema,
   appLifecycleReceiptSchema,
   appInstallationLockSchema,
+  packRelativePathSchema,
   workspaceAppInstallationSchema,
   contentHash,
   type AppInstallationLock
@@ -23,7 +24,7 @@ export const appLifecycleOperationSchema = z.object({
   idempotencyKey: z.string().min(16).max(160),
   installationId: z.string().min(1).max(160),
   appId: z.string().min(1).max(160),
-  action: z.enum(["install", "uninstall", "activate", "pause", "resume", "rollback"]),
+  action: z.enum(["install", "uninstall", "activate", "pause", "resume", "configure", "overlay", "repair", "duplicate", "detach", "update", "rollback"]),
   targetArtifactDigest: z.string().min(16).max(160),
   status: z.enum(["prepared", "requires_reconciliation", "completed"]),
   desired: z.object({
@@ -44,6 +45,73 @@ export const appLifecycleOperationSchema = z.object({
     targetState: appInstallationStateSchema,
     targetMode: z.enum(["shadow", "recommend", "execute_with_approval"])
   }).strict().optional(),
+  configure: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceConfigurationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    valuesDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetConfigurationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/)
+  }).strict().optional(),
+  overlay: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceLoopIds: z.array(z.string().min(1).max(160)).max(100),
+    expectedOverlayRevision: z.number().int().nonnegative(),
+    operationsDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
+  repair: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceLoopIds: z.array(z.string().min(1).max(160)).max(100),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
+  duplicate: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceFieldMappingsDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    derivedAppId: z.string().min(3).max(160),
+    operationsDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetInstallationId: z.string().min(1).max(160),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
+  detach: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceLoopIds: z.array(z.string().min(1).max(160)).max(100),
+    snapshotPath: packRelativePathSchema,
+    snapshotArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    snapshotFilesDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
   uninstall: z.object({
     fromUpdatedAt: z.string().datetime(),
     sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
@@ -53,6 +121,21 @@ export const appLifecycleOperationSchema = z.object({
     sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     remainingLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
     remainingLoopIds: z.array(z.string().min(1).max(160)).max(100)
+  }).strict().optional(),
+  update: z.object({
+    fromUpdatedAt: z.string().datetime(),
+    sourceArtifactDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceWorkspaceRevision: z.number().int().nonnegative(),
+    sourceLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    sourceLoopIds: z.array(z.string().min(1).max(160)).max(100),
+    planDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    approvedPermissionCapabilities: z.array(z.string().min(1).max(160)).max(100),
+    targetInstallationDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetOwnershipDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopInventoryDigest: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+    targetLoopIds: z.array(z.string().min(1).max(160)).max(100)
   }).strict().optional(),
   rollback: z.object({
     fromUpdatedAt: z.string().datetime(),
@@ -83,11 +166,29 @@ export const appLifecycleOperationSchema = z.object({
   if ((operation.status === "requires_reconciliation") !== Boolean(operation.failureCode)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["failureCode"], message: "Only interrupted lifecycle operations may contain a failure code" });
   }
-  if (operation.resultReceiptId && !["uninstall", "rollback"].includes(operation.action)) {
+  if (operation.resultReceiptId && !["configure", "overlay", "repair", "duplicate", "detach", "uninstall", "update", "rollback"].includes(operation.action)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Only completed receipt-producing lifecycle operations may reference a lifecycle receipt" });
   }
   if (operation.action === "rollback" && operation.status === "completed" && !operation.resultReceiptId) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed rollback operations require their exact lifecycle receipt" });
+  }
+  if (operation.action === "update" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed update operations require their exact lifecycle receipt" });
+  }
+  if (operation.action === "configure" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed configure operations require their exact lifecycle receipt" });
+  }
+  if (operation.action === "overlay" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed overlay operations require their exact lifecycle receipt" });
+  }
+  if (operation.action === "repair" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed repair operations require their exact lifecycle receipt" });
+  }
+  if (operation.action === "duplicate" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed duplicate operations require their exact lifecycle receipt" });
+  }
+  if (operation.action === "detach" && operation.status === "completed" && !operation.resultReceiptId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["resultReceiptId"], message: "Completed detach operations require their exact lifecycle receipt" });
   }
   if ((operation.action === "activate") !== Boolean(operation.activation)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["activation"], message: "Only activation operations require exact activation authority" });
@@ -96,11 +197,47 @@ export const appLifecycleOperationSchema = z.object({
   if (isRolloutOperation !== Boolean(operation.rollout)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollout"], message: "Only pause and resume operations require exact rollout state" });
   }
+  if ((operation.action === "configure") !== Boolean(operation.configure)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["configure"], message: "Only configure operations require an exact configuration contract" });
+  }
+  if ((operation.action === "overlay") !== Boolean(operation.overlay)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["overlay"], message: "Only overlay operations require an exact graph rematerialization contract" });
+  }
+  if ((operation.action === "repair") !== Boolean(operation.repair)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["repair"], message: "Only repair operations require an exact regeneration contract" });
+  }
+  if ((operation.action === "duplicate") !== Boolean(operation.duplicate)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["duplicate"], message: "Only duplicate operations require an exact derived-installation contract" });
+  }
+  if ((operation.action === "detach") !== Boolean(operation.detach)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["detach"], message: "Only detach operations require an exact immutable-snapshot contract" });
+  }
   if (operation.action !== "uninstall" && operation.uninstall) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["uninstall"], message: "Only uninstall operations may contain exact removal intent" });
   }
+  if ((operation.action === "update") !== Boolean(operation.update)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["update"], message: "Only update operations require an exact upgrade contract" });
+  }
   if ((operation.action === "rollback") !== Boolean(operation.rollback)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback"], message: "Only rollback operations require an exact rematerialization contract" });
+  }
+  if (operation.update && Date.parse(operation.update.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["update", "fromUpdatedAt"], message: "Update source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.configure && Date.parse(operation.configure.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["configure", "fromUpdatedAt"], message: "Configure source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.overlay && Date.parse(operation.overlay.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["overlay", "fromUpdatedAt"], message: "Overlay source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.repair && Date.parse(operation.repair.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["repair", "fromUpdatedAt"], message: "Repair source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.duplicate && Date.parse(operation.duplicate.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["duplicate", "fromUpdatedAt"], message: "Duplicate source revision cannot be newer than the prepared operation" });
+  }
+  if (operation.detach && Date.parse(operation.detach.fromUpdatedAt) > Date.parse(operation.startedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["detach", "fromUpdatedAt"], message: "Detach source revision cannot be newer than the prepared operation" });
   }
   if (operation.rollback && Date.parse(operation.rollback.fromUpdatedAt) > Date.parse(operation.startedAt)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback", "fromUpdatedAt"], message: "Rollback source revision cannot be newer than the prepared operation" });
@@ -123,8 +260,76 @@ export const appLifecycleOperationSchema = z.object({
   )) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["rollback", "targetLoopIds"], message: "Rollback target LoopSpecs must match the desired inventory" });
   }
+  if (operation.update && (
+    new Set(operation.update.sourceLoopIds).size !== operation.update.sourceLoopIds.length ||
+    new Set(operation.update.targetLoopIds).size !== operation.update.targetLoopIds.length ||
+    new Set(operation.update.approvedPermissionCapabilities).size !== operation.update.approvedPermissionCapabilities.length ||
+    new Set(operation.desired.loopIds).size !== operation.desired.loopIds.length ||
+    operation.update.targetLoopIds.length !== operation.desired.loopIds.length ||
+    operation.update.targetLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["update", "targetLoopIds"], message: "Update target LoopSpecs and permission approvals must be unique and match the desired inventory" });
+  }
+  if (operation.overlay && (
+    new Set(operation.overlay.sourceLoopIds).size !== operation.overlay.sourceLoopIds.length ||
+    new Set(operation.overlay.targetLoopIds).size !== operation.overlay.targetLoopIds.length ||
+    new Set(operation.desired.loopIds).size !== operation.desired.loopIds.length ||
+    operation.overlay.targetLoopIds.length !== operation.desired.loopIds.length ||
+    operation.overlay.targetLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["overlay", "targetLoopIds"], message: "Overlay target LoopSpecs must be unique and match the desired inventory" });
+  }
+  if (operation.repair && (
+    new Set(operation.repair.sourceLoopIds).size !== operation.repair.sourceLoopIds.length ||
+    new Set(operation.repair.targetLoopIds).size !== operation.repair.targetLoopIds.length ||
+    new Set(operation.desired.loopIds).size !== operation.desired.loopIds.length ||
+    operation.repair.targetLoopIds.length !== operation.desired.loopIds.length ||
+    operation.repair.targetLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["repair", "targetLoopIds"], message: "Repair target LoopSpecs must be unique and match the desired inventory" });
+  }
+  if (operation.duplicate && (
+    new Set(operation.duplicate.targetLoopIds).size !== operation.duplicate.targetLoopIds.length ||
+    new Set(operation.desired.loopIds).size !== operation.desired.loopIds.length ||
+    new Set(operation.desired.fieldMappingIds).size !== operation.desired.fieldMappingIds.length ||
+    new Set(operation.desired.companyContextKeys).size !== operation.desired.companyContextKeys.length ||
+    operation.duplicate.targetLoopIds.length !== operation.desired.loopIds.length ||
+    operation.duplicate.targetLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["duplicate", "targetLoopIds"], message: "Duplicate target LoopSpecs and shared dependencies must be unique and match the desired inventory" });
+  }
+  if (operation.detach && (
+    new Set(operation.detach.sourceLoopIds).size !== operation.detach.sourceLoopIds.length ||
+    new Set(operation.detach.targetLoopIds).size !== operation.detach.targetLoopIds.length ||
+    new Set(operation.desired.loopIds).size !== operation.desired.loopIds.length ||
+    new Set(operation.desired.fieldMappingIds).size !== operation.desired.fieldMappingIds.length ||
+    new Set(operation.desired.companyContextKeys).size !== operation.desired.companyContextKeys.length ||
+    operation.detach.snapshotArtifactDigest !== operation.detach.sourceArtifactDigest ||
+    operation.detach.sourceArtifactDigest !== operation.targetArtifactDigest ||
+    operation.detach.targetOwnershipDigest !== operation.detach.sourceOwnershipDigest ||
+    operation.detach.targetLoopInventoryDigest !== operation.detach.sourceLoopInventoryDigest ||
+    operation.detach.sourceLoopIds.length !== operation.detach.targetLoopIds.length ||
+    operation.detach.sourceLoopIds.some((loopId) => !operation.detach!.targetLoopIds.includes(loopId)) ||
+    operation.detach.targetLoopIds.length !== operation.desired.loopIds.length ||
+    operation.detach.targetLoopIds.some((loopId) => !operation.desired.loopIds.includes(loopId))
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["detach", "targetLoopIds"], message: "Detach must preserve one unique owned LoopSpec inventory" });
+  }
   if ((operation.activation || operation.rollout) && (operation.desired.fieldMappingIds.length > 0 || operation.desired.companyContextKeys.length > 0)) {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Rollout recovery may change only owned LoopSpec rollout state" });
+  }
+  if (operation.configure && (
+    operation.desired.loopIds.length > 0 ||
+    operation.desired.fieldMappingIds.length > 0 ||
+    operation.desired.companyContextKeys.length > 0
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Configure recovery may change only the installation configuration" });
+  }
+  if (operation.overlay && (
+    operation.desired.fieldMappingIds.length > 0 ||
+    operation.desired.companyContextKeys.length > 0
+  )) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["desired"], message: "Overlay recovery may change only the installation, ownership, and owned LoopSpec inventory" });
   }
   if (operation.action === "pause" && operation.rollout && (
     !["shadow", "recommend", "execute_with_approval"].includes(operation.rollout.fromState) ||
