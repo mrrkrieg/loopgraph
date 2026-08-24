@@ -54,6 +54,7 @@ describe("recovery evidence contract", () => {
       "loopgraph_app_verification_registries",
       "loopgraph_app_verifier_keys",
       "loopgraph_app_verification_receipts",
+      "loopgraph_hermes_route_activation_records",
       "canonical_company_entity_aliases",
       "loop_spec_versions",
       "route_jobs",
