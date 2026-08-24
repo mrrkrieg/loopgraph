@@ -302,8 +302,15 @@ export function marketplaceVersionFromArtifact(
     dependencies: manifest.dependencies,
     permissions: manifest.permissions,
     requiredCapabilities: manifest.requiredCapabilities,
+    optionalCapabilities: manifest.optionalCapabilities,
     presets: manifest.presets,
     modules: manifest.modules,
+    includedLoopCount: manifest.entrypoints.loops.length,
+    preview: {
+      synthetic: manifest.entrypoints.evals.length > 0,
+      sampleData: manifest.entrypoints.fixtures.length > 0,
+      historicalReplay: "installed_read_only"
+    },
     maturity,
     deprecated: false,
     artifactUri,

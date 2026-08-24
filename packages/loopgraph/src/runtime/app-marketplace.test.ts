@@ -30,6 +30,18 @@ describe("local app marketplace", () => {
     const marketplace = new LocalAppMarketplace(stateRoot, packsRoot);
     const apps = await marketplace.refreshAllCatalogSources();
     expect(apps.map((app) => app.id)).toContain("loopgraph.sales.qualify-route-inbound-leads");
+    const official = apps.find((app) => app.id === "loopgraph.sales.qualify-route-inbound-leads")?.versions[0];
+    expect(official).toMatchObject({
+      maturity: "tested",
+      maturityEvidence: {
+        artifactDigest: official?.digest,
+        status: "passed",
+        writeBlocked: true,
+        providerWrites: 0
+      }
+    });
+    expect(official?.maturityEvidence?.scenarioCount).toBeGreaterThanOrEqual(13);
+    expect(official?.maturityEvidence?.passedScenarioCount).toBe(official?.maturityEvidence?.scenarioCount);
 
     const byOutcome = await marketplace.searchApps({ query: "qualify inbound leads" });
     expect(byOutcome[0]?.app.id).toBe("loopgraph.sales.qualify-route-inbound-leads");
@@ -55,6 +67,25 @@ describe("local app marketplace", () => {
     expect(byManagementOutcome[0]?.app.id).toBe("loopgraph.management.run-company-operating-system");
     const byManagementCapability = await marketplace.searchApps({ capability: "loopgraph.topology.read" });
     expect(byManagementCapability.map((result) => result.app.id)).toContain("loopgraph.management.run-company-operating-system");
+  });
+
+  it("keeps a discovered local artifact at concept without digest-bound evaluation evidence", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "loopgraph-unproven-catalog-"));
+    temporaryDirectories.push(root);
+    const sourceRoot = path.join(root, "source");
+    await cp(path.join(packsRoot, "official", "sales", "qualify-route-inbound-leads"), path.join(sourceRoot, "sales-app"), { recursive: true });
+    const marketplace = new LocalAppMarketplace(path.join(root, "state"), packsRoot);
+    await marketplace.addCatalogSource({
+      schemaVersion: "loopgraph-marketplace/v1alpha1",
+      id: "local-unproven",
+      type: "filesystem",
+      uri: `file://${sourceRoot}`,
+      enabled: true,
+      trustPolicy: "explicit_local"
+    });
+    const apps = await marketplace.refreshCatalogSource("local-unproven");
+    expect(apps[0]?.versions[0]).toMatchObject({ maturity: "concept", provenanceVerified: false });
+    expect(apps[0]?.versions[0].maturityEvidence).toBeUndefined();
   });
 
   it("resolves immutable versions and verifies the cached artifact", async () => {
@@ -150,6 +181,13 @@ describe("local app marketplace", () => {
     expect(apps.map((app) => app.id)).toEqual(["acme.sales.account-review"]);
     expect(apps[0]?.versions[0]).toMatchObject({
       digest: loaded.artifact.digest,
+      maturity: "tested",
+      maturityEvidence: {
+        artifactDigest: loaded.artifact.digest,
+        status: "passed",
+        scenarioCount: 13,
+        passedScenarioCount: 13
+      },
       provenanceVerified: true,
       artifactUri: expect.stringContaining("/catalog-cache/acme-github/"),
       source: {
