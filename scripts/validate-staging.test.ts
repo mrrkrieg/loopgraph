@@ -46,7 +46,14 @@ describe("staging deployment validation", () => {
           "loopgraph_operational_degraded 0",
           "loopgraph_app_lifecycle_recovery_pending 0",
           "loopgraph_app_lifecycle_recovery_stale 0",
-          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0"
+          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0",
+          "loopgraph_app_action_commits_requested_total 12",
+          "loopgraph_app_action_commits_succeeded_total 10",
+          "loopgraph_app_action_commits_failed_total 2",
+          "loopgraph_app_action_reconciliation_pending 0",
+          "loopgraph_app_action_reconciliation_stale 0",
+          "loopgraph_app_action_reconciliation_oldest_age_seconds 0",
+          "loopgraph_app_action_reconciliation_stale_after_seconds 300"
         ].join("\n"));
       }
       return json({
@@ -78,7 +85,7 @@ describe("staging deployment validation", () => {
     });
 
     expect(receipt).toMatchObject({
-      schemaVersion: "staging-validation/v4",
+      schemaVersion: "staging-validation/v5",
       targetOrigin: "https://staging.loopgraph.test",
       organizationId: "123e4567-e89b-42d3-a456-426614174000",
       projectKey: "main",
@@ -86,6 +93,7 @@ describe("staging deployment validation", () => {
       results: [
         { name: "readiness", ok: true },
         { name: "operational_metrics", ok: true },
+        { name: "app_action_reconciliation_health", ok: true },
         { name: "audit_integrity", ok: true },
         { name: "unauthenticated_user_denial", status: 401, ok: true },
         { name: "cross_tenant_user_denial", status: 403, ok: true },
@@ -98,6 +106,15 @@ describe("staging deployment validation", () => {
         allowedRequests: 3,
         deniedStatus: 429,
         retryAfterSeconds: 1
+      },
+      appActionReconciliationEvidence: {
+        requestedTotal: 12,
+        succeededTotal: 10,
+        failedTotal: 2,
+        pending: 0,
+        stale: 0,
+        oldestAgeSeconds: 0,
+        staleAfterSeconds: 300
       }
     });
     expect(JSON.stringify(receipt)).not.toContain(token);
@@ -120,7 +137,14 @@ describe("staging deployment validation", () => {
           "loopgraph_operational_degraded 0",
           "loopgraph_app_lifecycle_recovery_pending 0",
           "loopgraph_app_lifecycle_recovery_stale 0",
-          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0"
+          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0",
+          "loopgraph_app_action_commits_requested_total 5",
+          "loopgraph_app_action_commits_succeeded_total 4",
+          "loopgraph_app_action_commits_failed_total 1",
+          "loopgraph_app_action_reconciliation_pending 0",
+          "loopgraph_app_action_reconciliation_stale 0",
+          "loopgraph_app_action_reconciliation_oldest_age_seconds 0",
+          "loopgraph_app_action_reconciliation_stale_after_seconds 300"
         ].join("\n"));
       }
       if (url.pathname === "/api/operations/audit-export") {
@@ -169,6 +193,45 @@ describe("staging deployment validation", () => {
     });
     expect(sleep).toHaveBeenCalledOnce();
     expect(sleep).toHaveBeenCalledWith(1_100);
+  });
+
+  it("blocks promotion when App action commits remain nonterminal", async () => {
+    const fetcher = vi.fn(async (input: URL | RequestInfo) => {
+      const url = new URL(input instanceof URL ? input : String(input));
+      if (url.pathname === "/api/health/ready") return json({ status: "ready" });
+      if (url.pathname === "/api/operations/metrics") {
+        return new Response([
+          "loopgraph_ready 1",
+          "loopgraph_security_audit_head_sequence 1",
+          "loopgraph_operational_degraded 0",
+          "loopgraph_app_lifecycle_recovery_pending 0",
+          "loopgraph_app_lifecycle_recovery_stale 0",
+          "loopgraph_app_lifecycle_recovery_oldest_age_seconds 0",
+          "loopgraph_app_action_commits_requested_total 3",
+          "loopgraph_app_action_commits_succeeded_total 1",
+          "loopgraph_app_action_commits_failed_total 1",
+          "loopgraph_app_action_reconciliation_pending 1",
+          "loopgraph_app_action_reconciliation_stale 1",
+          "loopgraph_app_action_reconciliation_oldest_age_seconds 600",
+          "loopgraph_app_action_reconciliation_stale_after_seconds 300"
+        ].join("\n"));
+      }
+      throw new Error(`Unexpected staging request ${url.pathname}`);
+    });
+
+    await expect(validateStagingDeployment({
+      baseUrl: "https://staging.loopgraph.test",
+      organizationId: "123e4567-e89b-42d3-a456-426614174000",
+      projectKey: "main",
+      observabilityToken: token,
+      userCookies: {
+        allowed: "allowed=1",
+        foreignTenant: "foreign=1",
+        suspended: "suspended=1"
+      },
+      expectedUserApiQuotaLimit: 3
+    }, { fetcher: fetcher as typeof fetch })).rejects.toThrow(/nonterminal App action commits/i);
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("rejects insecure origins before making a request", async () => {

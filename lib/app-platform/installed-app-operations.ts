@@ -1,4 +1,4 @@
-import type { AppEvalRun } from "loopgraph/core";
+import type { AppEvalRun, AppOperationAction, AppOperationActionEvent } from "loopgraph/core";
 import type { AgentOperationsActivityRow } from "loopgraph/runtime";
 import type {
   LoopGraphVisual,
@@ -9,6 +9,10 @@ import type { OutcomeView, ValueEntryView } from "@/lib/loopgraph-runtime/operat
 
 export type InstalledAppOperationsView = {
   activity: AgentOperationsActivityRow[];
+  actions: Array<AppOperationAction & {
+    effectiveStatus: "prepared" | "approved" | "committing" | "committed" | "failed" | "revoked" | "expired";
+    lifecycleEvents: AppOperationActionEvent[];
+  }>;
   outcomes: OutcomeView[];
   valueEntries: ValueEntryView[];
   topology: LoopGraphVisual;
@@ -17,6 +21,9 @@ export type InstalledAppOperationsView = {
     totalRuns: number;
     activeRuns: number;
     waitingApproval: number;
+    preparedActions: number;
+    actionsAwaitingApproval: number;
+    expiredActions: number;
     completedRuns: number;
     failedRuns: number;
     observedOutcomes: number;
@@ -33,12 +40,15 @@ export type InstalledAppOperationsView = {
 };
 
 export function buildInstalledAppOperationsView(input: {
-  app: { id: string; name: string; department: string };
+  app: { installationId: string; id: string; name: string; department: string };
   loops: Array<{ id: string; name: string }>;
   activity: AgentOperationsActivityRow[];
   evaluations: AppEvalRun[];
   outcomes: OutcomeView[];
   valueEntries: ValueEntryView[];
+  actions?: AppOperationAction[];
+  actionEvents?: AppOperationActionEvent[];
+  now?: Date;
 }): InstalledAppOperationsView {
   const loopIds = new Set(input.loops.map((loop) => loop.id));
   const activityById = new Map(input.activity
@@ -59,17 +69,40 @@ export function buildInstalledAppOperationsView(input: {
   const correctDecisions = reviewedScenarios.filter((scenario) => scenario.humanLabel === "correct").length;
   const observedOutcomes = outcomes.filter((outcome) => outcome.truthStatus === "observed");
   const observedValue = valueEntries.filter((entry) => entry.truthStatus === "observed");
+  const now = input.now ?? new Date();
+  const eventsByAction = new Map<string, AppOperationActionEvent[]>();
+  for (const event of input.actionEvents ?? []) {
+    const events = eventsByAction.get(event.actionId) ?? [];
+    events.push(event);
+    eventsByAction.set(event.actionId, events);
+  }
+  const actions = (input.actions ?? [])
+    .filter((action) => action.installationId === input.app.installationId && loopIds.has(action.loopId))
+    .map((action) => {
+      const lifecycleEvents = (eventsByAction.get(action.id) ?? [])
+        .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
+      return {
+        ...action,
+        lifecycleEvents,
+        effectiveStatus: effectiveActionStatus(action, lifecycleEvents, now)
+      };
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
 
   return {
     activity,
+    actions,
     outcomes,
     valueEntries,
-    topology: buildInstalledAppOperationsTopology({ app: input.app, loops: input.loops, activity, outcomes }),
+    topology: buildInstalledAppOperationsTopology({ app: input.app, loops: input.loops, activity, actions, outcomes }),
     summary: {
       incomingEvents: new Set(activity.map((row) => row.eventId)).size,
       totalRuns: activity.length,
       activeRuns: activity.filter((row) => ["claimed", "dispatched", "running"].includes(row.jobStatus)).length,
       waitingApproval: activity.filter((row) => row.jobStatus === "waiting_review").length,
+      preparedActions: actions.filter((action) => action.effectiveStatus === "prepared").length,
+      actionsAwaitingApproval: actions.filter((action) => action.effectiveStatus === "prepared" && action.approvalRequired).length,
+      expiredActions: actions.filter((action) => action.effectiveStatus === "expired").length,
       completedRuns: activity.filter((row) => row.jobStatus === "completed").length,
       failedRuns: activity.filter((row) => ["failed", "dead_letter"].includes(row.jobStatus)).length,
       observedOutcomes: observedOutcomes.length,
@@ -90,6 +123,9 @@ export function buildInstalledAppOperationsTopology(input: {
   app: { id: string; name: string; department: string };
   loops: Array<{ id: string; name: string }>;
   activity: AgentOperationsActivityRow[];
+  actions?: Array<AppOperationAction & {
+    effectiveStatus?: "prepared" | "approved" | "committing" | "committed" | "failed" | "revoked" | "expired";
+  }>;
   outcomes: OutcomeView[];
 }): LoopGraphVisual {
   const nodes = new Map<string, LoopGraphVisualNode>();
@@ -201,6 +237,39 @@ export function buildInstalledAppOperationsTopology(input: {
     }
   }
 
+  for (const action of (input.actions ?? []).slice(0, 8)) {
+    const loopNodeId = topologyLoopId(action.loopId);
+    if (!nodes.has(loopNodeId)) continue;
+    const actionNodeId = `installed-app:action:${normalizeTopologyId(action.id)}`;
+    nodes.set(actionNodeId, {
+      id: actionNodeId,
+      kind: "action",
+      label: humanizeTopologyLabel(action.providerBinding.operation),
+      subtitle: humanizeTopologyLabel(action.effectiveStatus ?? action.status),
+      weight: 3,
+      metadata: {
+        loopId: action.loopId,
+        routeJobId: action.routeJobId,
+        actionId: action.id,
+        runtimeKind: "prepared_action",
+        status: action.effectiveStatus ?? action.status
+      }
+    });
+    addTopologyEdge(edges, loopNodeId, actionNodeId, "prepares", "prepares");
+    if (action.approvalRequired && ["prepared", "approved"].includes(action.effectiveStatus ?? action.status)) {
+      const reviewNodeId = `installed-app:action-review:${normalizeTopologyId(action.id)}`;
+      nodes.set(reviewNodeId, {
+        id: reviewNodeId,
+        kind: "review",
+        label: (action.effectiveStatus ?? action.status) === "approved" ? "Approved" : "Approval required",
+        subtitle: (action.effectiveStatus ?? action.status) === "approved" ? "Receipt bound" : humanizeTopologyLabel(action.riskClass),
+        weight: 2,
+        metadata: { actionId: action.id, runtimeKind: "action_approval" }
+      });
+      addTopologyEdge(edges, actionNodeId, reviewNodeId, "approval", "approval");
+    }
+  }
+
   const latestOutcomeByLoop = new Map<string, OutcomeView>();
   for (const outcome of input.outcomes) {
     if (!latestOutcomeByLoop.has(outcome.loopId)) latestOutcomeByLoop.set(outcome.loopId, outcome);
@@ -231,6 +300,29 @@ export function buildInstalledAppOperationsTopology(input: {
   };
 }
 
+function effectiveActionStatus(
+  action: AppOperationAction,
+  events: AppOperationActionEvent[],
+  now: Date
+): InstalledAppOperationsView["actions"][number]["effectiveStatus"] {
+  if (events.some((event) => event.eventType === "commit_succeeded")) return "committed";
+  if (events.some((event) => event.eventType === "revoked")) return "revoked";
+  if (Date.parse(action.expiresAt) <= now.getTime()) return "expired";
+  const latestFailureAt = events
+    .filter((event) => event.eventType === "commit_failed")
+    .map((event) => event.occurredAt)
+    .sort()
+    .at(-1);
+  const latestApproval = events
+    .filter((event) => event.eventType === "approval_granted" && event.approval && Date.parse(event.approval.expiresAt) > now.getTime())
+    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))[0];
+  if (latestApproval && (!latestFailureAt || latestApproval.occurredAt > latestFailureAt)) return "approved";
+  if (events.some((event) => event.eventType === "commit_requested")) {
+    return latestFailureAt ? "failed" : "committing";
+  }
+  return "prepared";
+}
+
 function topologyLoopId(loopId: string): string {
   return `installed-app:loop:${normalizeTopologyId(loopId)}`;
 }
@@ -255,7 +347,7 @@ function normalizeDepartment(value?: string): string | undefined {
 }
 
 function humanizeTopologyLabel(value: string): string {
-  const label = value.replace(/[_-]+/g, " ").trim();
+  const label = value.replace(/[_.-]+/g, " ").trim();
   return label ? `${label[0].toUpperCase()}${label.slice(1)}` : value;
 }
 

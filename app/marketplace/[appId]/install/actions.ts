@@ -29,7 +29,7 @@ export async function planMarketplaceAppInstallAction(
     }) as MarketplaceAppDetail;
     const selectedModules = formData.getAll("selectedModule").filter((value): value is string => typeof value === "string");
     const configuration = configurationFromInstallForm(formData, detail.setupQuestions);
-    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
       projectRoot,
       appId,
       versionRange: detail.selectedVersion.version,
@@ -37,6 +37,8 @@ export async function planMarketplaceAppInstallAction(
       selectedModules,
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
+      expectedDraftRevision: previousState.journey.draft?.revision ?? 0,
+      confirmPresetChange: formData.get("confirmPresetChange") === "on",
       actor
     }) as AppOnboardingJourney;
     if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");
@@ -49,8 +51,8 @@ export async function planMarketplaceAppInstallAction(
       journey: appOnboardingProgressForView(journey),
       unresolvedQuestionKeys: journey.questions.map((question) => question.key),
       notice: plan.missingConfigurationKeys.length === 0
-        ? "Configuration was validated. Review the exact graph and permission transaction below."
-        : "Your answers were saved into a new read-only plan. Complete the remaining items before installation."
+        ? "Your onboarding progress was saved. Review the exact graph and permission transaction below."
+        : "Your onboarding progress was saved. Complete only the remaining items before installation."
     };
   } catch (error) {
     return {
@@ -84,6 +86,30 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   revalidatePath("/apps");
   revalidatePath("/brain");
   redirect(`/apps/${encodeURIComponent(result.installation.id)}`);
+}
+
+export async function resetMarketplaceAppOnboardingAction(formData: FormData): Promise<void> {
+  const actor = await authorizedInstallActor();
+  if (formData.get("confirmReset") !== "on") throw new Error("Confirm that you want to clear this onboarding draft");
+  const appId = requiredFormString(formData, "appId");
+  const presetId = requiredFormString(formData, "presetId");
+  const expectedDraftId = requiredFormString(formData, "expectedDraftId");
+  const expectedDraftRevision = Number(requiredFormString(formData, "expectedDraftRevision"));
+  if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision <= 0) {
+    throw new Error("The onboarding draft revision is invalid; reload before starting over");
+  }
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+    projectRoot,
+    appId,
+    expectedDraftId,
+    expectedDraftRevision,
+    confirmReset: true,
+    actor
+  });
+  const target = `/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`;
+  revalidatePath(target);
+  redirect(target);
 }
 
 export async function confirmAppFieldMappingsAction(formData: FormData): Promise<void> {
