@@ -71,6 +71,7 @@ Apply these migrations in order:
 ```text
 supabase/migrations/202608170003_cli_device_authorization.sql
 supabase/migrations/202608170004_cli_session_administration.sql
+supabase/migrations/20260823044639_cli_refresh_replay_detection.sql
 ```
 
 Configure:
@@ -108,6 +109,10 @@ rewrites `X-Forwarded-For`.
   organization.
 - Access tokens expire after 15 minutes. Refresh tokens expire after 30 days and
   rotate on every successful use.
+- Replaced refresh values survive only as SHA-256 digests in a private,
+  expiry-bounded history. Presenting an earlier generation revokes the current
+  session family atomically, records one tenant audit event without token
+  material, and requires a new browser login.
 - The database stores access and refresh digests, never raw CLI secrets.
 - The only allowed first-release capability is `marketplace.consume`.
 - Active organization membership is rechecked during approval, exchange, refresh,
@@ -125,6 +130,10 @@ Removing organization membership invalidates the next refresh or request. `auth
 logout` revokes one session immediately. Hosted admins and owners can open
 `/settings/cli-sessions` to inspect safe session metadata and revoke one device,
 every session owned by one user, or all human CLI sessions in the organization.
+The same page identifies a family revoked because refresh-token reuse was
+detected, but never queries or returns a current or historical token digest. The
+CLI removes its local profile after replay, invalid-grant, or membership denial so
+it cannot repeatedly submit a credential the server has invalidated.
 The page and its API never select token digests. Revocation requires MFA step-up,
 rechecks the actor's active admin/owner membership inside the database, binds the
 update to the exact organization and project, and atomically appends a hash-chained
@@ -133,6 +142,9 @@ operator's raw reason text. Workload identities and provider credentials are not
 affected by this human-session control.
 
 Before production, validate device-code issuance saturation, concurrent polling,
-refresh-token replay, cross-replica rotation, clock skew, membership removal,
+refresh-token replay and family revocation, cross-replica rotation, clock skew, membership removal,
 single/user/organization revocation, MFA enforcement, and audit-retention export
-against the real staging database.
+against the real staging database. The executable human-session portion is
+`npm run validate:cli-session-staging`; see [Hosted CLI session staging gate](./HOSTED-CLI-SESSION-STAGING-GATE.md).
+The separate destructive MFA drill is `npm run validate:cli-admin-staging`; see
+[Hosted CLI administrator staging gate](./HOSTED-CLI-ADMIN-STAGING-GATE.md).

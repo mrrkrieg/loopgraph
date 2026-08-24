@@ -15,7 +15,8 @@ import {
 import {
   applyReviewedAppInstallAction,
   confirmAppFieldMappingsAction,
-  planMarketplaceAppInstallAction
+  planMarketplaceAppInstallAction,
+  resetMarketplaceAppOnboardingAction
 } from "@/app/marketplace/[appId]/install/actions";
 import { AppOnboardingProgress } from "@/components/apps/app-onboarding-progress";
 import { InstallImpactReview } from "@/components/apps/install-impact-review";
@@ -27,10 +28,32 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
   const ready = blockers.length === 0;
   const activeMappingPlan = state.mappingPlan;
   const unresolvedQuestions = app.questions.filter((question) => state.unresolvedQuestionKeys.includes(question.key));
+  const draftTransition = Boolean(state.journey.draft && !state.journey.draft.applied);
+  const savedAnswerKeys = new Set(state.journey.draft?.applied ? state.journey.draft.answerKeys : []);
+  const savedQuestions = app.questions.filter((question) =>
+    savedAnswerKeys.has(question.key) && !state.unresolvedQuestionKeys.includes(question.key));
 
   return (
     <div className="space-y-6">
       <AppOnboardingProgress journey={state.journey} />
+      {state.journey.draft ? (
+        <div className={`rounded-lg border px-4 py-3 text-sm ${draftTransition ? "border-orange-200 bg-orange-50 text-orange-950" : "border-blue-200 bg-blue-50 text-blue-900"}`}>
+          <div>{draftTransition
+            ? `You are previewing ${app.preset.name} instead of the saved ${state.journey.draft.presetId} stack. Saved answers and mapping IDs are not applied to this preview.`
+            : `Saved onboarding progress · revision ${state.journey.draft.revision} · ${new Date(state.journey.draft.savedAt).toLocaleString()}. You can leave this page and resume without re-answering completed questions.`}</div>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-xs font-semibold">Start this App setup over</summary>
+            <form action={resetMarketplaceAppOnboardingAction} className="mt-3 rounded-md border border-blue-200 bg-white/70 p-3">
+              <input name="appId" type="hidden" value={app.id} />
+              <input name="presetId" type="hidden" value={app.preset.id} />
+              <input name="expectedDraftId" type="hidden" value={state.journey.draft.id} />
+              <input name="expectedDraftRevision" type="hidden" value={state.journey.draft.revision} />
+              <label className="flex items-start gap-2 text-xs leading-5"><input className="mt-1" name="confirmReset" required type="checkbox" /><span>Clear only these saved setup choices. Connected systems, confirmed reusable mappings, approved company context, and installed Apps will not change.</span></label>
+              <button className="mt-3 rounded-md border border-blue-300 bg-white px-3 py-2 text-xs font-semibold hover:border-blue-600" type="submit">Clear saved setup choices</button>
+            </form>
+          </details>
+        </div>
+      ) : null}
       <section className="rounded-xl border border-line bg-white p-5 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -62,6 +85,13 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
             </fieldset>
           ) : null}
 
+          {draftTransition ? (
+            <label className="mt-6 flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 text-sm leading-6 text-orange-950">
+              <input className="mt-1" name="confirmPresetChange" required type="checkbox" />
+              <span>Replace the saved <strong>{state.journey.draft!.presetId}</strong> setup choices with this <strong>{app.preset.id}</strong> stack when I save the plan. Shared connections, confirmed mappings, approved company context, installed Apps, and runtime state remain unchanged.</span>
+            </label>
+          ) : null}
+
           <fieldset className="mt-7 border-t border-line pt-6">
             <legend className="text-sm font-semibold">Step 2 · company-specific answers</legend>
             <p className="mt-2 text-sm leading-6 text-ink/55">Preset and approved company-context values are filled in first. Confirm or change only what is specific to this installation.</p>
@@ -72,6 +102,17 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
                 ))}
               </div>
             ) : <div className="mt-4 rounded-md bg-emerald-50 px-4 py-3 text-sm text-emerald-900">No company-specific questions are unresolved.</div>}
+            {savedQuestions.length > 0 ? (
+              <details className="mt-4 rounded-lg border border-line bg-paper p-4">
+                <summary className="cursor-pointer text-sm font-semibold">Review or change {savedQuestions.length} saved {savedQuestions.length === 1 ? "answer" : "answers"}</summary>
+                <p className="mt-2 text-xs leading-5 text-ink/50">These values came from this onboarding draft, not provider credentials or unapproved inference. Clearing a field removes it from the next saved snapshot.</p>
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  {savedQuestions.map((question) => (
+                    <QuestionField key={question.key} plan={state.plan} question={question} />
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </fieldset>
 
           {state.error ? <div className="mt-5 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">{state.error}</div> : null}

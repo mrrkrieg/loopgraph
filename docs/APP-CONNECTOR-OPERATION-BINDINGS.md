@@ -103,11 +103,87 @@ The disposition is deliberately narrow:
 - `prepare_action` permits preparation of an action; it is not execution or approval.
 - `blocked` includes explicit reasons and has no executable binding.
 
-Resolution itself never calls a provider and never returns secrets. A later executor must re-resolve
-or verify the complete resolution, validate operation-specific inputs, and let the Connector Broker
-recheck current tenant identity, scopes, connection health, kill switches, idempotency, and audit
-policy at the moment of use. Provider writes must continue through exact prepared-action approval
-and commit controls.
+Resolution itself never calls a provider and never returns secrets. The
+`loopgraph_app_operation_invoke` executor accepts only the same installation, loop, and logical
+capability plus a durable route-job ID, registered Hermes agent ID, call ID, and bounded operation
+input. It re-resolves the binding immediately before use and derives the tenant, provider,
+connection, canonical operation, company object, LoopSpec hash, environment, and activation mode
+from trusted installation and routing state.
+
+Invocation fails before the Connector Broker unless all of the following remain true:
+
+- the route job is active, belongs to the selected loop, requires the capability, and is bound to
+  the exact active LoopSpec version;
+- the selected Hermes agent has a fresh heartbeat, the capability, the correct environment and
+  organization, and an assignment to the loop;
+- the durable event and business problem agree on workspace, company, and company-object identity;
+- the current Broker projection still has the exact provider, environment, capability, scopes,
+  connection identity, and healthy state used by the binding; and
+- the operation input is JSON-bounded and passes the central secret boundary.
+
+A provider-read disposition executes the exact allowlisted Broker read. The internal
+`invoke_loopgraph_runtime` disposition enters a fixed read-only registry with exactly three current
+operations: bounded active topology, secret-free Hermes routing history, and observed outcome/value
+evidence. Each handler has a strict input schema, enforces workspace/company filters, caps record and
+response size, and returns a content-digested result. It cannot load a module, choose a file or URL,
+run SQL, or mutate graph state. A provider-write disposition can only call
+`prepareAction`, returning the immutable fingerprint that a separate approval and commit path must
+consume. Before returning success, Loopgraph also records a separate secret-free App action
+ownership proof. That record binds the prepared Broker action and prepare receipt to the exact
+workspace, company, installed artifact, LoopSpec version, logical capability, route job, assigned
+Hermes agent, provider binding, environment, and a digest of the affected company-object identity.
+It never copies canonical provider input, provider output, credentials, headers, or vault
+references out of Connector Broker storage. A hosted deployment records it through an audited,
+service-role-only RPC in the tenant/project/workspace namespace; local mode writes an atomic
+current-user-only ledger under `.loopgraph/apps/operation-actions.json`.
+
+The read-only `loopgraph_app_operation_actions_get` tool gives Hermes, CLI, MCP, and the Installed
+App screen the same filtered ownership records. The App operating topology renders prepared actions
+and their human gates next to the exact owned loop, while expired records are derived visibly rather
+than mistaken for executable work. A record is evidence that an action was prepared; it is not an
+approval or a commit receipt.
+
+### App-owned approval boundary
+
+The installed App operations page approves an action by its Loopgraph App action ID. The browser never submits the provider, connection, provider operation, Broker action ID, or fingerprint. The server reloads the immutable action record, verifies the current pinned App artifact, loop ownership, rollout mode, and capability binding, and only then creates the Connector Broker approval for the stored fingerprint.
+
+Approval requires the `integrations.manage` permission and hosted step-up authentication. Loopgraph appends a secret-free `approval_granted` lifecycle event containing the action-record digest, approval receipt identity, expiry, accountable actor, and a digest of the review reason. Review text remains in the authoritative Connector Broker control plane. An approval does not run the provider write; the later Hermes commit path must still revalidate the exact route and consume the receipt.
+
+The same operator can revoke one prepared or approved App action without disabling the provider connection. Revocation takes only the App installation/action identity and a human reason from the browser. The server re-derives the Broker connection, action, and fingerprint, atomically changes the Broker action and every unused approval to `revoked`, writes an audited reason digest, and appends a matching App lifecycle event. A commit already in progress must be reconciled instead of being guessed safe; committed actions are immutable evidence and cannot be retroactively revoked.
+
+This executor has no arbitrary HTTP fallback. Its separate
+`loopgraph_app_operation_action_commit` method and workload-authenticated
+`/api/hermes/apps/operations/commit` route accept only the App installation/action, original route
+job, assigned agent, and stable call identity. They reload the immutable action and unexpired
+approval event, re-resolve the pinned App operation, and revalidate the LoopSpec, company object,
+route, durable assignment, connection health/scopes/environment, Broker prepared-action identity,
+fingerprint, and absence of a revocation event before deriving the commit request. Commit-requested and terminal Broker receipt
+facts are appended to the lifecycle ledger; canonical provider input remains only in Connector
+Broker storage. The workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
+operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the
+caller. That route requires its own durable, tenant-scoped `hermes.app_operations` workload grant;
+the broader Connector Broker capability cannot substitute for it. The machine tenant is derived
+from the verified deployment binding rather than a browser cookie. The Connector Broker
+independently rechecks tenant identity, scopes, connection health, kill switches, idempotency, and
+audit policy at the moment of use.
+
+If Loopgraph records `commit_requested` but the App process stops before it can append the terminal
+event, the action is treated as unknown—not safe to retry. The assigned Hermes route uses the
+separate `loopgraph_app_operation_action_reconcile` method or workload-authenticated
+`/api/hermes/apps/operations/reconcile` route. It supplies only the App action and original route
+identity. Loopgraph re-derives the Broker tenant, action, fingerprint, operation, actor, and company
+context, and the Broker looks up the original idempotency receipt. A matching durable response is
+copied into secret-free terminal App evidence; `pending` causes Hermes to wait, while `unresolved`
+requires operator investigation. Reconciliation never invokes a provider handler and never turns
+an unknown outcome into permission for replacement work.
+
+Hosted deployments also run `/api/cron/app-action-reconciliation` every five minutes under the
+dedicated `schedule.app_action_reconciliation` workload capability. The worker considers only
+`commit_requested` events older than one minute, excludes revoked or terminal actions, and sends at
+most 25 exact App action identities through the same receipt-only reconciliation boundary. Stable
+call identities and receipt-derived terminal timestamps make concurrent retries idempotent. The
+worker response contains only action/request identities, bounded status codes, and counts—never
+provider input, output, credentials, or raw errors.
 
 ## Rollout and graph state
 
@@ -117,13 +193,35 @@ registry. Shadow and recommend modes remain non-executing routes; execute-with-a
 owned loops eligible to produce governed route jobs. Pause returns all owned LoopSpecs to shadow,
 while resume restores the last approved App mode.
 
+Rollout eligibility is also not a display-only maturity label. Before approval, the shared App
+service derives a canonical activation gate from the exact artifact, current lifecycle state,
+connector/configuration readiness, replay review, completed runs, observed outcomes, net-value
+evidence, and permissions. Shadow requires connected maturity, recommend requires a passing and
+fully labeled replay recommendation, and execute-with-approval requires production-proven maturity.
+The replay source window, completed App work, observed outcome window, and observed value window
+are freshness checked rather than trusting when a receipt happened to be written. Recommendation
+and execution evidence is capped at 30 days, with only five minutes of future clock skew accepted.
+The same source timestamps cap the public operational-maturity assessment: an App cannot remain
+`production_proven` or `loopgraph_verified` after its replay, completed-run, outcome, or value proof
+expires. Timestamped proof must reference one of the exact App-owned evidence records returned by the
+tenant-scoped snapshot; an unrelated fresh timestamp cannot refresh an older record.
+The versioned maturity response includes the status and expiry of replay, completed-run, outcome,
+and value proof, plus the earliest `validUntil` and a seven-day `renewalRecommendedAt`. Hermes, CLI,
+and browser consumers therefore share one proactive renewal clock instead of learning about expired
+proof only after a blocked activation.
+The approval receipt embeds that gate; consumption recomputes it and fails closed if evidence is no
+longer sufficient. Human approval supplies accountability, not a bypass around missing evidence.
+
 The transition verifies that the installation still owns a complete active LoopSpec set. Missing
 specs or routing contracts block the change. Each synchronization is revision-bound and
 content-addressed, so an exact retry is idempotent but a later pause/resume cycle creates a new graph
 transaction. The LoopSpec change is committed before the App registry state: if registry persistence
 is interrupted, the older App state remains the stricter provider-operation authority.
 
-This binding proves that a requested operation has a bounded implementation. It does not prove that
-a real provider account is healthy or that an OAuth application has been registered. Those facts
-still require live tenant onboarding, sandbox verification, webhook/transformer validation, and the
-existing staged activation gates.
+This binding and executor prove that a routed job has a bounded implementation, current trusted
+connection, and exact approval-bound commit path. They do not prove that a new OAuth application has
+been registered correctly or that a prepared write should be approved. Those facts still require
+live tenant onboarding, sandbox verification, webhook/transformer validation, and the existing staged activation and action-commit
+gates. The non-read `loopgraph.graph-change.propose` operation remains behind the existing semantic
+graph proposal, review, and transaction boundary; it is not silently treated as a read or a provider
+operation.

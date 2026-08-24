@@ -1,0 +1,44 @@
+name: Hosted App snapshot reconciliation
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-app-snapshot-reconciliation
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.repository == 'mrrkrieg/loopgraph' && github.ref == 'refs/heads/loopgraph/canvas-first'
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: app-snapshot-reconciliation
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Verify every current detached App archive
+        run: npm run --silent reconcile:app-snapshots > app-snapshot-reconciliation-receipt.json
+        env:
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SUPABASE_URL: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SUPABASE_URL }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ORGANIZATION_ID: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ORGANIZATION_ID }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_PROJECT_KEY: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_PROJECT_KEY }}"
+          LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_RECONCILIATION_SCOPE_DIGEST }}"
+          LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST }}"
+          LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: app-snapshot-reconciliation-evidence
+          path: app-snapshot-reconciliation-receipt.json
+          if-no-files-found: error
+          retention-days: 90
