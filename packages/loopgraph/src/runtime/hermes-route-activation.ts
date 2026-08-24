@@ -6,6 +6,7 @@ import {
   HERMES_ROUTE_ACTIVATION_PLAN_SCHEMA_VERSION,
   HERMES_ROUTE_ACTIVATION_RECORD_SCHEMA_VERSION,
   HERMES_ROUTE_CONTROLLER_REQUEST_SCHEMA_VERSION,
+  connectionInstanceSchema,
   contentHash,
   hermesRouteActivationPlanSchema,
   hermesRouteActivationRecordSchema,
@@ -22,6 +23,7 @@ import { defaultConnectorManifests, readConnectionInstances } from "./connector-
 import {
   doctorHermesWebhookRoutes,
   readHermesRoutesManifest,
+  type HermesWebhookPlanResult,
   type HermesWebhookRoutePlanItem
 } from "./hermes-webhooks";
 import { appInstallationRegistrySchema } from "./app-installation-store";
@@ -31,6 +33,23 @@ import { getLoopgraphRoot } from "./storage-resolver";
 import type { WorkloadTokenProvider } from "./workload-token-provider";
 
 export const HERMES_ROUTE_ACTIVATION_FILE = "hermes-route-activation.json" as const;
+export const HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION =
+  "hermes-route-activation-authority/v1alpha1" as const;
+
+export type HermesRouteActivationAuthority = {
+  schemaVersion: typeof HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION;
+  projectRootHash: string;
+  manifestDigest: string;
+  webhookPlan: HermesWebhookPlanResult;
+  connections: ConnectionInstance[];
+  appConnectionBindingsByLoopId: Record<string, string[]>;
+  warnings: string[];
+};
+
+export type HermesRouteActivationAuthorityProvider = (input: {
+  projectRoot: string;
+  now: Date;
+}) => Promise<HermesRouteActivationAuthority>;
 
 export interface HermesRouteActivationStore {
   readonly persistence: "file" | "distributed";
@@ -129,6 +148,7 @@ export async function callLoopgraphHermesRouteActivationTool(
 export type PrepareHermesRouteActivationInput = {
   projectRoot?: string;
   now?: Date;
+  authorityProvider?: HermesRouteActivationAuthorityProvider;
 };
 
 export type ActivateHermesRoutesInput = PrepareHermesRouteActivationInput & {
@@ -171,24 +191,22 @@ export async function prepareHermesRouteActivation(
   input: PrepareHermesRouteActivationInput = {}
 ): Promise<HermesRouteActivationPlan> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const generatedAt = (input.now ?? new Date()).toISOString();
-  const doctor = await doctorHermesWebhookRoutes({ projectRoot, now: input.now });
-  if (!doctor.ok) {
+  const now = input.now ?? new Date();
+  const generatedAt = now.toISOString();
+  const authority = input.authorityProvider
+    ? validateHermesRouteActivationAuthority(await input.authorityProvider({ projectRoot, now }))
+    : await localHermesRouteActivationAuthority(projectRoot, now);
+  if (path.resolve(authority.webhookPlan.projectRoot) !== projectRoot) {
     throw new HermesRouteActivationError(
-      "manifest_not_current",
-      "Hermes route activation requires a current .loopgraph/hermes-routes.json manifest"
+      "route_authority_scope_mismatch",
+      "Hermes route activation authority does not belong to the selected project"
     );
   }
-  const manifest = await readHermesRoutesManifest(doctor.manifestPath);
-  if (!manifest) {
-    throw new HermesRouteActivationError("manifest_missing", "Hermes route manifest is missing");
-  }
-
-  const connections = await readConnectionInstances(projectRoot);
+  const connections = authority.connections;
   const connectorManifests = defaultConnectorManifests();
-  const appConnectionBindingsByLoopId = await readAppConnectionBindingsByLoopId(projectRoot);
-  const warnings = [...doctor.warnings];
-  const routes = doctor.plan.routes.flatMap((route) => {
+  const appConnectionBindingsByLoopId = bindingMap(authority.appConnectionBindingsByLoopId);
+  const warnings = [...authority.webhookPlan.warnings, ...authority.warnings];
+  const routes = authority.webhookPlan.routes.flatMap((route) => {
     if (route.routeKind !== "provider_event") {
       return [activationRoute(route, {
         transformerId: route.routeKind === "loopgraph_lifecycle"
@@ -227,11 +245,10 @@ export async function prepareHermesRouteActivation(
       });
     });
   }).sort((left, right) => left.routeName.localeCompare(right.routeName));
-  const manifestDigest = contentHash(manifest);
   const planIdentity = {
-    projectRootHash: manifest.projectRootHash,
-    catalogVersion: manifest.catalogVersion,
-    manifestDigest,
+    projectRootHash: authority.projectRootHash,
+    catalogVersion: authority.webhookPlan.catalogVersion,
+    manifestDigest: authority.manifestDigest,
     controllerProtocol: HERMES_ROUTE_CONTROLLER_REQUEST_SCHEMA_VERSION,
     destructiveChangesAllowed: false as const,
     routes
@@ -258,7 +275,11 @@ export async function activateHermesRoutes(
 ): Promise<HermesRouteActivationRecord> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
-  const plan = await prepareHermesRouteActivation({ projectRoot, now });
+  const plan = await prepareHermesRouteActivation({
+    projectRoot,
+    now,
+    authorityProvider: input.authorityProvider
+  });
   if (input.confirmationDigest !== plan.planDigest) {
     throw new HermesRouteActivationError(
       "confirmation_digest_mismatch",
@@ -318,7 +339,11 @@ export async function getHermesRouteActivationStatus(
   let currentPlan: HermesRouteActivationPlan | undefined;
   let planError: string | undefined;
   try {
-    currentPlan = await prepareHermesRouteActivation({ projectRoot, now: input.now });
+    currentPlan = await prepareHermesRouteActivation({
+      projectRoot,
+      now: input.now,
+      authorityProvider: input.authorityProvider
+    });
   } catch (error) {
     planError = redactSensitiveString(error instanceof Error ? error.message : "Current route plan could not be prepared");
   }
@@ -420,6 +445,103 @@ export class HermesRouteActivationError extends Error {
     super(message);
     this.name = "HermesRouteActivationError";
   }
+}
+
+export function validateHermesRouteActivationAuthority(
+  input: HermesRouteActivationAuthority
+): HermesRouteActivationAuthority {
+  if (input.schemaVersion !== HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION) {
+    throw new HermesRouteActivationError(
+      "route_authority_invalid",
+      "Hermes route activation authority has an unsupported schema version"
+    );
+  }
+  if (!/^[a-f0-9]{16}$/.test(input.projectRootHash) || !/^[a-f0-9]{16}$/.test(input.manifestDigest)) {
+    throw new HermesRouteActivationError(
+      "route_authority_invalid",
+      "Hermes route activation authority digests are invalid"
+    );
+  }
+  if (
+    input.webhookPlan.schemaVersion !== "hermes-webhook-plan/v1alpha1" ||
+    !input.webhookPlan.catalogVersion ||
+    input.webhookPlan.routes.length < 1
+  ) {
+    throw new HermesRouteActivationError(
+      "route_authority_invalid",
+      "Hermes route activation authority has no valid route plan"
+    );
+  }
+  const connections = input.connections.map((connection) => connectionInstanceSchema.parse(connection));
+  const connectionIds = new Set(connections.map((connection) => connection.id));
+  const appConnectionBindingsByLoopId = Object.fromEntries(
+    Object.entries(input.appConnectionBindingsByLoopId)
+      .map(([loopId, bindings]): [string, string[]] => {
+        if (!loopId.trim() || !Array.isArray(bindings)) {
+          throw new HermesRouteActivationError(
+            "route_authority_invalid",
+            "Hermes route activation App bindings are invalid"
+          );
+        }
+        const normalized = [...new Set(bindings)].sort();
+        if (normalized.some((connectionId) => !connectionIds.has(connectionId))) {
+          throw new HermesRouteActivationError(
+            "route_authority_invalid",
+            `Hermes route activation App loop ${loopId} references an unknown connection`
+          );
+        }
+        return [loopId, normalized];
+      })
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
+  const authority = {
+    ...input,
+    connections,
+    appConnectionBindingsByLoopId,
+    warnings: [...new Set(input.warnings)].sort()
+  };
+  assertSecretFree(authority, "Hermes route activation authority");
+  return authority;
+}
+
+async function localHermesRouteActivationAuthority(
+  projectRoot: string,
+  now: Date
+): Promise<HermesRouteActivationAuthority> {
+  const doctor = await doctorHermesWebhookRoutes({ projectRoot, now });
+  if (!doctor.ok) {
+    throw new HermesRouteActivationError(
+      "manifest_not_current",
+      "Hermes route activation requires a current .loopgraph/hermes-routes.json manifest"
+    );
+  }
+  const manifest = await readHermesRoutesManifest(doctor.manifestPath);
+  if (!manifest) {
+    throw new HermesRouteActivationError("manifest_missing", "Hermes route manifest is missing");
+  }
+  const [connections, bindings] = await Promise.all([
+    readConnectionInstances(projectRoot),
+    readAppConnectionBindingsByLoopId(projectRoot)
+  ]);
+  return validateHermesRouteActivationAuthority({
+    schemaVersion: HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION,
+    projectRootHash: manifest.projectRootHash,
+    manifestDigest: contentHash(manifest),
+    webhookPlan: doctor.plan,
+    connections,
+    appConnectionBindingsByLoopId: Object.fromEntries(
+      [...bindings.entries()].map(([loopId, connectionIds]) => [loopId, [...connectionIds].sort()])
+    ),
+    warnings: doctor.warnings
+  });
+}
+
+function bindingMap(
+  bindings: Record<string, string[]>
+): Map<string, Set<string>> {
+  return new Map(
+    Object.entries(bindings).map(([loopId, connectionIds]) => [loopId, new Set(connectionIds)])
+  );
 }
 
 function activationRoute(

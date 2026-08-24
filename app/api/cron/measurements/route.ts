@@ -8,6 +8,8 @@ import {
   getHermesRouteActivationStore,
   getMeasurementStore
 } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import { isHostedAuthRequired } from "../../../../lib/auth/hosted-config";
+import { createHostedHermesRouteActivationAuthorityProvider } from "../../../../lib/loopgraph-runtime/hosted-hermes-route-authority";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -21,10 +23,13 @@ export async function GET(request: Request) {
     const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
     const measurementStore = getMeasurementStore({ projectRoot });
     const routeActivationStore = getHermesRouteActivationStore({ projectRoot, workspaceId });
+    const routeActivationAuthorityProvider = isHostedAuthRequired()
+      ? createHostedHermesRouteActivationAuthorityProvider({ projectRoot, workspaceId })
+      : undefined;
     const schedule = await scheduleDueMeasurements({ projectRoot, now }, { store: measurementStore });
     const reconciliation = await reconcileConnectionsAndMeasurements(
       { projectRoot, now },
-      { store: measurementStore, routeActivationStore }
+      { store: measurementStore, routeActivationStore, routeActivationAuthorityProvider }
     );
     return NextResponse.json({ schedule, reconciliation }, {
       status: 202,

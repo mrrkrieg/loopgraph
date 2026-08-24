@@ -76,7 +76,7 @@ For every verified event, Hermes can ask:
 6. Is there one clear route, or is explicit fan-out permitted?
 7. Should Hermes abstain and request more context or human judgment?
 
-Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run.
+Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run. Every new Hermes decision can echo the learning-context digest returned by ingest; Loopgraph recomputes it, rejects stale evidence, and stores the exact bounded evidence packet with the durable routing attempt.
 
 ## Product example
 
@@ -120,6 +120,10 @@ The automation is not successful merely because it produced a brief. It is succe
 | The diagram documents the workflow | Governed graph changes update backend topology and routing contracts |
 | Automations optimize local activity | Evidence can improve decisions across departments |
 
+Each event turn now includes a bounded shared-learning context: scoped routing evaluations, accountable human corrections, subject-related outcomes, and observed net value. Hermes can use that evidence to compare eligible loops, append evidence to an existing problem, lower confidence, or abstain. The isolated Hermes router must acknowledge the exact context digest when it submits its decision; stale or omitted evidence cannot create a route commit. The context remains advisory and can never make an ineligible loop eligible or authorize execution. See [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md).
+
+The operator learning view measures whether that system is improving: evidence-binding coverage, stale submissions rejected, abstention and human-review behavior, accountable corrections, golden-event pass rate, per-loop routing quality, observed outcomes, and net value remain separate signals. High route volume is never presented as success by itself.
+
 Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer. It provides the company operating contract around recurring AI work: **context, routing, policy, evidence, approval, escalation, and outcome**. See the [competitive boundary](docs/competitive-boundary.md).
 
 ## What a loop contains
@@ -142,7 +146,7 @@ Materialization creates the graph nodes, connection requirements, routing contra
 
 ### Requirements
 
-- Node.js 22+ and npm
+- Git, Node.js 22+, and npm
 - A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) installation
 
 Confirm Hermes is available:
@@ -151,7 +155,40 @@ Confirm Hermes is available:
 hermes --version
 ```
 
-Clone Loopgraph and activate the project-local Hermes integration:
+### Install directly from Hermes
+
+Install the narrow native plugin boundary from this repository, then bootstrap one empty company project:
+
+```bash
+mkdir loopgraph-company
+cd loopgraph-company
+hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable
+hermes plugins doctor loopgraph --ci
+hermes loopgraph plan --project .
+hermes loopgraph install --project . --yes
+```
+
+The plan is read-only. The confirmed install uses the exact Git commit recorded by Hermes, verifies the package-lock digest embedded in that same plugin revision, disables npm lifecycle scripts during dependency installation, builds the Loopgraph package, requires a clean production audit, and only then creates `.loopgraph/` and registers the scoped MCP servers. The plugin never accepts provider credentials. Omit activation with `--no-activate` when you want to inspect the generated Hermes configuration first.
+
+Restart Hermes and say:
+
+```text
+start Loopgraph
+```
+
+Hermes loads the bundled design skill, shows the department catalog when the workspace is empty, asks only unresolved questions, explains the proposed loops and required connections, and materializes only proposals you accept.
+
+Start the local operating plane and company graph from the company project:
+
+```bash
+hermes loopgraph start --project .
+```
+
+See the [native Hermes plugin contract](docs/HERMES-PLUGIN.md) for update, recovery, trust, and removal behavior.
+
+### Install from a source checkout
+
+Contributors and operators who prefer a visible source checkout can use the existing path:
 
 ```bash
 git clone https://github.com/mrrkrieg/loopgraph.git
@@ -161,15 +198,7 @@ npm run audit:prod
 npm run loopgraph -- setup --project . --activate
 ```
 
-The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`. Omit `--activate` when you want to inspect the generated Hermes configuration before applying it.
-
-Open Hermes and say:
-
-```text
-start Loopgraph
-```
-
-Hermes will show the department catalog, recommend Product as the first example, ask compact questions about your stack and goals, explain the proposed loops, and materialize only the proposals you accept.
+The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`.
 
 Start the local operating plane and company graph:
 
@@ -389,7 +418,7 @@ Every marketplace version carries its exact source ID, transport, URI, commit wh
 
 After installation, Loopgraph computes a stricter operational maturity ceiling that cannot skip gates. `connected` means every required logical capability and setup contract is ready for the exact tested artifact. `production_proven` requires reviewed historical routing plus completed work and observed outcome/value records—not task volume or modeled savings—and automatically falls back to `connected` when any required source evidence is missing, unbound, older than 30 days, or materially future-dated. `loopgraph_verified` additionally requires a signed receipt from an explicitly trusted independent verifier key and therefore also decays when the underlying production proof expires. Hermes, the CLI, and the installed-App view receive the same per-evidence clock, earliest proof expiry, and seven-day renewal date so teams can refresh proof before maturity drops. A fleet-level renewal plan ranks invalid, expired, renew-soon, incomplete, and current Apps from one tenant-scoped snapshot and gives Hermes one read-only next action for each App. The local supervisor consumes that same plan on its App-health cadence: invalid proof blocks fleet health, expired or renew-soon proof degrades it, and the status file carries the first safe Hermes renewal action. Hosted deployments export aggregate proof-state metrics and run the same tenant projection hourly under a dedicated workload capability; App identities and provider data never enter those metrics. Monitoring never runs a replay, changes provider state, creates approval, promotes an App, or treats human consent as proof.
 
-Activation consumes that evidence instead of merely displaying it. Shadow requires `connected` maturity, including a current Hermes Route Controller receipt for every event route covering the App's owned Loop IDs; a synced local manifest alone is never runtime proof. Each route must be in shadow mode with verified authentication, and every provider-backed route must prove its required subscription is active. Provider-agnostic App routes compile to the exact provider connection selected during installation instead of every connected system. Hermes- and Loopgraph-generated business events remain internal routes and never pretend to be provider subscriptions. Unrelated pending routes remain visible without blocking this App. Local receipts are atomically owner-protected; hosted receipts are append-only, tenant-scoped, RLS-protected, and shared by App maturity, activation, Management, and measurement reconciliation across replicas. Hosted storage fails closed rather than falling back to ephemeral disk. Recommendation mode additionally requires a passing, completely human-reviewed historical replay whose source-data window ended within the last 30 days; `execute_with_approval` requires `production_proven` maturity plus a completed App run and observed outcome/value windows from the same 30-day freshness horizon, while every execute capability stays approval-bound. Evidence dated more than five minutes into the future fails closed. `loopgraph apps activation-gate` returns the exact blockers before anyone creates authority. Every new approval embeds the immutable gate snapshot, and activation re-evaluates the current gate before consuming the one-time receipt. A human approval cannot override a failed or stale gate, and legacy receipts that predate evidence-bound gates remain readable for audit history but cannot be consumed.
+Activation consumes that evidence instead of merely displaying it. Shadow requires `connected` maturity, including a current Hermes Route Controller receipt for every event route covering the App's owned Loop IDs; a synced local manifest alone is never runtime proof. Each route must be in shadow mode with verified authentication, and every provider-backed route must prove its required subscription is active. Provider-agnostic App routes compile to the exact provider connection selected during installation instead of every connected system. Hermes- and Loopgraph-generated business events remain internal routes and never pretend to be provider subscriptions. Unrelated pending routes remain visible without blocking this App. Local receipts are atomically owner-protected. Hosted desired state is compiled from a consistent tenant/project snapshot of the distributed LoopSpec registry, distributed App ownership/bindings, and secret-free Connector Broker connection state—not a deployment replica's `.loopgraph` files—and concurrent registry drift fails closed. Hosted receipts are append-only, tenant-scoped, RLS-protected, and shared with that same authority by App maturity/onboarding, activation, Management, and measurement reconciliation across replicas. Hosted storage fails closed rather than falling back to ephemeral disk. A dedicated workload-authenticated hosted API exposes the server-derived plan and accepts only its exact confirmation digest; callers cannot choose the tenant, path, controller, identity, routes, connections, or receipt. Recommendation mode additionally requires a passing, completely human-reviewed historical replay whose source-data window ended within the last 30 days; `execute_with_approval` requires `production_proven` maturity plus a completed App run and observed outcome/value windows from the same 30-day freshness horizon, while every execute capability stays approval-bound. Evidence dated more than five minutes into the future fails closed. `loopgraph apps activation-gate` returns the exact blockers before anyone creates authority. Every new approval embeds the immutable gate snapshot, and activation re-evaluates the current gate before consuming the one-time receipt. A human approval cannot override a failed or stale gate, and legacy receipts that predate evidence-bound gates remain readable for audit history but cannot be consumed.
 
 Hermes, the CLI, and the browser use the same maturity service and durable workspace trust registry:
 
@@ -657,6 +686,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 ### Get started
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md)
+- [Native Hermes plugin](docs/HERMES-PLUGIN.md)
 - [Local supervisor](docs/LOCAL-SUPERVISOR.md)
 - [Hermes examples](docs/HERMES-EXAMPLES.md)
 - [Company loop library](docs/COMPANY-LOOP-LIBRARY.md)
@@ -669,6 +699,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 - [Topology guide](docs/topology-guide.md)
 - [Approval model](docs/approval-model.md)
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md)
+- [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md)
 
 ### Runtime and enterprise operations
 
