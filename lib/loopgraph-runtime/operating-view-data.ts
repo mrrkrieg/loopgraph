@@ -1,7 +1,4 @@
 import {
-  FileMeasurementStore,
-  FileOutcomeStore,
-  FileRoutingStore,
   compileRoutingLearningEffectiveness,
   listGraphChangeSets,
   listLoopOpportunities,
@@ -14,6 +11,9 @@ import {
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopgraphRoot,
+  getMeasurementStore,
+  getOutcomeStore,
+  getRoutingStore,
   getSemanticGraphStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 
@@ -190,9 +190,9 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
   const hermesDesignStore = getHermesDesignStore();
   const controllerStore = getLoopControllerStore({ projectRoot });
   const opportunityStore = getLoopOpportunityStore({ projectRoot });
-  const outcomeStore = new FileOutcomeStore(loopgraphRoot);
-  const measurementStore = new FileMeasurementStore(loopgraphRoot);
-  const routingStore = new FileRoutingStore(loopgraphRoot);
+  const outcomeStore = getOutcomeStore({ projectRoot });
+  const measurementStore = getMeasurementStore({ projectRoot });
+  const routingStore = getRoutingStore({ rootDir: loopgraphRoot });
 
   const [
     opportunities,
