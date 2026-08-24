@@ -21,6 +21,7 @@ export type CliSessionAdminView = {
   refreshExpiresAt: string;
   lastUsedAt?: string;
   revokedAt?: string;
+  refreshReuseDetectedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,6 +51,7 @@ export async function listCliAccessSessions(
     "refresh_expires_at",
     "last_used_at",
     "revoked_at",
+    "refresh_reuse_detected_at",
     "created_at",
     "updated_at"
   ].join(",");
@@ -132,6 +134,7 @@ function mapCliSession(
   const accessExpiresAt = requiredDateString(row.access_expires_at, "CLI access expiry");
   const refreshExpiresAt = requiredDateString(row.refresh_expires_at, "CLI refresh expiry");
   const revokedAt = optionalDateString(row.revoked_at);
+  const refreshReuseDetectedAt = optionalDateString(row.refresh_reuse_detected_at);
   const profile = profiles.get(userId);
   return {
     id,
@@ -146,6 +149,7 @@ function mapCliSession(
     refreshExpiresAt,
     ...(optionalDateString(row.last_used_at) ? { lastUsedAt: optionalDateString(row.last_used_at) } : {}),
     ...(revokedAt ? { revokedAt } : {}),
+    ...(refreshReuseDetectedAt ? { refreshReuseDetectedAt } : {}),
     createdAt: requiredDateString(row.created_at, "CLI session creation time"),
     updatedAt: requiredDateString(row.updated_at, "CLI session update time")
   };

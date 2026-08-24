@@ -38,6 +38,7 @@ export async function planMarketplaceAppInstallAction(
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
       expectedDraftRevision: previousState.journey.draft?.revision ?? 0,
+      confirmPresetChange: formData.get("confirmPresetChange") === "on",
       actor
     }) as AppOnboardingJourney;
     if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");
@@ -85,6 +86,30 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   revalidatePath("/apps");
   revalidatePath("/brain");
   redirect(`/apps/${encodeURIComponent(result.installation.id)}`);
+}
+
+export async function resetMarketplaceAppOnboardingAction(formData: FormData): Promise<void> {
+  const actor = await authorizedInstallActor();
+  if (formData.get("confirmReset") !== "on") throw new Error("Confirm that you want to clear this onboarding draft");
+  const appId = requiredFormString(formData, "appId");
+  const presetId = requiredFormString(formData, "presetId");
+  const expectedDraftId = requiredFormString(formData, "expectedDraftId");
+  const expectedDraftRevision = Number(requiredFormString(formData, "expectedDraftRevision"));
+  if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision <= 0) {
+    throw new Error("The onboarding draft revision is invalid; reload before starting over");
+  }
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+    projectRoot,
+    appId,
+    expectedDraftId,
+    expectedDraftRevision,
+    confirmReset: true,
+    actor
+  });
+  const target = `/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`;
+  revalidatePath(target);
+  redirect(target);
 }
 
 export async function confirmAppFieldMappingsAction(formData: FormData): Promise<void> {
