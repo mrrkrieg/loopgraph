@@ -14,7 +14,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - `loopgraph setup` now prepares the empty workspace, project-local Hermes contract, synchronized route manifest, and Studio plan through one safe path; `--activate` is explicit because it updates Hermes registrations.
 - `loopgraph start` now owns the local Studio plus an exclusive, gracefully stopped supervisor for route synchronization, connector checks, measurement scheduling, route jobs, opportunity scans, app update checks, controller scheduling, and aggregate health. Component cadences prevent expensive reconciliation work from running at the fast worker poll rate, errors are secret-redacted, and status is atomically persisted for the Brain UI.
 - `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
-- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph skill from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
+- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph design plus isolated event-router skills from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
 - Hermes immediately presents canonical departments and guides the user through five compact question bundles.
 - Project inspection reads allowlisted manifests and environment key names only after permission.
 - Durable Hermes design tasks can be dispatched over a signed transport, request focused evidence gaps, resume after answers, and submit schema-constrained proposals.
@@ -293,6 +293,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Live execution remains experimental and requires connector readiness, policy, approvals, and exact prepared-action fingerprints.
 
 ## Remaining product layers
+
+The repository now also includes a Hermes-native distribution boundary at `integrations/hermes-plugin`. It provides direct GitHub installation through `hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable`, an official-Doctor-compatible manifest, bundled design and isolated event-router skills, a read-only install plan, an exact-revision and package-lock-bound runtime bootstrap, and Hermes-native plan/install/doctor/start/webhook commands. Registration performs no disk or network work, and the provider credential boundary is unchanged.
 
 1. Apply the evidence/entity/probe migrations to each staging environment, configure the protected
    `learning-entity-staging` runner and independently pinned scope digest, and produce the first

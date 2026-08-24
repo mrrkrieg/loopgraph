@@ -1200,6 +1200,8 @@ The MVP can use native Hermes webhook routes, transform scripts, the router skil
 
 Project-local plugins are trusted code and should remain opt-in. For distribution, prefer a versioned pip entry point or user-level plugin installation.
 
+Current implementation status: Loopgraph now ships a dependency-free native Hermes plugin under `integrations/hermes-plugin`. Hermes can install that exact subdirectory from GitHub, so its security scanner examines only the adapter and bundled design/event-router skills rather than the application's intentional prompt-injection and credential-redaction regression fixtures. Registration is offline and side-effect free. The plugin registers the `hermes loopgraph` command tree, `/loopgraph` help, both read-only skills, and an exact-phrase onboarding hook. `hermes loopgraph plan` exposes the immutable source revision, package-lock digest, intended commands, and write boundaries. The confirmed installer fetches only the full 40-character revision recorded by Hermes, rejects lock drift before dependency installation, uses `npm ci --ignore-scripts`, builds the existing Loopgraph runtime, requires a clean production audit, and delegates setup, doctor, supervisor, and route rehearsal to the existing CLI. Business tools continue to arrive through the three scoped MCP profiles; the plugin does not duplicate routing logic, accept credentials, give webhook turns general tools, modify Hermes core, or perform work during registration.
+
 ### 9.8 Webhook configuration synchronization
 
 Creating a new loop should usually update the Loopgraph routing catalog only. It should not create another external webhook endpoint. Add a Hermes route only when the accepted loop introduces a new provider/account or event family.

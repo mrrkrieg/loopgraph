@@ -142,7 +142,7 @@ Materialization creates the graph nodes, connection requirements, routing contra
 
 ### Requirements
 
-- Node.js 22+ and npm
+- Git, Node.js 22+, and npm
 - A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) installation
 
 Confirm Hermes is available:
@@ -151,7 +151,40 @@ Confirm Hermes is available:
 hermes --version
 ```
 
-Clone Loopgraph and activate the project-local Hermes integration:
+### Install directly from Hermes
+
+Install the narrow native plugin boundary from this repository, then bootstrap one empty company project:
+
+```bash
+mkdir loopgraph-company
+cd loopgraph-company
+hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable
+hermes plugins doctor loopgraph --ci
+hermes loopgraph plan --project .
+hermes loopgraph install --project . --yes
+```
+
+The plan is read-only. The confirmed install uses the exact Git commit recorded by Hermes, verifies the package-lock digest embedded in that same plugin revision, disables npm lifecycle scripts during dependency installation, builds the Loopgraph package, requires a clean production audit, and only then creates `.loopgraph/` and registers the scoped MCP servers. The plugin never accepts provider credentials. Omit activation with `--no-activate` when you want to inspect the generated Hermes configuration first.
+
+Restart Hermes and say:
+
+```text
+start Loopgraph
+```
+
+Hermes loads the bundled design skill, shows the department catalog when the workspace is empty, asks only unresolved questions, explains the proposed loops and required connections, and materializes only proposals you accept.
+
+Start the local operating plane and company graph from the company project:
+
+```bash
+hermes loopgraph start --project .
+```
+
+See the [native Hermes plugin contract](docs/HERMES-PLUGIN.md) for update, recovery, trust, and removal behavior.
+
+### Install from a source checkout
+
+Contributors and operators who prefer a visible source checkout can use the existing path:
 
 ```bash
 git clone https://github.com/mrrkrieg/loopgraph.git
@@ -161,15 +194,7 @@ npm run audit:prod
 npm run loopgraph -- setup --project . --activate
 ```
 
-The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`. Omit `--activate` when you want to inspect the generated Hermes configuration before applying it.
-
-Open Hermes and say:
-
-```text
-start Loopgraph
-```
-
-Hermes will show the department catalog, recommend Product as the first example, ask compact questions about your stack and goals, explain the proposed loops, and materialize only the proposals you accept.
+The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`.
 
 Start the local operating plane and company graph:
 

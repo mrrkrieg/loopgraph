@@ -71,11 +71,20 @@ import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 import { LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 
 export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha12" as const;
-export const HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION = "hermes-loopgraph-activation/v1alpha1" as const;
+export const HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION = "hermes-loopgraph-activation/v1alpha2" as const;
 export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.11.0" as const;
 export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha9" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha8" as const;
 export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha1" as const;
+export const HERMES_LOOPGRAPH_MCP_SERVER_NAMES = [
+  "loopgraph_admin",
+  "loopgraph_webhook_router",
+  "loopgraph_lifecycle_router"
+] as const;
+export const HERMES_LOOPGRAPH_SKILL_IDS = [
+  "mrrkrieg/loopgraph/skills/loopgraph",
+  "mrrkrieg/loopgraph/skills/loopgraph-event-router"
+] as const;
 export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   mcpServer: HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION,
   designSkill: HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
@@ -224,6 +233,15 @@ export type HermesInstallOptions = {
   now?: Date;
 };
 
+export type HermesDeactivationResult = {
+  projectRoot: string;
+  disconnected: true;
+  commands: Array<{ command: "hermes"; args: ["mcp", "remove", typeof HERMES_LOOPGRAPH_MCP_SERVER_NAMES[number]] }>;
+  activationReceiptPath: string;
+  activationReceiptRemoved: boolean;
+  preserved: string[];
+};
+
 export type HermesDoctorOptions = {
   projectRoot?: string;
   hermesVersionCheck?: () => Promise<string | null>;
@@ -319,8 +337,8 @@ type HermesActivationReceipt = {
   projectRootHash: string;
   contractHash: string;
   appliedAt: string;
-  mcpServerNames: string[];
-  skill: string;
+  mcpServerNames: Array<typeof HERMES_LOOPGRAPH_MCP_SERVER_NAMES[number]>;
+  skills: Array<typeof HERMES_LOOPGRAPH_SKILL_IDS[number]>;
 };
 
 export async function installHermesIntegration(options: HermesInstallOptions = {}): Promise<HermesInstallResult> {
@@ -737,7 +755,9 @@ export async function activateHermesIntegration(
     });
   }
   commands.push({ command: "hermes", args: ["skills", "tap", "add", "mrrkrieg/loopgraph"] });
-  commands.push({ command: "hermes", args: ["skills", "install", "mrrkrieg/loopgraph/skills/loopgraph"] });
+  for (const skillId of HERMES_LOOPGRAPH_SKILL_IDS) {
+    commands.push({ command: "hermes", args: ["skills", "install", skillId] });
+  }
   for (const command of commands) {
     try {
       await commandRunner(command.command, command.args);
@@ -753,11 +773,49 @@ export async function activateHermesIntegration(
     projectRootHash: contentHash(install.projectRoot),
     contractHash: hermesActivationContractHash(metadata),
     appliedAt: now.toISOString(),
-    mcpServerNames: install.mcpServers.map((server) => server.name),
-    skill: "mrrkrieg/loopgraph/skills/loopgraph"
+    mcpServerNames: [...HERMES_LOOPGRAPH_MCP_SERVER_NAMES],
+    skills: [...HERMES_LOOPGRAPH_SKILL_IDS]
   };
   await writePrivateAtomicTextFile(install.activationReceiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   return { applied: true, commands, receiptPath: install.activationReceiptPath };
+}
+
+export async function deactivateHermesIntegration(
+  options: {
+    projectRoot?: string;
+    commandRunner?: (command: string, args: string[]) => Promise<void>;
+  } = {}
+): Promise<HermesDeactivationResult> {
+  const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
+  const activationReceiptPath = path.join(getLoopgraphRoot(projectRoot), "hermes", "activation.json");
+  const commandRunner = options.commandRunner ?? runCommand;
+  const commands = HERMES_LOOPGRAPH_MCP_SERVER_NAMES.map((serverName): HermesDeactivationResult["commands"][number] => ({
+    command: "hermes" as const,
+    args: ["mcp", "remove", serverName]
+  }));
+
+  for (const command of commands) {
+    try {
+      await commandRunner(command.command, command.args);
+    } catch (error) {
+      const rendered = [command.command, ...command.args].map((part) => JSON.stringify(part)).join(" ");
+      throw new Error(`Hermes disconnect stopped at: ${rendered}. The activation receipt was preserved because configuration removal is incomplete. ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const activationReceiptRemoved = await pathExists(activationReceiptPath);
+  if (activationReceiptRemoved) await unlink(activationReceiptPath);
+  return {
+    projectRoot,
+    disconnected: true,
+    commands,
+    activationReceiptPath,
+    activationReceiptRemoved,
+    preserved: [
+      "The project .loopgraph workspace and company data were preserved.",
+      "Hermes-managed provider credentials, plugin installation, skill tap, and unrelated MCP servers were preserved."
+    ]
+  };
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
@@ -988,13 +1046,18 @@ async function readHermesActivationReceipt(filePath: string): Promise<HermesActi
       typeof value.appliedAt !== "string" ||
       !Number.isFinite(Date.parse(value.appliedAt)) ||
       !Array.isArray(value.mcpServerNames) ||
-      !value.mcpServerNames.every((name) => typeof name === "string") ||
-      typeof value.skill !== "string"
+      !arraysEqual(value.mcpServerNames, HERMES_LOOPGRAPH_MCP_SERVER_NAMES) ||
+      !Array.isArray(value.skills) ||
+      !arraysEqual(value.skills, HERMES_LOOPGRAPH_SKILL_IDS)
     ) return undefined;
     return value as HermesActivationReceipt;
   } catch {
     return undefined;
   }
+}
+
+function arraysEqual(actual: unknown[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
 
 function hermesActivationContractHash(metadata: HermesInstallMetadata): string {
