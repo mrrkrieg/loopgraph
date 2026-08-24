@@ -118,5 +118,26 @@ describe("company context and configuration resolution", () => {
     expect(resolved.configuration.provenance.followUpSlaMinutes.layer).toBe("install_config");
     expect(resolved.missing).toHaveLength(0);
   });
-});
 
+  it("rejects declared types that do not match the approved JSON value", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "loopgraph-context-"));
+    temporaryDirectories.push(root);
+    const store = new FileCompanyContextStore(path.join(root, "context.json"));
+    await expect(store.approveValue({
+      workspaceId: "acme",
+      companyId: "acme-company",
+      proposal: {
+        key: "sales.inboundSlaMinutes",
+        type: "number",
+        value: "thirty",
+        provenance: { source: "user", observedAt: "2026-08-21T16:00:00.000Z" },
+        confidence: 1,
+        owner: "revenue-operations",
+        visibility: "workspace",
+        explanation: "Invalid type fixture."
+      },
+      approvedBy: "user-1",
+      expectedRevision: 0
+    })).rejects.toThrow(/declared type number/);
+  });
+});

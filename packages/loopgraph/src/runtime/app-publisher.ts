@@ -21,7 +21,6 @@ import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import {
-  APP_INSTALL_SCHEMA_VERSION,
   LOOP_PACK_SIGNATURE_SCHEMA_VERSION,
   MARKETPLACE_SCHEMA_VERSION,
   DepartmentTypeSchema,
@@ -32,8 +31,7 @@ import {
   loopPackSignatureSchema,
   type DepartmentType,
   type LoopPackSignature,
-  type PublisherTrustKey,
-  type WorkspaceAppInstallation
+  type PublisherTrustKey
 } from "../core";
 import { loadConnectorRecipes } from "./app-connector-service";
 import { compileLoopPack } from "./app-pack-compiler";
@@ -51,13 +49,16 @@ import {
   publishedCatalogSchema,
   publishedReleaseKey,
   readPublishedCatalog,
+  createSyntheticMaturityEvidence,
   type PublishedCatalog,
   type PublishedCatalogRelease
 } from "./app-publisher-catalog";
-import { runAppSyntheticConformance } from "./app-quality-engine";
+import { createSyntheticValidationInstallation, runAppSyntheticConformance } from "./app-quality-engine";
 
 const PUBLISHER_KEY_SCHEMA_VERSION = "loopgraph-publisher-key/v1alpha1" as const;
 const PUBLISHER_REGISTRY_SCHEMA_VERSION = "loopgraph-publisher-registry/v1alpha1" as const;
+export const APP_DEVELOPER_REPORT_SCHEMA_VERSION = "loopgraph-app-developer-report/v1alpha1" as const;
+export const APP_PREVIEW_SCHEMA_VERSION = "loopgraph-app-preview/v1alpha1" as const;
 
 const publisherKeyRecordSchema = z.object({
   schemaVersion: z.literal(PUBLISHER_KEY_SCHEMA_VERSION),
@@ -94,6 +95,71 @@ export type AppPublisherValidationReport = {
   checks: Array<{ id: string; status: "passed" | "failed"; summary: string }>;
   issues: LoopPackValidationIssue[];
   failedScenarios: Array<{ id: string; reason?: string }>;
+  scenarioCount: number;
+};
+
+export type AppDeveloperReport = {
+  schemaVersion: typeof APP_DEVELOPER_REPORT_SCHEMA_VERSION;
+  packRoot: string;
+  status: "ready" | "needs_work";
+  writeBlocked: true;
+  previewAvailable: boolean;
+  app?: {
+    id: string;
+    name: string;
+    version: string;
+    department: DepartmentType;
+    summary: string;
+    visibility: string;
+  };
+  inventory?: {
+    loops: Array<{ id: string; name: string; problemTypes: string[]; toolKeys: string[] }>;
+    skills: Array<{ id: string; name: string }>;
+    graphNodes: number;
+    graphEdges: number;
+    setupQuestions: number;
+    connectorRecipes: Array<{ id: string; providerId: string; required: boolean; capabilities: string[] }>;
+    fixtures: number;
+    evaluationSuites: number;
+  };
+  permissions?: Array<{ capability: string; authority: string; defaultPolicy: string; risk: string }>;
+  validation: AppPublisherValidationReport;
+  nextSteps: string[];
+};
+
+export type AppPublisherPreview = {
+  schemaVersion: typeof APP_PREVIEW_SCHEMA_VERSION;
+  packRoot: string;
+  appId: string;
+  version: string;
+  artifactDigest: string;
+  mode: "synthetic";
+  status: "passed" | "failed";
+  writeBlocked: true;
+  providerWrites: 0;
+  readyForSigning: boolean;
+  publishable: boolean;
+  graph: Awaited<ReturnType<typeof compileLoopPack>>["graph"];
+  scenarios: Array<{
+    id: string;
+    status: "passed" | "failed" | "skipped";
+    expectedAction?: string;
+    actualAction?: string;
+    expectedRoute?: string;
+    actualRoute?: string;
+    approvalRequired?: boolean;
+    reason?: string;
+    evidenceRefs: string[];
+  }>;
+  summary: {
+    total: number;
+    passed: number;
+    failed: number;
+    routes: number;
+    abstentions: number;
+    deferred: number;
+  };
+  validation: AppPublisherValidationReport;
 };
 
 export class LoopgraphAppPublisher {
@@ -203,6 +269,7 @@ export class LoopgraphAppPublisher {
       filesCreated: Object.keys(documents).length,
       nextSteps: [
         "Edit the routing contract, setup questions, fixtures, and outcome metrics for the real business problem.",
+        "Run app dev to inspect the compiled inventory, then app preview to compare every expected and actual Hermes decision.",
         "Run app validate after every change.",
         "Generate a publisher key, sign the immutable version, and publish it to a trusted private catalog."
       ]
@@ -286,6 +353,7 @@ export class LoopgraphAppPublisher {
     const checks: AppPublisherValidationReport["checks"] = [];
     const issues: LoopPackValidationIssue[] = [];
     const failedScenarios: AppPublisherValidationReport["failedScenarios"] = [];
+    let scenarioCount = 0;
     try {
       const loaded = await loadLoopPackDirectory(packRoot);
       checks.push({ id: "pack-contract", status: "passed", summary: "Manifest, declared content, path confinement, digest, and secret scanning passed." });
@@ -318,8 +386,9 @@ export class LoopgraphAppPublisher {
         appEvalSuiteSchema.parse(await readDocument(packRoot, entry))));
       await loadConnectorRecipes(loaded);
       checks.push({ id: "supporting-assets", status: "passed", summary: "Setup, connector, and evaluation documents passed their contracts." });
-      const installation = validationInstallation(loaded.manifest.metadata.id, loaded.manifest.metadata.version, loaded.artifact.digest, loaded.manifest.permissions);
+      const installation = createSyntheticValidationInstallation(loaded, "app-publisher");
       const evaluation = await runAppSyntheticConformance({ loaded, compiled, installation, actor: "app-publisher", now: new Date(0) });
+      scenarioCount = evaluation.scenarios.length;
       failedScenarios.push(...evaluation.scenarios.filter((scenario) => scenario.status === "failed").map((scenario) => ({ id: scenario.id, reason: scenario.reason })));
       checks.push({
         id: "synthetic-conformance",
@@ -343,14 +412,135 @@ export class LoopgraphAppPublisher {
         signature: { present: Boolean(signature), publisherId: signature?.publisherId, keyId: signature?.keyId, trusted: Boolean(key && !key.revokedAt) },
         checks,
         issues: [...loaded.issues, ...issues],
-        failedScenarios
+        failedScenarios,
+        scenarioCount
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       checks.push({ id: "pack-contract", status: "failed", summary: message });
       issues.push({ severity: "error", code: "publisher_validation_failed", message });
-      return { ok: false, packRoot, checks, issues, failedScenarios };
+      return { ok: false, packRoot, checks, issues, failedScenarios, scenarioCount };
     }
+  }
+
+  async inspectDeveloperApp(packRootInput: string): Promise<AppDeveloperReport> {
+    const packRoot = this.resolveProjectConfined(packRootInput);
+    const validation = await this.validateApp(packRoot);
+    if (!validation.appId || !validation.version || !validation.digest) {
+      return {
+        schemaVersion: APP_DEVELOPER_REPORT_SCHEMA_VERSION,
+        packRoot,
+        status: "needs_work",
+        writeBlocked: true,
+        previewAvailable: false,
+        validation,
+        nextSteps: ["Resolve the pack-contract errors, then run app dev again."]
+      };
+    }
+    const loaded = await loadLoopPackDirectory(packRoot);
+    const compiled = await compileLoopPack(loaded);
+    const setup = await Promise.all(loaded.manifest.entrypoints.setup.map(async (entry) =>
+      appSetupDefinitionSchema.parse(await readDocument(packRoot, entry))));
+    const recipes = await loadConnectorRecipes(loaded);
+    return {
+      schemaVersion: APP_DEVELOPER_REPORT_SCHEMA_VERSION,
+      packRoot,
+      status: validation.ok ? "ready" : "needs_work",
+      writeBlocked: true,
+      previewAvailable: true,
+      app: {
+        id: loaded.manifest.metadata.id,
+        name: loaded.manifest.metadata.name,
+        version: loaded.manifest.metadata.version,
+        department: loaded.manifest.metadata.department,
+        summary: loaded.manifest.metadata.summary,
+        visibility: loaded.manifest.metadata.visibility
+      },
+      inventory: {
+        loops: compiled.loopSpecs.map((spec) => ({
+          id: spec.metadata.id,
+          name: spec.metadata.name,
+          problemTypes: compiled.routingCards.find((card) => card.loopId === spec.metadata.id)?.problemTypes ?? [],
+          toolKeys: spec.tools.map((tool) => tool.key)
+        })),
+        skills: compiled.skills.map((skill) => ({ id: skill.id, name: skill.name })),
+        graphNodes: compiled.graph.nodes.length,
+        graphEdges: compiled.graph.edges.length,
+        setupQuestions: setup.reduce((total, definition) => total + definition.questions.length, 0),
+        connectorRecipes: recipes.map((recipe) => ({
+          id: recipe.id,
+          providerId: recipe.providerId,
+          required: recipe.capabilities.some((capability) => loaded.manifest.requiredCapabilities.includes(capability.logicalCapability)),
+          capabilities: recipe.capabilities.map((capability) => capability.logicalCapability)
+        })),
+        fixtures: loaded.manifest.entrypoints.fixtures.length,
+        evaluationSuites: loaded.manifest.entrypoints.evals.length
+      },
+      permissions: loaded.manifest.permissions.map((permission) => ({
+        capability: permission.capability,
+        authority: permission.authority,
+        defaultPolicy: permission.defaultPolicy,
+        risk: permission.risk
+      })),
+      validation,
+      nextSteps: validation.ok
+        ? [
+            "Run app preview to inspect every expected and actual Hermes routing decision.",
+            "Review permissions and graph intent, then sign and pack the exact immutable digest.",
+            "Publish only after the preview remains write-blocked and all scenarios pass."
+          ]
+        : ["Resolve every failed validation check and scenario, then run app dev again."]
+    };
+  }
+
+  async previewApp(packRootInput: string, now = new Date()): Promise<AppPublisherPreview> {
+    const packRoot = this.resolveProjectConfined(packRootInput);
+    const validation = await this.validateApp(packRoot);
+    const loaded = await loadLoopPackDirectory(packRoot);
+    const compiled = await compileLoopPack(loaded);
+    const installation = createSyntheticValidationInstallation(loaded, "app-publisher-preview");
+    const evaluation = await runAppSyntheticConformance({
+      loaded,
+      compiled,
+      installation,
+      actor: "app-publisher-preview",
+      now
+    });
+    const scenarios = evaluation.scenarios.map((scenario) => ({
+      id: scenario.id,
+      status: scenario.status,
+      expectedAction: scenario.expectedAction,
+      actualAction: scenario.actualAction,
+      expectedRoute: scenario.expectedRoute,
+      actualRoute: scenario.actualRoute,
+      approvalRequired: scenario.approvalRequired,
+      reason: scenario.reason,
+      evidenceRefs: scenario.evidenceRefs
+    }));
+    return {
+      schemaVersion: APP_PREVIEW_SCHEMA_VERSION,
+      packRoot,
+      appId: loaded.manifest.metadata.id,
+      version: loaded.manifest.metadata.version,
+      artifactDigest: loaded.artifact.digest,
+      mode: "synthetic",
+      status: evaluation.status === "passed" ? "passed" : "failed",
+      writeBlocked: true,
+      providerWrites: 0,
+      readyForSigning: validation.ok && evaluation.status === "passed",
+      publishable: validation.ok && evaluation.status === "passed" && validation.signature?.present === true && validation.signature.trusted === true,
+      graph: compiled.graph,
+      scenarios,
+      summary: {
+        total: scenarios.length,
+        passed: scenarios.filter((scenario) => scenario.status === "passed").length,
+        failed: scenarios.filter((scenario) => scenario.status === "failed").length,
+        routes: scenarios.filter((scenario) => scenario.actualAction === "route").length,
+        abstentions: scenarios.filter((scenario) => scenario.actualAction === "request_human" || scenario.actualAction === "unhandled").length,
+        deferred: scenarios.filter((scenario) => scenario.actualAction === "defer").length
+      },
+      validation
+    };
   }
 
   async signApp(input: { packRoot: string; keyId: string; now?: Date }): Promise<{
@@ -449,9 +639,20 @@ export class LoopgraphAppPublisher {
       }
       const timestamp = (input.now ?? new Date()).toISOString();
       const current = await readPublishedCatalog(catalogRoot);
-      const release = current?.releases.find((candidate) =>
+      const existingRelease = current?.releases.find((candidate) =>
         publishedReleaseKey(candidate.appId, candidate.version, candidate.digest) ===
-        publishedReleaseKey(loaded.manifest.metadata.id, loaded.manifest.metadata.version, loaded.artifact.digest)) ?? {
+        publishedReleaseKey(loaded.manifest.metadata.id, loaded.manifest.metadata.version, loaded.artifact.digest));
+      const validation = existingRelease?.validation ?? createSyntheticMaturityEvidence({
+        artifactDigest: loaded.artifact.digest,
+        status: "passed",
+        scenarioCount: report.scenarioCount,
+        passedScenarioCount: report.scenarioCount,
+        providerWrites: 0,
+        evidenceRefs: report.checks.filter((check) => check.status === "passed").map((check) => `publisher-check:${check.id}`),
+        evaluatedAt: timestamp
+      });
+      const release = {
+        ...(existingRelease ?? {
         appId: loaded.manifest.metadata.id,
         version: loaded.manifest.metadata.version,
         digest: loaded.artifact.digest,
@@ -460,6 +661,11 @@ export class LoopgraphAppPublisher {
         status: "active" as const,
         publishedAt: timestamp,
         updatedAt: timestamp
+        }),
+        validation,
+        updatedAt: existingRelease?.validation
+          ? existingRelease.updatedAt
+          : timestamp
       };
       const catalog = publishedCatalogSchema.parse({
         schemaVersion: PUBLISHED_CATALOG_SCHEMA_VERSION,
@@ -564,49 +770,6 @@ export class LoopgraphAppPublisher {
     }
     return resolved;
   }
-}
-
-function validationInstallation(
-  appId: string,
-  version: string,
-  artifactDigest: string,
-  permissions: Array<{ capability: string; authority: "read" | "draft" | "approve" | "execute"; defaultPolicy: "allowed" | "approval_required" | "forbidden" }>
-): WorkspaceAppInstallation {
-  return {
-    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
-    id: `validation.${appId}`,
-    workspaceId: "publisher-validation",
-    appId,
-    version,
-    artifactDigest,
-    state: "ready_to_test",
-    mode: "simulation",
-    selectedModules: [],
-    presetId: "validation",
-    configuration: {
-      schemaVersion: "loopgraph-app-configuration/v1alpha1",
-      appId,
-      version,
-      fields: [],
-      values: {},
-      provenance: {},
-      completedAt: new Date(0).toISOString()
-    },
-    connectionBindings: {},
-    fieldMappingIds: [],
-    permissions: permissions.map((permission) => ({
-      capability: permission.capability,
-      authority: permission.authority,
-      decision: permission.defaultPolicy === "allowed" ? "allow" : permission.defaultPolicy === "forbidden" ? "forbid" : "approval_required",
-      reason: "Publisher conformance keeps provider execution blocked.",
-      changedFromInstalled: false
-    })),
-    ownedAssets: [],
-    history: [],
-    installedAt: new Date(0).toISOString(),
-    updatedAt: new Date(0).toISOString(),
-    installedBy: "app-publisher"
-  };
 }
 
 async function rewriteCapturedIdentifiers(

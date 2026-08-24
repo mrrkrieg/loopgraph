@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_CONFIGURATION_SCHEMA_VERSION,
+  APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
+  APP_OPERATION_ACTION_SCHEMA_VERSION,
+  APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+  APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
+  appActivationGateSchema,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
+  appOnboardingDraftSchema,
+  appOperationActionSchema,
   appInstallationLockSchema,
+  appMaturityEvidenceSchema,
+  appEvidenceRenewalPlanSchema,
+  deriveAppEvidenceFleetHealth,
   appPlatformJsonSchemas,
   assertSafeInitialRollout,
   canonicalAppDigest,
@@ -80,6 +90,43 @@ function manifestInput() {
 }
 
 describe("Loopgraph App Platform contracts", () => {
+  it("bounds resumable onboarding drafts and rejects ambiguous snapshots", () => {
+    const draft = {
+      schemaVersion: "loopgraph-app-onboarding-draft/v1alpha1",
+      id: "draft.sales-inbound",
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: "loopgraph.sales.inbound-leads",
+      versionRange: "1.0.0",
+      presetId: "hubspot-gmail-slack",
+      selectedModules: ["qualification"],
+      configuration: { exclusions: ["employee"] },
+      fieldMappingIds: ["mapping.hubspot.lead-email"],
+      revision: 1,
+      createdAt: now,
+      createdBy: "sales-operations",
+      updatedAt: later,
+      updatedBy: "sales-operations"
+    };
+    expect(appOnboardingDraftSchema.parse(draft).revision).toBe(1);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      selectedModules: ["qualification", "qualification"]
+    })).toThrow(/unique/i);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      fieldMappingIds: ["mapping.hubspot.lead-email", "mapping.hubspot.lead-email"]
+    })).toThrow(/unique/i);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      configuration: Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`answer_${index}`, index]))
+    })).toThrow(/20 declared answers/i);
+    expect(() => appOnboardingDraftSchema.parse({
+      ...draft,
+      updatedAt: "2026-08-08T11:00:00.000Z"
+    })).toThrow(/cannot precede creation/i);
+  });
+
   it("accepts a valid strict LoopPack manifest and rejects unknown fields", () => {
     const parsed = loopPackManifestSchema.parse(manifestInput());
     expect(parsed.metadata.id).toBe("loopgraph.sales.inbound-leads");
@@ -147,6 +194,115 @@ describe("Loopgraph App Platform contracts", () => {
   it("produces order-independent canonical digests", () => {
     expect(canonicalAppDigest({ a: 1, b: 2 })).toBe(canonicalAppDigest({ b: 2, a: 1 }));
     expect(canonicalAppDigest({ a: 1 })).toMatch(/^sha256:[a-f0-9]{64}$/);
+  });
+
+  it("binds a prepared provider action to one App route without accepting provider input", () => {
+    const base = {
+      schemaVersion: APP_OPERATION_ACTION_SCHEMA_VERSION,
+      id: "appact_12345678",
+      workspaceId: "acme",
+      companyId: "acme-company",
+      installationId: "installed-sales",
+      appId: "loopgraph.sales.inbound-leads",
+      artifactDigest: digest("artifact"),
+      loopId: "sales-inbound-lead-intake",
+      loopVersionHash: digest("loop"),
+      capability: "crm.lead.write",
+      routeJobId: "route-job-1",
+      agentInstanceId: "hermes-sales",
+      callId: "call-1",
+      requestId: "request-12345678",
+      idempotencyKey: "idempotency-12345678",
+      resolutionDigest: digest("resolution"),
+      executionDigest: digest("execution"),
+      providerBinding: {
+        providerId: "hubspot",
+        connectionId: "hubspot-production",
+        brokerCapability: "provider.action.execute" as const,
+        operation: "crm.contacts.update"
+      },
+      companyObject: { type: "lead", identityDigest: digest("lead-42") },
+      environment: "production" as const,
+      brokerPreparedActionId: "broker-action-12345678",
+      brokerPreparedActionFingerprint: "f".repeat(64),
+      brokerPrepareReceiptId: "broker-receipt-12345678",
+      approvalRequired: true,
+      riskClass: "write" as const,
+      status: "prepared" as const,
+      preparedAt: now,
+      expiresAt: later,
+      updatedAt: now
+    };
+    const action = appOperationActionSchema.parse({
+      ...base,
+      recordDigest: canonicalAppDigest({ ...base, recordDigest: undefined })
+    });
+    expect(action.companyObject).not.toHaveProperty("id");
+    expect(() => appOperationActionSchema.parse({ ...action, input: { email: "person@example.com" } })).toThrow();
+    expect(() => appOperationActionSchema.parse({ ...action, loopId: "another-loop" })).toThrow(/digest/i);
+  });
+
+  it("binds tested maturity to complete zero-write evidence for one exact artifact", () => {
+    const body = {
+      schemaVersion: APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+      artifactDigest: digest("app"),
+      basis: "synthetic_conformance" as const,
+      status: "passed" as const,
+      writeBlocked: true as const,
+      providerWrites: 0,
+      scenarioCount: 13,
+      passedScenarioCount: 13,
+      evidenceRefs: ["eval-suite:required-safety"],
+      evaluatedAt: now
+    };
+    const evidence = appMaturityEvidenceSchema.parse({
+      ...body,
+      evidenceDigest: canonicalAppDigest({ ...body, evidenceDigest: undefined })
+    });
+    expect(evidence.status).toBe("passed");
+    expect(() => appMaturityEvidenceSchema.parse({ ...evidence, providerWrites: 1 })).toThrow();
+    expect(() => appMaturityEvidenceSchema.parse({ ...evidence, scenarioCount: 12, passedScenarioCount: 12 })).toThrow(/13 safety categories/i);
+    expect(() => appMaturityEvidenceSchema.parse({ ...evidence, evidenceDigest: digest("tampered") })).toThrow(/digest/i);
+  });
+
+  it("keeps fleet evidence-renewal plans tenant-bound, bounded, and internally consistent", () => {
+    const plan = appEvidenceRenewalPlanSchema.parse({
+      schemaVersion: APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      generatedAt: now,
+      totalInstallations: 0,
+      totalMatched: 0,
+      counts: { notApplicable: 0, incomplete: 0, current: 0, renewSoon: 0, expired: 0, invalid: 0 },
+      items: []
+    });
+    expect(plan.items).toEqual([]);
+    expect(() => appEvidenceRenewalPlanSchema.parse({
+      ...plan,
+      totalInstallations: 1
+    })).toThrow(/counts must equal/i);
+    expect(() => appEvidenceRenewalPlanSchema.parse({
+      ...plan,
+      totalMatched: 1
+    })).toThrow(/within the installation total/i);
+  });
+
+  it("derives fleet health with invalid evidence taking precedence over renewal warnings", () => {
+    const empty = {
+      notApplicable: 0,
+      incomplete: 0,
+      current: 0,
+      renewSoon: 0,
+      expired: 0,
+      invalid: 0
+    };
+    expect(deriveAppEvidenceFleetHealth({ ...empty, invalid: 1, expired: 1 })).toBe("blocked");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, expired: 1 })).toBe("degraded");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, renewSoon: 1 })).toBe("degraded");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, incomplete: 1 })).toBe("healthy");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, current: 1 })).toBe("healthy");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, notApplicable: 1 })).toBe("healthy");
+    expect(() => deriveAppEvidenceFleetHealth({ ...empty, invalid: -1 })).toThrow();
   });
 
   it("requires signed catalogs to carry exact publisher trust material instead of a key label alone", () => {
@@ -254,6 +410,7 @@ describe("Loopgraph App Platform contracts", () => {
         edgesAdded: ["edge.sales.inbound"],
         edgesRemoved: []
       },
+      conflicts: [],
       requiredTests: ["high-fit", "ambiguous-account"],
       initialMode: "shadow",
       rollback: { removeStagedAssets: true, preserveSharedAssets: true },
@@ -321,12 +478,17 @@ describe("Loopgraph App Platform contracts", () => {
       writeBlocked: true,
       startedAt: now,
       completedAt: later,
+      sourceWindow: { from: "2026-08-01T00:00:00.000Z", to: "2026-08-08T00:00:00.000Z" },
       scenarios: [],
       metrics: {},
       evidenceRefs: []
     } as const;
     expect(appEvalRunSchema.parse(base).writeBlocked).toBe(true);
     expect(() => appEvalRunSchema.parse({ ...base, writeBlocked: false })).toThrow(/block all writes/i);
+    expect(() => appEvalRunSchema.parse({
+      ...base,
+      sourceWindow: { from: "2026-08-08T00:00:00.000Z", to: "2026-08-01T00:00:00.000Z" }
+    })).toThrow(/source window end/i);
   });
 
   it("bounds historical replay by time window, event count, and event occurrence", () => {
@@ -367,9 +529,55 @@ describe("Loopgraph App Platform contracts", () => {
     expect(Object.keys(schemas)).toEqual(expect.arrayContaining([
       "AppHistoricalReplayRequest",
       "AppEvalJudgment",
-      "AppPromotionRecommendation"
+      "AppPromotionRecommendation",
+      "AppOnboardingDraft",
+      "AppOnboardingResetResult",
+      "AppActivationGate",
+      "AppEvidenceRenewalPlan",
+      "AppOperationAction",
+      "AppOperationActionEvent",
+      "AppOperationActionCommitResult"
     ]));
     expect(JSON.stringify(schemas.LoopPackManifest)).toContain("loopgraph-pack/v1alpha1");
+  });
+
+  it("binds activation readiness to a canonical, internally consistent gate digest", () => {
+    const gateContent = {
+      schemaVersion: APP_ACTIVATION_GATE_SCHEMA_VERSION,
+      installationId: "install.sales-inbound",
+      appId: "loopgraph.sales.inbound-leads",
+      artifactDigest: digest("sales-inbound-artifact"),
+      fromState: "shadow" as const,
+      requestedMode: "recommend" as const,
+      status: "ready" as const,
+      requiredMaturity: "connected" as const,
+      observedMaturity: "connected" as const,
+      checks: [
+        { id: "ordered-lifecycle", status: "pass" as const, summary: "The transition is ordered.", evidenceRefs: [] },
+        { id: "operational-maturity", status: "pass" as const, summary: "Connected maturity is achieved.", evidenceRefs: ["evaluation:synthetic"] },
+        { id: "promotion-evidence", status: "pass" as const, summary: "Historical decisions are reviewed.", evidenceRefs: ["evaluation:replay"] },
+        { id: "permission-boundary", status: "pass" as const, summary: "Writes remain blocked.", evidenceRefs: [] }
+      ],
+      evidenceRefs: ["evaluation:synthetic", "evaluation:replay"],
+      evaluatedAt: now
+    };
+    const gate = appActivationGateSchema.parse({
+      ...gateContent,
+      gateDigest: canonicalAppDigest(gateContent)
+    });
+    expect(gate.status).toBe("ready");
+    expect(() => appActivationGateSchema.parse({ ...gate, observedMaturity: "concept" })).toThrow(/digest/i);
+    expect(() => appActivationGateSchema.parse({
+      ...gate,
+      status: "ready",
+      checks: gate.checks.map((check) => check.id === "promotion-evidence" ? { ...check, status: "blocked" } : check),
+      gateDigest: canonicalAppDigest({
+        ...gate,
+        status: "ready",
+        checks: gate.checks.map((check) => check.id === "promotion-evidence" ? { ...check, status: "blocked" } : check),
+        gateDigest: undefined
+      })
+    })).toThrow(/status must be blocked/i);
   });
 
   it("only permits safe initial rollout modes", () => {
