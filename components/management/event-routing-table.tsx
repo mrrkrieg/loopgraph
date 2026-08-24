@@ -312,6 +312,48 @@ function RoutingDecisionDetails({ row }: { row: EventRoutingOperationsRow }) {
             <span className="rounded border border-line bg-paper px-2 py-1">policy {row.decisionDetail.policyVersion}</span>
           </div>
         </div>
+        {row.decisionDetail.learningContextBinding ? (
+          <div className="rounded border border-line bg-white p-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium text-ink/70">Cross-loop evidence Hermes received</div>
+              <span className={row.decisionDetail.learningContextBinding.acknowledged
+                ? "text-emerald-700"
+                : "text-amber-700"}
+              >
+                {row.decisionDetail.learningContextBinding.acknowledged ? "digest acknowledged" : "digest not acknowledged"}
+              </span>
+            </div>
+            <div className="mt-1 font-mono text-[10px] text-ink/40">
+              {row.decisionDetail.learningContextBinding.contextDigest}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1 text-ink/60">
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.status}
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.eligibleLoopIds.length} eligible
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.totals.routingCorrections} corrections
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.totals.observedOutcomes} outcomes
+              </span>
+              <span className="rounded border border-line bg-paper px-2 py-1">
+                {row.decisionDetail.learningContextBinding.context.totals.valueEntries} value entries
+              </span>
+            </div>
+            {row.decisionDetail.learningContextBinding.context.loopEvidence.length > 0 ? (
+              <div className="mt-2 space-y-1 text-ink/60">
+                {row.decisionDetail.learningContextBinding.context.loopEvidence.map((evidence) => (
+                  <div key={`${evidence.loopId}:${evidence.relation}`}>
+                    {evidence.loopId} · {evidence.relation.replace(/_/g, " ")} · {evidence.routingQuality.passed}/{evidence.routingQuality.evaluated} evals · {evidence.outcomes.observed} observed outcomes
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         <div>
           <div className="font-medium text-ink/70">Hermes selected routes</div>
           {row.decisionDetail.selectedRoutes.length === 0 ? (
@@ -580,17 +622,27 @@ function WebhookHealth({ model }: { model: EventRoutingOperationsReadModel }) {
   return (
     <div className="rounded-lg border border-line bg-white p-4">
       <div className="font-semibold">Hermes webhook routes</div>
-      <p className="mt-1 text-xs leading-5 text-ink/55">Non-secret route plan derived from materialized routing contracts.</p>
+      <p className="mt-1 text-xs leading-5 text-ink/55">Planned contracts plus the last exact, secret-free Hermes controller receipt.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-ink/55">
+        <StatusPill>{model.webhookHealth.activation.ready ? "Hermes ready" : model.webhookHealth.activation.current ? "Hermes pending" : "Not applied"}</StatusPill>
+        {model.webhookHealth.activation.planDigest ? <span>plan {model.webhookHealth.activation.planDigest}</span> : null}
+      </div>
       <div className="mt-3 space-y-2">
         {model.webhookHealth.routes.length === 0 ? (
           <p className="text-sm text-ink/55">No Hermes route families are required yet.</p>
-        ) : model.webhookHealth.routes.slice(0, 5).map((route) => (
-          <div key={route.routeName} className="rounded-md border border-line bg-paper p-3 text-sm">
-            <div className="font-medium">{route.routeName}</div>
-            <div className="mt-1 text-xs text-ink/55">{route.sourcePattern} · deliver {route.deliveryMode}</div>
-            <div className="mt-2 text-[11px] leading-5 text-ink/45">{route.eventTypePatterns.join(", ")}</div>
-          </div>
-        ))}
+        ) : model.webhookHealth.routes.slice(0, 5).map((route) => {
+          const applied = model.webhookHealth.activation.routes.find((candidate) => candidate.routeName === route.routeName);
+          return (
+            <div key={route.routeName} className="rounded-md border border-line bg-paper p-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <div className="font-medium">{route.routeName}</div>
+                <StatusPill>{applied ? `${applied.state} · ${applied.subscriptionState}` : "planned only"}</StatusPill>
+              </div>
+              <div className="mt-1 text-xs text-ink/55">{route.sourcePattern} · deliver {route.deliveryMode}</div>
+              <div className="mt-2 text-[11px] leading-5 text-ink/45">{route.eventTypePatterns.join(", ")}</div>
+            </div>
+          );
+        })}
         {model.webhookHealth.warnings.slice(0, 3).map((warning) => (
           <div key={warning} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
             {warning}

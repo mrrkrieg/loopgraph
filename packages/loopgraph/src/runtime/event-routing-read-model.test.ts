@@ -14,6 +14,11 @@ import {
 } from "../core";
 import { loadEventRoutingOperations } from "./event-routing-read-model";
 import { saveLoopgraphLifecycleDelivery } from "./lifecycle-events";
+import {
+  bindRoutingLearningContext,
+  routingLearningContextDigest,
+  unavailableRoutingLearningContext
+} from "./routing-learning-context";
 import { FileRoutingStore, ingestRoutingEvent, submitRoutingDecision } from "./routing-store";
 
 describe("event routing operations read model", () => {
@@ -30,6 +35,12 @@ describe("event routing operations read model", () => {
       routingCards: [card, contentCard],
       now: new Date("2026-07-21T12:00:02.000Z")
     });
+    const learningContext = unavailableRoutingLearningContext({
+      event,
+      now: new Date("2026-07-21T12:00:02.000Z"),
+      warning: "No prior cross-loop evidence exists yet."
+    });
+    const learningContextDigest = routingLearningContextDigest(learningContext);
     const submitted = await submitRoutingDecision({
       store,
       decision: {
@@ -63,7 +74,12 @@ describe("event routing operations read model", () => {
       },
       routingCards: [card, contentCard],
       catalogVersion: "catalog_v1",
-      now: new Date("2026-07-21T12:00:03.000Z")
+      now: new Date("2026-07-21T12:00:03.000Z"),
+      learningContextBinding: bindRoutingLearningContext({
+        context: learningContext,
+        acknowledgedDigest: learningContextDigest,
+        boundAt: new Date("2026-07-21T12:00:03.000Z")
+      })
     });
     await store.saveRoutingCorrection({
       id: "correction_read_model_1",
@@ -111,6 +127,11 @@ describe("event routing operations read model", () => {
           sourceEventId: event.id,
           routeCommitId: submitted.routeCommits[0]?.id,
           routeAttemptId: submitted.attempt.id,
+          learningContextBinding: expect.objectContaining({
+            contextDigest: learningContextDigest,
+            acknowledged: true,
+            context: expect.objectContaining({ status: "unavailable" })
+          }),
           problemId: submitted.problem?.id,
           loopId: "marketing_ads",
           runId: "run_read_model_1",
@@ -263,6 +284,7 @@ describe("event routing operations read model", () => {
         }),
         correlationTimeline: expect.arrayContaining([
           expect.objectContaining({ stage: "event_receipt", status: "received" }),
+          expect.objectContaining({ stage: "learning_context", status: "acknowledged" }),
           expect.objectContaining({ stage: "hermes_decision", status: "committed" }),
           expect.objectContaining({ stage: "business_problem", status: "resolved" }),
           expect.objectContaining({ stage: "route_commit", status: "queued" }),
