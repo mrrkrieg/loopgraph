@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
-import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchema } from "../core";
+import {
+  MARKETPLACE_SCHEMA_VERSION,
+  canonicalAppDigest,
+  connectionInstanceSchema,
+  hermesExecutionEventSchema,
+  observedOutcomeSchema,
+  valueLedgerEntrySchema
+} from "../core";
 import { FileConnectorFieldMappingStore, type ConnectorFieldMappingStore } from "./app-connector-service";
 import { FileCompanyContextStore } from "./company-context-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
@@ -15,12 +22,21 @@ import {
   type AppInstallationMutationAuditContext,
   type AppInstallationRegistry,
   type AppInstallationStore,
-  type AppInstallationUpdate
+  type AppInstallationUpdate,
+  type AppLifecycleOperation
 } from "./app-installation-store";
 import { LocalAppMarketplace } from "./app-marketplace";
 import { callLoopgraphAppTool } from "./app-tools";
-import { FileLoopSpecRegistryStore } from "./loop-spec-store";
+import {
+  FileLoopSpecRegistryStore,
+  type LoopSpecMaterializationCommitInput,
+  type LoopSpecRegistryStore
+} from "./loop-spec-store";
 import { readLoopgraphWorkspace } from "./workspace";
+import { FileOutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore } from "./hermes-operations-store";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import type { HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -29,13 +45,60 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function harness(options: { installationStore?: AppInstallationStore } = {}) {
+const salesLoopIds = [
+  "sales-inbound-account-research",
+  "sales-inbound-follow-up",
+  "sales-inbound-lead-intake",
+  "sales-inbound-lead-qualification",
+  "sales-inbound-lead-routing",
+  "sales-inbound-qualification-learning"
+];
+
+const readyRouteStatusProvider = async (): Promise<HermesRouteActivationStatus> => ({
+  projectRoot: "/test",
+  recordPath: "/test/.loopgraph/hermes-route-activation.json",
+  checkedAt: "2026-08-08T12:00:00.000Z",
+  exists: true,
+  current: true,
+  ready: true,
+  planDigest: "a1b2c3d4e5f60708",
+  currentPlanDigest: "a1b2c3d4e5f60708",
+  routeStates: [{
+    routeId: "hermes_route_sales",
+    routeName: "loopgraph-hubspot-events",
+    routeKind: "provider_event",
+    loopIds: salesLoopIds,
+    state: "shadow",
+    subscriptionState: "active",
+    signatureVerificationConfigured: true,
+    ready: true
+  }],
+  warnings: [],
+  nextActions: ["Hermes routes are ready."]
+});
+
+const readyWebhookDoctorProvider = async (): Promise<HermesWebhookDoctorResult> => ({
+  ok: true,
+  plan: {
+    catalogVersion: "routing-catalog-test",
+    routes: [{ routeKind: "provider_event", loopIds: salesLoopIds }]
+  }
+} as HermesWebhookDoctorResult);
+
+async function harness(options: {
+  installationStore?: AppInstallationStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  routeActivationStatusProvider?: () => Promise<HermesRouteActivationStatus>;
+  webhookDoctorProvider?: () => Promise<HermesWebhookDoctorResult>;
+} = {}) {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-install-"));
   temporaryDirectories.push(projectRoot);
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "marketplace"), packsRoot);
   await marketplace.refreshAllCatalogSources();
   const mappingStore = new FileConnectorFieldMappingStore(path.join(projectRoot, ".loopgraph", "apps", "field-mappings.json"), "acme");
   const contextStore = new FileCompanyContextStore(path.join(projectRoot, ".loopgraph", "apps", "company-context.json"));
+  const outcomeStore = new FileOutcomeStore(path.join(projectRoot, ".loopgraph"));
+  const operationsStore = new FileHermesOperationsStore(path.join(projectRoot, ".loopgraph"));
   const logicalFields = [
     ["lead", "lead.id", "id"],
     ["lead", "lead.email", "email"],
@@ -60,7 +123,12 @@ async function harness(options: { installationStore?: AppInstallationStore } = {
   const service = new AppInstallationService(marketplace, projectRoot, "acme", "acme-company", {
     contextStore,
     mappingStore,
-    installationStore: options.installationStore
+    installationStore: options.installationStore,
+    loopSpecStore: options.loopSpecStore,
+    outcomeStore,
+    operationsStore,
+    routeActivationStatusProvider: options.routeActivationStatusProvider ?? readyRouteStatusProvider,
+    webhookDoctorProvider: options.webhookDoctorProvider ?? readyWebhookDoctorProvider
   });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
@@ -73,7 +141,7 @@ async function harness(options: { installationStore?: AppInstallationStore } = {
     readPolicy: "read_only",
     writePolicy: "not_allowed"
   });
-  return { projectRoot, service, marketplace, contextStore, mappingStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
+  return { projectRoot, service, marketplace, contextStore, mappingStore, outcomeStore, operationsStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
 }
 
 const installValues = {
@@ -90,6 +158,7 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
   readonly persistence = "file" as const;
   readonly audits: AppInstallationMutationAuditContext[] = [];
   private registry: AppInstallationRegistry;
+  private interruptedCompletionAction?: AppLifecycleOperation["action"];
 
   constructor(workspaceId: string) {
     this.registry = emptyAppInstallationRegistry(workspaceId);
@@ -103,14 +172,76 @@ class AuditCapturingInstallationStore implements AppInstallationStore {
     return undefined;
   }
 
+  interruptNextActivationRegistryCommit(): void {
+    this.interruptNextLifecycleRegistryCommit("activate");
+  }
+
+  interruptNextLifecycleRegistryCommit(action: AppLifecycleOperation["action"]): void {
+    this.interruptedCompletionAction = action;
+  }
+
   async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
     const current = this.registry;
     const result = await operation(current);
     const next = appInstallationRegistrySchema.parse(result.registry);
     assertAppInstallationRegistryRevision(current, next);
+    const pendingOperation = current.lifecycleOperations.find((candidate) =>
+      candidate.action === this.interruptedCompletionAction && candidate.status !== "completed");
+    const completedOperation = pendingOperation
+      ? next.lifecycleOperations.find((candidate) => candidate.id === pendingOperation.id && candidate.status === "completed")
+      : undefined;
+    if (this.interruptedCompletionAction && completedOperation) {
+      const action = this.interruptedCompletionAction;
+      this.interruptedCompletionAction = undefined;
+      throw new Error(`simulated worker interruption after ${action} LoopSpec materialization`);
+    }
     this.registry = next;
     if (result.audit) this.audits.push(result.audit);
     return result.value;
+  }
+}
+
+class InterruptBeforeMaterializationStore implements LoopSpecRegistryStore {
+  readonly persistence = "file" as const;
+  private interruptNextCommit = false;
+
+  constructor(private readonly delegate: LoopSpecRegistryStore) {}
+
+  interruptNextMaterialization(): void {
+    this.interruptNextCommit = true;
+  }
+
+  getWorkspace(projectRoot: string) {
+    return this.delegate.getWorkspace(projectRoot);
+  }
+
+  listActiveLoopSpecs(projectRoot: string) {
+    return this.delegate.listActiveLoopSpecs(projectRoot);
+  }
+
+  getActiveLoopSpec(projectRoot: string, loopId: string) {
+    return this.delegate.getActiveLoopSpec(projectRoot, loopId);
+  }
+
+  async commitMaterializationAtomically(input: LoopSpecMaterializationCommitInput) {
+    if (this.interruptNextCommit) {
+      this.interruptNextCommit = false;
+      throw new Error("simulated interruption before LoopSpec materialization");
+    }
+    return this.delegate.commitMaterializationAtomically(input);
+  }
+
+  async advanceUnrelatedWorkspaceRevision(projectRoot: string, now: Date): Promise<void> {
+    const snapshot = await this.delegate.getWorkspace(projectRoot);
+    const artifacts = await this.delegate.listActiveLoopSpecs(projectRoot);
+    await this.delegate.commitMaterializationAtomically({
+      commitId: `unrelated-workspace-${snapshot.revision}`,
+      idempotencyKey: canonicalAppDigest({ action: "unrelated-workspace", revision: snapshot.revision }),
+      expectedRevision: snapshot.revision,
+      projectRoot,
+      committedAt: now.toISOString(),
+      artifacts
+    });
   }
 }
 
@@ -165,6 +296,128 @@ async function installSalesApp(input: Awaited<ReturnType<typeof harness>>, now =
     now
   });
   return input.service.apply(plan, "admin-1", new Date(now.getTime() + 60_000));
+}
+
+async function recordRecommendationProof(
+  input: Awaited<ReturnType<typeof harness>>,
+  installationId: string,
+  now = new Date("2026-08-08T12:04:30.000Z"),
+  window = {
+    from: "2026-08-01T00:00:00.000Z",
+    to: "2026-08-08T00:00:00.000Z"
+  }
+) {
+  const events = Array.from({ length: 5 }, (_, index) => ({
+    id: `historical-qualified-lead-${index + 1}`,
+    occurredAt: new Date(Date.parse(window.from) + index * 24 * 60 * 60 * 1_000 + 9 * 60 * 60 * 1_000).toISOString(),
+    source: "hubspot",
+    eventType: "lead.created",
+    subject: { type: "lead", id: `lead-historical-${index + 1}` },
+    normalizedPayload: {
+      leadId: `lead-historical-${index + 1}`,
+      email: `buyer-${index + 1}@example.test`,
+      company: `Example ${index + 1}`
+    },
+    evidenceRefs: [`evidence:historical:${index + 1}`],
+    connectorState: "connected" as const,
+    expectedAction: "route" as const,
+    expectedLoopId: "sales-inbound-lead-intake"
+  }));
+  const replay = await input.service.historicalReplay({
+    schemaVersion: "loopgraph-app-eval/v1alpha1",
+    installationId,
+    from: window.from,
+    to: window.to,
+    maxEvents: events.length,
+    events,
+    requestedAt: now.toISOString(),
+    requestedBy: "sales-manager"
+  }, now);
+  for (const scenario of replay.scenarios) {
+    await input.service.labelEvaluation({
+      schemaVersion: "loopgraph-app-eval/v1alpha1",
+      runId: replay.id,
+      scenarioId: scenario.id,
+      label: "correct",
+      reviewMinutes: 1,
+      reviewedBy: "sales-manager",
+      reviewedAt: new Date(now.getTime() + 30_000).toISOString()
+    });
+  }
+  return replay;
+}
+
+async function recordProductionProof(
+  input: Awaited<ReturnType<typeof harness>>,
+  installationId: string,
+  now = new Date("2026-08-08T12:07:00.000Z")
+) {
+  const loopId = "sales-inbound-lead-intake";
+  const runId = "run-qualified-lead-production-proof";
+  const outcomeId = "outcome-qualified-pipeline-production-proof";
+  await input.operationsStore.appendExecutionEvent(hermesExecutionEventSchema.parse({
+    id: "execution-qualified-lead-production-proof",
+    idempotencyKey: "execution-qualified-lead-production-proof",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    agentInstanceId: "hermes-sales",
+    eventType: "run.completed",
+    routeJobId: "job-qualified-lead-production-proof",
+    routeCommitId: "commit-qualified-lead-production-proof",
+    routeAttemptId: "attempt-qualified-lead-production-proof",
+    eventId: "event-qualified-lead-production-proof",
+    problemId: "problem-qualified-lead-production-proof",
+    loopId,
+    loopSpecHash: "a".repeat(64),
+    runId,
+    correlationId: "correlation-qualified-lead-production-proof",
+    sequence: 1,
+    summary: "Hermes completed the governed lead-intake work.",
+    occurredAt: now.toISOString(),
+    recordedAt: now.toISOString()
+  }));
+  await input.outcomeStore.saveObservedOutcome(observedOutcomeSchema.parse({
+    id: outcomeId,
+    workspaceId: "acme",
+    companyId: "acme-company",
+    loopId,
+    metricDefinitionId: "qualified_pipeline_created",
+    metricKey: "qualified_pipeline_created",
+    unit: "count",
+    desiredDirection: "increase",
+    evaluationWindow: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-08T00:00:00.000Z" },
+    baseline: { value: 0, sampleIds: ["sample-qualified-pipeline-baseline"] },
+    observed: { value: 1, sampleIds: ["sample-qualified-pipeline-observed"] },
+    target: 1,
+    absoluteDelta: 1,
+    status: "target_met",
+    truthStatus: "observed",
+    confidence: 1,
+    evidenceSufficiency: { sufficient: true, reasons: [] },
+    guardrails: [],
+    runIds: [runId],
+    problemIds: ["problem-qualified-lead-production-proof"],
+    evidenceRefs: [`run:${runId}`],
+    evaluatedAt: now.toISOString()
+  }));
+  await input.outcomeStore.saveValueLedgerEntry(valueLedgerEntrySchema.parse({
+    id: "value-qualified-lead-production-proof",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    loopId,
+    window: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-08T00:00:00.000Z" },
+    grossSavedMinutes: 30,
+    hiddenCostMinutes: { review: 5, rework: 0, botsitting: 0, escalation: 0, governance: 0 },
+    observedCostMinutes: 5,
+    netSavedMinutes: 25,
+    truthStatus: "observed",
+    observedOutcomeIds: [outcomeId],
+    runIds: [runId],
+    reviewIds: ["review-qualified-lead-production-proof"],
+    evidenceRefs: [`outcome:${outcomeId}`, `run:${runId}`],
+    recordedAt: now.toISOString()
+  }));
+  return { installationId, runId, outcomeId };
 }
 
 async function addUpdateCatalog(input: Awaited<ReturnType<typeof harness>>): Promise<void> {
@@ -316,11 +569,45 @@ describe("atomic app installation lifecycle", () => {
     const interrupted = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(interrupted.installations).toHaveLength(1);
     expect(interrupted.lifecycleOperations.find((operation) => operation.action === "uninstall"))
-      .toMatchObject({ status: "requires_reconciliation" });
+      .toMatchObject({
+        status: "requires_reconciliation",
+        actor: "admin-1",
+        uninstall: {
+          fromUpdatedAt: applied.installation.updatedAt,
+          reasonDigest: canonicalAppDigest({ reason: uninstall.reason }),
+          sourceInstallationDigest: canonicalAppDigest(applied.installation),
+          remainingLoopIds: []
+        }
+      });
     await expect(service.test(applied.installation.id, "admin-1", new Date("2026-08-08T10:12:30.000Z")))
       .rejects.toThrow(/must be reconciled before another operation/i);
+    await expect(service.uninstall({ ...uninstall, actor: "admin-2", now: new Date("2026-08-08T10:12:40.000Z") }))
+      .rejects.toThrow(/idempotency conflict/i);
+    await expect(service.uninstall({ ...uninstall, reason: "A different removal reason.", now: new Date("2026-08-08T10:12:50.000Z") }))
+      .rejects.toThrow(/must be reconciled/i);
+
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }) as { stage: string; nextAction: { input: Record<string, unknown> } };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      nextAction: {
+        input: {
+          action: "uninstall",
+          reasonDigest: canonicalAppDigest({ reason: uninstall.reason }),
+          fromUpdatedAt: applied.installation.updatedAt,
+          remainingLoopIds: []
+        }
+      }
+    });
 
     const recovered = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:13:00.000Z") });
+    await expect(service.uninstall({ ...uninstall, actor: "admin-2", now: new Date("2026-08-08T10:13:30.000Z") }))
+      .rejects.toThrow(/different actor or removal reason/i);
+    await expect(service.uninstall({ ...uninstall, reason: "Changed after completion.", now: new Date("2026-08-08T10:13:40.000Z") }))
+      .rejects.toThrow(/different actor or removal reason/i);
     const replayed = await service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:14:00.000Z") });
     expect(replayed.receipt.id).toBe(recovered.receipt.id);
     const registry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
@@ -351,6 +638,40 @@ describe("atomic app installation lifecycle", () => {
     const finalRegistry = await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read();
     expect(finalRegistry.lifecycleOperations.filter((candidate) => candidate.action === "uninstall" && candidate.status === "completed"))
       .toHaveLength(2);
+  });
+
+  it("fails closed when owned LoopSpec topology drifts during uninstall recovery", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T10:20:00.000Z"));
+    const uninstall = {
+      installationId: applied.installation.id,
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      actor: "admin-1",
+      reason: "Remove the exact installed Sales App.",
+      confirmed: true
+    };
+    store.interruptNextLifecycleRegistryCommit("uninstall");
+    await expect(input.service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:22:00.000Z") }))
+      .rejects.toThrow(/simulated worker interruption/);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as {
+      registeredSpecs: Array<Record<string, unknown>>;
+    };
+    workspace.registeredSpecs.push({
+      id: "unexpected-recovery-loop",
+      name: "Unexpected recovery loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-recovery-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T10:22:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2), "utf8");
+
+    await expect(input.service.uninstall({ ...uninstall, now: new Date("2026-08-08T10:23:00.000Z") }))
+      .rejects.toThrow(/Active LoopSpec inventory is missing unexpected-recovery-loop/);
+    expect((await store.read()).lifecycleOperations.find((operation) => operation.action === "uninstall"))
+      .toMatchObject({ status: "requires_reconciliation" });
   });
 
   it("binds only current approved company context and records installation ownership", async () => {
@@ -416,6 +737,25 @@ describe("atomic app installation lifecycle", () => {
     const applied = await input.service.apply(freshPlan, "admin-1", new Date("2026-08-08T11:06:00.000Z"));
     const context = await input.contextStore.get("acme", "acme-company");
     expect(context.values.find((value) => value.key === "sales.icp")?.consumerInstallationIds).toEqual([applied.installation.id]);
+
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.context-aware",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "admin-1",
+      now: new Date("2026-08-08T11:07:00.000Z")
+    });
+    expect(duplicated.installation?.configuration.provenance.icpDefinition).toMatchObject({
+      layer: "company_context",
+      sourceRef: "sales.icp"
+    });
+    const contextAfterDuplicate = await input.contextStore.get("acme", "acme-company");
+    expect(contextAfterDuplicate.values.find((value) => value.key === "sales.icp")?.consumerInstallationIds).toEqual([
+      applied.installation.id,
+      duplicated.installation!.id
+    ].sort());
   });
 
   it("plans, installs, tests, and activates the Sales app without enabling writes", async () => {
@@ -576,6 +916,210 @@ describe("atomic app installation lifecycle", () => {
     });
   });
 
+  it("requires ordered evidence gates before recommend and execute-with-approval authority can be created", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    const synthetic = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const shadowGate = await input.service.activationGate(
+      applied.installation.id,
+      "shadow",
+      new Date("2026-08-08T12:03:00.000Z")
+    );
+    expect(shadowGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "connected",
+      observedMaturity: "connected"
+    });
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "security-approver",
+      reason: "Observe the exact connected and tested App without provider writes.",
+      evidenceRefs: [synthetic.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    expect(shadowApproval).toMatchObject({
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha2",
+      activationGate: {
+        gateDigest: shadowGate.gateDigest,
+        requiredMaturity: "connected",
+        status: "ready"
+      }
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      shadowApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+    const preProofPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:04:15.000Z"));
+    expect(preProofPlan).toMatchObject({
+      totalInstallations: 1,
+      totalMatched: 1,
+      counts: { notApplicable: 1 },
+      items: [{
+        installationId: applied.installation.id,
+        status: "not_applicable",
+        priority: "none",
+        nextAction: { kind: "run_historical_replay" }
+      }]
+    });
+
+    const blockedRecommend = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-08-08T12:04:30.000Z")
+    );
+    expect(blockedRecommend).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "promotion-evidence", status: "blocked" })
+      ])
+    });
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "A human approval cannot substitute for reviewed routing evidence.",
+      now: new Date("2026-08-08T12:04:30.000Z")
+    })).rejects.toThrow(/promotion-evidence/i);
+
+    const replay = await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:05:00.000Z"));
+    expect(replay.sourceWindow).toEqual({
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-08T00:00:00.000Z"
+    });
+    const staleRecommendGate = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-09-08T12:05:00.000Z")
+    );
+    expect(staleRecommendGate).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
+      ])
+    });
+    const recommendGate = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-08-08T12:05:30.000Z")
+    );
+    expect(recommendGate).toMatchObject({ status: "ready", requiredMaturity: "connected" });
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "Five bounded historical decisions were completely reviewed.",
+      evidenceRefs: [replay.id],
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:06:30.000Z")
+    );
+
+    const blockedExecute = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:07:00.000Z")
+    );
+    expect(blockedExecute).toMatchObject({
+      status: "blocked",
+      requiredMaturity: "production_proven",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "operational-maturity", status: "blocked" })
+      ])
+    });
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "execute_with_approval",
+      approvedBy: "security-approver",
+      reason: "Approval alone cannot create production proof.",
+      now: new Date("2026-08-08T12:07:00.000Z")
+    })).rejects.toThrow(/production_proven/i);
+
+    await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:07:30.000Z"));
+    const currentPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:08:00.000Z"));
+    expect(currentPlan.items[0]).toMatchObject({
+      installationId: applied.installation.id,
+      status: "current",
+      priority: "none",
+      affectedEvidence: [],
+      nextAction: { kind: "monitor" }
+    });
+    const renewSoonPlan = await input.service.evidenceRenewalPlan(
+      { statuses: ["renew_soon"] },
+      new Date("2026-09-02T12:08:00.000Z")
+    );
+    expect(renewSoonPlan).toMatchObject({
+      totalMatched: 1,
+      counts: { renewSoon: 1 },
+      items: [{ status: "renew_soon", priority: "high", nextAction: { kind: "renew_proof" } }]
+    });
+    const expiredPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-09-08T12:08:00.000Z"));
+    expect(expiredPlan).toMatchObject({
+      counts: { expired: 1 },
+      items: [{ status: "expired", priority: "critical", nextAction: { kind: "renew_proof" } }]
+    });
+    const executeGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:08:00.000Z")
+    );
+    expect(executeGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "production_proven",
+      observedMaturity: "production_proven"
+    });
+    const staleExecuteGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-09-08T12:08:00.000Z")
+    );
+    expect(staleExecuteGate).toMatchObject({
+      status: "blocked",
+      observedMaturity: "connected",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
+      ])
+    });
+    await recordRecommendationProof(
+      input,
+      applied.installation.id,
+      new Date("2026-08-08T12:09:00.000Z"),
+      { from: "2026-09-01T00:00:00.000Z", to: "2026-09-08T00:00:00.000Z" }
+    );
+    const futureDatedExecuteGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:10:00.000Z")
+    );
+    expect(futureDatedExecuteGate).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          id: "evidence-freshness",
+          status: "blocked",
+          summary: expect.stringMatching(/future/i)
+        })
+      ])
+    });
+    const invalidPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:10:00.000Z"));
+    expect(invalidPlan).toMatchObject({
+      counts: { invalid: 1 },
+      items: [{ status: "invalid", priority: "critical", nextAction: { kind: "repair_evidence" } }]
+    });
+  }, 20_000);
+
   it("emits bounded activation approval and consumption audit contexts", async () => {
     const store = new AuditCapturingInstallationStore("acme");
     const input = await harness({ installationStore: store });
@@ -642,6 +1186,140 @@ describe("atomic app installation lifecycle", () => {
     expect(serialized).not.toContain(applied.installation.appId);
   }, 20_000);
 
+  it("resumes an interrupted activation without replaying authority or losing LoopSpec state", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "security-approver",
+      reason: "Observe the exact tested artifact in shadow mode.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      shadowApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "Shadow evidence supports governed recommendations.",
+      evidenceRefs: [evaluation.id],
+      expiresInSeconds: 60,
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+
+    store.interruptNextActivationRegistryCommit();
+    await expect(input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:05:30.000Z")
+    )).rejects.toThrow("simulated worker interruption");
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toMatchObject({ state: "shadow", mode: "shadow" });
+    expect(interrupted.activationApprovals.find((approval) => approval.id === recommendApproval.id)?.consumedAt).toBeUndefined();
+    expect(interrupted.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "activate",
+      status: "requires_reconciliation",
+      failureCode: "operation_interrupted",
+      activation: {
+        approvalReceiptId: recommendApproval.id,
+        approvalDigest: recommendApproval.approvalDigest,
+        fromState: "shadow",
+        targetMode: "recommend"
+      }
+    }));
+    const materializedModes = (await new FileLoopSpecRegistryStore(input.projectRoot).listActiveLoopSpecs(input.projectRoot))
+      .filter((artifact) => artifact.spec.metadata.labels?.installationId === applied.installation.id)
+      .map((artifact) => artifact.spec.routing?.activationMode);
+    expect(new Set(materializedModes)).toEqual(new Set(["recommend"]));
+    await expect(input.service.pause(applied.installation.id, "operations-activator"))
+      .rejects.toThrow(/must be reconciled/i);
+    await expect(input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "different-activator",
+      new Date("2026-08-08T12:06:30.000Z")
+    )).rejects.toThrow(/idempotency conflict/i);
+    expect((await store.read()).lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "activate",
+      actor: "operations-activator",
+      status: "requires_reconciliation"
+    }));
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }, { appInstallationStoreFactory: () => store }) as {
+      stage: string;
+      recovery: { action: string; status: string };
+      nextAction: { kind: string; input: Record<string, unknown> };
+    };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      recovery: { action: "activate", status: "requires_reconciliation" },
+      nextAction: {
+        kind: "retry_exact_request",
+        input: {
+          action: "activate",
+          installationId: applied.installation.id,
+          approvalReceiptId: recommendApproval.id,
+          mode: "recommend"
+        }
+      }
+    });
+
+    const recovered = await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:07:00.000Z")
+    );
+    expect(recovered).toMatchObject({ state: "recommend", mode: "recommend" });
+    const completed = await store.read();
+    expect(completed.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "activate",
+      status: "completed",
+      completedAt: "2026-08-08T12:07:00.000Z"
+    }));
+    expect(completed.activationApprovals.find((approval) => approval.id === recommendApproval.id)).toMatchObject({
+      consumedAt: "2026-08-08T12:07:00.000Z",
+      consumedBy: "operations-activator"
+    });
+    expect(store.audits.filter((audit) =>
+      audit.action === "app.activation.consumed" && audit.targetId === recommendApproval.id)).toHaveLength(1);
+
+    const completedRevision = completed.revision;
+    const replayed = await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:08:00.000Z")
+    );
+    expect(replayed).toMatchObject({ state: "recommend", mode: "recommend" });
+    expect((await store.read()).revision).toBe(completedRevision);
+  }, 20_000);
+
   it("keeps installed LoopSpec routing synchronized with App rollout, pause, and resume", async () => {
     const input = await harness();
     const applied = await installSalesApp(input);
@@ -680,8 +1358,10 @@ describe("atomic app installation lifecycle", () => {
 
     await activate("shadow", "2026-08-08T12:03:00.000Z", "2026-08-08T12:04:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     await activate("recommend", "2026-08-08T12:05:00.000Z", "2026-08-08T12:06:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["recommend"]));
+    await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:06:30.000Z"));
     await activate("execute_with_approval", "2026-08-08T12:07:00.000Z", "2026-08-08T12:08:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
 
@@ -691,9 +1371,121 @@ describe("atomic app installation lifecycle", () => {
     const resumed = await input.service.resume(applied.installation.id, "admin-1");
     expect(resumed).toMatchObject({ state: "execute_with_approval", mode: "execute_with_approval" });
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
-  });
+  }, 20_000);
 
-  it("rejects missing, mismatched, expired, and replayed App activation approvals", async () => {
+  it("recovers interrupted pause and resume without leaving App and LoopSpec state split", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "Observe the tested App in shadow mode.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    await input.service.activate(applied.installation.id, "shadow", shadowApproval.id, "admin-1", new Date("2026-08-08T12:04:00.000Z"));
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "admin-1",
+      reason: "Shadow evidence supports recommendations.",
+      evidenceRefs: [evaluation.id],
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    await input.service.activate(applied.installation.id, "recommend", recommendApproval.id, "admin-1", new Date("2026-08-08T12:06:00.000Z"));
+    const routingModes = async () => (await new FileLoopSpecRegistryStore(input.projectRoot).listActiveLoopSpecs(input.projectRoot))
+      .filter((artifact) => artifact.spec.metadata.labels?.installationId === applied.installation.id)
+      .map((artifact) => artifact.spec.routing?.activationMode);
+
+    store.interruptNextLifecycleRegistryCommit("pause");
+    await expect(input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:07:00.000Z")))
+      .rejects.toThrow("simulated worker interruption after pause");
+    let registry = await store.read();
+    expect(registry.installations[0]).toMatchObject({ state: "recommend", mode: "recommend" });
+    expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    expect(registry.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "pause",
+      actor: "admin-1",
+      status: "requires_reconciliation",
+      rollout: {
+        fromState: "recommend",
+        fromMode: "recommend",
+        fromUpdatedAt: "2026-08-08T12:06:00.000Z",
+        targetState: "paused",
+        targetMode: "recommend"
+      }
+    }));
+    await expect(input.service.pause(applied.installation.id, "different-admin", new Date("2026-08-08T12:07:30.000Z")))
+      .rejects.toThrow(/idempotency conflict/i);
+    const pauseJourney = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }, { appInstallationStoreFactory: () => store }) as {
+      stage: string;
+      recovery: { action: string; status: string };
+      nextAction: { kind: string; input: Record<string, unknown> };
+    };
+    expect(pauseJourney).toMatchObject({
+      stage: "recover_lifecycle",
+      recovery: { action: "pause", status: "requires_reconciliation" },
+      nextAction: {
+        kind: "retry_exact_request",
+        input: { action: "pause", installationId: applied.installation.id, targetState: "paused", mode: "recommend" }
+      }
+    });
+
+    const paused = await input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:08:00.000Z"));
+    expect(paused).toMatchObject({ state: "paused", mode: "recommend" });
+    registry = await store.read();
+    const pausedRevision = registry.revision;
+    expect(registry.lifecycleOperations).toContainEqual(expect.objectContaining({ action: "pause", status: "completed" }));
+    expect(await input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:08:30.000Z")))
+      .toMatchObject({ state: "paused", mode: "recommend" });
+    expect((await store.read()).revision).toBe(pausedRevision);
+
+    store.interruptNextLifecycleRegistryCommit("resume");
+    await expect(input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:09:00.000Z")))
+      .rejects.toThrow("simulated worker interruption after resume");
+    registry = await store.read();
+    expect(registry.installations[0]).toMatchObject({ state: "paused", mode: "recommend" });
+    expect(new Set(await routingModes())).toEqual(new Set(["recommend"]));
+    expect(registry.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "resume",
+      actor: "admin-1",
+      status: "requires_reconciliation",
+      rollout: {
+        fromState: "paused",
+        fromMode: "recommend",
+        fromUpdatedAt: "2026-08-08T12:08:00.000Z",
+        targetState: "recommend",
+        targetMode: "recommend"
+      }
+    }));
+
+    const resumed = await input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:10:00.000Z"));
+    expect(resumed).toMatchObject({ state: "recommend", mode: "recommend" });
+    const resumedRevision = (await store.read()).revision;
+    expect(await input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:10:30.000Z")))
+      .toMatchObject({ state: "recommend", mode: "recommend" });
+    expect((await store.read()).revision).toBe(resumedRevision);
+
+    const pausedAgain = await input.service.pause(applied.installation.id, "admin-1", new Date("2026-08-08T12:11:00.000Z"));
+    expect(pausedAgain).toMatchObject({ state: "paused", mode: "recommend" });
+    expect((await store.read()).revision).toBeGreaterThan(resumedRevision);
+    const resumedAgain = await input.service.resume(applied.installation.id, "admin-1", new Date("2026-08-08T12:12:00.000Z"));
+    expect(resumedAgain).toMatchObject({ state: "recommend", mode: "recommend" });
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "pause" && operation.status === "completed")).toHaveLength(2);
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "resume" && operation.status === "completed")).toHaveLength(2);
+  }, 20_000);
+
+  it("rejects missing, mismatched, and expired approvals while replaying only an exact completed activation", async () => {
     const input = await harness();
     const applied = await installSalesApp(input);
     const evaluation = await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
@@ -739,20 +1531,142 @@ describe("atomic app installation lifecycle", () => {
       evidenceRefs: [evaluation.id],
       now: new Date("2026-08-08T12:05:00.000Z")
     });
-    await input.service.activate(
+    const activated = await input.service.activate(
       applied.installation.id,
       "shadow",
       freshApproval.id,
       "admin-1",
       new Date("2026-08-08T12:06:00.000Z")
     );
-    await expect(input.service.activate(
+    const completedRevision = (await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision;
+    const replayed = await input.service.activate(
       applied.installation.id,
       "shadow",
       freshApproval.id,
       "admin-1",
       new Date("2026-08-08T12:06:30.000Z")
-    )).rejects.toThrow("already been consumed");
+    );
+    expect(replayed).toEqual(activated);
+    expect((await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision).toBe(completedRevision);
+  });
+
+  it("blocks App promotion until Hermes proves the exact owned provider routes", async () => {
+    const input = await harness({
+      routeActivationStatusProvider: async () => ({
+        projectRoot: "/test",
+        recordPath: "/test/.loopgraph/hermes-route-activation.json",
+        checkedAt: "2026-08-08T12:03:00.000Z",
+        exists: false,
+        current: false,
+        ready: false,
+        routeStates: [],
+        warnings: ["No Hermes route activation receipt exists for this project."],
+        nextActions: ["Prepare and apply the current Hermes route plan."]
+      })
+    });
+    const applied = await installSalesApp(input);
+    await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const readiness = await input.service.readiness(applied.installation.id, new Date("2026-08-08T12:03:00.000Z"));
+    expect(readiness.checks).toContainEqual(expect.objectContaining({
+      id: "hermes-route-activation",
+      status: "fail",
+      summary: expect.stringContaining("No Hermes Route Controller receipt")
+    }));
+    const gate = await input.service.activationGate(applied.installation.id, "shadow", new Date("2026-08-08T12:03:00.000Z"));
+    expect(gate.status).toBe("blocked");
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "This must not bypass missing Hermes route evidence.",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/Hermes route/i);
+  });
+
+  it("does not block one App on an unrelated pending Hermes route", async () => {
+    const ready = await readyRouteStatusProvider();
+    const input = await harness({
+      routeActivationStatusProvider: async () => ({
+        ...ready,
+        ready: false,
+        routeStates: [
+          ...ready.routeStates,
+          {
+            routeId: "hermes_route_unrelated",
+            routeName: "loopgraph-zendesk-events",
+            routeKind: "provider_event",
+            loopIds: ["customer-success-ticket-triage"],
+            state: "pending_connection",
+            subscriptionState: "pending_connection",
+            signatureVerificationConfigured: false,
+            ready: false
+          }
+        ]
+      })
+    });
+    const applied = await installSalesApp(input);
+    await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const readiness = await input.service.readiness(applied.installation.id, new Date("2026-08-08T12:03:00.000Z"));
+    expect(readiness.checks).toContainEqual(expect.objectContaining({
+      id: "hermes-route-activation",
+      status: "pass"
+    }));
+    expect((await input.service.activationGate(
+      applied.installation.id,
+      "shadow",
+      new Date("2026-08-08T12:03:00.000Z")
+    )).status).toBe("ready");
+  });
+
+  it("loads legacy activation receipts for audit history but refuses to consume them as authority", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const immutable = {
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha1" as const,
+      id: "activation-approval.1111111111111111",
+      workspaceId: "acme",
+      installationId: applied.installation.id,
+      appId: applied.installation.appId,
+      artifactDigest: applied.installation.artifactDigest,
+      fromState: "simulation_passed" as const,
+      requestedMode: "shadow" as const,
+      approvedBy: "legacy-approver",
+      reason: "This historical receipt predates evidence-bound activation gates.",
+      evidenceRefs: [evaluation.id],
+      approvedAt: "2026-08-08T12:03:00.000Z",
+      expiresAt: "2026-08-08T12:18:00.000Z"
+    };
+    await store.withExclusiveUpdate(async (registry) => ({
+      registry: {
+        ...registry,
+        revision: registry.revision + 1,
+        activationApprovals: [...registry.activationApprovals, {
+          ...immutable,
+          approvalDigest: canonicalAppDigest(immutable)
+        }],
+        updatedAt: immutable.approvedAt
+      },
+      value: undefined
+    }));
+
+    await expect(input.service.activate(
+      applied.installation.id,
+      "shadow",
+      immutable.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    )).rejects.toThrow(/legacy.*not evidence-bound/i);
+    const retained = (await store.read()).activationApprovals.find((approval) => approval.id === immutable.id);
+    expect(retained).toMatchObject({ id: immutable.id, schemaVersion: immutable.schemaVersion });
+    expect(retained).not.toHaveProperty("consumedAt");
   });
 
   it("plans, materializes, and tests only the modules selected by the operator", async () => {
@@ -1004,7 +1918,13 @@ describe("atomic app installation lifecycle", () => {
       now: new Date("2026-08-08T12:03:30.000Z")
     })).rejects.toThrow(/fresh install plan/i);
 
-    const repaired = await input.service.repair(applied.installation.id, "sales-admin", new Date("2026-08-08T12:04:00.000Z"));
+    const repaired = await input.service.repair({
+      installationId: applied.installation.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: overlaid.installation!.artifactDigest,
+      expectedUpdatedAt: overlaid.installation!.updatedAt,
+      now: new Date("2026-08-08T12:04:00.000Z")
+    });
     expect(repaired.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
     expect(repaired.receipt.action).toBe("repair");
     expect(repaired.installation?.ownedAssets).toEqual(expect.arrayContaining([
@@ -1016,6 +1936,8 @@ describe("atomic app installation lifecycle", () => {
       installationId: applied.installation.id,
       derivedAppId: "private.sales.acme-lead-qualification",
       overlayOperations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 15 }],
+      expectedArtifactDigest: repaired.installation!.artifactDigest,
+      expectedUpdatedAt: repaired.installation!.updatedAt,
       actor: "sales-admin",
       now: new Date("2026-08-08T12:05:00.000Z")
     });
@@ -1033,13 +1955,15 @@ describe("atomic app installation lifecycle", () => {
       mapping.dependentInstallationIds.includes(duplicated.installation!.id)
     )).toBe(true);
 
-    const detached = await input.service.detach(
-      duplicated.installation!.id,
-      duplicated.installation!.artifactDigest,
-      "sales-admin",
-      new Date("2026-08-08T12:06:00.000Z")
-    );
+    const detached = await input.service.detach({
+      installationId: duplicated.installation!.id,
+      expectedArtifactDigest: duplicated.installation!.artifactDigest,
+      expectedUpdatedAt: duplicated.installation!.updatedAt,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
     expect(detached.installation?.derivation?.snapshotPath).toContain("private-snapshots");
+    expect(detached.installation?.derivation?.snapshotFilesDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(detached.installation?.derivation?.detachedAt).toBe("2026-08-08T12:06:00.000Z");
 
     const uninstalled = await input.service.uninstall({
@@ -1058,6 +1982,631 @@ describe("atomic app installation lifecycle", () => {
       "configure", "overlay", "repair", "duplicate", "detach", "uninstall"
     ]));
     expect(await input.mappingStore.list()).toHaveLength(input.mappingIds.length);
+  });
+
+  it("recovers and replays only the exact actor-bound configuration request", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const sourceConfigurationDigest = canonicalAppDigest(applied.installation.configuration);
+    const request = {
+      installationId: applied.installation.id,
+      values: { followUpSlaMinutes: 45 },
+      expectedConfigurationDigest: sourceConfigurationDigest,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("configure");
+    await expect(input.service.configure({
+      ...request,
+      now: new Date("2026-08-08T12:02:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption/i);
+
+    const interrupted = await store.read();
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "configure");
+    expect(recovery).toMatchObject({
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      configure: {
+        sourceConfigurationDigest,
+        fromUpdatedAt: applied.installation.updatedAt
+      }
+    });
+    expect(Object.keys(recovery?.configure ?? {}).sort()).toEqual([
+      "fromUpdatedAt",
+      "sourceConfigurationDigest",
+      "sourceInstallationDigest",
+      "targetConfigurationDigest",
+      "targetInstallationDigest",
+      "valuesDigest"
+    ]);
+    expect(JSON.stringify(recovery)).not.toContain("followUpSlaMinutes");
+
+    await expect(input.service.configure({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/must be reconciled/i);
+    await expect(input.service.configure({
+      ...request,
+      values: { followUpSlaMinutes: 60 },
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/must be reconciled/i);
+
+    const recovered = await input.service.configure({
+      ...request,
+      now: new Date("2026-08-08T12:04:00.000Z")
+    });
+    expect(recovered.installation?.configuration.values.followUpSlaMinutes).toBe(45);
+    expect(recovered.receipt).toMatchObject({ action: "configure", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.configure({
+      ...request,
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.configure({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:05:00.000Z")
+    })).rejects.toThrow(/configuration changed/i);
+
+    const later = await input.service.configure({
+      installationId: applied.installation.id,
+      values: { followUpSlaMinutes: 60 },
+      expectedConfigurationDigest: canonicalAppDigest(recovered.installation?.configuration),
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    expect(later.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) =>
+      operation.action === "configure" && operation.status === "completed"
+    )).toHaveLength(2);
+  });
+
+  it("recovers owned LoopSpec rematerialization only for the exact actor-bound overlay", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const operations = [
+      { op: "set" as const, path: "/values/qualificationThreshold", value: { qualified: 90, reviewMin: 70 } },
+      { op: "disable_module" as const, moduleId: "governed-follow-up" }
+    ];
+    const request = {
+      installationId: applied.installation.id,
+      operations,
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedOverlayRevision: 0,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("overlay");
+    await expect(input.service.applyOverlay({
+      ...request,
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after overlay LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0].overlay).toBeUndefined();
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "overlay");
+    expect(recovery).toMatchObject({
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      overlay: {
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        expectedOverlayRevision: 0,
+        operationsDigest: canonicalAppDigest(operations),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.overlay ?? {}).sort()).toEqual([
+      "expectedOverlayRevision",
+      "fromUpdatedAt",
+      "operationsDigest",
+      "sourceArtifactDigest",
+      "sourceInstallationDigest",
+      "sourceLoopIds",
+      "sourceLoopInventoryDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    expect(JSON.stringify(recovery)).not.toContain("qualificationThreshold");
+    expect((await readLoopgraphWorkspace(input.projectRoot)).registeredSpecs.map((entry) => entry.id)).not.toContain("sales-inbound-follow-up");
+
+    await expect(input.service.applyOverlay({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:03:30.000Z")
+    })).rejects.toThrow(/must be reconciled|idempotency conflict/i);
+    await expect(input.service.applyOverlay({
+      ...request,
+      operations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 45 }],
+      now: new Date("2026-08-08T12:03:40.000Z")
+    })).rejects.toThrow(/must be reconciled/i);
+
+    const recovered = await input.service.applyOverlay({
+      ...request,
+      now: new Date("2026-08-08T12:04:00.000Z")
+    });
+    expect(recovered.installation?.overlay?.revision).toBe(1);
+    expect(recovered.installation?.selectedModules).toEqual(["account-research"]);
+    expect(recovered.receipt).toMatchObject({ action: "overlay", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.applyOverlay({
+      ...request,
+      now: new Date("2026-08-08T12:05:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+
+    const later = await input.service.applyOverlay({
+      installationId: applied.installation.id,
+      operations: [{ op: "set", path: "/values/followUpSlaMinutes", value: 45 }],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedOverlayRevision: 1,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    expect(later.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) =>
+      operation.action === "overlay" && operation.status === "completed"
+    )).toHaveLength(2);
+  });
+
+  it("recovers and replays only the exact actor-bound pinned-artifact repair", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:06:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt
+    };
+
+    store.interruptNextLifecycleRegistryCommit("repair");
+    await expect(input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:07:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after repair LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toEqual(applied.installation);
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "repair");
+    expect(recovery).toMatchObject({
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      targetArtifactDigest: applied.installation.artifactDigest,
+      repair: {
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.repair ?? {}).sort()).toEqual([
+      "fromUpdatedAt",
+      "sourceArtifactDigest",
+      "sourceInstallationDigest",
+      "sourceLoopIds",
+      "sourceLoopInventoryDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    await expect(input.service.repair({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:07:30.000Z")
+    })).rejects.toThrow(/idempotency conflict|must be reconciled/i);
+
+    const recovered = await input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:08:00.000Z")
+    });
+    expect(recovered.installation).toMatchObject({ state: "ready_to_test", mode: "simulation" });
+    expect(recovered.receipt).toMatchObject({ action: "repair", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:09:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.repair({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:09:30.000Z")
+    })).rejects.toThrow(/exact replay/i);
+
+    const later = await input.service.repair({
+      installationId: recovered.installation!.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: recovered.installation!.artifactDigest,
+      expectedUpdatedAt: recovered.installation!.updatedAt,
+      now: new Date("2026-08-08T12:10:00.000Z")
+    });
+    expect(later.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) =>
+      operation.action === "repair" && operation.status === "completed"
+    )).toHaveLength(2);
+  });
+
+  it("recovers repair after an unrelated workspace revision while refusing owned drift", async () => {
+    const loopSpecStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    const input = await harness({ loopSpecStore });
+    const store = new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme");
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:11:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt
+    };
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:12:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const recovery = (await store.read()).lifecycleOperations.find((operation) => operation.action === "repair");
+    expect(recovery).toMatchObject({ status: "requires_reconciliation" });
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: input.projectRoot,
+      appId: applied.installation.appId,
+      installationId: applied.installation.id
+    }) as { stage: string; nextAction: { input: Record<string, unknown> } };
+    expect(journey).toMatchObject({
+      stage: "recover_lifecycle",
+      nextAction: {
+        input: {
+          action: "repair",
+          expectedArtifactDigest: applied.installation.artifactDigest,
+          expectedUpdatedAt: applied.installation.updatedAt
+        }
+      }
+    });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:12:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(recovery!.repair!.sourceWorkspaceRevision);
+
+    const repaired = await input.service.repair({
+      ...request,
+      now: new Date("2026-08-08T12:13:00.000Z")
+    });
+    expect(repaired.receipt.action).toBe("repair");
+
+    const laterRequest = {
+      installationId: repaired.installation!.id,
+      actor: "sales-admin",
+      expectedArtifactDigest: repaired.installation!.artifactDigest,
+      expectedUpdatedAt: repaired.installation!.updatedAt
+    };
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.repair({
+      ...laterRequest,
+      now: new Date("2026-08-08T12:13:20.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as { registeredSpecs: Array<Record<string, unknown>> };
+    workspace.registeredSpecs.push({
+      id: "unexpected-repair-loop",
+      name: "Unexpected repair loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-repair-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T12:13:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2));
+    await expect(input.service.repair({
+      ...laterRequest,
+      now: new Date("2026-08-08T12:14:00.000Z")
+    })).rejects.toThrow(/topology changed/i);
+  });
+
+  it("recovers and exactly replays a private duplicate after cross-store materialization", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:15:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.recovery-safe",
+      overlayOperations: [{ op: "set" as const, path: "/values/followUpSlaMinutes", value: 20 }],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("duplicate");
+    await expect(input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:16:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after duplicate LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations).toHaveLength(1);
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "duplicate");
+    expect(recovery).toMatchObject({
+      installationId: applied.installation.id,
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      duplicate: {
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        derivedAppId: "private.sales.recovery-safe",
+        targetInstallationId: expect.stringMatching(/^install\./),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.duplicate ?? {}).sort()).toEqual([
+      "derivedAppId",
+      "fromUpdatedAt",
+      "operationsDigest",
+      "sourceArtifactDigest",
+      "sourceFieldMappingsDigest",
+      "sourceInstallationDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetInstallationId",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    const concurrentLoopStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    await concurrentLoopStore.advanceUnrelatedWorkspaceRevision(
+      input.projectRoot,
+      new Date("2026-08-08T12:16:15.000Z")
+    );
+    expect((await concurrentLoopStore.getWorkspace(input.projectRoot)).revision)
+      .toBeGreaterThan(recovery!.duplicate!.sourceWorkspaceRevision);
+    await expect(input.service.duplicate({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:16:30.000Z")
+    })).rejects.toThrow(/idempotency conflict|must be reconciled/i);
+
+    const recovered = await input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:17:00.000Z")
+    });
+    expect(recovered.installation).toMatchObject({
+      id: recovery?.duplicate?.targetInstallationId,
+      state: "ready_to_test",
+      mode: "simulation",
+      derivation: { derivedAppId: "private.sales.recovery-safe", parentInstallationId: applied.installation.id }
+    });
+    expect(recovered.receipt).toMatchObject({ action: "duplicate", actor: "sales-admin" });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:18:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.duplicate({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:18:30.000Z")
+    })).rejects.toThrow(/exact replay/i);
+  });
+
+  it("refuses a third derived topology while duplicate recovery is pending", async () => {
+    const loopSpecStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    const input = await harness({ loopSpecStore });
+    const store = new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme");
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:19:00.000Z"));
+    const request = {
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.drift-refusal",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin"
+    };
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:20:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const recovery = (await store.read()).lifecycleOperations.find((operation) => operation.action === "duplicate");
+    expect(recovery).toMatchObject({ status: "requires_reconciliation" });
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as { registeredSpecs: Array<Record<string, unknown>> };
+    workspace.registeredSpecs.push({
+      id: "unexpected-derived-loop",
+      name: "Unexpected derived loop",
+      path: path.join(
+        ".loopgraph",
+        "apps",
+        "installations",
+        recovery!.duplicate!.targetInstallationId,
+        "generated",
+        "loops",
+        "unexpected-derived-loop.yaml"
+      ),
+      department: "sales",
+      addedAt: "2026-08-08T12:20:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2), "utf8");
+    await expect(input.service.duplicate({
+      ...request,
+      now: new Date("2026-08-08T12:21:00.000Z")
+    })).rejects.toThrow(/topology changed/i);
+  });
+
+  it("recovers and exactly replays an actor-bound immutable detach snapshot", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:22:00.000Z"));
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.detached-recovery",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:23:00.000Z")
+    });
+    const request = {
+      installationId: duplicated.installation!.id,
+      expectedArtifactDigest: duplicated.installation!.artifactDigest,
+      expectedUpdatedAt: duplicated.installation!.updatedAt,
+      actor: "sales-admin"
+    };
+
+    store.interruptNextLifecycleRegistryCommit("detach");
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:24:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after detach/i);
+
+    const interrupted = await store.read();
+    const source = interrupted.installations.find((installation) => installation.id === duplicated.installation!.id);
+    expect(source?.derivation?.detachedAt).toBeUndefined();
+    const recovery = interrupted.lifecycleOperations.find((operation) => operation.action === "detach");
+    expect(recovery).toMatchObject({
+      installationId: duplicated.installation!.id,
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      detach: {
+        fromUpdatedAt: duplicated.installation!.updatedAt,
+        sourceArtifactDigest: duplicated.installation!.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(duplicated.installation),
+        snapshotArtifactDigest: duplicated.installation!.artifactDigest,
+        snapshotFilesDigest: expect.stringMatching(/^sha256:/),
+        snapshotPath: expect.stringContaining("private-snapshots"),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      }
+    });
+    expect(Object.keys(recovery?.detach ?? {}).sort()).toEqual([
+      "fromUpdatedAt",
+      "snapshotArtifactDigest",
+      "snapshotFilesDigest",
+      "snapshotPath",
+      "sourceArtifactDigest",
+      "sourceInstallationDigest",
+      "sourceLoopIds",
+      "sourceLoopInventoryDigest",
+      "sourceOwnershipDigest",
+      "sourceWorkspaceRevision",
+      "targetInstallationDigest",
+      "targetLoopIds",
+      "targetLoopInventoryDigest",
+      "targetOwnershipDigest"
+    ]);
+    expect(await readFile(path.join(input.projectRoot, recovery!.detach!.snapshotPath, "loopgraph.pack.yaml"), "utf8")).toContain("loopgraph.sales.qualify-route-inbound-leads");
+    await expect(input.service.detach({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:24:30.000Z")
+    })).rejects.toThrow(/idempotency conflict|must be reconciled/i);
+
+    const unrelatedLoopStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    await unrelatedLoopStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:24:45.000Z"));
+    expect((await unrelatedLoopStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(recovery!.detach!.sourceWorkspaceRevision);
+
+    const recovered = await input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:25:00.000Z")
+    });
+    expect(recovered.installation?.derivation).toMatchObject({
+      detachedAt: "2026-08-08T12:24:00.000Z",
+      detachedBy: "sales-admin",
+      snapshotPath: recovery!.detach!.snapshotPath,
+      snapshotFilesDigest: recovery!.detach!.snapshotFilesDigest
+    });
+    expect(recovered.receipt).toMatchObject({ action: "detach", actor: "sales-admin", reversible: false });
+    const completedRevision = (await store.read()).revision;
+
+    const replayed = await input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:26:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    expect((await store.read()).revision).toBe(completedRevision);
+    await expect(input.service.detach({
+      ...request,
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:26:30.000Z")
+    })).rejects.toThrow(/exact replay/i);
+    await writeFile(
+      path.join(input.projectRoot, recovery!.detach!.snapshotPath, "README.md"),
+      "tampered after detach",
+      "utf8"
+    );
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:27:00.000Z")
+    })).rejects.toThrow(/snapshot no longer matches/i);
+  });
+
+  it("refuses owned topology drift while detach recovery is pending", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:27:00.000Z"));
+    const duplicated = await input.service.duplicate({
+      installationId: applied.installation.id,
+      derivedAppId: "private.sales.detach-drift",
+      overlayOperations: [],
+      expectedArtifactDigest: applied.installation.artifactDigest,
+      expectedUpdatedAt: applied.installation.updatedAt,
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:28:00.000Z")
+    });
+    const request = {
+      installationId: duplicated.installation!.id,
+      expectedArtifactDigest: duplicated.installation!.artifactDigest,
+      expectedUpdatedAt: duplicated.installation!.updatedAt,
+      actor: "sales-admin"
+    };
+    store.interruptNextLifecycleRegistryCommit("detach");
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:29:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after detach/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const workspace = JSON.parse(await readFile(workspacePath, "utf8")) as { registeredSpecs: Array<Record<string, unknown>> };
+    workspace.registeredSpecs.push({
+      id: "unexpected-detach-loop",
+      name: "Unexpected detach loop",
+      path: path.join(
+        ".loopgraph",
+        "apps",
+        "installations",
+        duplicated.installation!.id,
+        "generated",
+        "loops",
+        "unexpected-detach-loop.yaml"
+      ),
+      department: "sales",
+      addedAt: "2026-08-08T12:29:30.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(workspace, null, 2), "utf8");
+    await expect(input.service.detach({
+      ...request,
+      now: new Date("2026-08-08T12:30:00.000Z")
+    })).rejects.toThrow(/topology changed|inventory is missing/i);
   });
 
   it("plans permission-aware updates, requires review, and restores the exact prior revision", async () => {
@@ -1105,5 +2654,329 @@ describe("atomic app installation lifecycle", () => {
     expect(rolledBack.installation).toMatchObject({ version: "1.0.0", state: "rolled_back", mode: "simulation" });
     const conformance = await input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T12:05:00.000Z"));
     expect(conformance.status).toBe("passed");
+  });
+
+  it("resumes an interrupted update only for the exact actor, reviewed plan, approvals, and LoopSpec target", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:10:00.000Z"));
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:11:00.000Z")
+    });
+
+    store.interruptNextLifecycleRegistryCommit("update");
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:12:00.000Z")
+    })).rejects.toThrow(/simulated worker interruption after update LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toMatchObject({ version: "1.0.0", artifactDigest: applied.installation.artifactDigest });
+    expect(interrupted.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "update",
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      targetArtifactDigest: updatePlan.toDigest,
+      update: expect.objectContaining({
+        fromUpdatedAt: applied.installation.updatedAt,
+        sourceArtifactDigest: applied.installation.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(applied.installation),
+        planDigest: updatePlan.planDigest,
+        approvedPermissionCapabilities: ["crm.lead.update"],
+        targetInstallationDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      })
+    }));
+    await expect(input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T12:12:30.000Z")))
+      .rejects.toThrow(/must be reconciled before another operation/i);
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:12:40.000Z")
+    })).rejects.toThrow(/idempotency conflict/i);
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update", "crm.account.read"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:12:45.000Z")
+    })).rejects.toThrow(/do not require review/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const recordedTargetWorkspace = await readFile(workspacePath, "utf8");
+    const driftedWorkspace = JSON.parse(recordedTargetWorkspace) as { registeredSpecs: Array<Record<string, unknown>> };
+    driftedWorkspace.registeredSpecs.push({
+      id: "unexpected-update-loop",
+      name: "Unexpected update loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-update-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T12:12:50.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(driftedWorkspace, null, 2), "utf8");
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:12:55.000Z")
+    })).rejects.toThrow(/Active LoopSpec inventory is missing unexpected-update-loop/i);
+    await writeFile(workspacePath, recordedTargetWorkspace, "utf8");
+
+    const recovered = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:42:00.000Z")
+    });
+    const replayed = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:43:00.000Z")
+    });
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "another-admin",
+      now: new Date("2026-08-08T12:43:30.000Z")
+    })).rejects.toThrow(/different actor, reviewed plan, or installation revision/i);
+    expect(recovered.installation).toMatchObject({ version: "1.1.0", state: "ready_to_test", mode: "simulation" });
+    expect((await store.read()).lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "update",
+      status: "completed",
+      resultReceiptId: recovered.receipt.id
+    }));
+
+    const rolledBack = await input.service.rollback(
+      applied.installation.id,
+      recovered.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:44:00.000Z")
+    );
+    const secondPlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:45:00.000Z")
+    });
+    const secondUpdate = await input.service.applyUpdate({
+      plan: secondPlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:46:00.000Z")
+    });
+    expect(rolledBack.installation).toMatchObject({ version: "1.0.0" });
+    expect(secondUpdate.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "update" && operation.status === "completed"))
+      .toHaveLength(2);
+  });
+
+  it("recovers update and rollback after an unrelated workspace revision when owned inventory is unchanged", async () => {
+    const installationStore = new AuditCapturingInstallationStore("acme");
+    const loopSpecStore = new InterruptBeforeMaterializationStore(new FileLoopSpecRegistryStore());
+    const input = await harness({ installationStore, loopSpecStore });
+    const applied = await installSalesApp(input, new Date("2026-08-08T12:50:00.000Z"));
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:51:00.000Z")
+    });
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:52:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const updateRecovery = (await installationStore.read()).lifecycleOperations.find((operation) => operation.action === "update");
+    expect(updateRecovery).toMatchObject({ status: "requires_reconciliation" });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:52:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(updateRecovery!.update!.sourceWorkspaceRevision);
+
+    const updated = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T12:53:00.000Z")
+    });
+    expect(updated.installation).toMatchObject({ version: "1.1.0", state: "ready_to_test" });
+
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:54:00.000Z")
+    )).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const rollbackRecovery = (await installationStore.read()).lifecycleOperations.find((operation) => operation.action === "rollback");
+    expect(rollbackRecovery).toMatchObject({ status: "requires_reconciliation" });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:54:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(rollbackRecovery!.rollback!.sourceWorkspaceRevision);
+
+    const rolledBack = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T12:55:00.000Z")
+    );
+    expect(rolledBack.installation).toMatchObject({ version: "1.0.0", state: "rolled_back" });
+
+    const uninstallRequest = {
+      installationId: applied.installation.id,
+      expectedArtifactDigest: rolledBack.installation!.artifactDigest,
+      actor: "sales-admin",
+      reason: "Retire the exact recovered installation.",
+      confirmed: true
+    };
+    loopSpecStore.interruptNextMaterialization();
+    await expect(input.service.uninstall({
+      ...uninstallRequest,
+      now: new Date("2026-08-08T12:56:00.000Z")
+    })).rejects.toThrow(/interruption before LoopSpec materialization/i);
+    const uninstallRecovery = (await installationStore.read()).lifecycleOperations.find((operation) => operation.action === "uninstall");
+    expect(uninstallRecovery).toMatchObject({ status: "requires_reconciliation" });
+    await loopSpecStore.advanceUnrelatedWorkspaceRevision(input.projectRoot, new Date("2026-08-08T12:56:30.000Z"));
+    expect((await loopSpecStore.getWorkspace(input.projectRoot)).revision).toBeGreaterThan(uninstallRecovery!.uninstall!.sourceWorkspaceRevision);
+
+    const uninstalled = await input.service.uninstall({
+      ...uninstallRequest,
+      now: new Date("2026-08-08T12:57:00.000Z")
+    });
+    expect(uninstalled.installation).toBeUndefined();
+    expect(uninstalled.receipt).toMatchObject({ action: "uninstall" });
+  });
+
+  it("resumes an interrupted rollback only for the exact actor, installation, and LoopSpec target", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input, new Date("2026-08-08T13:00:00.000Z"));
+    await addUpdateCatalog(input);
+    const updatePlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:01:00.000Z")
+    });
+    const updated = await input.service.applyUpdate({
+      plan: updatePlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:02:00.000Z")
+    });
+
+    store.interruptNextLifecycleRegistryCommit("rollback");
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:03:00.000Z")
+    )).rejects.toThrow(/simulated worker interruption after rollback LoopSpec materialization/i);
+
+    const interrupted = await store.read();
+    expect(interrupted.installations[0]).toMatchObject({ version: "1.1.0", state: "ready_to_test" });
+    expect(interrupted.lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "rollback",
+      status: "requires_reconciliation",
+      actor: "sales-admin",
+      targetArtifactDigest: applied.installation.artifactDigest,
+      rollback: expect.objectContaining({
+        fromUpdatedAt: updated.installation!.updatedAt,
+        sourceArtifactDigest: updated.installation!.artifactDigest,
+        sourceInstallationDigest: canonicalAppDigest(updated.installation),
+        targetInstallationDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        sourceLoopIds: expect.any(Array),
+        targetLoopIds: expect.any(Array)
+      })
+    }));
+    await expect(input.service.test(applied.installation.id, "sales-admin", new Date("2026-08-08T13:03:30.000Z")))
+      .rejects.toThrow(/must be reconciled before another operation/i);
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "another-admin",
+      new Date("2026-08-08T13:03:40.000Z")
+    )).rejects.toThrow(/idempotency conflict/i);
+
+    const workspacePath = path.join(input.projectRoot, ".loopgraph", "workspace.json");
+    const recordedTargetWorkspace = await readFile(workspacePath, "utf8");
+    const driftedWorkspace = JSON.parse(recordedTargetWorkspace) as { registeredSpecs: Array<Record<string, unknown>> };
+    driftedWorkspace.registeredSpecs.push({
+      id: "unexpected-rollback-loop",
+      name: "Unexpected rollback loop",
+      path: path.join(".loopgraph", "apps", "installations", applied.installation.id, "generated", "loops", "unexpected-rollback-loop.yaml"),
+      department: "sales",
+      addedAt: "2026-08-08T13:03:45.000Z"
+    });
+    await writeFile(workspacePath, JSON.stringify(driftedWorkspace, null, 2), "utf8");
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:03:50.000Z")
+    )).rejects.toThrow(/Active LoopSpec inventory is missing unexpected-rollback-loop/i);
+    await writeFile(workspacePath, recordedTargetWorkspace, "utf8");
+
+    const recovered = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:04:00.000Z")
+    );
+    const replayed = await input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:04:30.000Z")
+    );
+    expect(replayed.receipt.id).toBe(recovered.receipt.id);
+    await expect(input.service.rollback(
+      applied.installation.id,
+      updated.installation!.artifactDigest,
+      "another-admin",
+      new Date("2026-08-08T13:04:40.000Z")
+    )).rejects.toThrow(/different actor or installation revision/i);
+    expect((await store.read()).lifecycleOperations).toContainEqual(expect.objectContaining({
+      action: "rollback",
+      status: "completed",
+      resultReceiptId: recovered.receipt.id
+    }));
+    expect(recovered.installation).toMatchObject({ version: "1.0.0", state: "rolled_back", mode: "simulation" });
+
+    const secondPlan = await input.service.planUpdate({
+      installationId: applied.installation.id,
+      versionRange: "1.1.0",
+      connections: [input.connection],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:05:00.000Z")
+    });
+    const secondUpdate = await input.service.applyUpdate({
+      plan: secondPlan,
+      approvedPermissionCapabilities: ["crm.lead.update"],
+      actor: "sales-admin",
+      now: new Date("2026-08-08T13:06:00.000Z")
+    });
+    const secondRollback = await input.service.rollback(
+      applied.installation.id,
+      secondUpdate.installation!.artifactDigest,
+      "sales-admin",
+      new Date("2026-08-08T13:07:00.000Z")
+    );
+    expect(secondRollback.receipt.id).not.toBe(recovered.receipt.id);
+    expect((await store.read()).lifecycleOperations.filter((operation) => operation.action === "rollback" && operation.status === "completed"))
+      .toHaveLength(2);
   });
 });

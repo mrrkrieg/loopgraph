@@ -42,6 +42,11 @@ describe("Hermes local shadow routing simulation", () => {
       loopId: "marketing_ads",
       status: "shadow"
     });
+    expect(result.submission?.attempt.learningContextBinding).toMatchObject({
+      contextDigest: result.ingest.learningContextDigest,
+      acknowledgedDigest: result.ingest.learningContextDigest,
+      acknowledged: true
+    });
     expect(result.evaluation).toMatchObject({
       expectedLoopIds: ["marketing_ads"],
       actualLoopIds: ["marketing_ads"],

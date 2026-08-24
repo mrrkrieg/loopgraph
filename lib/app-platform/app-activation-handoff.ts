@@ -15,6 +15,7 @@ export function currentActivationApproval(input: {
   const now = (input.now ?? new Date()).getTime();
   return input.approvals
     .filter((approval) =>
+      "activationGate" in approval &&
       !approval.consumedAt &&
       Date.parse(approval.expiresAt) > now &&
       approval.installationId === input.installation.id &&
