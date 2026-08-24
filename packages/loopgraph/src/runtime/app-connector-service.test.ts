@@ -8,6 +8,7 @@ import {
   FileProviderSchemaSnapshotStore,
   loadConnectorRecipes,
   resolveConnectorCapabilities,
+  resolveConnectorRecipeOperation,
   suggestFieldMappings,
   validateFieldMappingCoverage
 } from "./app-connector-service";
@@ -105,6 +106,68 @@ describe("logical connector and field mapping service", () => {
       expect.objectContaining({ capability: "crm.account.read", status: "reusable", connectionId: "provider_hubspot_main" })
     ]);
     expect(brokerConnection).not.toHaveProperty("credentialRef");
+  });
+
+  it("resolves the required Product, Sales, and Marketing preset operations to bounded broker descriptors", async () => {
+    const cases = [
+      ["packs/official/product/turn-feedback-into-product-problems", "intercom-posthog-linear"],
+      ["packs/official/sales/qualify-route-inbound-leads", "hubspot-gmail-slack"],
+      ["packs/official/marketing/learn-qualified-pipeline", "google-ads-hubspot-posthog"]
+    ] as const;
+
+    for (const [relativeRoot, recipeId] of cases) {
+      const loaded = await loadLoopPackDirectory(path.resolve(process.cwd(), relativeRoot));
+      const recipe = (await loadConnectorRecipes(loaded)).find((candidate) => candidate.id === recipeId);
+      expect(recipe, `${recipeId} should be present`).toBeDefined();
+      for (const capability of loaded.manifest.requiredCapabilities) {
+        const binding = recipe!.capabilities.find((candidate) => candidate.logicalCapability === capability);
+        expect(binding, `${recipeId} should bind ${capability}`).toBeDefined();
+        expect(resolveConnectorRecipeOperation(recipe!, binding!)).toMatchObject({
+          executor: "connector_broker",
+          descriptor: expect.objectContaining({ capability: "provider.data.read" })
+        });
+      }
+    }
+  });
+
+  it("treats governed Loopgraph operations as credential-free runtime bindings", async () => {
+    const loaded = await loadLoopPackDirectory(path.resolve(process.cwd(), "packs/official/management/run-company-operating-system"));
+    const recipe = (await loadConnectorRecipes(loaded)).find((candidate) => candidate.id === "loopgraph-snowflake-slack")!;
+    const binding = recipe.capabilities.find((candidate) => candidate.providerOperation === "loopgraph.graph.read")!;
+    expect(resolveConnectorRecipeOperation(recipe, binding)).toMatchObject({
+      providerId: "loopgraph",
+      operation: "graph.read",
+      executor: "loopgraph_runtime"
+    });
+  });
+
+  it("refuses a self-claimed connection when the recipe operation has no reviewed broker adapter", async () => {
+    const loaded = await loadLoopPackDirectory(path.resolve(process.cwd(), "packs/official/hr-talent/operate-people-workflows"));
+    const recipes = await loadConnectorRecipes(loaded);
+    const claimedConnection = connectionInstanceSchema.parse({
+      schemaVersion: "connection-instance/v1alpha1",
+      id: "survey-production",
+      manifestId: "survey",
+      capabilityKeys: ["survey.response.read", "survey.aggregate-responses.read"],
+      grantedScopes: ["survey-aggregate:read"],
+      status: "connected",
+      environment: "live",
+      readPolicy: "read_only",
+      writePolicy: "not_allowed"
+    });
+    const [resolution] = resolveConnectorCapabilities({
+      requiredCapabilities: ["survey.response.read"],
+      optionalCapabilities: [],
+      recipes,
+      connections: [claimedConnection],
+      selectedRecipeId: "workday-greenhouse-slack"
+    });
+    expect(resolution).toMatchObject({
+      capability: "survey.response.read",
+      executor: "unavailable",
+      status: "missing"
+    });
+    expect(resolution.reason).toMatch(/No bounded Hermes Connector Broker operation/);
   });
 
   it("suggests explainable mappings and never silently confirms uncertain fields", () => {

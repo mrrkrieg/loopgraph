@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
+  APP_INSTALL_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
@@ -54,6 +55,49 @@ const REQUIRED_CONFORMANCE_CATEGORIES = {
   upgrade_rollback: ["upgrade-rollback"]
 } as const;
 
+export function createSyntheticValidationInstallation(
+  loaded: LoopPackLoadResult,
+  actor: string
+): WorkspaceAppInstallation {
+  const { manifest, artifact } = loaded;
+  return {
+    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+    id: `validation.${manifest.metadata.id}`,
+    workspaceId: "publisher-validation",
+    appId: manifest.metadata.id,
+    version: manifest.metadata.version,
+    artifactDigest: artifact.digest,
+    state: "ready_to_test",
+    mode: "simulation",
+    selectedModules: manifest.modules.map((moduleDefinition) => moduleDefinition.id),
+    presetId: "validation",
+    configuration: {
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      appId: manifest.metadata.id,
+      version: manifest.metadata.version,
+      fields: [],
+      values: {},
+      provenance: {},
+      completedAt: new Date(0).toISOString()
+    },
+    connectionBindings: {},
+    operationBindings: {},
+    fieldMappingIds: [],
+    permissions: manifest.permissions.map((permission) => ({
+      capability: permission.capability,
+      authority: permission.authority,
+      decision: permission.defaultPolicy === "allowed" ? "allow" : permission.defaultPolicy === "forbidden" ? "forbid" : "approval_required",
+      reason: "Synthetic conformance keeps provider execution blocked.",
+      changedFromInstalled: false
+    })),
+    ownedAssets: [],
+    history: [],
+    installedAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    installedBy: actor
+  };
+}
+
 export async function runAppSyntheticConformance(input: {
   loaded: LoopPackLoadResult;
   compiled: CompiledLoopPack;
@@ -61,24 +105,30 @@ export async function runAppSyntheticConformance(input: {
   actor: string;
   now: Date;
 }): Promise<AppEvalRun> {
-  const suites = await loadEvalSuites(input.loaded);
+  const suites = await loadEvalSuites(input.loaded, input.compiled.activeEntrypoints.evals);
+  const activeLoopIds = new Set(input.compiled.loopSpecs.map((spec) => spec.metadata.id));
   const scenarios = [] as AppEvalRun["scenarios"];
   for (const suite of suites) {
     for (const scenario of suite.scenarios) {
       const fixture = asRecord(JSON.parse(await readFile(resolvePackFile(input.loaded.root, scenario.fixture), "utf8")));
       const event = fixtureToQualityEvent(fixture, scenario, input.compiled.routingCards);
       const decision = evaluateQualityEvent(event, input.compiled);
-      const passed = decision.action === scenario.expectedAction &&
-        (!scenario.expectedLoopId || decision.loopId === scenario.expectedLoopId) &&
-        decision.approvalRequired === scenario.expectedApproval;
+      const expectedLoopEnabled = !scenario.expectedLoopId || activeLoopIds.has(scenario.expectedLoopId);
+      const expectedAction = expectedLoopEnabled ? scenario.expectedAction : "unhandled" as const;
+      const expectedLoopId = expectedLoopEnabled ? scenario.expectedLoopId : undefined;
+      const expectedApproval = expectedLoopEnabled ? scenario.expectedApproval : false;
+      const passed = decision.action === expectedAction &&
+        (!expectedLoopId || decision.loopId === expectedLoopId) &&
+        decision.approvalRequired === expectedApproval;
       scenarios.push({
         id: scenario.id,
         status: passed ? "passed" : "failed",
         sourceEventId: event.id,
-        expectedAction: scenario.expectedAction,
+        expectedAction,
         actualAction: decision.action,
-        expectedRoute: scenario.expectedLoopId,
+        expectedRoute: expectedLoopId,
         actualRoute: decision.loopId,
+        approvalRequired: decision.approvalRequired,
         reason: decision.reason,
         evidenceRefs: [`fixture:${scenario.fixture}`]
       });
@@ -165,6 +215,7 @@ export function runAppHistoricalReplay(input: {
       actualAction: decision.action,
       expectedRoute: event.expectedLoopId,
       actualRoute: decision.loopId,
+      approvalRequired: decision.approvalRequired,
       reason: decision.reason,
       evidenceRefs: [...event.evidenceRefs, `historical-event:${event.id}`]
     };
@@ -187,6 +238,7 @@ export function runAppHistoricalReplay(input: {
     writeBlocked: true,
     startedAt,
     completedAt: startedAt,
+    sourceWindow: { from: request.from, to: request.to },
     scenarios,
     metrics: {
       eventCount: scenarios.length,
@@ -241,6 +293,11 @@ export function createPromotionRecommendation(input: {
       id: "false-positive-rate",
       status: falsePositiveRate === undefined ? "warn" : falsePositiveRate <= 0.05 ? "pass" : "fail",
       summary: falsePositiveRate === undefined ? "False-positive rate needs reviewer labels." : `Observed false-positive rate is ${(falsePositiveRate * 100).toFixed(1)}%.`
+    },
+    {
+      id: "incomplete-rate",
+      status: incompleteRate === undefined ? "warn" : incompleteRate <= 0.05 ? "pass" : "fail",
+      summary: incompleteRate === undefined ? "Incomplete-decision rate needs reviewer labels." : `Observed incomplete-decision rate is ${(incompleteRate * 100).toFixed(1)}%.`
     },
     {
       id: "review-burden",
@@ -378,8 +435,8 @@ function fixtureToQualityEvent(fixture: Record<string, unknown>, scenario: AppEv
   };
 }
 
-async function loadEvalSuites(loaded: LoopPackLoadResult): Promise<AppEvalSuite[]> {
-  return Promise.all(loaded.manifest.entrypoints.evals.map(async (relativePath) =>
+async function loadEvalSuites(loaded: LoopPackLoadResult, entrypoints = loaded.manifest.entrypoints.evals): Promise<AppEvalSuite[]> {
+  return Promise.all(entrypoints.map(async (relativePath) =>
     appEvalSuiteSchema.parse(YAML.parse(await readFile(resolvePackFile(loaded.root, relativePath), "utf8")))));
 }
 

@@ -1,3 +1,4 @@
+import React from "react";
 import type { AppInstallationState, AppReadiness } from "loopgraph/core";
 
 export function AppStatusPill({

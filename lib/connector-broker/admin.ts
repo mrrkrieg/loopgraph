@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import {
+  canonicalAppDigest,
   workloadCapabilitySchema,
   connectorInstallationAdminSchema,
   connectorInstallationHasExpectedNamespace,
@@ -314,6 +315,39 @@ export async function approveConnectorPreparedAction(input: {
     }
   });
   return { approvalId, actionId: input.actionId, fingerprint: input.fingerprint, expiresAt };
+}
+
+export async function revokeConnectorPreparedAction(input: {
+  database: WorkspaceDatabase;
+  installationId: string;
+  actionId: string;
+  fingerprint: string;
+  reason: string;
+}) {
+  if (!input.database.organizationId || !input.database.userId) {
+    throw new Error("Hosted connector storage is unavailable");
+  }
+  const reason = input.reason.trim();
+  if (reason.length < 3 || reason.length > 1_000) throw new Error("Prepared action revocation reason must contain 3 to 1000 characters");
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const client = connectorControlPlaneClient();
+  const reasonDigest = canonicalAppDigest(reason);
+  const { data, error } = await client.rpc("revoke_connector_prepared_action", {
+    p_organization_id: input.database.organizationId,
+    p_project_key: projectKey,
+    p_installation_id: input.installationId,
+    p_action_id: input.actionId,
+    p_fingerprint: input.fingerprint,
+    p_revoked_by: input.database.userId,
+    p_reason_digest: reasonDigest,
+    p_now: new Date().toISOString()
+  });
+  if (error) throw error;
+  const result = data as { actionId?: unknown; fingerprint?: unknown; status?: unknown } | null;
+  if (!result || result.actionId !== input.actionId || result.fingerprint !== input.fingerprint || result.status !== "revoked") {
+    throw new Error("Connector action revocation returned an invalid receipt");
+  }
+  return { actionId: input.actionId, fingerprint: input.fingerprint, status: "revoked" as const };
 }
 
 export type WorkloadIdentityAdminView = {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { MarketplaceAppCard } from "@/components/apps/marketplace-app-card";
 import { DepartmentPackCard } from "@/components/apps/department-pack-card";
+import { CompanyBlueprintCard } from "@/components/apps/company-blueprint-card";
 import { PageHeader } from "@/components/page-header";
 import { getMarketplaceViewData } from "@/lib/app-platform/read-model";
 
@@ -61,6 +62,13 @@ export default async function MarketplacePage({ searchParams }: MarketplacePageP
           return <DepartmentLink active={department === item} href={`/marketplace?${search.toString()}`} key={item} label={item.replace(/_/g, " ")} />;
         })}
       </div>
+
+      {data.companyBlueprints.length > 0 ? (
+        <section className="mt-8">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-signal">Start with the whole company</div>
+          <div className="space-y-4">{data.companyBlueprints.map((entry) => <CompanyBlueprintCard entry={entry} key={entry.blueprint.id} />)}</div>
+        </section>
+      ) : null}
 
       {data.departmentPacks.length > 0 ? (
         <section className="mt-8">

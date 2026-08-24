@@ -34,6 +34,12 @@ Moving a node is a layout-only transaction. Adding or connecting semantic nodes 
 
 When the user wants a complete business capability, search the Marketplace by outcome and inspect the selected App. Then call `loopgraph_app_onboarding_get` as the source of truth for the rest of the journey.
 
+When the user wants a company-wide operating system, asks how departments should share context, or wants one Hermes Brain across the company, call `loopgraph_company_blueprints_search` and inspect the selected result with `loopgraph_company_blueprint_get`. Explain its canonical company objects and cross-department evidence conditions, then open only the returned dependency-safe Department Pack.
+
+- A Company Blueprint composes read-only Department Pack contracts. It never installs Packs or Apps and never grants routing or provider-write authority.
+- Re-read `loopgraph_company_blueprint_get` after a Department Pack changes; do not infer company progress from conversation memory.
+- Cross-department edges require canonical entity resolution, required evidence, an eligible receiving App, and its independent approval policy.
+
 When the user wants to start an entire department, asks what a company function can run, or needs several Apps to share context, call `loopgraph_department_packs_search` first. Inspect the selected Pack with `loopgraph_department_pack_get`, explain its ordered Apps, shared context, shared capabilities, and permitted evidence handoffs, then use only the returned exact next App action.
 
 - A Department Pack is a declarative topology, not a bulk installer. Never install or activate every App automatically.
@@ -43,6 +49,9 @@ When the user wants to start an entire department, asks what a company function 
 
 - Present its declared stack presets when the stage is `choose_preset`.
 - Ask only the returned `questions`; do not repeat answers or invent missing company context.
+- After a preset or answer changes, call `loopgraph_app_onboarding_save` with the complete current non-secret snapshot and the exact draft revision from the latest journey. A later `loopgraph_app_onboarding_get` call with only the App ID must resume it. Never put credentials, tokens, raw provider records, permission grants, or activation authority in a draft.
+- Only when the operator explicitly asks to start over, explain that shared connections, mappings, approved company context, installed Apps, and runtime state will stay intact. After confirmation, call `loopgraph_app_onboarding_reset` with the exact current draft ID and revision plus `confirmReset: true`; re-read instead of clearing anything when identity or revision changed.
+- An App-only browser install URL resumes the saved preset. When the operator asks for a different preset, preview it through `loopgraph_app_onboarding_get`; if `draft.applied` is false, explain that old answers and draft mapping IDs were excluded. Replace the draft only after explicit confirmation with the complete new snapshot, current revision, and `confirmPresetChange: true`.
 - Resolve only the returned connector, mapping, and permission blockers.
 - After every connection, answer, mapping, install, test, or lifecycle change, call `loopgraph_app_onboarding_get` again instead of guessing the next step.
 - Use only the exact `nextAction.toolName` and content-bound plan returned by the journey.

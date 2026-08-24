@@ -1,0 +1,13 @@
+name: loopgraph
+version: 0.2.0
+description: Governed company loops with Hermes as the event router and reasoning brain
+author: Loopgraph contributors
+license: MIT
+homepage: https://github.com/mrrkrieg/loopgraph
+external_dependencies:
+  - git
+  - node
+  - npm
+provides_hooks:
+  - pre_llm_call
+
