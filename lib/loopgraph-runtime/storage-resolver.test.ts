@@ -3,14 +3,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getActiveLoopgraphProjectRoot,
   getAppInstallationStore,
+  getAppSnapshotStore,
   getAppVerificationStore,
+  getCompanyContextStore,
   getConnectorFieldMappingStore,
   getDiscoveryDesignStore,
+  getEntityResolutionStore,
+  getHermesRouteActivationStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopSpecRegistryStore,
+  getMeasurementStore,
+  getOutcomeStore,
   getStorageAdapter,
   getProviderSchemaSnapshotStore,
+  getRoutingStore,
   resetStorageAdapterCache,
   resolveHostedRuntimeProjectRoot
 } from "./storage-resolver";
@@ -138,11 +145,29 @@ describe("hosted runtime namespaces", () => {
     expect(secondWorkspace).not.toBe(first);
   });
 
+  it("scopes local Hermes route activation proof by project and workspace", () => {
+    const first = getHermesRouteActivationStore({ projectRoot: "/tmp/loopgraph-routes-a", workspaceId: "acme", forceFile: true });
+    const firstAgain = getHermesRouteActivationStore({ projectRoot: "/tmp/loopgraph-routes-a", workspaceId: "acme", forceFile: true });
+    const secondWorkspace = getHermesRouteActivationStore({ projectRoot: "/tmp/loopgraph-routes-a", workspaceId: "globex", forceFile: true });
+    expect(first.persistence).toBe("file");
+    expect(firstAgain).toBe(first);
+    expect(secondWorkspace).not.toBe(first);
+  });
+
   it("scopes local App installation registries by project and workspace", () => {
     const first = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
     const firstAgain = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
     const secondWorkspace = getAppInstallationStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "globex", forceFile: true });
     expect(first.persistence).toBe("file");
+    expect(firstAgain).toBe(first);
+    expect(secondWorkspace).not.toBe(first);
+  });
+
+  it("scopes local App snapshots by project and workspace", () => {
+    const first = getAppSnapshotStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
+    const firstAgain = getAppSnapshotStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "acme", forceFile: true });
+    const secondWorkspace = getAppSnapshotStore({ projectRoot: "/tmp/loopgraph-apps-a", workspaceId: "globex", forceFile: true });
+    expect(first.persistence).toBe("local");
     expect(firstAgain).toBe(first);
     expect(secondWorkspace).not.toBe(first);
   });
@@ -154,6 +179,49 @@ describe("hosted runtime namespaces", () => {
     expect(mappings.persistence).toBe("file");
     expect(schemas.persistence).toBe("file");
     expect(mappingsAgain).toBe(mappings);
+  });
+
+  it("scopes local company context by project, workspace, and company", () => {
+    const first = getCompanyContextStore({ projectRoot: "/tmp/loopgraph-context-a", workspaceId: "acme", companyId: "acme-company", forceFile: true });
+    const firstAgain = getCompanyContextStore({ projectRoot: "/tmp/loopgraph-context-a", workspaceId: "acme", companyId: "acme-company", forceFile: true });
+    const secondCompany = getCompanyContextStore({ projectRoot: "/tmp/loopgraph-context-a", workspaceId: "acme", companyId: "globex-company", forceFile: true });
+    expect(first.persistence).toBe("file");
+    expect(firstAgain).toBe(first);
+    expect(secondCompany).not.toBe(first);
+  });
+
+  it("scopes local learning evidence and canonical entities by project", () => {
+    const firstMeasurements = getMeasurementStore({
+      projectRoot: "/tmp/loopgraph-learning-a",
+      forceFile: true
+    });
+    const firstOutcomes = getOutcomeStore({
+      projectRoot: "/tmp/loopgraph-learning-a",
+      forceFile: true
+    });
+    const firstEntities = getEntityResolutionStore({
+      projectRoot: "/tmp/loopgraph-learning-a",
+      forceFile: true
+    });
+    const secondMeasurements = getMeasurementStore({
+      projectRoot: "/tmp/loopgraph-learning-b",
+      forceFile: true
+    });
+    const secondOutcomes = getOutcomeStore({
+      projectRoot: "/tmp/loopgraph-learning-b",
+      forceFile: true
+    });
+    const secondEntities = getEntityResolutionStore({
+      projectRoot: "/tmp/loopgraph-learning-b",
+      forceFile: true
+    });
+
+    expect(firstMeasurements.persistence).toBe("local");
+    expect(firstOutcomes.persistence).toBe("local");
+    expect(firstEntities.persistence).toBe("local");
+    expect(secondMeasurements).not.toBe(firstMeasurements);
+    expect(secondOutcomes).not.toBe(firstOutcomes);
+    expect(secondEntities).not.toBe(firstEntities);
   });
 
   it("fails closed instead of using file state for hosted controller data", () => {
@@ -172,14 +240,35 @@ describe("hosted runtime namespaces", () => {
     expect(() => getAppVerificationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App verification storage is required"
     );
+    expect(() => getHermesRouteActivationStore({ workspaceId: "acme" })).toThrow(
+      "Distributed Hermes route activation storage is required"
+    );
     expect(() => getAppInstallationStore({ workspaceId: "acme" })).toThrow(
       "Distributed App installation storage is required"
+    );
+    expect(() => getAppSnapshotStore({ workspaceId: "acme" })).toThrow(
+      "Distributed App snapshot storage is required"
     );
     expect(() => getConnectorFieldMappingStore({ workspaceId: "acme" })).toThrow(
       "Distributed App field-mapping storage is required"
     );
     expect(() => getProviderSchemaSnapshotStore({ workspaceId: "acme" })).toThrow(
       "Distributed provider-schema storage is required"
+    );
+    expect(() => getCompanyContextStore({ workspaceId: "acme", companyId: "acme-company" })).toThrow(
+      "Distributed company-context storage is required"
+    );
+    expect(() => getMeasurementStore()).toThrow(
+      "Distributed measurement storage is required"
+    );
+    expect(() => getRoutingStore()).toThrow(
+      "Distributed routing storage is required"
+    );
+    expect(() => getOutcomeStore()).toThrow(
+      "Distributed outcome storage is required"
+    );
+    expect(() => getEntityResolutionStore()).toThrow(
+      "Distributed entity resolution is required"
     );
   });
 });
