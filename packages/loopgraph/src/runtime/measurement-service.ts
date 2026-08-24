@@ -24,6 +24,7 @@ import {
 import { doctorHermesWebhookRoutes } from "./hermes-webhooks";
 import {
   getHermesRouteActivationStatus,
+  type HermesRouteActivationAuthorityProvider,
   type HermesRouteActivationStore,
   type HermesRouteActivationStatus
 } from "./hermes-route-activation";
@@ -382,6 +383,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
 }, options: {
   store?: MeasurementStore;
   routeActivationStore?: HermesRouteActivationStore;
+  routeActivationAuthorityProvider?: HermesRouteActivationAuthorityProvider;
 } = {}): Promise<{
   report: ConnectionReconciliationReport;
   controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
@@ -400,7 +402,12 @@ export async function reconcileConnectionsAndMeasurements(input: {
   const [plan, webhook, activation, bindings, instances, jobs] = await Promise.all([
     buildConnectionPlan({ projectRoot, now }),
     doctorHermesWebhookRoutes({ projectRoot, now }),
-    safeHermesRouteActivationStatus(projectRoot, now, options.routeActivationStore),
+    safeHermesRouteActivationStatus(
+      projectRoot,
+      now,
+      options.routeActivationStore,
+      options.routeActivationAuthorityProvider
+    ),
     store.listMetricBindings(),
     readConnectionInstances(projectRoot),
     store.listMeasurementJobs()
@@ -603,10 +610,16 @@ export async function reconcileConnectionsAndMeasurements(input: {
 async function safeHermesRouteActivationStatus(
   projectRoot: string,
   now: Date,
-  recordStore?: HermesRouteActivationStore
+  recordStore?: HermesRouteActivationStore,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
 ): Promise<HermesRouteActivationStatus> {
   try {
-    return await getHermesRouteActivationStatus({ projectRoot, now, recordStore });
+    return await getHermesRouteActivationStatus({
+      projectRoot,
+      now,
+      recordStore,
+      authorityProvider
+    });
   } catch (error) {
     return {
       projectRoot,

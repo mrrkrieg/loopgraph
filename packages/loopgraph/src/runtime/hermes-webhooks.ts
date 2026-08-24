@@ -10,6 +10,8 @@ import {
   type RoutingDecision,
   type RoutingCard
 } from "../core";
+import type { ConnectionInstance } from "../core";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { LOOPGRAPH_ROUTING_OPS_TOOL_NAMES } from "./routing-ops-tools";
 import { LOOPGRAPH_ROUTING_TOOL_NAMES, loopgraph_routing_catalog_get } from "./routing-tools";
 import {
@@ -331,12 +333,23 @@ export async function callLoopgraphHermesWebhookTool(
 }
 
 export async function planHermesWebhookRoutes(
-  input: HermesWebhooksPlanInput & { now?: Date } = {}
+  input: HermesWebhooksPlanInput & { now?: Date } = {},
+  options: {
+    loopSpecStore?: LoopSpecRegistryStore;
+    trustedConnections?: ConnectionInstance[];
+  } = {}
 ): Promise<HermesWebhookPlanResult> {
   const parsed = hermesWebhooksPlanInputSchema.parse(input);
   const projectRoot = path.resolve(parsed.projectRoot ?? process.cwd());
   const generatedAt = (input.now ?? new Date()).toISOString();
-  const catalog = await loopgraph_routing_catalog_get({ projectRoot });
+  const catalog = await loopgraph_routing_catalog_get(
+    { projectRoot },
+    {
+      projectRoot,
+      loopSpecStore: options.loopSpecStore,
+      trustedConnections: options.trustedConnections
+    }
+  );
   const routeGroups = new Map<string, MutableRouteGroup>();
   const warnings: string[] = [];
 

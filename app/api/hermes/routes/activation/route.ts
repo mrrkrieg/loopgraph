@@ -11,6 +11,7 @@ import {
   type WorkloadTokenProvider
 } from "loopgraph/runtime";
 import { safeConnectorError } from "@/lib/connector-broker/safe-error";
+import { createHostedHermesRouteActivationAuthorityProvider } from "@/lib/loopgraph-runtime/hosted-hermes-route-authority";
 import {
   getActiveLoopgraphProjectRoot,
   getHermesRouteActivationStore
@@ -39,6 +40,7 @@ export async function GET(request: Request) {
     if (view === "plan") {
       const plan = await prepareHermesRouteActivation({
         projectRoot: context.projectRoot,
+        authorityProvider: context.authorityProvider,
         now: new Date()
       });
       return NextResponse.json({ plan }, noStore(200));
@@ -47,6 +49,7 @@ export async function GET(request: Request) {
     const status = await getHermesRouteActivationStatus({
       projectRoot: context.projectRoot,
       recordStore: context.recordStore,
+      authorityProvider: context.authorityProvider,
       now: new Date()
     });
     return NextResponse.json({ status: publicStatus(status) }, noStore(200));
@@ -70,6 +73,7 @@ export async function POST(request: Request) {
     await activateHermesRoutes({
       projectRoot: context.projectRoot,
       recordStore: context.recordStore,
+      authorityProvider: context.authorityProvider,
       confirmationDigest: input.confirmationDigest,
       controllerUrl: controller.url,
       audience: controller.audience,
@@ -79,6 +83,7 @@ export async function POST(request: Request) {
     const status = await getHermesRouteActivationStatus({
       projectRoot: context.projectRoot,
       recordStore: context.recordStore,
+      authorityProvider: context.authorityProvider,
       now: new Date()
     });
     return NextResponse.json({ status: publicStatus(status) }, noStore(200));
@@ -92,7 +97,11 @@ function activationContext() {
   const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
   return {
     projectRoot,
-    recordStore: getHermesRouteActivationStore({ projectRoot, workspaceId })
+    recordStore: getHermesRouteActivationStore({ projectRoot, workspaceId }),
+    authorityProvider: createHostedHermesRouteActivationAuthorityProvider({
+      projectRoot,
+      workspaceId
+    })
   };
 }
 
