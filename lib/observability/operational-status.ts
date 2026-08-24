@@ -3,6 +3,7 @@ import "server-only";
 import { isHostedAuthRequired, isPublicHostedPreviewEnvironment } from "@/lib/auth/hosted-config";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
 import { resolveHostedRuntimeProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import { getHostedAppEvidenceHealth } from "./app-evidence-health";
 import { emitOperationalLog } from "./operational-log";
 
 export type OperationalMetrics = {
@@ -11,6 +12,16 @@ export type OperationalMetrics = {
   machineDenied5m: number;
   auditEventsTotal: number;
   auditHeadSequence: number;
+  cliSessionsTotal: number;
+  cliSessionsActive: number;
+  cliSessionsRefreshRequired: number;
+  cliSessionsExpired: number;
+  cliSessionsRevoked: number;
+  cliRefreshReuseDetectedTotal: number;
+  cliRefreshReuseDetected24h: number;
+  cliRefreshReuseUnrevoked: number;
+  cliDeviceAuthorizationsPending: number;
+  cliDeviceAuthorizationOldestPendingSeconds: number;
   routeJobsQueued: number;
   routeJobsRunning: number;
   routeJobsWaitingReview: number;
@@ -59,6 +70,16 @@ export type OperationalMetrics = {
   graphCommitsTotal: number;
   latestGraphSequence: number;
   appInstallationsTotal: number;
+  appEvidenceHealth: number;
+  appEvidenceInstallationsTotal: number;
+  appEvidenceInvalid: number;
+  appEvidenceExpired: number;
+  appEvidenceRenewSoon: number;
+  appEvidenceIncomplete: number;
+  appEvidenceCurrent: number;
+  appEvidenceNotApplicable: number;
+  appEvidenceItemsReturned: number;
+  appEvidencePlanTruncated: number;
   appLifecycleRecoveryPending: number;
   appLifecycleRecoveryPrepared: number;
   appLifecycleRecoveryRequiresReconciliation: number;
@@ -86,7 +107,9 @@ export type OperationalReadiness = {
     configuration: boolean;
     database: boolean | null;
     audit: boolean | null;
+    cliSessionSecurity: boolean | null;
     runtimeNamespace: boolean | null;
+    appEvidenceFreshness: boolean | null;
     appLifecycleRecovery: boolean | null;
     appActionReconciliation: boolean | null;
   };
@@ -132,6 +155,16 @@ const EMPTY_METRICS: OperationalMetrics = {
   machineDenied5m: 0,
   auditEventsTotal: 0,
   auditHeadSequence: 0,
+  cliSessionsTotal: 0,
+  cliSessionsActive: 0,
+  cliSessionsRefreshRequired: 0,
+  cliSessionsExpired: 0,
+  cliSessionsRevoked: 0,
+  cliRefreshReuseDetectedTotal: 0,
+  cliRefreshReuseDetected24h: 0,
+  cliRefreshReuseUnrevoked: 0,
+  cliDeviceAuthorizationsPending: 0,
+  cliDeviceAuthorizationOldestPendingSeconds: 0,
   routeJobsQueued: 0,
   routeJobsRunning: 0,
   routeJobsWaitingReview: 0,
@@ -180,6 +213,16 @@ const EMPTY_METRICS: OperationalMetrics = {
   graphCommitsTotal: 0,
   latestGraphSequence: 0,
   appInstallationsTotal: 0,
+  appEvidenceHealth: 1,
+  appEvidenceInstallationsTotal: 0,
+  appEvidenceInvalid: 0,
+  appEvidenceExpired: 0,
+  appEvidenceRenewSoon: 0,
+  appEvidenceIncomplete: 0,
+  appEvidenceCurrent: 0,
+  appEvidenceNotApplicable: 0,
+  appEvidenceItemsReturned: 0,
+  appEvidencePlanTruncated: 0,
   appLifecycleRecoveryPending: 0,
   appLifecycleRecoveryPrepared: 0,
   appLifecycleRecoveryRequiresReconciliation: 0,
@@ -209,7 +252,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         configuration: true,
         database: null,
         audit: null,
+        cliSessionSecurity: null,
         runtimeNamespace: null,
+        appEvidenceFreshness: null,
         appLifecycleRecovery: null,
         appActionReconciliation: null
       },
@@ -226,8 +271,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     process.env.LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS
   );
   let runtimeNamespace = false;
+  let runtimeProjectRoot: string | undefined;
   try {
-    resolveHostedRuntimeProjectRoot(process.env);
+    runtimeProjectRoot = resolveHostedRuntimeProjectRoot(process.env);
     runtimeNamespace = true;
   } catch {
     runtimeNamespace = false;
@@ -261,7 +307,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         configuration,
         database: Boolean(supabase),
         audit: false,
+        cliSessionSecurity: false,
         runtimeNamespace,
+        appEvidenceFreshness: false,
         appLifecycleRecovery: false,
         appActionReconciliation: false
       },
@@ -271,11 +319,13 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
 
   const [
     operational,
+    cliSessionSecurity,
     callbacks,
     discoveryDesign,
     loopSpecRegistry,
     opportunityController,
     semanticGraph,
+    appEvidenceHealth,
     appLifecycleRecovery,
     appActionReconciliation
   ] =
@@ -283,6 +333,11 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       supabase.rpc("get_loopgraph_operational_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      supabase.rpc("get_cli_session_security_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_now: checkedAt
       }),
       supabase.rpc("get_hermes_callback_queue_snapshot", {
         p_organization_id: organizationId,
@@ -304,6 +359,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         p_organization_id: organizationId,
         p_project_key: projectKey
       }),
+      getHostedAppEvidenceHealth({ projectRoot: runtimeProjectRoot, now: new Date(checkedAt) })
+        .then((data) => ({ data, error: null }))
+        .catch((error: unknown) => ({ data: null, error })),
       supabase.rpc("get_app_lifecycle_recovery_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey,
@@ -317,19 +375,23 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     ]);
   if (
     operational.error ||
+    cliSessionSecurity.error ||
     callbacks.error ||
     discoveryDesign.error ||
     loopSpecRegistry.error ||
     opportunityController.error ||
     semanticGraph.error ||
+    appEvidenceHealth.error ||
     appLifecycleRecovery.error ||
     appActionReconciliation.error ||
     !isRecord(operational.data) ||
+    !isRecord(cliSessionSecurity.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
     !isRecord(loopSpecRegistry.data) ||
     !isRecord(opportunityController.data) ||
     !isRecord(semanticGraph.data) ||
+    !appEvidenceHealth.data ||
     !isRecord(appLifecycleRecovery.data) ||
     !isRecord(appActionReconciliation.data) ||
     operational.data.database_ready !== true
@@ -351,7 +413,9 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         configuration: true,
         database: false,
         audit: false,
+        cliSessionSecurity: false,
         runtimeNamespace: true,
+        appEvidenceFreshness: false,
         appLifecycleRecovery: false,
         appActionReconciliation: false
       },
@@ -359,31 +423,51 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     };
   }
 
-  const metrics = parseMetrics({
-    ...operational.data,
-    ...callbacks.data,
-    ...discoveryDesign.data,
-    ...loopSpecRegistry.data,
-    ...opportunityController.data,
-    ...semanticGraph.data,
-    ...appLifecycleRecovery.data,
-    ...appActionReconciliation.data
-  });
+  const metrics = {
+    ...parseMetrics({
+      ...operational.data,
+      ...cliSessionSecurity.data,
+      ...callbacks.data,
+      ...discoveryDesign.data,
+      ...loopSpecRegistry.data,
+      ...opportunityController.data,
+      ...semanticGraph.data,
+      ...appLifecycleRecovery.data,
+      ...appActionReconciliation.data
+    }),
+    appEvidenceHealth: appEvidenceHealth.data.health === "healthy" ? 1 : 0,
+    appEvidenceInstallationsTotal: appEvidenceHealth.data.totalInstallations,
+    appEvidenceInvalid: appEvidenceHealth.data.counts.invalid,
+    appEvidenceExpired: appEvidenceHealth.data.counts.expired,
+    appEvidenceRenewSoon: appEvidenceHealth.data.counts.renewSoon,
+    appEvidenceIncomplete: appEvidenceHealth.data.counts.incomplete,
+    appEvidenceCurrent: appEvidenceHealth.data.counts.current,
+    appEvidenceNotApplicable: appEvidenceHealth.data.counts.notApplicable,
+    appEvidenceItemsReturned: appEvidenceHealth.data.itemsReturned,
+    appEvidencePlanTruncated: appEvidenceHealth.data.truncated ? 1 : 0
+  };
+  const appEvidenceFreshnessHealthy = appEvidenceHealth.data.health === "healthy";
   const lifecycleRecoveryHealthy =
     metrics.appLifecycleRecoveryRequiresReconciliation === 0 &&
     metrics.appLifecycleRecoveryStale === 0;
   const actionReconciliationHealthy = metrics.appActionReconciliationStale === 0;
+  const cliSessionIntegrityHealthy = metrics.cliRefreshReuseUnrevoked === 0;
+  const cliSessionSecurityHealthy =
+    metrics.cliRefreshReuseDetected24h === 0 && cliSessionIntegrityHealthy;
 
   return {
-    ready: true,
-    degraded: !lifecycleRecoveryHealthy || !actionReconciliationHealthy,
+    ready: cliSessionIntegrityHealthy,
+    degraded: !appEvidenceFreshnessHealthy || !lifecycleRecoveryHealthy ||
+      !actionReconciliationHealthy || !cliSessionSecurityHealthy,
     mode: "hosted",
     checkedAt,
     checks: {
       configuration: true,
       database: true,
       audit: true,
+      cliSessionSecurity: cliSessionSecurityHealthy,
       runtimeNamespace: true,
+      appEvidenceFreshness: appEvidenceFreshnessHealthy,
       appLifecycleRecovery: lifecycleRecoveryHealthy,
       appActionReconciliation: actionReconciliationHealthy
     },
@@ -534,6 +618,36 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_security_audit_head_sequence Current audit-chain sequence.",
     "# TYPE loopgraph_security_audit_head_sequence gauge",
     `loopgraph_security_audit_head_sequence ${metrics.auditHeadSequence}`,
+    "# HELP loopgraph_cli_sessions_total Human CLI sessions in the tenant project.",
+    "# TYPE loopgraph_cli_sessions_total gauge",
+    `loopgraph_cli_sessions_total ${metrics.cliSessionsTotal}`,
+    "# HELP loopgraph_cli_sessions_active Human CLI sessions with current access and refresh authority.",
+    "# TYPE loopgraph_cli_sessions_active gauge",
+    `loopgraph_cli_sessions_active ${metrics.cliSessionsActive}`,
+    "# HELP loopgraph_cli_sessions_refresh_required Human CLI sessions whose access token expired while refresh authority remains.",
+    "# TYPE loopgraph_cli_sessions_refresh_required gauge",
+    `loopgraph_cli_sessions_refresh_required ${metrics.cliSessionsRefreshRequired}`,
+    "# HELP loopgraph_cli_sessions_expired Human CLI sessions whose refresh authority expired without explicit revocation.",
+    "# TYPE loopgraph_cli_sessions_expired gauge",
+    `loopgraph_cli_sessions_expired ${metrics.cliSessionsExpired}`,
+    "# HELP loopgraph_cli_sessions_revoked Human CLI sessions explicitly revoked or revoked by policy.",
+    "# TYPE loopgraph_cli_sessions_revoked gauge",
+    `loopgraph_cli_sessions_revoked ${metrics.cliSessionsRevoked}`,
+    "# HELP loopgraph_cli_refresh_reuse_detected_total CLI session families with detected prior-generation refresh replay.",
+    "# TYPE loopgraph_cli_refresh_reuse_detected_total gauge",
+    `loopgraph_cli_refresh_reuse_detected_total ${metrics.cliRefreshReuseDetectedTotal}`,
+    "# HELP loopgraph_cli_refresh_reuse_detected_24h CLI session families with refresh replay detected in the last 24 hours.",
+    "# TYPE loopgraph_cli_refresh_reuse_detected_24h gauge",
+    `loopgraph_cli_refresh_reuse_detected_24h ${metrics.cliRefreshReuseDetected24h}`,
+    "# HELP loopgraph_cli_refresh_reuse_unrevoked CLI session families where replay was detected without family revocation.",
+    "# TYPE loopgraph_cli_refresh_reuse_unrevoked gauge",
+    `loopgraph_cli_refresh_reuse_unrevoked ${metrics.cliRefreshReuseUnrevoked}`,
+    "# HELP loopgraph_cli_device_authorizations_pending Unexpired pending CLI device authorizations.",
+    "# TYPE loopgraph_cli_device_authorizations_pending gauge",
+    `loopgraph_cli_device_authorizations_pending ${metrics.cliDeviceAuthorizationsPending}`,
+    "# HELP loopgraph_cli_device_authorization_oldest_pending_seconds Age of the oldest unexpired pending CLI device authorization.",
+    "# TYPE loopgraph_cli_device_authorization_oldest_pending_seconds gauge",
+    `loopgraph_cli_device_authorization_oldest_pending_seconds ${metrics.cliDeviceAuthorizationOldestPendingSeconds}`,
     "# HELP loopgraph_route_jobs_queued Route jobs queued or waiting for retry.",
     "# TYPE loopgraph_route_jobs_queued gauge",
     `loopgraph_route_jobs_queued ${metrics.routeJobsQueued}`,
@@ -678,6 +792,36 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_app_installations_total Installed Apps in this tenant project.",
     "# TYPE loopgraph_app_installations_total gauge",
     `loopgraph_app_installations_total ${metrics.appInstallationsTotal}`,
+    "# HELP loopgraph_app_evidence_health Whether every installed App has non-invalid, non-expired evidence outside its renewal window.",
+    "# TYPE loopgraph_app_evidence_health gauge",
+    `loopgraph_app_evidence_health ${metrics.appEvidenceHealth}`,
+    "# HELP loopgraph_app_evidence_installations_total Installed Apps evaluated by the evidence-renewal contract.",
+    "# TYPE loopgraph_app_evidence_installations_total gauge",
+    `loopgraph_app_evidence_installations_total ${metrics.appEvidenceInstallationsTotal}`,
+    "# HELP loopgraph_app_evidence_invalid Installed Apps with invalid operating evidence.",
+    "# TYPE loopgraph_app_evidence_invalid gauge",
+    `loopgraph_app_evidence_invalid ${metrics.appEvidenceInvalid}`,
+    "# HELP loopgraph_app_evidence_expired Installed Apps whose operating evidence has expired.",
+    "# TYPE loopgraph_app_evidence_expired gauge",
+    `loopgraph_app_evidence_expired ${metrics.appEvidenceExpired}`,
+    "# HELP loopgraph_app_evidence_renew_soon Installed Apps whose operating evidence is inside the renewal window.",
+    "# TYPE loopgraph_app_evidence_renew_soon gauge",
+    `loopgraph_app_evidence_renew_soon ${metrics.appEvidenceRenewSoon}`,
+    "# HELP loopgraph_app_evidence_incomplete Installed Apps that still need operating evidence for higher maturity.",
+    "# TYPE loopgraph_app_evidence_incomplete gauge",
+    `loopgraph_app_evidence_incomplete ${metrics.appEvidenceIncomplete}`,
+    "# HELP loopgraph_app_evidence_current Installed Apps with current operating evidence.",
+    "# TYPE loopgraph_app_evidence_current gauge",
+    `loopgraph_app_evidence_current ${metrics.appEvidenceCurrent}`,
+    "# HELP loopgraph_app_evidence_not_applicable Installed Apps whose current maturity does not yet require operating evidence.",
+    "# TYPE loopgraph_app_evidence_not_applicable gauge",
+    `loopgraph_app_evidence_not_applicable ${metrics.appEvidenceNotApplicable}`,
+    "# HELP loopgraph_app_evidence_items_returned Bounded renewal-plan items returned to the health projection.",
+    "# TYPE loopgraph_app_evidence_items_returned gauge",
+    `loopgraph_app_evidence_items_returned ${metrics.appEvidenceItemsReturned}`,
+    "# HELP loopgraph_app_evidence_plan_truncated Whether the bounded renewal-plan item list was truncated.",
+    "# TYPE loopgraph_app_evidence_plan_truncated gauge",
+    `loopgraph_app_evidence_plan_truncated ${metrics.appEvidencePlanTruncated}`,
     "# HELP loopgraph_app_lifecycle_recovery_pending Prepared or interrupted App lifecycle operations requiring an exact retry.",
     "# TYPE loopgraph_app_lifecycle_recovery_pending gauge",
     `loopgraph_app_lifecycle_recovery_pending ${metrics.appLifecycleRecoveryPending}`,
@@ -742,6 +886,18 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     machineDenied5m: nonnegative(data.machine_denied_5m),
     auditEventsTotal: nonnegative(data.audit_events_total),
     auditHeadSequence: nonnegative(data.audit_head_sequence),
+    cliSessionsTotal: nonnegative(data.cli_sessions_total),
+    cliSessionsActive: nonnegative(data.cli_sessions_active),
+    cliSessionsRefreshRequired: nonnegative(data.cli_sessions_refresh_required),
+    cliSessionsExpired: nonnegative(data.cli_sessions_expired),
+    cliSessionsRevoked: nonnegative(data.cli_sessions_revoked),
+    cliRefreshReuseDetectedTotal: nonnegative(data.cli_refresh_reuse_detected_total),
+    cliRefreshReuseDetected24h: nonnegative(data.cli_refresh_reuse_detected_24h),
+    cliRefreshReuseUnrevoked: nonnegative(data.cli_refresh_reuse_unrevoked),
+    cliDeviceAuthorizationsPending: nonnegative(data.cli_device_authorizations_pending),
+    cliDeviceAuthorizationOldestPendingSeconds: nonnegative(
+      data.cli_device_authorizations_oldest_pending_seconds
+    ),
     routeJobsQueued: nonnegative(data.route_jobs_queued),
     routeJobsRunning: nonnegative(data.route_jobs_running),
     routeJobsWaitingReview: nonnegative(data.route_jobs_waiting_review),
@@ -808,6 +964,16 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     graphCommitsTotal: nonnegative(data.graph_commits_total),
     latestGraphSequence: nonnegative(data.latest_graph_sequence),
     appInstallationsTotal: nonnegative(data.app_installations_total),
+    appEvidenceHealth: 1,
+    appEvidenceInstallationsTotal: 0,
+    appEvidenceInvalid: 0,
+    appEvidenceExpired: 0,
+    appEvidenceRenewSoon: 0,
+    appEvidenceIncomplete: 0,
+    appEvidenceCurrent: 0,
+    appEvidenceNotApplicable: 0,
+    appEvidenceItemsReturned: 0,
+    appEvidencePlanTruncated: 0,
     appLifecycleRecoveryPending: nonnegative(data.app_lifecycle_recovery_pending),
     appLifecycleRecoveryPrepared: nonnegative(data.app_lifecycle_recovery_prepared),
     appLifecycleRecoveryRequiresReconciliation: nonnegative(

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   APP_CONFIGURATION_SCHEMA_VERSION,
+  APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_ACTION_SCHEMA_VERSION,
   APP_MATURITY_EVIDENCE_SCHEMA_VERSION,
+  APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
   LOOP_PACK_SCHEMA_VERSION,
+  appActivationGateSchema,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
@@ -13,6 +16,8 @@ import {
   appOperationActionSchema,
   appInstallationLockSchema,
   appMaturityEvidenceSchema,
+  appEvidenceRenewalPlanSchema,
+  deriveAppEvidenceFleetHealth,
   appPlatformJsonSchemas,
   assertSafeInitialRollout,
   canonicalAppDigest,
@@ -260,6 +265,46 @@ describe("Loopgraph App Platform contracts", () => {
     expect(() => appMaturityEvidenceSchema.parse({ ...evidence, evidenceDigest: digest("tampered") })).toThrow(/digest/i);
   });
 
+  it("keeps fleet evidence-renewal plans tenant-bound, bounded, and internally consistent", () => {
+    const plan = appEvidenceRenewalPlanSchema.parse({
+      schemaVersion: APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
+      workspaceId: "acme",
+      companyId: "acme-company",
+      generatedAt: now,
+      totalInstallations: 0,
+      totalMatched: 0,
+      counts: { notApplicable: 0, incomplete: 0, current: 0, renewSoon: 0, expired: 0, invalid: 0 },
+      items: []
+    });
+    expect(plan.items).toEqual([]);
+    expect(() => appEvidenceRenewalPlanSchema.parse({
+      ...plan,
+      totalInstallations: 1
+    })).toThrow(/counts must equal/i);
+    expect(() => appEvidenceRenewalPlanSchema.parse({
+      ...plan,
+      totalMatched: 1
+    })).toThrow(/within the installation total/i);
+  });
+
+  it("derives fleet health with invalid evidence taking precedence over renewal warnings", () => {
+    const empty = {
+      notApplicable: 0,
+      incomplete: 0,
+      current: 0,
+      renewSoon: 0,
+      expired: 0,
+      invalid: 0
+    };
+    expect(deriveAppEvidenceFleetHealth({ ...empty, invalid: 1, expired: 1 })).toBe("blocked");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, expired: 1 })).toBe("degraded");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, renewSoon: 1 })).toBe("degraded");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, incomplete: 1 })).toBe("healthy");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, current: 1 })).toBe("healthy");
+    expect(deriveAppEvidenceFleetHealth({ ...empty, notApplicable: 1 })).toBe("healthy");
+    expect(() => deriveAppEvidenceFleetHealth({ ...empty, invalid: -1 })).toThrow();
+  });
+
   it("requires signed catalogs to carry exact publisher trust material instead of a key label alone", () => {
     const signature = loopPackSignatureSchema.parse({
       schemaVersion: "loopgraph-pack-signature/v1alpha1",
@@ -433,12 +478,17 @@ describe("Loopgraph App Platform contracts", () => {
       writeBlocked: true,
       startedAt: now,
       completedAt: later,
+      sourceWindow: { from: "2026-08-01T00:00:00.000Z", to: "2026-08-08T00:00:00.000Z" },
       scenarios: [],
       metrics: {},
       evidenceRefs: []
     } as const;
     expect(appEvalRunSchema.parse(base).writeBlocked).toBe(true);
     expect(() => appEvalRunSchema.parse({ ...base, writeBlocked: false })).toThrow(/block all writes/i);
+    expect(() => appEvalRunSchema.parse({
+      ...base,
+      sourceWindow: { from: "2026-08-08T00:00:00.000Z", to: "2026-08-01T00:00:00.000Z" }
+    })).toThrow(/source window end/i);
   });
 
   it("bounds historical replay by time window, event count, and event occurrence", () => {
@@ -482,11 +532,52 @@ describe("Loopgraph App Platform contracts", () => {
       "AppPromotionRecommendation",
       "AppOnboardingDraft",
       "AppOnboardingResetResult",
+      "AppActivationGate",
+      "AppEvidenceRenewalPlan",
       "AppOperationAction",
       "AppOperationActionEvent",
       "AppOperationActionCommitResult"
     ]));
     expect(JSON.stringify(schemas.LoopPackManifest)).toContain("loopgraph-pack/v1alpha1");
+  });
+
+  it("binds activation readiness to a canonical, internally consistent gate digest", () => {
+    const gateContent = {
+      schemaVersion: APP_ACTIVATION_GATE_SCHEMA_VERSION,
+      installationId: "install.sales-inbound",
+      appId: "loopgraph.sales.inbound-leads",
+      artifactDigest: digest("sales-inbound-artifact"),
+      fromState: "shadow" as const,
+      requestedMode: "recommend" as const,
+      status: "ready" as const,
+      requiredMaturity: "connected" as const,
+      observedMaturity: "connected" as const,
+      checks: [
+        { id: "ordered-lifecycle", status: "pass" as const, summary: "The transition is ordered.", evidenceRefs: [] },
+        { id: "operational-maturity", status: "pass" as const, summary: "Connected maturity is achieved.", evidenceRefs: ["evaluation:synthetic"] },
+        { id: "promotion-evidence", status: "pass" as const, summary: "Historical decisions are reviewed.", evidenceRefs: ["evaluation:replay"] },
+        { id: "permission-boundary", status: "pass" as const, summary: "Writes remain blocked.", evidenceRefs: [] }
+      ],
+      evidenceRefs: ["evaluation:synthetic", "evaluation:replay"],
+      evaluatedAt: now
+    };
+    const gate = appActivationGateSchema.parse({
+      ...gateContent,
+      gateDigest: canonicalAppDigest(gateContent)
+    });
+    expect(gate.status).toBe("ready");
+    expect(() => appActivationGateSchema.parse({ ...gate, observedMaturity: "concept" })).toThrow(/digest/i);
+    expect(() => appActivationGateSchema.parse({
+      ...gate,
+      status: "ready",
+      checks: gate.checks.map((check) => check.id === "promotion-evidence" ? { ...check, status: "blocked" } : check),
+      gateDigest: canonicalAppDigest({
+        ...gate,
+        status: "ready",
+        checks: gate.checks.map((check) => check.id === "promotion-evidence" ? { ...check, status: "blocked" } : check),
+        gateDigest: undefined
+      })
+    })).toThrow(/status must be blocked/i);
   });
 
   it("only permits safe initial rollout modes", () => {
