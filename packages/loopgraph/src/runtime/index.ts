@@ -20,6 +20,8 @@ export * from "./assessment-providers";
 export * from "./improvement-loader";
 export * from "./management-rollup";
 export * from "./routing-store";
+export * from "./routing-learning-context";
+export * from "./routing-learning-effectiveness";
 export * from "./route-job-worker";
 export * from "./route-job-worker-tools";
 export * from "./outcome-store";

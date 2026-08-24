@@ -6,6 +6,7 @@ import {
   HERMES_ROUTE_ACTIVATION_PLAN_SCHEMA_VERSION,
   HERMES_ROUTE_ACTIVATION_RECORD_SCHEMA_VERSION,
   HERMES_ROUTE_CONTROLLER_REQUEST_SCHEMA_VERSION,
+  connectionInstanceSchema,
   contentHash,
   hermesRouteActivationPlanSchema,
   hermesRouteActivationRecordSchema,
@@ -22,6 +23,7 @@ import { defaultConnectorManifests, readConnectionInstances } from "./connector-
 import {
   doctorHermesWebhookRoutes,
   readHermesRoutesManifest,
+  type HermesWebhookPlanResult,
   type HermesWebhookRoutePlanItem
 } from "./hermes-webhooks";
 import { appInstallationRegistrySchema } from "./app-installation-store";
@@ -31,6 +33,59 @@ import { getLoopgraphRoot } from "./storage-resolver";
 import type { WorkloadTokenProvider } from "./workload-token-provider";
 
 export const HERMES_ROUTE_ACTIVATION_FILE = "hermes-route-activation.json" as const;
+export const HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION =
+  "hermes-route-activation-authority/v1alpha1" as const;
+
+export type HermesRouteActivationAuthority = {
+  schemaVersion: typeof HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION;
+  projectRootHash: string;
+  manifestDigest: string;
+  webhookPlan: HermesWebhookPlanResult;
+  connections: ConnectionInstance[];
+  appConnectionBindingsByLoopId: Record<string, string[]>;
+  warnings: string[];
+};
+
+export type HermesRouteActivationAuthorityProvider = (input: {
+  projectRoot: string;
+  now: Date;
+}) => Promise<HermesRouteActivationAuthority>;
+
+export interface HermesRouteActivationStore {
+  readonly persistence: "file" | "distributed";
+  readonly reference: string;
+  read(): Promise<HermesRouteActivationRecord | null>;
+  write(record: HermesRouteActivationRecord): Promise<void>;
+}
+
+export class FileHermesRouteActivationStore implements HermesRouteActivationStore {
+  readonly persistence = "file" as const;
+  readonly reference: string;
+
+  constructor(private readonly projectRoot = process.cwd()) {
+    this.reference = activationRecordPath(path.resolve(projectRoot));
+  }
+
+  async read(): Promise<HermesRouteActivationRecord | null> {
+    try {
+      return validateHermesRouteActivationRecord(JSON.parse(await readFile(this.reference, "utf8")));
+    } catch (error) {
+      if (isFileNotFound(error)) return null;
+      if (error instanceof HermesRouteActivationError) throw error;
+      throw new HermesRouteActivationError("activation_record_invalid", "Stored Hermes route activation receipt is invalid");
+    }
+  }
+
+  async write(recordInput: HermesRouteActivationRecord): Promise<void> {
+    const record = validateHermesRouteActivationRecord(recordInput);
+    await mkdir(path.dirname(this.reference), { recursive: true, mode: 0o700 });
+    const temporaryPath = `${this.reference}.${process.pid}.${randomUUID()}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
+    await rename(temporaryPath, this.reference);
+    if (process.platform !== "win32") await chmod(this.reference, 0o600);
+  }
+}
 
 export const hermesRouteActivationPrepareInputSchema = z.object({
   projectRoot: z.string().optional()
@@ -93,6 +148,7 @@ export async function callLoopgraphHermesRouteActivationTool(
 export type PrepareHermesRouteActivationInput = {
   projectRoot?: string;
   now?: Date;
+  authorityProvider?: HermesRouteActivationAuthorityProvider;
 };
 
 export type ActivateHermesRoutesInput = PrepareHermesRouteActivationInput & {
@@ -101,6 +157,11 @@ export type ActivateHermesRoutesInput = PrepareHermesRouteActivationInput & {
   confirmationDigest: string;
   tokenProvider: WorkloadTokenProvider;
   fetcher?: typeof fetch;
+  recordStore?: HermesRouteActivationStore;
+};
+
+export type GetHermesRouteActivationStatusInput = PrepareHermesRouteActivationInput & {
+  recordStore?: HermesRouteActivationStore;
 };
 
 export type HermesRouteActivationStatus = {
@@ -130,24 +191,22 @@ export async function prepareHermesRouteActivation(
   input: PrepareHermesRouteActivationInput = {}
 ): Promise<HermesRouteActivationPlan> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const generatedAt = (input.now ?? new Date()).toISOString();
-  const doctor = await doctorHermesWebhookRoutes({ projectRoot, now: input.now });
-  if (!doctor.ok) {
+  const now = input.now ?? new Date();
+  const generatedAt = now.toISOString();
+  const authority = input.authorityProvider
+    ? validateHermesRouteActivationAuthority(await input.authorityProvider({ projectRoot, now }))
+    : await localHermesRouteActivationAuthority(projectRoot, now);
+  if (path.resolve(authority.webhookPlan.projectRoot) !== projectRoot) {
     throw new HermesRouteActivationError(
-      "manifest_not_current",
-      "Hermes route activation requires a current .loopgraph/hermes-routes.json manifest"
+      "route_authority_scope_mismatch",
+      "Hermes route activation authority does not belong to the selected project"
     );
   }
-  const manifest = await readHermesRoutesManifest(doctor.manifestPath);
-  if (!manifest) {
-    throw new HermesRouteActivationError("manifest_missing", "Hermes route manifest is missing");
-  }
-
-  const connections = await readConnectionInstances(projectRoot);
+  const connections = authority.connections;
   const connectorManifests = defaultConnectorManifests();
-  const appConnectionBindingsByLoopId = await readAppConnectionBindingsByLoopId(projectRoot);
-  const warnings = [...doctor.warnings];
-  const routes = doctor.plan.routes.flatMap((route) => {
+  const appConnectionBindingsByLoopId = bindingMap(authority.appConnectionBindingsByLoopId);
+  const warnings = [...authority.webhookPlan.warnings, ...authority.warnings];
+  const routes = authority.webhookPlan.routes.flatMap((route) => {
     if (route.routeKind !== "provider_event") {
       return [activationRoute(route, {
         transformerId: route.routeKind === "loopgraph_lifecycle"
@@ -186,11 +245,10 @@ export async function prepareHermesRouteActivation(
       });
     });
   }).sort((left, right) => left.routeName.localeCompare(right.routeName));
-  const manifestDigest = contentHash(manifest);
   const planIdentity = {
-    projectRootHash: manifest.projectRootHash,
-    catalogVersion: manifest.catalogVersion,
-    manifestDigest,
+    projectRootHash: authority.projectRootHash,
+    catalogVersion: authority.webhookPlan.catalogVersion,
+    manifestDigest: authority.manifestDigest,
     controllerProtocol: HERMES_ROUTE_CONTROLLER_REQUEST_SCHEMA_VERSION,
     destructiveChangesAllowed: false as const,
     routes
@@ -217,7 +275,11 @@ export async function activateHermesRoutes(
 ): Promise<HermesRouteActivationRecord> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const now = input.now ?? new Date();
-  const plan = await prepareHermesRouteActivation({ projectRoot, now });
+  const plan = await prepareHermesRouteActivation({
+    projectRoot,
+    now,
+    authorityProvider: input.authorityProvider
+  });
   if (input.confirmationDigest !== plan.planDigest) {
     throw new HermesRouteActivationError(
       "confirmation_digest_mismatch",
@@ -248,17 +310,18 @@ export async function activateHermesRoutes(
     receipt
   });
   assertSecretFree(record, "Hermes route activation record");
-  await writeActivationRecord(projectRoot, record);
+  await (input.recordStore ?? new FileHermesRouteActivationStore(projectRoot)).write(record);
   return record;
 }
 
 export async function getHermesRouteActivationStatus(
-  input: PrepareHermesRouteActivationInput = {}
+  input: GetHermesRouteActivationStatusInput = {}
 ): Promise<HermesRouteActivationStatus> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
-  const recordPath = activationRecordPath(projectRoot);
+  const recordStore = input.recordStore ?? new FileHermesRouteActivationStore(projectRoot);
+  const recordPath = recordStore.reference;
   const checkedAt = (input.now ?? new Date()).toISOString();
-  const record = await readActivationRecord(projectRoot);
+  const record = await recordStore.read();
   if (!record) {
     return {
       projectRoot,
@@ -276,7 +339,11 @@ export async function getHermesRouteActivationStatus(
   let currentPlan: HermesRouteActivationPlan | undefined;
   let planError: string | undefined;
   try {
-    currentPlan = await prepareHermesRouteActivation({ projectRoot, now: input.now });
+    currentPlan = await prepareHermesRouteActivation({
+      projectRoot,
+      now: input.now,
+      authorityProvider: input.authorityProvider
+    });
   } catch (error) {
     planError = redactSensitiveString(error instanceof Error ? error.message : "Current route plan could not be prepared");
   }
@@ -378,6 +445,103 @@ export class HermesRouteActivationError extends Error {
     super(message);
     this.name = "HermesRouteActivationError";
   }
+}
+
+export function validateHermesRouteActivationAuthority(
+  input: HermesRouteActivationAuthority
+): HermesRouteActivationAuthority {
+  if (input.schemaVersion !== HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION) {
+    throw new HermesRouteActivationError(
+      "route_authority_invalid",
+      "Hermes route activation authority has an unsupported schema version"
+    );
+  }
+  if (!/^[a-f0-9]{16}$/.test(input.projectRootHash) || !/^[a-f0-9]{16}$/.test(input.manifestDigest)) {
+    throw new HermesRouteActivationError(
+      "route_authority_invalid",
+      "Hermes route activation authority digests are invalid"
+    );
+  }
+  if (
+    input.webhookPlan.schemaVersion !== "hermes-webhook-plan/v1alpha1" ||
+    !input.webhookPlan.catalogVersion ||
+    input.webhookPlan.routes.length < 1
+  ) {
+    throw new HermesRouteActivationError(
+      "route_authority_invalid",
+      "Hermes route activation authority has no valid route plan"
+    );
+  }
+  const connections = input.connections.map((connection) => connectionInstanceSchema.parse(connection));
+  const connectionIds = new Set(connections.map((connection) => connection.id));
+  const appConnectionBindingsByLoopId = Object.fromEntries(
+    Object.entries(input.appConnectionBindingsByLoopId)
+      .map(([loopId, bindings]): [string, string[]] => {
+        if (!loopId.trim() || !Array.isArray(bindings)) {
+          throw new HermesRouteActivationError(
+            "route_authority_invalid",
+            "Hermes route activation App bindings are invalid"
+          );
+        }
+        const normalized = [...new Set(bindings)].sort();
+        if (normalized.some((connectionId) => !connectionIds.has(connectionId))) {
+          throw new HermesRouteActivationError(
+            "route_authority_invalid",
+            `Hermes route activation App loop ${loopId} references an unknown connection`
+          );
+        }
+        return [loopId, normalized];
+      })
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
+  const authority = {
+    ...input,
+    connections,
+    appConnectionBindingsByLoopId,
+    warnings: [...new Set(input.warnings)].sort()
+  };
+  assertSecretFree(authority, "Hermes route activation authority");
+  return authority;
+}
+
+async function localHermesRouteActivationAuthority(
+  projectRoot: string,
+  now: Date
+): Promise<HermesRouteActivationAuthority> {
+  const doctor = await doctorHermesWebhookRoutes({ projectRoot, now });
+  if (!doctor.ok) {
+    throw new HermesRouteActivationError(
+      "manifest_not_current",
+      "Hermes route activation requires a current .loopgraph/hermes-routes.json manifest"
+    );
+  }
+  const manifest = await readHermesRoutesManifest(doctor.manifestPath);
+  if (!manifest) {
+    throw new HermesRouteActivationError("manifest_missing", "Hermes route manifest is missing");
+  }
+  const [connections, bindings] = await Promise.all([
+    readConnectionInstances(projectRoot),
+    readAppConnectionBindingsByLoopId(projectRoot)
+  ]);
+  return validateHermesRouteActivationAuthority({
+    schemaVersion: HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION,
+    projectRootHash: manifest.projectRootHash,
+    manifestDigest: contentHash(manifest),
+    webhookPlan: doctor.plan,
+    connections,
+    appConnectionBindingsByLoopId: Object.fromEntries(
+      [...bindings.entries()].map(([loopId, connectionIds]) => [loopId, [...connectionIds].sort()])
+    ),
+    warnings: doctor.warnings
+  });
+}
+
+function bindingMap(
+  bindings: Record<string, string[]>
+): Map<string, Set<string>> {
+  return new Map(
+    Object.entries(bindings).map(([loopId, connectionIds]) => [loopId, new Set(connectionIds)])
+  );
 }
 
 function activationRoute(
@@ -659,20 +823,27 @@ export function activationRecordPath(projectRoot: string): string {
   return path.join(getLoopgraphRoot(projectRoot), HERMES_ROUTE_ACTIVATION_FILE);
 }
 
-async function readActivationRecord(projectRoot: string): Promise<HermesRouteActivationRecord | null> {
-  try {
-    const record = hermesRouteActivationRecordSchema.parse(JSON.parse(await readFile(activationRecordPath(projectRoot), "utf8")));
-    verifyStoredActivationRecord(record);
-    return record;
-  } catch (error) {
-    if (isFileNotFound(error)) return null;
-    throw new HermesRouteActivationError("activation_record_invalid", "Stored Hermes route activation receipt is invalid");
-  }
-}
-
-function verifyStoredActivationRecord(record: HermesRouteActivationRecord): void {
+export function validateHermesRouteActivationRecord(input: unknown): HermesRouteActivationRecord {
+  const record = hermesRouteActivationRecordSchema.parse(input);
   const receipt = record.receipt;
   const plan = record.plan;
+  for (const route of plan.routes) {
+    const { configDigest, ...routeIdentity } = route;
+    if (contentHash(routeIdentity) !== configDigest) {
+      throw new Error(`Stored Hermes route ${route.routeName} changed its content digest`);
+    }
+  }
+  const planIdentity = {
+    projectRootHash: plan.projectRootHash,
+    catalogVersion: plan.catalogVersion,
+    manifestDigest: plan.manifestDigest,
+    controllerProtocol: plan.controllerProtocol,
+    destructiveChangesAllowed: plan.destructiveChangesAllowed,
+    routes: plan.routes
+  };
+  if (contentHash(planIdentity) !== plan.planDigest) {
+    throw new Error("Stored Hermes route activation plan changed its content digest");
+  }
   if (
     receipt.projectRootHash !== plan.projectRootHash ||
     receipt.catalogVersion !== plan.catalogVersion ||
@@ -723,6 +894,7 @@ function verifyStoredActivationRecord(record: HermesRouteActivationRecord): void
     throw new Error("Stored Hermes route readiness does not match its route receipts");
   }
   assertSecretFree(record, "stored Hermes route activation record");
+  return record;
 }
 
 function routeReceiptReady(
@@ -734,16 +906,6 @@ function routeReceiptReady(
     (desired.subscription.required
       ? actual.subscriptionState === "active"
       : ["active", "not_applicable"].includes(actual.subscriptionState));
-}
-
-async function writeActivationRecord(projectRoot: string, record: HermesRouteActivationRecord): Promise<void> {
-  const filePath = activationRecordPath(projectRoot);
-  await mkdir(path.dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600, flag: "wx" });
-  if (process.platform !== "win32") await chmod(temporaryPath, 0o600);
-  await rename(temporaryPath, filePath);
-  if (process.platform !== "win32") await chmod(filePath, 0o600);
 }
 
 function isFileNotFound(error: unknown): boolean {

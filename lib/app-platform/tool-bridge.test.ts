@@ -10,6 +10,11 @@ const mocks = vi.hoisted(() => ({
   hostedSearch: vi.fn(),
   getDatabase: vi.fn(),
   listInstallations: vi.fn(),
+  getRouteActivationStatus: vi.fn(),
+  routeAuthorityProvider: vi.fn(),
+  webhookDoctorProvider: vi.fn(),
+  createRouteAuthorityProvider: vi.fn(),
+  createWebhookDoctorProvider: vi.fn(),
   externalBroker: { execute: vi.fn(), prepareAction: vi.fn() },
   getExternalBroker: vi.fn(),
   activeProjectRoot: vi.fn(),
@@ -24,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   loopSpecStore: { persistence: "distributed" },
   connectorFieldMappingStore: { persistence: "distributed" },
   providerSchemaSnapshotStore: { persistence: "distributed" },
+  routeActivationStore: { persistence: "distributed" },
   getOutcomeStore: vi.fn(),
   getHermesOperationsStore: vi.fn(),
   getRoutingStore: vi.fn(),
@@ -34,12 +40,14 @@ const mocks = vi.hoisted(() => ({
   getLoopSpecRegistryStore: vi.fn(),
   getConnectorFieldMappingStore: vi.fn(),
   getProviderSchemaSnapshotStore: vi.fn(),
-  getAppVerificationStore: vi.fn()
+  getAppVerificationStore: vi.fn(),
+  getHermesRouteActivationStore: vi.fn()
 }));
 
 vi.mock("loopgraph/runtime", () => ({
   callLoopgraphAppTool: mocks.runtimeTool,
-  connectionInstanceFromBrokerInstallation: vi.fn((installation) => installation)
+  connectionInstanceFromBrokerInstallation: vi.fn((installation) => installation),
+  getHermesRouteActivationStatus: mocks.getRouteActivationStatus
 }));
 vi.mock("@/lib/auth/hosted-config", () => ({
   isHostedAuthRequired: vi.fn(() => true),
@@ -71,7 +79,12 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getLoopSpecRegistryStore: mocks.getLoopSpecRegistryStore,
   getConnectorFieldMappingStore: mocks.getConnectorFieldMappingStore,
   getProviderSchemaSnapshotStore: mocks.getProviderSchemaSnapshotStore,
-  getAppVerificationStore: mocks.getAppVerificationStore
+  getAppVerificationStore: mocks.getAppVerificationStore,
+  getHermesRouteActivationStore: mocks.getHermesRouteActivationStore
+}));
+vi.mock("@/lib/loopgraph-runtime/hosted-hermes-route-authority", () => ({
+  createHostedHermesRouteActivationAuthorityProvider: mocks.createRouteAuthorityProvider,
+  createHostedHermesWebhookDoctorProvider: mocks.createWebhookDoctorProvider
 }));
 vi.mock("@/lib/db/adapters/supabase-marketplace-registry-store", () => ({
   SupabaseMarketplaceRegistryStore: class {
@@ -103,6 +116,9 @@ beforeEach(() => {
   mocks.getConnectorFieldMappingStore.mockReturnValue(mocks.connectorFieldMappingStore);
   mocks.getProviderSchemaSnapshotStore.mockReturnValue(mocks.providerSchemaSnapshotStore);
   mocks.getAppVerificationStore.mockReturnValue(mocks.appVerificationStore);
+  mocks.getHermesRouteActivationStore.mockReturnValue(mocks.routeActivationStore);
+  mocks.createRouteAuthorityProvider.mockReturnValue(mocks.routeAuthorityProvider);
+  mocks.createWebhookDoctorProvider.mockReturnValue(mocks.webhookDoctorProvider);
 });
 
 afterEach(() => {
@@ -127,8 +143,11 @@ describe("hosted app tool bridge", () => {
       expect(options).toMatchObject({
         outcomeStore: mocks.outcomeStore,
         hermesOperationsStore: mocks.hermesOperationsStore,
-        loopSpecStore: mocks.loopSpecStore
+        loopSpecStore: mocks.loopSpecStore,
+        routeActivationStatusProvider: expect.any(Function),
+        webhookDoctorProvider: mocks.webhookDoctorProvider
       });
+      await options.routeActivationStatusProvider({ now: new Date("2026-08-23T22:00:00.000Z") });
       expect(options.appVerificationStoreFactory("acme")).toBe(mocks.appVerificationStore);
       expect(options.appInstallationStoreFactory("acme")).toBe(mocks.appInstallationStore);
       expect(options.appSnapshotStoreFactory("acme")).toBe(mocks.appSnapshotStore);
@@ -195,8 +214,11 @@ describe("hosted app tool bridge", () => {
       expect(options).toMatchObject({
         outcomeStore: mocks.outcomeStore,
         hermesOperationsStore: mocks.hermesOperationsStore,
-        loopSpecStore: mocks.loopSpecStore
+        loopSpecStore: mocks.loopSpecStore,
+        routeActivationStatusProvider: expect.any(Function),
+        webhookDoctorProvider: mocks.webhookDoctorProvider
       });
+      await options.routeActivationStatusProvider({ now: new Date("2026-08-23T22:00:00.000Z") });
       return { ok: true };
     });
     for (const name of [
@@ -219,6 +241,14 @@ describe("hosted app tool bridge", () => {
     }
     expect(mocks.getOutcomeStore).toHaveBeenCalledTimes(3);
     expect(mocks.getHermesOperationsStore).toHaveBeenCalledTimes(3);
+    expect(mocks.getRouteActivationStatus).toHaveBeenCalledTimes(3);
+    expect(mocks.getRouteActivationStatus).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectRoot: "/srv/loopgraph/tenant/main",
+      recordStore: mocks.routeActivationStore,
+      authorityProvider: expect.any(Function)
+    }));
+    const snapshotProvider = mocks.getRouteActivationStatus.mock.calls.at(-1)?.[0].authorityProvider;
+    expect(mocks.createWebhookDoctorProvider).toHaveBeenCalledWith(snapshotProvider);
   });
 
   it("binds headless Hermes App execution to the verified machine tenant without a browser session", async () => {

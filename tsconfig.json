@@ -74,6 +74,9 @@
       "@/lib/loopgraph-runtime/worker-api-auth": [
         "./lib/loopgraph-runtime/worker-api-auth.ts"
       ],
+      "@/lib/loopgraph-runtime/hosted-hermes-route-authority": [
+        "./lib/loopgraph-runtime/hosted-hermes-route-authority.ts"
+      ],
       "@/lib/loopgraph-runtime/metric-planner": [
         "./lib/loopgraph-runtime/metric-planner.ts"
       ],
