@@ -32,6 +32,7 @@ continuously export the chain head and events to a separately controlled retenti
 | `GET /api/health/live` | Public, no details | Confirms the web process can respond |
 | `GET /api/health/ready` | Public, no dependency details | Returns `200` only when hosted configuration, tenant namespace, database, and audit RPC are ready |
 | `GET /api/operations/metrics` | Workload identity with `observability.read` | Prometheus-format readiness and security-control counters |
+| `GET /api/cron/app-evidence-health` | Workload identity with `schedule.app_evidence_health` | Re-evaluates tenant App proof freshness hourly and emits one aggregate, secret-free operational observation |
 | `GET /api/operations/audit-export` | Workload identity with `observability.read` | Machine export bounded to one verified immutable checkpoint |
 | `GET /api/audit/export` | Signed-in organization `admin` or `owner` | Human export bounded to one verified immutable checkpoint |
 
@@ -86,6 +87,13 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 - `loopgraph_ready == 0` for two consecutive checks: page the service owner;
 - any sustained increase in `loopgraph_machine_denied_5m`: investigate credential drift or abuse;
 - any `loopgraph_machine_rate_limited_5m > 0`: inspect the caller and expected schedule;
+- any `loopgraph_cli_refresh_reuse_detected_24h > 0`: page the security owner, preserve the
+  matching bounded audit chain, revoke or rotate adjacent user authority, and confirm the affected
+  family is represented in `loopgraph_cli_sessions_revoked`;
+- any `loopgraph_cli_refresh_reuse_unrevoked > 0`: fail readiness, block promotion, and treat the
+  session store as inconsistent until every replayed family is revoked;
+- `loopgraph_cli_device_authorization_oldest_pending_seconds > 600`: investigate expiry processing
+  and device-flow abuse; never expose codes or request fingerprints in the alert;
 - any `loopgraph_route_jobs_dead_letter > 0`: stop promotion for the affected route and inspect
   its last error;
 - sustained `loopgraph_route_job_expired_leases > 0` or increasing
@@ -106,6 +114,14 @@ Wire the protected metrics into the deployment monitoring system and begin with:
   `loopgraph_app_action_reconciliation_stale_after_seconds`: page the connector platform owner,
   preserve the original request identity, and inspect Broker receipt storage; never retry the
   provider mutation;
+- any `loopgraph_app_evidence_invalid > 0`: block App promotion, inspect the exact App through
+  Hermes or the authorized Installed Apps surface, and repair the bound evidence references;
+- any `loopgraph_app_evidence_expired > 0`: keep the affected App at its currently allowed mode
+  and renew proof through a bounded write-blocked replay plus current observed operating evidence;
+- any `loopgraph_app_evidence_renew_soon > 0`: schedule the service-authored Hermes renewal action
+  before the evidence window closes; monitoring must not invoke that action itself;
+- any `loopgraph_app_evidence_plan_truncated > 0`: inspect the full tenant renewal plan in bounded
+  pages before claiming fleet proof health;
 - increasing `loopgraph_discovery_oldest_active_seconds` while a design is expected to progress:
   inspect unresolved evidence, outbound Hermes delivery, and proposals waiting for review;
 - increasing `loopgraph_discovery_sessions_active` with no increase in
@@ -113,10 +129,14 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 - an audit-chain verification response of `409`: stop promotion and preserve database evidence.
 
 The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
-Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, immutable
-design artifacts, App lifecycle recovery, and App action receipt reconciliation. App recovery
-metrics contain aggregate counts and age only; App IDs, installation IDs, action IDs, request IDs,
-actors, connector fields, and company-context keys are excluded.
+Hermes dispatch queue, inbound Hermes callback inbox, human CLI session security, discovery sessions, evidence gaps, immutable
+design artifacts, App lifecycle recovery, App action receipt reconciliation, and the same versioned
+App evidence-renewal contract consumed by Hermes. CLI, App recovery, and evidence-health metrics contain
+aggregate counts only; token digests, user/device identities, request fingerprints, App IDs,
+installation IDs, action IDs, request IDs, actors, connector fields, provider payloads, and
+company-context keys are excluded. Invalid, expired, or renew-soon proof
+sets `loopgraph_operational_degraded` without failing public traffic readiness. An unavailable,
+cross-workspace, malformed, stale, or future-dated evidence projection fails readiness closed.
 `loopgraph_operational_degraded` reports recoverable operator work without returning a public
 readiness failure that could remove healthy workers and make reconciliation harder.
 
@@ -134,9 +154,19 @@ After applying migrations to staging:
    and immutable-until deadline. See [Independent audit retention protocol](./AUDIT-RETENTION-PROTOCOL.md).
 8. Interrupt one staging-only App install after its prepared record, verify the protected metrics
    show pending recovery, retry the exact request, and verify every recovery metric returns to zero.
-9. Interrupt one staging-only App action after the Broker stores its commit receipt but before the
-   App ledger records a terminal event. Confirm the scheduled reconciliation worker resolves it,
-   then confirm pending and stale action-reconciliation metrics return to zero without a second
-   provider call. Use a staging-only fixture provider or an approved non-production provider
-   account that independently records invocation count; the aggregate `staging-validation/v5` gate
-   proves the final zero-backlog state but cannot by itself prove provider-side exactly-once work.
+9. Run `npm run prove:app-action-exactly-once` with the exact source commit. The no-network fixture
+   discards the first successful Broker response at the App terminal-ledger boundary, reconciles the
+   durable receipt, replays the original commit, and fails unless its provider handler ran exactly
+   once. For distributed-environment proof, repeat the process-loss scenario with an approved
+   non-production provider account that independently records invocation count. The aggregate
+   `staging-validation/v5` gate proves the final zero-backlog state but cannot by itself prove the
+   external provider's idempotency behavior.
+10. Run `npm run --silent validate:app-evidence-health-staging` from a protected runner. Preserve
+    the secret-free receipt and separately prove invalid/expired/renew-soon fixtures set the
+    expected protected metrics without creating replay, approval, activation, or provider-write
+    records.
+11. Rotate and replay one disposable staging CLI refresh family. Confirm
+    `loopgraph_cli_refresh_reuse_detected_24h` increments, `loopgraph_cli_refresh_reuse_unrevoked`
+    remains zero, readiness becomes operationally degraded, and the replay audit event reaches the
+    independent retention acknowledgement. Correlate the expected disposable staging alert to the
+    protected workflow run; the same signal outside that exact drill is a security incident.

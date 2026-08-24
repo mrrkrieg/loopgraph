@@ -29,6 +29,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/app-evidence-health",
+      "schedule": "17 * * * *"
+    },
+    {
       "path": "/api/connector-broker/v1/workers/oauth-refresh",
       "schedule": "*/5 * * * *"
     },
