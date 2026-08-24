@@ -5,6 +5,10 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
 ## Required controls
 
 - `ops/slo.yaml` is the versioned SLO and alert contract. Route its metrics to an alerting system with paging ownership; the file is not an alert delivery system by itself.
+- Hosted readiness also reads the service-role-only CLI security snapshot. Recent refresh-family
+  replay marks operations degraded, while any replayed-but-unrevoked family or unavailable snapshot
+  fails the protected readiness boundary. The projection exposes counts and ages only—never token
+  digests, users, devices, or request fingerprints.
 - `.github/workflows/staging-release.yml` builds once, deploys the prebuilt artifact to staging, validates it, and only promotes that verified deployment after protected-environment approval.
   The credential-bearing workflow chain runs only from the protected default branch
   `loopgraph/canvas-first`; environment deployment rules must enforce the same branch. Trigger it
@@ -22,8 +26,18 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   credentials. Update those pins only through a reviewed dependency change that resolves the
   vendor's release tag to its exact commit.
 - `npm run rehearse:restore` performs a real, snapshot-consistent `pg_dump` / isolated `pg_restore` exercise. It refuses to run unless source and disposable target URLs differ, the target has zero public tables, its database name explicitly identifies it as disposable, and `LOOPGRAPH_CONFIRM_ISOLATED_RESTORE=yes` is explicit.
-- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging and marketplace receipts and proves both exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
+- `npm run audit:drain` exports one bounded verified audit checkpoint with separate short-lived source and destination workload identities. It reads the current staging, marketplace, App evidence-health, CLI-session, and CLI-administrator receipts and proves all five exact sequence/hash checkpoints inside that chain. The independent receiver must enforce receipt-chain continuity and return an Ed25519-signed immutability acknowledgement.
 - `npm run validate:marketplace-staging` is the production marketplace gate. It requires four separately projected, short-lived workload identities: allowed tenant, foreign tenant, revoked grant, and observability. It proves exact signed artifact staging, tenant isolation, durable revocation, replay rejection, and accepted-request audit evidence without printing a token.
+- `npm run validate:cli-session-staging` is the isolated human-session drill. Through two replica
+  origins it saturates device issuance and one small request window, proves polling slowdown,
+  cross-replica refresh rotation, refresh-family replay revocation, stale-clock denial, suspended
+  membership, explicit session revocation, and exact audit presence. It consumes only pre-provisioned
+  disposable sessions and never serializes a returned token.
+- `npm run validate:cli-admin-staging` is the destructive disposable-session MFA drill. It proves an
+  AAL1 administrator cannot mutate the session, an AAL2 administrator revokes exactly one target,
+  the bounded inventory and access boundary project that revocation, and the exact atomic audit
+  event is retained. The protected job uses three quota-controlled browser calls so it fits the
+  reviewed staging administrator bucket without weakening the boundary.
 - `npm run validate:app-snapshots-staging` is the detached-App archive gate. It proves the private
   bucket contract, authenticated client denial for read/insert/update/delete, first-writer
   immutability, exact recovery through a second replica root, and verified cleanup. The service-role
@@ -51,9 +65,10 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   Missing, corrupt, untracked, unavailable, malformed, retention-drifted,
   unstable, incomplete, cross-scope, or stale evidence blocks promotion.
 - `npm run validate:staging` uses a projected observability workload identity plus three short-lived Supabase user sessions. It proves unauthenticated, foreign-tenant, and suspended-member denial, then consumes one complete staging-only `admin` quota window and requires the next request to return `429`. Its receipt contains status and bounded control summaries only; it does not copy cookies, tokens, response bodies, or user records into release evidence.
-- `npm run release:evidence:build` binds the current run's eight receipts to one source commit,
+- `npm run release:evidence:build` binds the current run's fifteen receipts to one source commit,
   deployment, source and restore Storage origins, tenant/project, database identity, exact
-  marketplace artifact, and independently reviewed retained-snapshot inventory.
+  marketplace artifact, independently reviewed active mutation and learning/entity probe scopes,
+  and retained-snapshot inventory.
   `npm run release:evidence:verify` reconstructs that manifest before promotion and fails on any
   substituted, stale, or mixed receipt.
 - App install/uninstall reconciliation is an operational gate. The tenant-scoped service-role
@@ -66,6 +81,13 @@ Loopgraph production promotion is evidence-gated. A successful build is necessar
   metrics without exposing action, installation, provider, or request identifiers. The default
   stale threshold is 300 seconds; set `LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS` only to a
   reviewed integer from 60 through 86400. An invalid value fails hosted configuration readiness.
+- App evidence freshness is derived from the same tenant-scoped, versioned renewal plan used by
+  Hermes, CLI, browser, and local supervisor. The protected metrics export aggregate invalid,
+  expired, renew-soon, incomplete, current, and not-applicable counts. Invalid, expired, or
+  renew-soon evidence degrades operations without removing healthy traffic workers; an unavailable,
+  malformed, cross-workspace, stale, or future-dated projection fails readiness closed. The hourly
+  scheduler has only `schedule.app_evidence_health` and cannot run replay, create approval, promote
+  an App, or invoke providers.
 
 ## App lifecycle recovery runbook
 
@@ -106,11 +128,36 @@ invokes the provider handler. A request older than the configured threshold is s
 6. Confirm pending and stale metrics return to zero and preserve the relevant audit-chain evidence
    before resuming promotion.
 
+## App evidence freshness runbook
+
+Before treating the monitor as production evidence, run the protected
+`npm run --silent validate:app-evidence-health-staging` gate against the exact deployment. It proves
+workload authorization, cross-tenant denial, replay rejection, the aggregate-only response
+contract, and parity between the schedule projection and protected Prometheus gauges. See
+[Hosted App evidence-health staging gate](./HOSTED-APP-EVIDENCE-HEALTH-STAGING-GATE.md).
+
+1. Confirm the protected alert is scoped to the expected tenant/project and compare invalid,
+   expired, renew-soon, and truncation metrics.
+2. Ask Hermes for the versioned fleet renewal plan or open Installed Apps. Do not copy provider
+   payloads, credentials, or arbitrary object values into logs or tickets.
+3. For invalid proof, repair the exact missing, unbound, malformed, or future-dated reference. For
+   expired proof, run a new bounded write-blocked replay and record current completed work, observed
+   outcomes, and observed net value. For renew-soon proof, schedule the returned safe action before
+   the evidence deadline.
+4. Keep replay, evidence recording, approval, and activation as separate accountable operations.
+   The health scheduler and metrics scraper must never perform them.
+5. Confirm the affected aggregate count returns to zero, the App maturity gate reflects the new
+   evidence clock, and relevant audit evidence is retained before considering promotion.
+
 ## Release evidence
 
-The protected workflow stores the staging, App action, marketplace, App snapshot isolation,
-App snapshot recovery, App snapshot reconciliation, database recovery, and audit-retention receipts
-as separate artifacts, compiles `loopgraph-production-promotion-evidence/v7`, and creates a GitHub OIDC
+The protected workflow stores the staging, App action, marketplace, hosted App evidence-health,
+cross-replica CLI-session, CLI-administrator MFA/revocation, exact marketplace-release revocation,
+live workload-issuer rotation,
+active App snapshot
+mutation-fence, distributed learning/entity, App snapshot isolation, App snapshot recovery,
+App snapshot reconciliation, database recovery, and audit-retention receipts as separate artifacts,
+compiles `loopgraph-production-promotion-evidence/v16`, and creates a GitHub OIDC
 provenance attestation for the exact manifest file. The production job downloads the same run's
 artifacts, reconstructs the manifest, verifies its evidence-set digest and GitHub attestation, and
 verifies the receiver acknowledgement against the production environment's independently configured
@@ -119,7 +166,7 @@ must not be replaced with a checkbox or an environment variable claiming a check
 [Production promotion evidence](./PRODUCTION-PROMOTION-EVIDENCE.md) for the schemas and protected
 environment setup.
 
-The `audit-drain/v3` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
+The `audit-drain/v8` receipt with its signed external acknowledgement is mandatory for every production promotion. Preserve it outside
 the application database through the protected runner's `LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE`; the
 sender atomically advances this predecessor only after verification. Production promotion depends
 on the protected `audit-retention-staging` job; an unavailable

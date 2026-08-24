@@ -983,11 +983,12 @@ Runtime routing should be optimized for bounded, reliable decisions:
 
 1. Hermes receives a narrow normalized event, never the unrestricted raw payload by default.
 2. Loopgraph returns a small eligible candidate set.
-3. Exact high-confidence events may use a fast routing profile.
-4. Ambiguous or high-impact events may use a stronger reasoning profile.
-5. Low-confidence decisions request human choice rather than guessing.
-6. The router never modifies a loop definition during an event turn.
-7. An event with no safe match becomes an unhandled business problem, not an excuse to call an arbitrary tool.
+3. Loopgraph returns a bounded advisory learning context compiled from scoped routing evaluations, human corrections, observed outcomes, net value, and subject history. The context cannot expand eligibility or authority.
+4. Exact high-confidence events may use a fast routing profile.
+5. Ambiguous or high-impact events may use a stronger reasoning profile.
+6. Low-confidence decisions request human choice rather than guessing.
+7. The router never modifies a loop definition during an event turn.
+8. An event with no safe match becomes an unhandled business problem, not an excuse to call an arbitrary tool.
 
 This separation prevents a noisy webhook from entering the expensive loop-design workflow and prevents the design workflow from becoming the execution authority.
 
@@ -1199,6 +1200,8 @@ The MVP can use native Hermes webhook routes, transform scripts, the router skil
 - Avoid modifying Hermes core.
 
 Project-local plugins are trusted code and should remain opt-in. For distribution, prefer a versioned pip entry point or user-level plugin installation.
+
+Current implementation status: Loopgraph now ships a dependency-free native Hermes plugin under `integrations/hermes-plugin`. Hermes can install that exact subdirectory from GitHub, so its security scanner examines only the adapter and bundled design/event-router skills rather than the application's intentional prompt-injection and credential-redaction regression fixtures. Registration is offline and side-effect free. The plugin registers the `hermes loopgraph` command tree, `/loopgraph` help, both read-only skills, and an exact-phrase onboarding hook. `hermes loopgraph plan` exposes the immutable source revision, package-lock digest, intended commands, and write boundaries. The confirmed installer fetches only the full 40-character revision recorded by Hermes, rejects lock drift before dependency installation, uses `npm ci --ignore-scripts`, builds the existing Loopgraph runtime, requires a clean production audit, and delegates setup, doctor, supervisor, and route rehearsal to the existing CLI. Business tools continue to arrive through the three scoped MCP profiles; the plugin does not duplicate routing logic, accept credentials, give webhook turns general tools, modify Hermes core, or perform work during registration.
 
 ### 9.8 Webhook configuration synchronization
 
@@ -1887,7 +1890,7 @@ Acceptance:
 
 - Hermes can choose only eligible registered loops; forged loop IDs and stale cards are rejected, and repeated evidence cannot create duplicate open problem work.
 
-Current implementation status: `loopgraph_routing_decision_submit` now validates Hermes-selected route input mappings against the registered `RoutingCard.inputMapping` and the durable normalized `EventEnvelope`. Route commits store Loopgraph's deterministic event-to-input mapping rather than trusting webhook-turn values, contradictory mapped values are rejected, and undeclared injected mapping targets cannot become loop inputs. Hermes also cannot change the business-problem subject during decision submission: a proposed problem subject must match the ingested event subject, and append-evidence decisions are rejected when the existing open problem belongs to another subject. Human-choice alternatives are bounded to registered routing catalog loop IDs before they are shown or committed. The public Hermes MCP schema does not expose caller-supplied routing catalogs, so decision submission recomputes the current project catalog instead of trusting stale or forged cards from the webhook turn.
+Current implementation status: `loopgraph_routing_decision_submit` now validates Hermes-selected route input mappings against the registered `RoutingCard.inputMapping` and the durable normalized `EventEnvelope`. Route commits store Loopgraph's deterministic event-to-input mapping rather than trusting webhook-turn values, contradictory mapped values are rejected, and undeclared injected mapping targets cannot become loop inputs. Hermes also cannot change the business-problem subject during decision submission: a proposed problem subject must match the ingested event subject, and append-evidence decisions are rejected when the existing open problem belongs to another subject. Human-choice alternatives are bounded to registered routing catalog loop IDs before they are shown or committed. The public Hermes MCP schema does not expose caller-supplied routing catalogs, so decision submission recomputes the current project catalog instead of trusting stale or forged cards from the webhook turn. Event ingest now returns a stable digest for its bounded cross-loop learning context; the event-router skill echoes it, submission recompiles the current context and rejects a stale acknowledgement, and the durable attempt stores the exact evidence packet and acknowledgement state for the Management timeline and event-routing graph. The isolated `webhook_router` profile now makes the digest required in its machine-readable tool schema and rejects an omitted or malformed acknowledgement before routing. Trusted admin/legacy calls remain readable as explicitly unacknowledged history, and local shadow simulations exercise the evidence-bound path.
 
 #### Subgoal 5A.7: Add the job queue and routing lifecycle
 
