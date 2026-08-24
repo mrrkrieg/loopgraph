@@ -24,11 +24,21 @@ export const MAX_HOSTED_APP_SNAPSHOT_BYTES = 100 * 1024 * 1024;
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SCOPE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,159}$/;
+const DIGEST_SEGMENT_PATTERN = /^[a-f0-9]{64}$/;
+const ARCHIVE_NAME_PATTERN = /^[a-f0-9]{64}\.loopgraph-pack\.json$/;
+const SNAPSHOT_INVENTORY_PAGE_SIZE = 100;
+const MAX_SNAPSHOT_INVENTORY_ENTRIES = 50_000;
+const MAX_SNAPSHOT_INVENTORY_DEPTH = 8;
 
 export type HostedAppSnapshotScope = {
   organizationId: string;
   projectKey: string;
   workspaceId: string;
+};
+
+export type HostedAppSnapshotInventory = {
+  objectKeyDigests: string[];
+  malformedObjects: number;
 };
 
 /**
@@ -196,6 +206,83 @@ export function hostedAppSnapshotLogicalPrefix(
   return [scope.organizationId, scope.projectKey, scope.workspaceId, logicalPath].join("/");
 }
 
+/**
+ * Inventories one exact tenant/project prefix without returning Storage object keys.
+ *
+ * Supabase Storage exposes virtual folders through paged `list` calls. The traversal is bounded,
+ * accepts only the server-derived four-segment object shape, and projects every valid key to an
+ * opaque digest before returning it to reconciliation.
+ */
+export async function inventoryHostedAppSnapshotObjects(
+  supabase: SupabaseClient,
+  scope: Pick<HostedAppSnapshotScope, "organizationId" | "projectKey">
+): Promise<HostedAppSnapshotInventory> {
+  assertHostedAppSnapshotTenantScope(scope);
+  const root = `${scope.organizationId}/${scope.projectKey}`;
+  const queue = [{ prefix: root, depth: 0 }];
+  const queued = new Set([root]);
+  const objectKeyDigests = new Set<string>();
+  let malformedObjects = 0;
+  let entriesSeen = 0;
+
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const current = queue[cursor]!;
+    for (let offset = 0; ; offset += SNAPSHOT_INVENTORY_PAGE_SIZE) {
+      const { data, error } = await supabase.storage
+        .from(HOSTED_APP_SNAPSHOT_BUCKET)
+        .list(current.prefix, {
+          limit: SNAPSHOT_INVENTORY_PAGE_SIZE,
+          offset,
+          sortBy: { column: "name", order: "asc" }
+        });
+      if (error) throw new Error("Hosted App snapshot inventory is unavailable");
+      const entries = (data ?? []) as Array<{ id?: unknown; name?: unknown }>;
+      entriesSeen += entries.length;
+      if (entriesSeen > MAX_SNAPSHOT_INVENTORY_ENTRIES) {
+        throw new Error("Hosted App snapshot inventory exceeded its bounded entry limit");
+      }
+
+      for (const entry of entries) {
+        if (
+          typeof entry.name !== "string" || entry.name.length < 1 || entry.name.length > 256 ||
+          entry.name === "." || entry.name === ".." || entry.name.includes("/")
+        ) {
+          throw new Error("Hosted App snapshot inventory contained an invalid path segment");
+        }
+        const objectPath = `${current.prefix}/${entry.name}`;
+        if (entry.id === null) {
+          if (current.depth >= MAX_SNAPSHOT_INVENTORY_DEPTH) {
+            throw new Error("Hosted App snapshot inventory exceeded its bounded path depth");
+          }
+          if (!queued.has(objectPath)) {
+            queued.add(objectPath);
+            queue.push({ prefix: objectPath, depth: current.depth + 1 });
+          }
+          continue;
+        }
+        if (typeof entry.id !== "string" || entry.id.length < 1) {
+          throw new Error("Hosted App snapshot inventory contained an indeterminate object entry");
+        }
+
+        const relative = objectPath.slice(root.length + 1).split("/");
+        if (
+          relative.length !== 4 || !SCOPE_ID_PATTERN.test(relative[0] ?? "") ||
+          !DIGEST_SEGMENT_PATTERN.test(relative[1] ?? "") ||
+          !DIGEST_SEGMENT_PATTERN.test(relative[2] ?? "") ||
+          !ARCHIVE_NAME_PATTERN.test(relative[3] ?? "")
+        ) {
+          malformedObjects += 1;
+          continue;
+        }
+        objectKeyDigests.add(canonicalAppDigest({ objectKey: objectPath }));
+      }
+      if (entries.length < SNAPSHOT_INVENTORY_PAGE_SIZE) break;
+    }
+  }
+
+  return { objectKeyDigests: [...objectKeyDigests].sort(), malformedObjects };
+}
+
 export function isSupabaseAppSnapshotStoreEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(
     env.NEXT_PUBLIC_SUPABASE_URL &&
@@ -225,14 +312,20 @@ function assertLoadedSnapshot(loaded: LoopPackLoadResult, descriptor: AppSnapsho
 }
 
 function assertHostedAppSnapshotScope(scope: HostedAppSnapshotScope): void {
+  assertHostedAppSnapshotTenantScope(scope);
+  if (!SCOPE_ID_PATTERN.test(scope.workspaceId)) {
+    throw new Error("App snapshot store workspace ID is invalid");
+  }
+}
+
+function assertHostedAppSnapshotTenantScope(
+  scope: Pick<HostedAppSnapshotScope, "organizationId" | "projectKey">
+): void {
   if (!UUID_PATTERN.test(scope.organizationId)) {
     throw new Error("App snapshot store organization ID must be a UUID");
   }
   if (!SCOPE_ID_PATTERN.test(scope.projectKey) || scope.projectKey.length > 64) {
     throw new Error("App snapshot store project key is invalid");
-  }
-  if (!SCOPE_ID_PATTERN.test(scope.workspaceId)) {
-    throw new Error("App snapshot store workspace ID is invalid");
   }
 }
 

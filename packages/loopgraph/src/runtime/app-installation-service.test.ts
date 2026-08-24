@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import YAML from "yaml";
-import { MARKETPLACE_SCHEMA_VERSION, canonicalAppDigest, connectionInstanceSchema } from "../core";
+import {
+  MARKETPLACE_SCHEMA_VERSION,
+  canonicalAppDigest,
+  connectionInstanceSchema,
+  hermesExecutionEventSchema,
+  observedOutcomeSchema,
+  valueLedgerEntrySchema
+} from "../core";
 import { FileConnectorFieldMappingStore, type ConnectorFieldMappingStore } from "./app-connector-service";
 import { FileCompanyContextStore } from "./company-context-service";
 import { AppInstallationService, installPlanBlockers } from "./app-installation-service";
@@ -26,6 +33,10 @@ import {
   type LoopSpecRegistryStore
 } from "./loop-spec-store";
 import { readLoopgraphWorkspace } from "./workspace";
+import { FileOutcomeStore } from "./outcome-store";
+import { FileHermesOperationsStore } from "./hermes-operations-store";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import type { HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -34,13 +45,60 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function harness(options: { installationStore?: AppInstallationStore; loopSpecStore?: LoopSpecRegistryStore } = {}) {
+const salesLoopIds = [
+  "sales-inbound-account-research",
+  "sales-inbound-follow-up",
+  "sales-inbound-lead-intake",
+  "sales-inbound-lead-qualification",
+  "sales-inbound-lead-routing",
+  "sales-inbound-qualification-learning"
+];
+
+const readyRouteStatusProvider = async (): Promise<HermesRouteActivationStatus> => ({
+  projectRoot: "/test",
+  recordPath: "/test/.loopgraph/hermes-route-activation.json",
+  checkedAt: "2026-08-08T12:00:00.000Z",
+  exists: true,
+  current: true,
+  ready: true,
+  planDigest: "a1b2c3d4e5f60708",
+  currentPlanDigest: "a1b2c3d4e5f60708",
+  routeStates: [{
+    routeId: "hermes_route_sales",
+    routeName: "loopgraph-hubspot-events",
+    routeKind: "provider_event",
+    loopIds: salesLoopIds,
+    state: "shadow",
+    subscriptionState: "active",
+    signatureVerificationConfigured: true,
+    ready: true
+  }],
+  warnings: [],
+  nextActions: ["Hermes routes are ready."]
+});
+
+const readyWebhookDoctorProvider = async (): Promise<HermesWebhookDoctorResult> => ({
+  ok: true,
+  plan: {
+    catalogVersion: "routing-catalog-test",
+    routes: [{ routeKind: "provider_event", loopIds: salesLoopIds }]
+  }
+} as HermesWebhookDoctorResult);
+
+async function harness(options: {
+  installationStore?: AppInstallationStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  routeActivationStatusProvider?: () => Promise<HermesRouteActivationStatus>;
+  webhookDoctorProvider?: () => Promise<HermesWebhookDoctorResult>;
+} = {}) {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-install-"));
   temporaryDirectories.push(projectRoot);
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "marketplace"), packsRoot);
   await marketplace.refreshAllCatalogSources();
   const mappingStore = new FileConnectorFieldMappingStore(path.join(projectRoot, ".loopgraph", "apps", "field-mappings.json"), "acme");
   const contextStore = new FileCompanyContextStore(path.join(projectRoot, ".loopgraph", "apps", "company-context.json"));
+  const outcomeStore = new FileOutcomeStore(path.join(projectRoot, ".loopgraph"));
+  const operationsStore = new FileHermesOperationsStore(path.join(projectRoot, ".loopgraph"));
   const logicalFields = [
     ["lead", "lead.id", "id"],
     ["lead", "lead.email", "email"],
@@ -66,7 +124,11 @@ async function harness(options: { installationStore?: AppInstallationStore; loop
     contextStore,
     mappingStore,
     installationStore: options.installationStore,
-    loopSpecStore: options.loopSpecStore
+    loopSpecStore: options.loopSpecStore,
+    outcomeStore,
+    operationsStore,
+    routeActivationStatusProvider: options.routeActivationStatusProvider ?? readyRouteStatusProvider,
+    webhookDoctorProvider: options.webhookDoctorProvider ?? readyWebhookDoctorProvider
   });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
@@ -79,7 +141,7 @@ async function harness(options: { installationStore?: AppInstallationStore; loop
     readPolicy: "read_only",
     writePolicy: "not_allowed"
   });
-  return { projectRoot, service, marketplace, contextStore, mappingStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
+  return { projectRoot, service, marketplace, contextStore, mappingStore, outcomeStore, operationsStore, connection, mappingIds: mappings.map((mapping) => mapping.id) };
 }
 
 const installValues = {
@@ -234,6 +296,128 @@ async function installSalesApp(input: Awaited<ReturnType<typeof harness>>, now =
     now
   });
   return input.service.apply(plan, "admin-1", new Date(now.getTime() + 60_000));
+}
+
+async function recordRecommendationProof(
+  input: Awaited<ReturnType<typeof harness>>,
+  installationId: string,
+  now = new Date("2026-08-08T12:04:30.000Z"),
+  window = {
+    from: "2026-08-01T00:00:00.000Z",
+    to: "2026-08-08T00:00:00.000Z"
+  }
+) {
+  const events = Array.from({ length: 5 }, (_, index) => ({
+    id: `historical-qualified-lead-${index + 1}`,
+    occurredAt: new Date(Date.parse(window.from) + index * 24 * 60 * 60 * 1_000 + 9 * 60 * 60 * 1_000).toISOString(),
+    source: "hubspot",
+    eventType: "lead.created",
+    subject: { type: "lead", id: `lead-historical-${index + 1}` },
+    normalizedPayload: {
+      leadId: `lead-historical-${index + 1}`,
+      email: `buyer-${index + 1}@example.test`,
+      company: `Example ${index + 1}`
+    },
+    evidenceRefs: [`evidence:historical:${index + 1}`],
+    connectorState: "connected" as const,
+    expectedAction: "route" as const,
+    expectedLoopId: "sales-inbound-lead-intake"
+  }));
+  const replay = await input.service.historicalReplay({
+    schemaVersion: "loopgraph-app-eval/v1alpha1",
+    installationId,
+    from: window.from,
+    to: window.to,
+    maxEvents: events.length,
+    events,
+    requestedAt: now.toISOString(),
+    requestedBy: "sales-manager"
+  }, now);
+  for (const scenario of replay.scenarios) {
+    await input.service.labelEvaluation({
+      schemaVersion: "loopgraph-app-eval/v1alpha1",
+      runId: replay.id,
+      scenarioId: scenario.id,
+      label: "correct",
+      reviewMinutes: 1,
+      reviewedBy: "sales-manager",
+      reviewedAt: new Date(now.getTime() + 30_000).toISOString()
+    });
+  }
+  return replay;
+}
+
+async function recordProductionProof(
+  input: Awaited<ReturnType<typeof harness>>,
+  installationId: string,
+  now = new Date("2026-08-08T12:07:00.000Z")
+) {
+  const loopId = "sales-inbound-lead-intake";
+  const runId = "run-qualified-lead-production-proof";
+  const outcomeId = "outcome-qualified-pipeline-production-proof";
+  await input.operationsStore.appendExecutionEvent(hermesExecutionEventSchema.parse({
+    id: "execution-qualified-lead-production-proof",
+    idempotencyKey: "execution-qualified-lead-production-proof",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    agentInstanceId: "hermes-sales",
+    eventType: "run.completed",
+    routeJobId: "job-qualified-lead-production-proof",
+    routeCommitId: "commit-qualified-lead-production-proof",
+    routeAttemptId: "attempt-qualified-lead-production-proof",
+    eventId: "event-qualified-lead-production-proof",
+    problemId: "problem-qualified-lead-production-proof",
+    loopId,
+    loopSpecHash: "a".repeat(64),
+    runId,
+    correlationId: "correlation-qualified-lead-production-proof",
+    sequence: 1,
+    summary: "Hermes completed the governed lead-intake work.",
+    occurredAt: now.toISOString(),
+    recordedAt: now.toISOString()
+  }));
+  await input.outcomeStore.saveObservedOutcome(observedOutcomeSchema.parse({
+    id: outcomeId,
+    workspaceId: "acme",
+    companyId: "acme-company",
+    loopId,
+    metricDefinitionId: "qualified_pipeline_created",
+    metricKey: "qualified_pipeline_created",
+    unit: "count",
+    desiredDirection: "increase",
+    evaluationWindow: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-08T00:00:00.000Z" },
+    baseline: { value: 0, sampleIds: ["sample-qualified-pipeline-baseline"] },
+    observed: { value: 1, sampleIds: ["sample-qualified-pipeline-observed"] },
+    target: 1,
+    absoluteDelta: 1,
+    status: "target_met",
+    truthStatus: "observed",
+    confidence: 1,
+    evidenceSufficiency: { sufficient: true, reasons: [] },
+    guardrails: [],
+    runIds: [runId],
+    problemIds: ["problem-qualified-lead-production-proof"],
+    evidenceRefs: [`run:${runId}`],
+    evaluatedAt: now.toISOString()
+  }));
+  await input.outcomeStore.saveValueLedgerEntry(valueLedgerEntrySchema.parse({
+    id: "value-qualified-lead-production-proof",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    loopId,
+    window: { start: "2026-08-01T00:00:00.000Z", end: "2026-08-08T00:00:00.000Z" },
+    grossSavedMinutes: 30,
+    hiddenCostMinutes: { review: 5, rework: 0, botsitting: 0, escalation: 0, governance: 0 },
+    observedCostMinutes: 5,
+    netSavedMinutes: 25,
+    truthStatus: "observed",
+    observedOutcomeIds: [outcomeId],
+    runIds: [runId],
+    reviewIds: ["review-qualified-lead-production-proof"],
+    evidenceRefs: [`outcome:${outcomeId}`, `run:${runId}`],
+    recordedAt: now.toISOString()
+  }));
+  return { installationId, runId, outcomeId };
 }
 
 async function addUpdateCatalog(input: Awaited<ReturnType<typeof harness>>): Promise<void> {
@@ -732,6 +916,210 @@ describe("atomic app installation lifecycle", () => {
     });
   });
 
+  it("requires ordered evidence gates before recommend and execute-with-approval authority can be created", async () => {
+    const input = await harness();
+    const applied = await installSalesApp(input);
+    const synthetic = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const shadowGate = await input.service.activationGate(
+      applied.installation.id,
+      "shadow",
+      new Date("2026-08-08T12:03:00.000Z")
+    );
+    expect(shadowGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "connected",
+      observedMaturity: "connected"
+    });
+    const shadowApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "security-approver",
+      reason: "Observe the exact connected and tested App without provider writes.",
+      evidenceRefs: [synthetic.id],
+      now: new Date("2026-08-08T12:03:00.000Z")
+    });
+    expect(shadowApproval).toMatchObject({
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha2",
+      activationGate: {
+        gateDigest: shadowGate.gateDigest,
+        requiredMaturity: "connected",
+        status: "ready"
+      }
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "shadow",
+      shadowApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    );
+    const preProofPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:04:15.000Z"));
+    expect(preProofPlan).toMatchObject({
+      totalInstallations: 1,
+      totalMatched: 1,
+      counts: { notApplicable: 1 },
+      items: [{
+        installationId: applied.installation.id,
+        status: "not_applicable",
+        priority: "none",
+        nextAction: { kind: "run_historical_replay" }
+      }]
+    });
+
+    const blockedRecommend = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-08-08T12:04:30.000Z")
+    );
+    expect(blockedRecommend).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "promotion-evidence", status: "blocked" })
+      ])
+    });
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "A human approval cannot substitute for reviewed routing evidence.",
+      now: new Date("2026-08-08T12:04:30.000Z")
+    })).rejects.toThrow(/promotion-evidence/i);
+
+    const replay = await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:05:00.000Z"));
+    expect(replay.sourceWindow).toEqual({
+      from: "2026-08-01T00:00:00.000Z",
+      to: "2026-08-08T00:00:00.000Z"
+    });
+    const staleRecommendGate = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-09-08T12:05:00.000Z")
+    );
+    expect(staleRecommendGate).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
+      ])
+    });
+    const recommendGate = await input.service.activationGate(
+      applied.installation.id,
+      "recommend",
+      new Date("2026-08-08T12:05:30.000Z")
+    );
+    expect(recommendGate).toMatchObject({ status: "ready", requiredMaturity: "connected" });
+    const recommendApproval = await input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "recommend",
+      approvedBy: "security-approver",
+      reason: "Five bounded historical decisions were completely reviewed.",
+      evidenceRefs: [replay.id],
+      now: new Date("2026-08-08T12:06:00.000Z")
+    });
+    await input.service.activate(
+      applied.installation.id,
+      "recommend",
+      recommendApproval.id,
+      "operations-activator",
+      new Date("2026-08-08T12:06:30.000Z")
+    );
+
+    const blockedExecute = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:07:00.000Z")
+    );
+    expect(blockedExecute).toMatchObject({
+      status: "blocked",
+      requiredMaturity: "production_proven",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "operational-maturity", status: "blocked" })
+      ])
+    });
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "execute_with_approval",
+      approvedBy: "security-approver",
+      reason: "Approval alone cannot create production proof.",
+      now: new Date("2026-08-08T12:07:00.000Z")
+    })).rejects.toThrow(/production_proven/i);
+
+    await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:07:30.000Z"));
+    const currentPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:08:00.000Z"));
+    expect(currentPlan.items[0]).toMatchObject({
+      installationId: applied.installation.id,
+      status: "current",
+      priority: "none",
+      affectedEvidence: [],
+      nextAction: { kind: "monitor" }
+    });
+    const renewSoonPlan = await input.service.evidenceRenewalPlan(
+      { statuses: ["renew_soon"] },
+      new Date("2026-09-02T12:08:00.000Z")
+    );
+    expect(renewSoonPlan).toMatchObject({
+      totalMatched: 1,
+      counts: { renewSoon: 1 },
+      items: [{ status: "renew_soon", priority: "high", nextAction: { kind: "renew_proof" } }]
+    });
+    const expiredPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-09-08T12:08:00.000Z"));
+    expect(expiredPlan).toMatchObject({
+      counts: { expired: 1 },
+      items: [{ status: "expired", priority: "critical", nextAction: { kind: "renew_proof" } }]
+    });
+    const executeGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:08:00.000Z")
+    );
+    expect(executeGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "production_proven",
+      observedMaturity: "production_proven"
+    });
+    const staleExecuteGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-09-08T12:08:00.000Z")
+    );
+    expect(staleExecuteGate).toMatchObject({
+      status: "blocked",
+      observedMaturity: "connected",
+      checks: expect.arrayContaining([
+        expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
+      ])
+    });
+    await recordRecommendationProof(
+      input,
+      applied.installation.id,
+      new Date("2026-08-08T12:09:00.000Z"),
+      { from: "2026-09-01T00:00:00.000Z", to: "2026-09-08T00:00:00.000Z" }
+    );
+    const futureDatedExecuteGate = await input.service.activationGate(
+      applied.installation.id,
+      "execute_with_approval",
+      new Date("2026-08-08T12:10:00.000Z")
+    );
+    expect(futureDatedExecuteGate).toMatchObject({
+      status: "blocked",
+      checks: expect.arrayContaining([
+        expect.objectContaining({
+          id: "evidence-freshness",
+          status: "blocked",
+          summary: expect.stringMatching(/future/i)
+        })
+      ])
+    });
+    const invalidPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:10:00.000Z"));
+    expect(invalidPlan).toMatchObject({
+      counts: { invalid: 1 },
+      items: [{ status: "invalid", priority: "critical", nextAction: { kind: "repair_evidence" } }]
+    });
+  }, 20_000);
+
   it("emits bounded activation approval and consumption audit contexts", async () => {
     const store = new AuditCapturingInstallationStore("acme");
     const input = await harness({ installationStore: store });
@@ -822,6 +1210,7 @@ describe("atomic app installation lifecycle", () => {
       "operations-activator",
       new Date("2026-08-08T12:04:00.000Z")
     );
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     const recommendApproval = await input.service.approveActivation({
       installationId: applied.installation.id,
       mode: "recommend",
@@ -969,8 +1358,10 @@ describe("atomic app installation lifecycle", () => {
 
     await activate("shadow", "2026-08-08T12:03:00.000Z", "2026-08-08T12:04:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["shadow"]));
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     await activate("recommend", "2026-08-08T12:05:00.000Z", "2026-08-08T12:06:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["recommend"]));
+    await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:06:30.000Z"));
     await activate("execute_with_approval", "2026-08-08T12:07:00.000Z", "2026-08-08T12:08:00.000Z");
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
 
@@ -980,7 +1371,7 @@ describe("atomic app installation lifecycle", () => {
     const resumed = await input.service.resume(applied.installation.id, "admin-1");
     expect(resumed).toMatchObject({ state: "execute_with_approval", mode: "execute_with_approval" });
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
-  });
+  }, 20_000);
 
   it("recovers interrupted pause and resume without leaving App and LoopSpec state split", async () => {
     const store = new AuditCapturingInstallationStore("acme");
@@ -996,6 +1387,7 @@ describe("atomic app installation lifecycle", () => {
       now: new Date("2026-08-08T12:03:00.000Z")
     });
     await input.service.activate(applied.installation.id, "shadow", shadowApproval.id, "admin-1", new Date("2026-08-08T12:04:00.000Z"));
+    await recordRecommendationProof(input, applied.installation.id, new Date("2026-08-08T12:04:30.000Z"));
     const recommendApproval = await input.service.approveActivation({
       installationId: applied.installation.id,
       mode: "recommend",
@@ -1156,6 +1548,125 @@ describe("atomic app installation lifecycle", () => {
     );
     expect(replayed).toEqual(activated);
     expect((await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision).toBe(completedRevision);
+  });
+
+  it("blocks App promotion until Hermes proves the exact owned provider routes", async () => {
+    const input = await harness({
+      routeActivationStatusProvider: async () => ({
+        projectRoot: "/test",
+        recordPath: "/test/.loopgraph/hermes-route-activation.json",
+        checkedAt: "2026-08-08T12:03:00.000Z",
+        exists: false,
+        current: false,
+        ready: false,
+        routeStates: [],
+        warnings: ["No Hermes route activation receipt exists for this project."],
+        nextActions: ["Prepare and apply the current Hermes route plan."]
+      })
+    });
+    const applied = await installSalesApp(input);
+    await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const readiness = await input.service.readiness(applied.installation.id, new Date("2026-08-08T12:03:00.000Z"));
+    expect(readiness.checks).toContainEqual(expect.objectContaining({
+      id: "hermes-route-activation",
+      status: "fail",
+      summary: expect.stringContaining("No Hermes Route Controller receipt")
+    }));
+    const gate = await input.service.activationGate(applied.installation.id, "shadow", new Date("2026-08-08T12:03:00.000Z"));
+    expect(gate.status).toBe("blocked");
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "This must not bypass missing Hermes route evidence.",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/Hermes route/i);
+  });
+
+  it("does not block one App on an unrelated pending Hermes route", async () => {
+    const ready = await readyRouteStatusProvider();
+    const input = await harness({
+      routeActivationStatusProvider: async () => ({
+        ...ready,
+        ready: false,
+        routeStates: [
+          ...ready.routeStates,
+          {
+            routeId: "hermes_route_unrelated",
+            routeName: "loopgraph-zendesk-events",
+            routeKind: "provider_event",
+            loopIds: ["customer-success-ticket-triage"],
+            state: "pending_connection",
+            subscriptionState: "pending_connection",
+            signatureVerificationConfigured: false,
+            ready: false
+          }
+        ]
+      })
+    });
+    const applied = await installSalesApp(input);
+    await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const readiness = await input.service.readiness(applied.installation.id, new Date("2026-08-08T12:03:00.000Z"));
+    expect(readiness.checks).toContainEqual(expect.objectContaining({
+      id: "hermes-route-activation",
+      status: "pass"
+    }));
+    expect((await input.service.activationGate(
+      applied.installation.id,
+      "shadow",
+      new Date("2026-08-08T12:03:00.000Z")
+    )).status).toBe("ready");
+  });
+
+  it("loads legacy activation receipts for audit history but refuses to consume them as authority", async () => {
+    const store = new AuditCapturingInstallationStore("acme");
+    const input = await harness({ installationStore: store });
+    const applied = await installSalesApp(input);
+    const evaluation = await input.service.test(
+      applied.installation.id,
+      "evaluation-runner",
+      new Date("2026-08-08T12:02:00.000Z")
+    );
+    const immutable = {
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha1" as const,
+      id: "activation-approval.1111111111111111",
+      workspaceId: "acme",
+      installationId: applied.installation.id,
+      appId: applied.installation.appId,
+      artifactDigest: applied.installation.artifactDigest,
+      fromState: "simulation_passed" as const,
+      requestedMode: "shadow" as const,
+      approvedBy: "legacy-approver",
+      reason: "This historical receipt predates evidence-bound activation gates.",
+      evidenceRefs: [evaluation.id],
+      approvedAt: "2026-08-08T12:03:00.000Z",
+      expiresAt: "2026-08-08T12:18:00.000Z"
+    };
+    await store.withExclusiveUpdate(async (registry) => ({
+      registry: {
+        ...registry,
+        revision: registry.revision + 1,
+        activationApprovals: [...registry.activationApprovals, {
+          ...immutable,
+          approvalDigest: canonicalAppDigest(immutable)
+        }],
+        updatedAt: immutable.approvedAt
+      },
+      value: undefined
+    }));
+
+    await expect(input.service.activate(
+      applied.installation.id,
+      "shadow",
+      immutable.id,
+      "operations-activator",
+      new Date("2026-08-08T12:04:00.000Z")
+    )).rejects.toThrow(/legacy.*not evidence-bound/i);
+    const retained = (await store.read()).activationApprovals.find((approval) => approval.id === immutable.id);
+    expect(retained).toMatchObject({ id: immutable.id, schemaVersion: immutable.schemaVersion });
+    expect(retained).not.toHaveProperty("consumedAt");
   });
 
   it("plans, materializes, and tests only the modules selected by the operator", async () => {
