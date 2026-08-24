@@ -4,12 +4,72 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { connectorInstallationViewSchema, type AppOnboardingJourney } from "../core";
-import { callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
+import {
+  appInstallationRegistrySchema,
+  assertAppInstallationRegistryRevision,
+  emptyAppInstallationRegistry,
+  type AppInstallationMutationAuditContext,
+  type AppInstallationRegistry,
+  type AppInstallationStore,
+  type AppInstallationUpdate
+} from "./app-installation-store";
+import { appDetachInputSchema, appDuplicateInputSchema, appRepairInputSchema, callLoopgraphAppTool, LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 import { callLoopgraphConnectionTool } from "./connection-tools";
 import { connectionInstanceFromBrokerInstallation } from "./connector-registry";
 import { createAppIndependentVerificationReceipt } from "./app-operational-maturity";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import { callLoopgraphHermesWebhookTool, type HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const temporaryDirectories: string[] = [];
+
+const readyHermesRoutingOptions = {
+  routeActivationStatusProvider: async (): Promise<HermesRouteActivationStatus> => ({
+    projectRoot: "/test",
+    recordPath: "/test/.loopgraph/hermes-route-activation.json",
+    checkedAt: "2026-08-21T12:00:00.000Z",
+    exists: true,
+    current: true,
+    ready: true,
+    planDigest: "a1b2c3d4e5f60708",
+    currentPlanDigest: "a1b2c3d4e5f60708",
+    routeStates: [{
+      routeId: "hermes_route_sales",
+      routeName: "loopgraph-sales-events",
+      routeKind: "provider_event" as const,
+      loopIds: [
+        "sales-inbound-account-research",
+        "sales-inbound-follow-up",
+        "sales-inbound-lead-intake",
+        "sales-inbound-lead-qualification",
+        "sales-inbound-lead-routing",
+        "sales-inbound-qualification-learning"
+      ],
+      state: "shadow" as const,
+      subscriptionState: "active" as const,
+      signatureVerificationConfigured: true,
+      ready: true
+    }],
+    warnings: [],
+    nextActions: ["Hermes routes are ready."]
+  }),
+  webhookDoctorProvider: async (): Promise<HermesWebhookDoctorResult> => ({
+    ok: true,
+    plan: {
+      catalogVersion: "routing-catalog-test",
+      routes: [{
+        routeKind: "provider_event",
+        loopIds: [
+          "sales-inbound-account-research",
+          "sales-inbound-follow-up",
+          "sales-inbound-lead-intake",
+          "sales-inbound-lead-qualification",
+          "sales-inbound-lead-routing",
+          "sales-inbound-qualification-learning"
+        ]
+      }]
+    }
+  } as HermesWebhookDoctorResult)
+};
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
@@ -38,6 +98,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_operation_action_commit",
       "loopgraph_app_operation_action_reconcile",
       "loopgraph_app_maturity_get",
+      "loopgraph_apps_renewal_plan",
       "loopgraph_app_verification_registry_get",
       "loopgraph_app_verifier_trust_add",
       "loopgraph_app_verifier_trust_revoke",
@@ -59,6 +120,7 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_app_rollback",
       "loopgraph_app_detach",
       "loopgraph_app_uninstall",
+      "loopgraph_app_activation_gate_get",
       "loopgraph_app_activation_approve",
       "loopgraph_app_activate",
       "loopgraph_app_pause",
@@ -78,6 +140,62 @@ describe("shared Loopgraph App tools", () => {
       "loopgraph_marketplace_source_add",
       "loopgraph_marketplace_source_refresh"
     ]);
+  });
+
+  it("requires both source bindings when repair requests exact replay", () => {
+    const base = {
+      projectRoot: "/srv/loopgraph/main",
+      installationId: "install.sales",
+      actor: "admin"
+    };
+    expect(appRepairInputSchema.safeParse(base).success).toBe(false);
+    expect(appRepairInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }).success).toBe(false);
+    expect(appRepairInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      expectedUpdatedAt: "2026-08-22T20:00:00.000Z"
+    }).success).toBe(true);
+  });
+
+  it("requires both exact source bindings for replay-safe duplication", () => {
+    const base = {
+      projectRoot: "/srv/loopgraph/main",
+      installationId: "install.sales",
+      derivedAppId: "private.sales.qualify",
+      overlayOperations: [],
+      actor: "admin"
+    };
+    expect(appDuplicateInputSchema.safeParse(base).success).toBe(false);
+    expect(appDuplicateInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }).success).toBe(false);
+    expect(appDuplicateInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      expectedUpdatedAt: "2026-08-22T21:00:00.000Z"
+    }).success).toBe(true);
+  });
+
+  it("requires both exact source bindings for replay-safe detach", () => {
+    const base = {
+      projectRoot: "/srv/loopgraph/main",
+      installationId: "install.private-sales",
+      actor: "admin"
+    };
+    expect(appDetachInputSchema.safeParse(base).success).toBe(false);
+    expect(appDetachInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }).success).toBe(false);
+    expect(appDetachInputSchema.safeParse({
+      ...base,
+      expectedArtifactDigest: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      expectedUpdatedAt: "2026-08-22T22:00:00.000Z"
+    }).success).toBe(true);
   });
 
   it("exposes the same secret-free prepared-action ledger to Hermes and local callers", async () => {
@@ -335,6 +453,15 @@ describe("shared Loopgraph App tools", () => {
     expect(status.installations).toEqual([]);
     expect(status.readiness).toEqual([]);
     expect(status.lock).toBeUndefined();
+
+    const renewalPlan = await callLoopgraphAppTool("loopgraph_apps_renewal_plan", { projectRoot }) as {
+      totalInstallations: number;
+      totalMatched: number;
+      counts: Record<string, number>;
+      items: unknown[];
+    };
+    expect(renewalPlan).toMatchObject({ totalInstallations: 0, totalMatched: 0, items: [] });
+    expect(Object.values(renewalPlan.counts).reduce((total, count) => total + count, 0)).toBe(0);
 
     const plan = await callLoopgraphAppTool("loopgraph_app_install_plan", {
       projectRoot,
@@ -598,7 +725,7 @@ describe("shared Loopgraph App tools", () => {
     const maturity = await callLoopgraphAppTool("loopgraph_app_maturity_get", {
       projectRoot,
       installationId: applied.installation.id
-    }) as { maturity: string; gates: Array<{ level: string; status: string }> };
+    }, readyHermesRoutingOptions) as { maturity: string; gates: Array<{ level: string; status: string }> };
     expect(maturity).toMatchObject({
       maturity: "connected",
       gates: [
@@ -661,11 +788,38 @@ describe("shared Loopgraph App tools", () => {
     }) as { trustedVerifierKeys: Array<{ revokedAt?: string; revokedBy?: string }> };
     expect(revoked.trustedVerifierKeys[0]).toMatchObject({ revokedBy: "security-admin" });
 
-    const activate = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+    const routeSync = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
       installationId: applied.installation.id
     }) as AppOnboardingJourney;
+    expect(routeSync).toMatchObject({
+      stage: "activate_shadow",
+      nextAction: {
+        toolName: "loopgraph_hermes_webhooks_sync",
+        requiresHumanConfirmation: true,
+        input: { dryRun: false }
+      }
+    });
+    await callLoopgraphHermesWebhookTool("loopgraph_hermes_webhooks_sync", { projectRoot });
+    const routeActivation = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      installationId: applied.installation.id
+    }) as AppOnboardingJourney;
+    expect(routeActivation).toMatchObject({
+      stage: "activate_shadow",
+      nextAction: {
+        toolName: "loopgraph_hermes_webhooks_prepare",
+        requiresHumanConfirmation: false
+      }
+    });
+
+    const activate = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      installationId: applied.installation.id
+    }, readyHermesRoutingOptions) as AppOnboardingJourney;
     expect(activate).toMatchObject({
       stage: "activate_shadow",
       nextAction: {
@@ -674,6 +828,16 @@ describe("shared Loopgraph App tools", () => {
         input: { installationId: applied.installation.id, mode: "shadow" }
       }
     });
+    const shadowGate = await callLoopgraphAppTool("loopgraph_app_activation_gate_get", {
+      projectRoot,
+      installationId: applied.installation.id,
+      mode: "shadow"
+    }, readyHermesRoutingOptions) as { status: string; requiredMaturity: string; gateDigest: string };
+    expect(shadowGate).toMatchObject({
+      status: "ready",
+      requiredMaturity: "connected",
+      gateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/)
+    });
     const approval = await callLoopgraphAppTool("loopgraph_app_activation_approve", {
       projectRoot,
       installationId: applied.installation.id,
@@ -681,16 +845,31 @@ describe("shared Loopgraph App tools", () => {
       approvedBy: "sales-operations",
       reason: "The write-blocked rehearsal passed and shadow routing is approved.",
       evidenceRefs: ["operator-review:shadow"]
-    }) as { receipt: { id: string }; nextAction: { toolName: string; input: { approvalReceiptId: string } } };
+    }, readyHermesRoutingOptions) as { receipt: { id: string; schemaVersion: string; activationGate: { gateDigest: string; status: string; requiredMaturity: string } }; nextAction: { toolName: string; input: { approvalReceiptId: string } } };
+    expect(approval.receipt).toMatchObject({
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha2",
+      activationGate: {
+        gateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
+        status: "ready",
+        requiredMaturity: "connected"
+      }
+    });
     expect(approval.nextAction).toMatchObject({
       toolName: "loopgraph_app_activate",
       input: { approvalReceiptId: approval.receipt.id }
     });
+    const approvalStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
+      projectRoot,
+      installationId: applied.installation.id
+    }, readyHermesRoutingOptions) as { activationApprovals: Array<{ id: string; consumedAt?: string }> };
+    expect(approvalStatus.activationApprovals).toHaveLength(1);
+    expect(approvalStatus.activationApprovals[0]).toMatchObject({ id: approval.receipt.id });
+    expect(approvalStatus.activationApprovals[0]?.consumedAt).toBeUndefined();
     const approvedJourney = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
       installationId: applied.installation.id
-    }) as AppOnboardingJourney;
+    }, readyHermesRoutingOptions) as AppOnboardingJourney;
     expect(approvedJourney).toMatchObject({
       stage: "activate_shadow",
       nextAction: {
@@ -705,12 +884,19 @@ describe("shared Loopgraph App tools", () => {
       mode: "shadow",
       approvalReceiptId: approval.receipt.id,
       actor: "sales-operations"
-    });
+    }, readyHermesRoutingOptions);
+    const consumedStatus = await callLoopgraphAppTool("loopgraph_app_install_status", {
+      projectRoot,
+      installationId: applied.installation.id
+    }, readyHermesRoutingOptions) as { activationApprovals: Array<{ id: string; consumedAt?: string; consumedBy?: string }> };
+    expect(consumedStatus.activationApprovals).toEqual([
+      expect.objectContaining({ id: approval.receipt.id, consumedBy: "sales-operations" })
+    ]);
     const operating = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
       installationId: applied.installation.id
-    }) as AppOnboardingJourney;
+    }, readyHermesRoutingOptions) as AppOnboardingJourney;
     expect(operating).toMatchObject({
       stage: "operate",
       progress: { completed: 7, total: 8 },
@@ -718,7 +904,7 @@ describe("shared Loopgraph App tools", () => {
       evidence: { syntheticStatus: "passed", providerWritesBlocked: true }
     });
     expect(operating.draft).toBeUndefined();
-  }, 15_000);
+  }, 45_000);
 
   it("rejects unsafe draft writes and resets only the exact confirmed draft", async () => {
     const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-draft-security-"));
@@ -819,5 +1005,147 @@ describe("shared Loopgraph App tools", () => {
       confirmReset: true,
       actor: "sales-operations"
     })).rejects.toThrow(/identity conflict/i);
+  }, 20_000);
+
+  it("keeps an explicit preset preview isolated until the saved draft transition is confirmed", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-preset-transition-"));
+    temporaryDirectories.push(projectRoot);
+    const appId = "loopgraph.sales.qualify-route-inbound-leads";
+    const saved = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      projectRoot,
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration: { exclusions: ["employee"] },
+      expectedDraftRevision: 0,
+      actor: "sales-operations"
+    }) as AppOnboardingJourney;
+
+    const preview = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId,
+      presetId: "salesforce-outlook-teams"
+    }) as AppOnboardingJourney;
+    expect(preview.app.presetId).toBe("salesforce-outlook-teams");
+    expect(preview.draft).toMatchObject({
+      id: saved.draft!.id,
+      presetId: "hubspot-gmail-slack",
+      revision: 1,
+      applied: false,
+      resumed: false
+    });
+    expect(preview.plan?.configuration.values.exclusions).toBeUndefined();
+
+    const replacement = {
+      projectRoot,
+      appId,
+      presetId: "salesforce-outlook-teams",
+      configuration: { exclusions: ["contractor"] },
+      expectedDraftRevision: 1,
+      actor: "sales-operations"
+    };
+    await expect(callLoopgraphAppTool("loopgraph_app_onboarding_save", replacement))
+      .rejects.toThrow(/requires explicit confirmation/i);
+
+    const confirmed = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      ...replacement,
+      confirmPresetChange: true
+    }) as AppOnboardingJourney;
+    expect(confirmed.draft).toMatchObject({
+      id: saved.draft!.id,
+      presetId: "salesforce-outlook-teams",
+      revision: 2,
+      applied: true
+    });
+    const resumed = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+      projectRoot,
+      appId
+    }) as AppOnboardingJourney;
+    expect(resumed.app.presetId).toBe("salesforce-outlook-teams");
+    expect(resumed.plan?.configuration.values.exclusions).toEqual(["contractor"]);
+  }, 20_000);
+
+  it("emits bounded actor-attributed audit context for draft save and reset", async () => {
+    const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-onboarding-audit-"));
+    temporaryDirectories.push(projectRoot);
+    const appId = "loopgraph.sales.qualify-route-inbound-leads";
+    const store = new AuditCapturingInstallationStore("acme");
+    const options = { appInstallationStoreFactory: () => store };
+    const saved = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme",
+      appId,
+      presetId: "hubspot-gmail-slack",
+      configuration: { exclusions: ["employee"] },
+      expectedDraftRevision: 0,
+      actor: "sales-operations"
+    }, options) as AppOnboardingJourney;
+
+    const saveAudit = store.audits[0];
+    expect(saveAudit).toMatchObject({
+      actor: "sales-operations",
+      action: "app.onboarding_draft.saved",
+      targetType: "app_onboarding_draft",
+      targetId: saved.draft!.id,
+      metadata: {
+        draftRevision: 1,
+        presetChanged: false,
+        answerCount: 1,
+        fieldMappingCount: 0
+      }
+    });
+    if (!saveAudit || (saveAudit.action !== "app.onboarding_draft.saved" && saveAudit.action !== "app.onboarding_draft.reset")) {
+      throw new Error("Expected an onboarding draft audit event");
+    }
+    expect(saveAudit.metadata.appIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(saveAudit.metadata.presetIdDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot,
+      workspaceId: "acme",
+      companyId: "acme",
+      appId,
+      expectedDraftId: saved.draft!.id,
+      expectedDraftRevision: 1,
+      confirmReset: true,
+      actor: "sales-admin"
+    }, options);
+    expect(store.audits[1]).toMatchObject({
+      actor: "sales-admin",
+      action: "app.onboarding_draft.reset",
+      targetId: saved.draft!.id,
+      metadata: { draftRevision: 1, answerCount: 1 }
+    });
+    expect(JSON.stringify(store.audits)).not.toContain("employee");
+    expect(JSON.stringify(store.audits)).not.toContain("hubspot-gmail-slack");
+    expect(JSON.stringify(store.audits)).not.toContain(appId);
   });
 });
+
+class AuditCapturingInstallationStore implements AppInstallationStore {
+  readonly persistence = "file" as const;
+  readonly audits: AppInstallationMutationAuditContext[] = [];
+  private registry: AppInstallationRegistry;
+
+  constructor(workspaceId: string) {
+    this.registry = emptyAppInstallationRegistry(workspaceId);
+  }
+
+  async read() {
+    return this.registry;
+  }
+
+  async readLockfile() {
+    return undefined;
+  }
+
+  async withExclusiveUpdate<T>(operation: (registry: AppInstallationRegistry) => Promise<AppInstallationUpdate<T>>): Promise<T> {
+    const current = this.registry;
+    const result = await operation(current);
+    const next = appInstallationRegistrySchema.parse(result.registry);
+    assertAppInstallationRegistryRevision(current, next);
+    this.registry = next;
+    if (result.audit) this.audits.push(result.audit);
+    return result.value;
+  }
+}

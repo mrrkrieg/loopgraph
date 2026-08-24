@@ -51,9 +51,15 @@ export type VerifiedWorkloadIdentity = {
 
 type JwksDocument = { keys: Array<JsonWebKey & { kid?: string; alg?: string; use?: string }> };
 type CachedJwks = { value: JwksDocument; expiresAt: number };
+type ResolvedJwks = { cached: CachedJwks; fromCache: boolean };
+
+const JWKS_ROTATION_REFRESH_COOLDOWN_MS = 30_000;
+const MAX_JWKS_KEYS = 100;
 
 export class WorkloadIdentityVerifier {
   private readonly jwks = new Map<string, CachedJwks>();
+  private readonly jwksLoads = new Map<string, Promise<CachedJwks>>();
+  private readonly lastRotationRefreshAt = new Map<string, number>();
   private readonly issuers: ParsedWorkloadIdentityIssuer[];
 
   constructor(
@@ -97,17 +103,15 @@ export class WorkloadIdentityVerifier {
     if (issuer.allowedSubjectPatterns.length > 0 && !issuer.allowedSubjectPatterns.some((pattern) => wildcardMatch(claims.sub, pattern))) {
       throw new WorkloadIdentityError("subject_not_allowed");
     }
-    const key = await this.findKey(issuer, header.kid, header.alg);
     const signature = Buffer.from(segments[2], "base64url");
-    const verified = verifySignature(
-      "sha256",
-      Buffer.from(`${segments[0]}.${segments[1]}`),
-      header.alg === "ES256"
-        ? { key: createPublicKey({ key, format: "jwk" }), dsaEncoding: "ieee-p1363" }
-        : createPublicKey({ key, format: "jwk" }),
-      signature
-    );
-    if (!verified) throw new WorkloadIdentityError("invalid_signature");
+    const signedContent = Buffer.from(`${segments[0]}.${segments[1]}`);
+    let key = await this.findKey(issuer, header.kid, header.alg);
+    if (!verifyJwtSignature(header.alg, key, signedContent, signature)) {
+      key = await this.findKey(issuer, header.kid, header.alg, { refreshForRotation: true });
+      if (!verifyJwtSignature(header.alg, key, signedContent, signature)) {
+        throw new WorkloadIdentityError("invalid_signature");
+      }
+    }
 
     const capabilities = stringList(claims[issuer.capabilityClaim] ?? claims.scope);
     if (!capabilities.includes(required.capability)) {
@@ -148,23 +152,120 @@ export class WorkloadIdentityVerifier {
     };
   }
 
-  private async findKey(issuer: ParsedWorkloadIdentityIssuer, kid: string, alg: string): Promise<JsonWebKey> {
-    let cached = this.jwks.get(issuer.jwksUri);
-    if (!cached || cached.expiresAt <= this.now()) {
-      const response = await this.fetcher(issuer.jwksUri, { headers: { accept: "application/json" } });
-      if (!response.ok) throw new WorkloadIdentityError("jwks_unavailable");
-      const value = await response.json() as JwksDocument;
-      if (!Array.isArray(value.keys)) throw new WorkloadIdentityError("invalid_jwks");
-      cached = { value, expiresAt: this.now() + cacheMaxAge(response.headers.get("cache-control")) };
-      this.jwks.set(issuer.jwksUri, cached);
+  private async findKey(
+    issuer: ParsedWorkloadIdentityIssuer,
+    kid: string,
+    alg: string,
+    options: { refreshForRotation?: boolean } = {}
+  ): Promise<JsonWebKey> {
+    let resolved = await this.resolveJwks(issuer);
+    let keys = matchingKeys(resolved.cached.value, kid, alg);
+    const shouldRefreshForRotation = options.refreshForRotation || (resolved.fromCache && keys.length === 0);
+    const inFlightRefresh = shouldRefreshForRotation
+      ? this.jwksLoads.get(issuer.jwksUri)
+      : undefined;
+    if (shouldRefreshForRotation && (inFlightRefresh || this.reserveRotationRefresh(issuer.jwksUri))) {
+      resolved = {
+        cached: await (inFlightRefresh ?? this.loadJwks(issuer, true)),
+        fromCache: false
+      };
+      keys = matchingKeys(resolved.cached.value, kid, alg);
     }
-    const keys = cached.value.keys.filter((candidate) =>
-      candidate.kid === kid &&
-      (!candidate.alg || candidate.alg === alg) &&
-      (!candidate.use || candidate.use === "sig")
-    );
     if (keys.length !== 1) throw new WorkloadIdentityError("signing_key_not_found");
     return keys[0];
+  }
+
+  private async resolveJwks(issuer: ParsedWorkloadIdentityIssuer): Promise<ResolvedJwks> {
+    const cached = this.jwks.get(issuer.jwksUri);
+    if (cached && cached.expiresAt > this.now()) return { cached, fromCache: true };
+    return { cached: await this.loadJwks(issuer, false), fromCache: false };
+  }
+
+  private async loadJwks(issuer: ParsedWorkloadIdentityIssuer, force: boolean): Promise<CachedJwks> {
+    if (!force) {
+      const cached = this.jwks.get(issuer.jwksUri);
+      if (cached && cached.expiresAt > this.now()) return cached;
+    }
+    const existing = this.jwksLoads.get(issuer.jwksUri);
+    if (existing) return existing;
+    const load = this.fetchJwks(issuer).finally(() => {
+      this.jwksLoads.delete(issuer.jwksUri);
+    });
+    this.jwksLoads.set(issuer.jwksUri, load);
+    return load;
+  }
+
+  private async fetchJwks(issuer: ParsedWorkloadIdentityIssuer): Promise<CachedJwks> {
+    let response: Response;
+    try {
+      response = await this.fetcher(issuer.jwksUri, {
+        headers: { accept: "application/json" },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000)
+      });
+    } catch {
+      throw new WorkloadIdentityError("jwks_unavailable");
+    }
+    if (!response.ok) throw new WorkloadIdentityError("jwks_unavailable");
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      throw new WorkloadIdentityError("invalid_jwks");
+    }
+    if (!isJwksDocument(value)) throw new WorkloadIdentityError("invalid_jwks");
+    const cached = {
+      value,
+      expiresAt: this.now() + cacheMaxAge(response.headers.get("cache-control"))
+    };
+    this.jwks.set(issuer.jwksUri, cached);
+    return cached;
+  }
+
+  private reserveRotationRefresh(jwksUri: string) {
+    const now = this.now();
+    const lastRefresh = this.lastRotationRefreshAt.get(jwksUri);
+    if (lastRefresh !== undefined && now - lastRefresh < JWKS_ROTATION_REFRESH_COOLDOWN_MS) {
+      return false;
+    }
+    this.lastRotationRefreshAt.set(jwksUri, now);
+    return true;
+  }
+}
+
+function matchingKeys(value: JwksDocument, kid: string, alg: string) {
+  return value.keys.filter((candidate) =>
+    candidate.kid === kid &&
+    (!candidate.alg || candidate.alg === alg) &&
+    (!candidate.use || candidate.use === "sig")
+  );
+}
+
+function isJwksDocument(value: unknown): value is JwksDocument {
+  if (!value || typeof value !== "object") return false;
+  const keys = (value as { keys?: unknown }).keys;
+  return Array.isArray(keys) && keys.length <= MAX_JWKS_KEYS && keys.every((key) =>
+    Boolean(key) && typeof key === "object" && !Array.isArray(key)
+  );
+}
+
+function verifyJwtSignature(
+  alg: "RS256" | "ES256",
+  key: JsonWebKey,
+  signedContent: Buffer,
+  signature: Buffer
+) {
+  try {
+    return verifySignature(
+      "sha256",
+      signedContent,
+      alg === "ES256"
+        ? { key: createPublicKey({ key, format: "jwk" }), dsaEncoding: "ieee-p1363" }
+        : createPublicKey({ key, format: "jwk" }),
+      signature
+    );
+  } catch {
+    throw new WorkloadIdentityError("invalid_jwks");
   }
 }
 
@@ -212,5 +313,7 @@ function wildcardMatch(value: string, pattern: string) {
 function cacheMaxAge(header: string | null) {
   const match = /(?:^|,)\s*max-age=(\d+)/i.exec(header ?? "");
   const seconds = match ? Number(match[1]) : 300;
-  return Math.min(Math.max(seconds, 30), 3_600) * 1_000;
+  // A provider may advertise a long cache lifetime, but a retired signing key must stop being
+  // accepted within one bounded operational window. New-key misses still refresh immediately.
+  return Math.min(Math.max(seconds, 30), 300) * 1_000;
 }

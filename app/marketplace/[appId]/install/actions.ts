@@ -38,6 +38,7 @@ export async function planMarketplaceAppInstallAction(
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
       expectedDraftRevision: previousState.journey.draft?.revision ?? 0,
+      confirmPresetChange: formData.get("confirmPresetChange") === "on",
       actor
     }) as AppOnboardingJourney;
     if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");

@@ -28,7 +28,8 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
   const ready = blockers.length === 0;
   const activeMappingPlan = state.mappingPlan;
   const unresolvedQuestions = app.questions.filter((question) => state.unresolvedQuestionKeys.includes(question.key));
-  const savedAnswerKeys = new Set(state.journey.draft?.answerKeys ?? []);
+  const draftTransition = Boolean(state.journey.draft && !state.journey.draft.applied);
+  const savedAnswerKeys = new Set(state.journey.draft?.applied ? state.journey.draft.answerKeys : []);
   const savedQuestions = app.questions.filter((question) =>
     savedAnswerKeys.has(question.key) && !state.unresolvedQuestionKeys.includes(question.key));
 
@@ -36,8 +37,10 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
     <div className="space-y-6">
       <AppOnboardingProgress journey={state.journey} />
       {state.journey.draft ? (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          <div>Saved onboarding progress · revision {state.journey.draft.revision} · {new Date(state.journey.draft.savedAt).toLocaleString()}. You can leave this page and resume without re-answering completed questions.</div>
+        <div className={`rounded-lg border px-4 py-3 text-sm ${draftTransition ? "border-orange-200 bg-orange-50 text-orange-950" : "border-blue-200 bg-blue-50 text-blue-900"}`}>
+          <div>{draftTransition
+            ? `You are previewing ${app.preset.name} instead of the saved ${state.journey.draft.presetId} stack. Saved answers and mapping IDs are not applied to this preview.`
+            : `Saved onboarding progress · revision ${state.journey.draft.revision} · ${new Date(state.journey.draft.savedAt).toLocaleString()}. You can leave this page and resume without re-answering completed questions.`}</div>
           <details className="mt-2">
             <summary className="cursor-pointer text-xs font-semibold">Start this App setup over</summary>
             <form action={resetMarketplaceAppOnboardingAction} className="mt-3 rounded-md border border-blue-200 bg-white/70 p-3">
@@ -80,6 +83,13 @@ export function InstallWizard({ app, initialPlan, initialImpact, initialJourney,
                 ))}
               </div>
             </fieldset>
+          ) : null}
+
+          {draftTransition ? (
+            <label className="mt-6 flex items-start gap-3 rounded-lg border border-orange-200 bg-orange-50 p-4 text-sm leading-6 text-orange-950">
+              <input className="mt-1" name="confirmPresetChange" required type="checkbox" />
+              <span>Replace the saved <strong>{state.journey.draft!.presetId}</strong> setup choices with this <strong>{app.preset.id}</strong> stack when I save the plan. Shared connections, confirmed mappings, approved company context, installed Apps, and runtime state remain unchanged.</span>
+            </label>
           ) : null}
 
           <fieldset className="mt-7 border-t border-line pt-6">

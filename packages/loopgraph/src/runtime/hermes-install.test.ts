@@ -7,6 +7,7 @@ import { LOOPGRAPH_MCP_STATIC_RESOURCE_URIS } from "../mcp/server";
 import { DEPARTMENT_OPERATING_SKILLS, DEPARTMENT_OPERATING_SKILL_PROTOCOL_VERSION } from "../core";
 import {
   activateHermesIntegration,
+  deactivateHermesIntegration,
   doctorHermesIntegration,
   HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION,
   HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION,
@@ -281,6 +282,9 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_hermes_webhooks_sync");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_doctor");
     expect(designSkill).toContain("loopgraph_hermes_webhooks_test");
+    expect(designSkill).toContain("loopgraph_hermes_webhooks_prepare");
+    expect(designSkill).toContain("loopgraph_hermes_webhooks_activation_status");
+    expect(designSkill).toContain("Never request the token in chat");
     expect(designSkill).toContain("only after the user explicitly asks to write or refresh");
     expect(designSkill).toContain("Do not point provider webhooks directly at Loopgraph");
     expect(designSkill).toContain("loopgraph_loops_list");
@@ -289,6 +293,8 @@ describe("Hermes integration installer", () => {
     expect(designSkill).toContain("loopgraph_app_onboarding_save");
     expect(designSkill).toContain("loopgraph_app_onboarding_reset");
     expect(designSkill).toContain("confirmReset: true");
+    expect(designSkill).toContain("draft.applied");
+    expect(designSkill).toContain("confirmPresetChange: true");
     expect(designSkill).toContain("complete current non-secret snapshot");
     expect(designSkill).toContain("loopgraph_app_install_plan");
     expect(designSkill).toContain("loopgraph_app_historical_replay");
@@ -463,16 +469,96 @@ describe("Hermes integration installer", () => {
 
     expect(result.activation).toMatchObject({ applied: true });
     expect(result.activation?.receiptPath).toBe(path.join(projectRoot, ".loopgraph", "hermes", "activation.json"));
-    expect(commands).toHaveLength(5);
+    expect(commands).toHaveLength(6);
     expect(commands.filter((command) => command.args.slice(0, 2).join(" ") === "mcp add")).toHaveLength(3);
     expect(commands).toContainEqual({ command: "hermes", args: ["skills", "tap", "add", "mrrkrieg/loopgraph"] });
     expect(commands).toContainEqual({ command: "hermes", args: ["skills", "install", "mrrkrieg/loopgraph/skills/loopgraph"] });
+    expect(commands).toContainEqual({ command: "hermes", args: ["skills", "install", "mrrkrieg/loopgraph/skills/loopgraph-event-router"] });
     expect(result.nextSteps).not.toContain("Merge the generated non-secret MCP snippet into ~/.hermes/config.yaml.");
     const doctor = await doctorHermesIntegration({
       projectRoot,
       hermesVersionCheck: async () => "hermes 1.0.0"
     });
     expect(doctor.activation).toMatchObject({ applied: true, current: true });
+  });
+
+  it("disconnects only Loopgraph MCP registrations and removes the local activation claim", async () => {
+    const projectRoot = await temporaryProjectRoot();
+    const activated = await setupHermesIntegration({
+      projectRoot,
+      cliEntryPath: path.join(projectRoot, "dist", "cli.js"),
+      nodeCommand: process.execPath,
+      hermesVersionCheck: async () => "hermes 1.0.0",
+      activate: true,
+      commandRunner: async () => undefined
+    });
+    const commands: Array<{ command: string; args: string[] }> = [];
+
+    const result = await deactivateHermesIntegration({
+      projectRoot,
+      commandRunner: async (command, args) => { commands.push({ command, args }); }
+    });
+
+    expect(result).toMatchObject({
+      projectRoot,
+      disconnected: true,
+      activationReceiptPath: activated.activation?.receiptPath,
+      activationReceiptRemoved: true
+    });
+    expect(commands).toEqual([
+      { command: "hermes", args: ["mcp", "remove", "loopgraph_admin"] },
+      { command: "hermes", args: ["mcp", "remove", "loopgraph_webhook_router"] },
+      { command: "hermes", args: ["mcp", "remove", "loopgraph_lifecycle_router"] }
+    ]);
+    await expect(readFile(activated.activation!.receiptPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    const doctor = await doctorHermesIntegration({
+      projectRoot,
+      hermesVersionCheck: async () => "hermes 1.0.0"
+    });
+    expect(doctor.activation).toMatchObject({ applied: false, current: false });
+  });
+
+  it("rejects an activation receipt that does not prove both scoped skills", async () => {
+    const projectRoot = await temporaryProjectRoot();
+    const activated = await setupHermesIntegration({
+      projectRoot,
+      cliEntryPath: path.join(projectRoot, "dist", "cli.js"),
+      nodeCommand: process.execPath,
+      hermesVersionCheck: async () => "hermes 1.0.0",
+      activate: true,
+      commandRunner: async () => undefined
+    });
+    const receipt = JSON.parse(await readFile(activated.activation!.receiptPath, "utf8")) as Record<string, unknown>;
+    receipt.skills = ["mrrkrieg/loopgraph/skills/loopgraph"];
+    await writeFile(activated.activation!.receiptPath, `${JSON.stringify(receipt)}\n`);
+
+    const doctor = await doctorHermesIntegration({
+      projectRoot,
+      hermesVersionCheck: async () => "hermes 1.0.0"
+    });
+    expect(doctor.activation).toMatchObject({ applied: false, current: false });
+  });
+
+  it("preserves the activation receipt when Hermes disconnect is incomplete", async () => {
+    const projectRoot = await temporaryProjectRoot();
+    const activated = await setupHermesIntegration({
+      projectRoot,
+      cliEntryPath: path.join(projectRoot, "dist", "cli.js"),
+      nodeCommand: process.execPath,
+      hermesVersionCheck: async () => "hermes 1.0.0",
+      activate: true,
+      commandRunner: async () => undefined
+    });
+
+    await expect(deactivateHermesIntegration({
+      projectRoot,
+      commandRunner: async (_command, args) => {
+        if (args.at(-1) === "loopgraph_webhook_router") throw new Error("simulated removal failure");
+      }
+    })).rejects.toThrow("The activation receipt was preserved");
+    expect(JSON.parse(await readFile(activated.activation!.receiptPath, "utf8"))).toMatchObject({
+      schemaVersion: "hermes-loopgraph-activation/v1alpha2"
+    });
   });
 
   it.skipIf(process.platform === "win32")("atomically replaces an activation receipt symlink without changing its target", async () => {
