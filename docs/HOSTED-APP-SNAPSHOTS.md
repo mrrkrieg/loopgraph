@@ -178,6 +178,12 @@ promotion. It uses a unique workspace namespace and two empty runtime roots to p
 - a second replica recovers the exact artifact and full signed file-inventory digests; and
 - the service-only probe is removed after validation.
 
+Before that archive exercise, `npm run probe:app-snapshot-fence` actively proves the deployed
+mutation path. It uses a random `fence_probe_…` project beneath the reviewed staging organization,
+requires every registry insert/update/delete and Storage upload/replace/delete to advance the
+generation, then removes the synthetic registry, object, and generation row. The probe receipt
+contains no random project, workspace, object path, absolute generation, credential, or payload.
+
 The protected runner receives the Supabase service-role key only through
 `LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE`, an absolute non-symlink regular file with mode
 `0600`. It reuses the short-lived allowed-user session bundle from the hosted user-boundary gate.

@@ -9,9 +9,11 @@ const installation = {
   state: "simulation_passed"
 } as WorkspaceAppInstallation;
 
-function approval(overrides: Partial<AppActivationApprovalReceipt> = {}): AppActivationApprovalReceipt {
+type CurrentApproval = Extract<AppActivationApprovalReceipt, { schemaVersion: "loopgraph-app-activation-approval/v1alpha2" }>;
+
+function approval(overrides: Partial<CurrentApproval> = {}): CurrentApproval {
   return {
-    schemaVersion: "loopgraph-app-activation-approval/v1alpha1",
+    schemaVersion: "loopgraph-app-activation-approval/v1alpha2",
     id: "activation-approval.test",
     workspaceId: "default",
     installationId: installation.id,
@@ -22,6 +24,26 @@ function approval(overrides: Partial<AppActivationApprovalReceipt> = {}): AppAct
     approvedBy: "owner@example.com",
     reason: "Synthetic conformance passed and shadow mode cannot write to providers.",
     evidenceRefs: ["evaluation:test"],
+    activationGate: {
+      schemaVersion: "loopgraph-app-activation-gate/v1alpha1",
+      installationId: installation.id,
+      appId: installation.appId,
+      artifactDigest: installation.artifactDigest,
+      fromState: installation.state,
+      requestedMode: "shadow",
+      status: "ready",
+      requiredMaturity: "connected",
+      observedMaturity: "connected",
+      checks: [
+        { id: "ordered-lifecycle", status: "pass", summary: "Ordered transition is valid.", evidenceRefs: [] },
+        { id: "operational-maturity", status: "pass", summary: "Connected maturity achieved.", evidenceRefs: ["evaluation:test"] },
+        { id: "promotion-evidence", status: "not_applicable", summary: "Not required for shadow.", evidenceRefs: [] },
+        { id: "permission-boundary", status: "pass", summary: "Writes remain blocked.", evidenceRefs: [] }
+      ],
+      evidenceRefs: ["evaluation:test"],
+      evaluatedAt: "2026-08-22T12:00:00.000Z",
+      gateDigest: `sha256:${"d".repeat(64)}`
+    },
     approvedAt: "2026-08-22T12:00:00.000Z",
     expiresAt: "2026-08-22T12:15:00.000Z",
     approvalDigest: `sha256:${"b".repeat(64)}`,
@@ -49,5 +71,20 @@ describe("browser App activation handoff", () => {
   it("deduplicates and bounds evidence references before the approval mutation", () => {
     expect(activationEvidenceRefs(["evaluation:one", "evaluation:one", "", "x".repeat(1_001), "evaluation:two"]))
       .toEqual(["evaluation:one", "evaluation:two"]);
+  });
+
+  it("does not offer legacy approvals that predate evidence-bound activation gates", () => {
+    const legacy = {
+      ...approval(),
+      schemaVersion: "loopgraph-app-activation-approval/v1alpha1" as const
+    };
+    const { activationGate: _activationGate, ...legacyApproval } = legacy;
+    void _activationGate;
+    expect(currentActivationApproval({
+      installation,
+      approvals: [legacyApproval],
+      mode: "shadow",
+      now: new Date("2026-08-22T12:05:00.000Z")
+    })).toBeUndefined();
   });
 });
