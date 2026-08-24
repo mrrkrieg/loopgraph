@@ -49,6 +49,10 @@ describe("hosted marketplace staging gate", () => {
           expect(url.searchParams.get("after")).toBe("41");
           expect(url.searchParams.has("through")).toBe(false);
           return json({
+            schemaVersion: "loopgraph-security-audit-export/v2",
+            organizationId: config.organizationId,
+            projectKey: config.projectKey,
+            afterSequence: 41,
             throughSequence: 43,
             integrity: { valid: true, headHash: "e".repeat(64) },
             events: [],
@@ -59,6 +63,10 @@ describe("hosted marketplace staging gate", () => {
         expect(url.searchParams.get("after")).toBe("42");
         expect(url.searchParams.get("through")).toBe("43");
         return json({
+          schemaVersion: "loopgraph-security-audit-export/v2",
+          organizationId: config.organizationId,
+          projectKey: config.projectKey,
+          afterSequence: 42,
           throughSequence: 43,
           integrity: { valid: true, headHash: "e".repeat(64) },
           events: [{

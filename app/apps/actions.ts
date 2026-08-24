@@ -26,10 +26,15 @@ export async function operateInstalledAppAction(formData: FormData) {
   const installationId = requiredFormString(formData, "installationId");
   const action = requiredFormString(formData, "action");
   if (!(action in actionTools)) throw new Error(`Unsupported app operation: ${action}`);
+  const exactRepairSource = action === "repair" ? {
+    expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt")
+  } : {};
   await callLoopgraphAppTool(actionTools[action as keyof typeof actionTools], {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
-    actor
+    actor,
+    ...exactRepairSource
   });
   revalidateInstalledApp(installationId);
 }
@@ -84,15 +89,40 @@ export async function revokeInstalledAppOperationAction(formData: FormData) {
 export async function activateInstalledAppAction(formData: FormData) {
   const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
-  const mode = requiredFormString(formData, "mode");
-  if (mode !== "shadow" && mode !== "recommend" && mode !== "execute_with_approval") {
-    throw new Error("Browser activation is limited to shadow, recommend, or execute with approval");
-  }
+  const mode = browserActivationMode(formData);
   await callLoopgraphAppTool("loopgraph_app_activate", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     mode,
+    approvalReceiptId: requiredFormString(formData, "approvalReceiptId", 512),
     actor
+  });
+  revalidateInstalledApp(installationId);
+}
+
+export async function approveInstalledAppActivationAction(formData: FormData) {
+  const actor = await authorizedAppActor();
+  await requireHostedStepUp();
+  const installationId = requiredFormString(formData, "installationId");
+  const mode = browserActivationMode(formData);
+  if (requiredFormString(formData, "confirmation", 32) !== "APPROVE") {
+    throw new Error("Explicit activation approval is required");
+  }
+  const evidenceRefs = formData.getAll("evidenceRef").map((value) => {
+    if (typeof value !== "string" || value.length < 1 || value.length > 1_000) {
+      throw new Error("Invalid activation evidence reference");
+    }
+    return value;
+  });
+  if (evidenceRefs.length > 100) throw new Error("Activation approval accepts at most 100 evidence references");
+  await callLoopgraphAppTool("loopgraph_app_activation_approve", {
+    projectRoot: getActiveLoopgraphProjectRoot(),
+    installationId,
+    mode,
+    approvedBy: actor,
+    reason: requiredFormString(formData, "reason", 2_000),
+    evidenceRefs: [...new Set(evidenceRefs)],
+    expiresInSeconds: 900
   });
   revalidateInstalledApp(installationId);
 }
@@ -176,6 +206,8 @@ export async function duplicateInstalledAppAction(formData: FormData) {
     installationId,
     derivedAppId: requiredFormString(formData, "derivedAppId"),
     overlayOperations: overlay.operations ?? [],
+    expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
     actor
   }) as { installation?: { id?: unknown } };
   const derivedInstallationId = result.installation?.id;
@@ -217,6 +249,7 @@ export async function detachInstalledAppAction(formData: FormData) {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
     actor
   });
   revalidateInstalledApp(installationId);
@@ -273,4 +306,12 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
   return parsed as Record<string, unknown>;
+}
+
+function browserActivationMode(formData: FormData): "shadow" | "recommend" {
+  const mode = requiredFormString(formData, "mode");
+  if (mode !== "shadow" && mode !== "recommend") {
+    throw new Error("Browser activation is limited to shadow or recommend mode");
+  }
+  return mode;
 }
