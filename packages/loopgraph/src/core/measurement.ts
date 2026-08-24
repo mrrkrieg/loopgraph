@@ -140,6 +140,9 @@ export const connectionReconciliationIssueSchema = z.object({
     "metric_binding_invalid",
     "webhook_manifest_missing",
     "webhook_manifest_stale",
+    "webhook_activation_missing",
+    "webhook_activation_stale",
+    "webhook_route_not_ready",
     "measurement_overdue"
   ]),
   connectionInstanceId: z.string().min(1).optional(),
@@ -160,6 +163,8 @@ export const connectionReconciliationReportSchema = z.object({
   metricBindingsHash: z.string().min(1),
   webhookCatalogVersion: z.string().min(1),
   webhookManifestOk: z.boolean(),
+  webhookActivationReady: z.boolean().default(false),
+  webhookActivationPlanDigest: z.string().min(1).optional(),
   checkedConnectionIds: z.array(z.string().min(1)).default([]),
   checkedBindingIds: z.array(z.string().min(1)).default([]),
   issues: z.array(connectionReconciliationIssueSchema).default([]),

@@ -35,6 +35,23 @@ flowchart LR
 5. Every accepted, denied, or failed call produces an idempotent receipt containing hashes—not raw
    inputs or outputs—and appends an event to the tenant security audit chain.
 
+Installed Apps add a route-bound authority check before this broker boundary. Hermes cannot submit
+a provider, operation, connection, URL, tenant, workspace, or company object. It supplies a logical
+capability and durable execution identity; Loopgraph derives the exact pinned App binding and
+requires an active matching route job, exact LoopSpec hash, fresh assigned agent, matching durable
+event/problem subject, exact Broker environment, current scopes, and healthy secret-free connection
+projection. Reads may execute, while any write returns only a prepared-action fingerprint for the
+separate approval and commit controls. Secret-shaped operation input is rejected before the Broker.
+The headless endpoint requires a dedicated `hermes.app_operations` durable workload grant and binds
+the tenant from verified deployment configuration; browser session authority and the broader
+provider-broker grant do not authorize this route.
+
+Bindings owned by the Loopgraph provider do not fall through to the Connector Broker. Three
+allowlisted internal reads—topology, routing decisions, and outcome/value evidence—run in a separate
+fixed registry after the same route/agent/tenant checks. They expose bounded summaries, omit raw
+provider payloads and model metadata, enforce tenant filters, reject secret-shaped input and output,
+and have no dynamic module, arbitrary file, SQL, URL, graph mutation, or action-commit mechanism.
+
 Before a provider handler runs, a tenant-scoped idempotency lease is atomically reserved. Concurrent
 duplicates return `request_in_progress`, and reuse of the key for a different actor, environment,
 company object, loop, route job, installation, capability, operation, or input returns
@@ -94,6 +111,11 @@ Set `LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS` to a JSON array of trusted issuer poli
 
 - accepts RS256 and ES256 JWTs only;
 - obtains keys from the configured JWKS URI and caches them for a bounded interval;
+- refreshes once when a previously unseen key ID appears or a cached same-ID key no longer verifies,
+  so an issuer can rotate signing keys before the prior cache TTL expires;
+- deduplicates concurrent JWKS loads, caps a JWKS at 100 keys, rejects redirects and malformed key
+  documents, caps even a provider-advertised long cache lifetime at five minutes, and permits at most one rotation-triggered refresh per issuer every 30 seconds so an
+  attacker-controlled key ID cannot become an outbound request amplifier;
 - checks issuer, audience, expiry/not-before, allowed subject patterns, tenant claims, and the exact
   machine capability;
 - derives a non-secret credential ID from issuer + subject for durable replay and rate-limit receipts;
@@ -107,6 +129,13 @@ web-identity token with STS or uses ECS/EC2/Lambda workload credentials. Static 
 tokens fail closed unless `LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` is deliberately enabled during
 migration. Static AWS access keys are also rejected in production unless the temporary
 `LOOPGRAPH_ALLOW_STATIC_AWS_CREDENTIALS=true` escape hatch is explicitly enabled.
+
+Use an overlap window when rotating issuer keys: publish the old and new public keys, begin issuing
+tokens with the new `kid`, wait through the maximum accepted token lifetime, and only then remove the
+old key. A same-`kid` emergency replacement is supported through the signature-failure refresh, but a
+new unique `kid` is preferred because it produces an unambiguous rotation boundary. A JWKS fetch or
+parse failure always denies the request; the verifier never accepts a token merely because an older
+cached key set exists.
 
 For sender-bound identities, set `LOOPGRAPH_TRUSTED_MTLS_PROXY=true` only when the broker origin is
 unreachable except through a gateway that removes inbound `x-loopgraph-mtls-*` headers, verifies the
