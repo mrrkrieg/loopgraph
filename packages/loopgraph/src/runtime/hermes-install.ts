@@ -38,6 +38,8 @@ import {
   ROUTING_CARD_SCHEMA_VERSION,
   ROUTING_CONTRACT_SCHEMA_VERSION,
   ROUTING_DECISION_SCHEMA_VERSION,
+  ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION,
+  ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION,
   VALUE_LEDGER_ENTRY_SCHEMA_VERSION
 } from "../core";
 import {
@@ -70,12 +72,12 @@ import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 import { LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 
-export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha12" as const;
+export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha16" as const;
 export const HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION = "hermes-loopgraph-activation/v1alpha2" as const;
-export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.11.0" as const;
-export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha9" as const;
+export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.14.0" as const;
+export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha13" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha8" as const;
-export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha1" as const;
+export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha3" as const;
 export const HERMES_LOOPGRAPH_MCP_SERVER_NAMES = [
   "loopgraph_admin",
   "loopgraph_webhook_router",
@@ -107,6 +109,7 @@ export const HERMES_LOOPGRAPH_PROTOCOL_VERSIONS = {
   routingContract: ROUTING_CONTRACT_SCHEMA_VERSION,
   routingCard: ROUTING_CARD_SCHEMA_VERSION,
   routingDecision: ROUTING_DECISION_SCHEMA_VERSION,
+  routingLearningContext: ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION,
   routeJob: ROUTE_JOB_SCHEMA_VERSION,
   hermesAgentInstance: HERMES_AGENT_INSTANCE_SCHEMA_VERSION,
   hermesExecutionEvent: HERMES_EXECUTION_EVENT_SCHEMA_VERSION,
@@ -1310,6 +1313,7 @@ metadata:
     eventEnvelopeSchema: ${EVENT_ENVELOPE_SCHEMA_VERSION}
     routingDecisionSchema: ${ROUTING_DECISION_SCHEMA_VERSION}
     routingCardSchema: ${ROUTING_CARD_SCHEMA_VERSION}
+    routingLearningContextBindingSchema: ${ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION}
     routeJobSchema: ${ROUTE_JOB_SCHEMA_VERSION}
 ---
 
@@ -1325,21 +1329,22 @@ Use this skill only for isolated webhook, schedule, manual, or Loopgraph lifecyc
 2. Immediately call \`loopgraph_events_ingest\` on the isolated Loopgraph MCP server named \`loopgraph_webhook_router\` for project root \`${projectRoot}\`. Do not use \`loopgraph_admin\` from a webhook-triggered turn.
 3. If Loopgraph reports a duplicate, stop.
 4. If \`normalizedPayload.notificationOnly\` is true, or \`sourceRoute\` is \`loopgraph.lifecycle\`, record the event as a lifecycle notification and stop without submitting a RoutingDecision.
-5. Compare only the eligible routing cards returned by Loopgraph; each card must use routing card schema \`${ROUTING_CARD_SCHEMA_VERSION}\`.
-6. Evaluate these questions in order and record only the answer summary and evidence references, never hidden reasoning:
+5. Read the returned \`learningContext\` and retain its \`learningContextDigest\`. The context contains only bounded routing evaluations, human corrections, observed outcomes, and net-value evidence for eligible and subject-related loops. Its authority is advisory: unavailable evidence stays unknown, and historical success can never make an ineligible loop eligible.
+6. Compare only the eligible routing cards returned by Loopgraph; each card must use routing card schema \`${ROUTING_CARD_SCHEMA_VERSION}\`.
+7. Evaluate these questions in order and record only the answer summary and evidence references, never hidden reasoning:
 ${HERMES_ROUTER_EVALUATION_QUESTIONS.map((question, index) => `   ${index + 1}. ${question}`).join("\n")}
-7. Submit exactly one schema-constrained RoutingDecision with \`schemaVersion: "${ROUTING_DECISION_SCHEMA_VERSION}"\` through \`loopgraph_routing_decision_submit\`.
-8. Use \`loopgraph_events_get\`, \`loopgraph_problems_get\`, \`loopgraph_routing_decision_get\`, or \`loopgraph_graph_get\` only when you need to explain existing durable state.
-9. Use \`append_evidence\` for matching open problems instead of creating duplicate work.
-10. Fan out only when every selected card explicitly permits it and a canonical shared-learning playbook declares the sequence. One event should otherwise create one primary problem.
-11. If confidence is low, required context is missing, candidates are close, or exclusions conflict, request human choice.
-12. If no loop matches, create an unhandled business problem and stop.
-13. For debugging or operator explanation, call \`loopgraph_graph_get\` with \`projection: "event_routing"\`.
+8. Submit exactly one schema-constrained RoutingDecision with \`schemaVersion: "${ROUTING_DECISION_SCHEMA_VERSION}"\` through \`loopgraph_routing_decision_submit\`, echoing the exact \`learningContextDigest\` returned by ingest. If Loopgraph rejects a stale digest, re-ingest before reasoning again; never bypass the binding by omitting the digest.
+9. Use \`loopgraph_events_get\`, \`loopgraph_problems_get\`, \`loopgraph_routing_decision_get\`, or \`loopgraph_graph_get\` only when you need to explain existing durable state.
+10. Use \`append_evidence\` for matching open problems instead of creating duplicate work.
+11. Fan out only when every selected card explicitly permits it and a canonical shared-learning playbook declares the sequence. One event should otherwise create one primary problem.
+12. If confidence is low, required context is missing, candidates are close, or exclusions conflict, request human choice.
+13. If no loop matches, create an unhandled business problem and stop.
+14. For debugging or operator explanation, call \`loopgraph_graph_get\` with \`projection: "event_routing"\`.
 
 ## Supporting References
 
 - MCP exposure: use only the generated \`loopgraph_webhook_router\` server, which runs \`loopgraph mcp serve --project ${projectRoot} --exposure webhook_router\`, for webhook-triggered turns.
-- MCP resources: \`loopgraph://schemas/event-envelope\`, \`loopgraph://schemas/routing-card\`, \`loopgraph://schemas/routing-decision\`, and \`loopgraph://graph/company\`. Do not read full loop resources from an untrusted webhook turn.
+- MCP resources: \`loopgraph://schemas/event-envelope\`, \`loopgraph://schemas/routing-card\`, \`loopgraph://schemas/routing-decision\`, \`loopgraph://schemas/routing-learning-context\`, \`loopgraph://schemas/routing-learning-context-binding\`, and \`loopgraph://graph/company\`. Do not read full loop resources from an untrusted webhook turn.
 - \`references/routing-protocol.md\`: event-ingest, decision, validation, and durable-state sequence.
 - \`examples/product-routing-events.md\`: Product feedback, release-learning, duplicate, and human-review examples.
 - \`examples/marketing-routing-events.md\`: Ads, Content Creation, ambiguous, duplicate, and fan-out examples.

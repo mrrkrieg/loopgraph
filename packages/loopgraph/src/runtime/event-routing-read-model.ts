@@ -119,6 +119,7 @@ export type EventRoutingDecisionDetail = {
     key: string;
     value: string;
   }>;
+  learningContextBinding?: RoutingAttempt["learningContextBinding"];
   selectedRoutes: Array<{
     loopId: string;
     loopLabel: string;
@@ -159,6 +160,7 @@ export type EventRoutingTimelineEntry = {
   at: string;
   stage:
     | "event_receipt"
+    | "learning_context"
     | "hermes_decision"
     | "business_problem"
     | "route_commit"
@@ -619,6 +621,9 @@ function decisionDetailForRow(input: {
     ...(input.attempt?.catalogVersion ? { catalogVersion: input.attempt.catalogVersion } : {}),
     ...(decision?.policyVersion ? { policyVersion: decision.policyVersion } : {}),
     modelMetadata: summarizeModelMetadata(decision?.modelMetadata ?? {}),
+    ...(input.attempt?.learningContextBinding ? {
+      learningContextBinding: input.attempt.learningContextBinding
+    } : {}),
     selectedRoutes: decision?.selectedRoutes.map((route) => ({
       loopId: route.loopId,
       loopLabel: input.catalogByLoopId.get(route.loopId)?.loopName ?? route.loopId,
@@ -676,6 +681,17 @@ function correlationTimelineForRow(input: {
   }];
 
   if (input.attempt) {
+    const learningBinding = input.attempt.learningContextBinding;
+    if (learningBinding) {
+      entries.push({
+        id: `${input.attempt.id}:learning-context`,
+        at: learningBinding.boundAt,
+        stage: "learning_context",
+        label: "Cross-loop evidence bound to decision",
+        detail: `${learningBinding.context.eligibleLoopIds.length} eligible loops · ${learningBinding.context.loopEvidence.length} evidence summaries · digest ${learningBinding.contextDigest}`,
+        status: learningBinding.acknowledged ? "acknowledged" : "unacknowledged"
+      });
+    }
     entries.push({
       id: input.attempt.id,
       at: input.attempt.createdAt,

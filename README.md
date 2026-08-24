@@ -76,7 +76,7 @@ For every verified event, Hermes can ask:
 6. Is there one clear route, or is explicit fan-out permitted?
 7. Should Hermes abstain and request more context or human judgment?
 
-Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run.
+Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run. Every new Hermes decision can echo the learning-context digest returned by ingest; Loopgraph recomputes it, rejects stale evidence, and stores the exact bounded evidence packet with the durable routing attempt.
 
 ## Product example
 
@@ -119,6 +119,10 @@ The automation is not successful merely because it produced a brief. It is succe
 | The worker often receives reusable credentials | Hermes receives capabilities, not reusable provider tokens |
 | The diagram documents the workflow | Governed graph changes update backend topology and routing contracts |
 | Automations optimize local activity | Evidence can improve decisions across departments |
+
+Each event turn now includes a bounded shared-learning context: scoped routing evaluations, accountable human corrections, subject-related outcomes, and observed net value. Hermes can use that evidence to compare eligible loops, append evidence to an existing problem, lower confidence, or abstain. The isolated Hermes router must acknowledge the exact context digest when it submits its decision; stale or omitted evidence cannot create a route commit. The context remains advisory and can never make an ineligible loop eligible or authorize execution. See [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md).
+
+The operator learning view measures whether that system is improving: evidence-binding coverage, stale submissions rejected, abstention and human-review behavior, accountable corrections, golden-event pass rate, per-loop routing quality, observed outcomes, and net value remain separate signals. High route volume is never presented as success by itself.
 
 Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer. It provides the company operating contract around recurring AI work: **context, routing, policy, evidence, approval, escalation, and outcome**. See the [competitive boundary](docs/competitive-boundary.md).
 
@@ -682,6 +686,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 ### Get started
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md)
+- [Native Hermes plugin](docs/HERMES-PLUGIN.md)
 - [Local supervisor](docs/LOCAL-SUPERVISOR.md)
 - [Hermes examples](docs/HERMES-EXAMPLES.md)
 - [Company loop library](docs/COMPANY-LOOP-LIBRARY.md)
@@ -694,6 +699,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 - [Topology guide](docs/topology-guide.md)
 - [Approval model](docs/approval-model.md)
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md)
+- [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md)
 
 ### Runtime and enterprise operations
 
