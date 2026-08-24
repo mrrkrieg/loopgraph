@@ -5,6 +5,7 @@ export type InstallWizardQuestion = AppSetupDefinition["questions"][number];
 export type InstallWizardState = {
   stage: "configure" | "review";
   plan: AppInstallPlan;
+  impact: AppInstallImpactView;
   mappingPlan: AppFieldMappingPlan;
   journey: AppOnboardingProgressView;
   unresolvedQuestionKeys: string[];
@@ -12,7 +13,39 @@ export type InstallWizardState = {
   notice?: string;
 };
 
-export type AppOnboardingProgressView = Pick<AppOnboardingJourney, "stage" | "headline" | "progress" | "steps" | "nextAction">;
+export type AppInstallImpactView = {
+  additions: Array<{ id: string; kind: AppInstallPlan["assets"][number]["kind"]; sourcePath?: string }>;
+  reusedAssets: Array<{ id: string; kind: AppInstallPlan["assets"][number]["kind"]; sourcePath?: string }>;
+  reusedDependencies: Array<{ appId: string; version: string }>;
+  conflicts: AppInstallPlan["conflicts"];
+  permissions: AppInstallPlan["permissions"];
+  metrics: Array<{ id: string; loopName: string; metric?: string; description?: string; direction?: string }>;
+  evidenceEdges: Array<{
+    id: string;
+    source: string;
+    target: string;
+    type: "evidence_in" | "supports" | "produces" | "learning_return";
+    reason?: string;
+    condition?: string;
+  }>;
+};
+
+type InstallImpactSource = {
+  graphPreview: {
+    nodes: Array<{ id: string; label: string; type: string }>;
+    edges: Array<{
+      id: string;
+      source: string;
+      target: string;
+      type: "routes" | "owns" | "contains" | "evidence_in" | "supports" | "produces" | "learning_return";
+      reason?: string;
+      condition?: string;
+    }>;
+  };
+  sampleOutputs: Array<{ id: string; loopName: string; metric?: string; description?: string; direction?: string }>;
+};
+
+export type AppOnboardingProgressView = Pick<AppOnboardingJourney, "stage" | "headline" | "progress" | "steps" | "nextAction" | "draft">;
 
 export function appOnboardingProgressForView(journey: AppOnboardingJourney): AppOnboardingProgressView {
   return {
@@ -20,7 +53,43 @@ export function appOnboardingProgressForView(journey: AppOnboardingJourney): App
     headline: journey.headline,
     progress: journey.progress,
     steps: journey.steps,
-    nextAction: journey.nextAction
+    nextAction: journey.nextAction,
+    draft: journey.draft
+  };
+}
+
+export function buildAppInstallImpactView(plan: AppInstallPlan, source: InstallImpactSource): AppInstallImpactView {
+  const graphNodeById = new Map(source.graphPreview.nodes.map((node) => [node.id, node]));
+  const reusedAssets = plan.assets
+    .filter((asset) => asset.action === "reuse")
+    .map((asset) => ({ id: asset.id, kind: asset.kind, ...(asset.sourcePath ? { sourcePath: asset.sourcePath } : {}) }));
+  const reusedAssetIds = new Set(reusedAssets.map((asset) => asset.id));
+  for (const nodeId of plan.graphDiff.nodesReused) {
+    const assetId = `graph-node.${nodeId}`;
+    if (!reusedAssetIds.has(assetId)) reusedAssets.push({ id: assetId, kind: "graph_node" });
+  }
+  return {
+    additions: plan.assets
+      .filter((asset) => asset.action === "create")
+      .map((asset) => ({ id: asset.id, kind: asset.kind, ...(asset.sourcePath ? { sourcePath: asset.sourcePath } : {}) })),
+    reusedAssets,
+    reusedDependencies: plan.dependencyResolutions
+      .filter((dependency) => dependency.reused)
+      .map(({ appId, version }) => ({ appId, version })),
+    conflicts: plan.conflicts,
+    permissions: plan.permissions,
+    metrics: source.sampleOutputs.map(({ id, loopName, metric, description, direction }) => ({ id, loopName, metric, description, direction })),
+    evidenceEdges: source.graphPreview.edges
+      .filter((edge): edge is typeof edge & { type: AppInstallImpactView["evidenceEdges"][number]["type"] } =>
+        ["evidence_in", "supports", "produces", "learning_return"].includes(edge.type))
+      .map((edge) => ({
+        id: edge.id,
+        source: graphNodeById.get(edge.source)?.label ?? humanizeInstallIdentifier(edge.source),
+        target: graphNodeById.get(edge.target)?.label ?? humanizeInstallIdentifier(edge.target),
+        type: edge.type,
+        reason: edge.reason,
+        condition: edge.condition
+      }))
   };
 }
 
@@ -50,10 +119,13 @@ export function installPlanBlockersForView(plan: AppInstallPlan): string[] {
     ...plan.missingConfigurationKeys.map((key) => `Resolve ${readableBlocker(key)}.`),
     ...plan.capabilityResolutions
       .filter((resolution) => resolution.required && !["connected", "reusable"].includes(resolution.status))
-      .map((resolution) => `Connect ${resolution.capability} (${resolution.status}).`),
+      .map((resolution) => resolution.reason ?? `Connect ${resolution.capability} (${resolution.status}).`),
     ...plan.permissions
       .filter((permission) => permission.decision === "unresolved")
-      .map((permission) => `Review permission ${permission.capability}.`)
+      .map((permission) => `Review permission ${permission.capability}.`),
+    ...(plan.conflicts ?? [])
+      .filter((conflict) => conflict.blocking)
+      .map((conflict) => `Resolve ${conflict.kind.replace(/_/g, " ")} conflict for ${conflict.resourceId}: ${conflict.reason}`)
   ];
 }
 
@@ -98,4 +170,11 @@ function readableBlocker(value: string): string {
   if (value.startsWith("mapping_confirmation:")) return `field mapping confirmation for ${value.slice("mapping_confirmation:".length).replace(/:/g, " / ")}`;
   if (value.startsWith("mapping:")) return `field mapping for ${value.slice("mapping:".length).replace(/:/g, " / ")}`;
   return value.replace(/_/g, " ");
+}
+
+function humanizeInstallIdentifier(value: string): string {
+  return value
+    .replace(/^(?:graph-node|graph-edge|loop|skill|routing|receipt)\./, "")
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
