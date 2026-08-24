@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   LOOPGRAPH_API_VERSION,
   LOOP_KIND,
+  type HermesRouteControllerRequest,
   type MetricDefinition
 } from "../core";
 import {
@@ -12,6 +13,7 @@ import {
   upsertConnectionInstance
 } from "./connector-registry";
 import { syncHermesWebhookRoutes } from "./hermes-webhooks";
+import { activateHermesRoutes, prepareHermesRouteActivation } from "./hermes-route-activation";
 import {
   claimMeasurementJobs,
   completeMeasurementJob,
@@ -127,6 +129,7 @@ describe("scheduled connector measurements", () => {
       projectRoot,
       now: new Date("2026-07-29T01:50:00.000Z")
     });
+    await activateRoutesForTest(projectRoot, new Date("2026-07-29T01:51:00.000Z"));
     const binding = await upsertMetricBinding({
       projectRoot,
       metricDefinitionId: "metric_activation",
@@ -185,6 +188,7 @@ describe("scheduled connector measurements", () => {
 
     expect(report.status).toBe("blocked");
     expect(report.webhookManifestOk).toBe(true);
+    expect(report.webhookActivationReady).toBe(true);
     expect(report.issues.map((issue) => issue.kind)).toEqual(expect.arrayContaining([
       "connection_degraded",
       "health_stale",
@@ -195,7 +199,72 @@ describe("scheduled connector measurements", () => {
       .getReconciliationReport(report.id);
     expect(persisted?.id).toBe(report.id);
   });
+
+  it("blocks provider routing when only the local manifest exists and Hermes has not proven activation", async () => {
+    const projectRoot = await createMeasurementProject();
+    await registerHealthyAnalyticsConnection(projectRoot);
+    await syncHermesWebhookRoutes({
+      projectRoot,
+      now: new Date("2026-07-29T01:50:00.000Z")
+    });
+
+    const { report } = await reconcileConnectionsAndMeasurements({
+      projectRoot,
+      now: new Date("2026-07-29T02:00:00.000Z")
+    });
+
+    expect(report).toMatchObject({
+      status: "blocked",
+      webhookManifestOk: true,
+      webhookActivationReady: false,
+      issues: expect.arrayContaining([
+        expect.objectContaining({ kind: "webhook_activation_missing", severity: "blocking" })
+      ])
+    });
+  });
 });
+
+async function activateRoutesForTest(projectRoot: string, now: Date) {
+  const plan = await prepareHermesRouteActivation({ projectRoot, now });
+  return activateHermesRoutes({
+    projectRoot,
+    now,
+    controllerUrl: "https://hermes.example.test/v1/loopgraph/routes/reconcile",
+    audience: "hermes-controller",
+    confirmationDigest: plan.planDigest,
+    tokenProvider: { getToken: async () => "header.payload.signature-with-enough-entropy-for-tests" },
+    fetcher: (async (_url: string | URL | Request, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as HermesRouteControllerRequest;
+      return Response.json({
+        schemaVersion: "hermes-route-controller-receipt/v1alpha1",
+        requestId: request.requestId,
+        controllerInstanceId: "hermes_controller_measurement_test",
+        appliedAt: request.requestedAt,
+        projectRootHash: request.projectRootHash,
+        catalogVersion: request.catalogVersion,
+        manifestDigest: request.manifestDigest,
+        planDigest: request.planDigest,
+        destructiveChangesApplied: false,
+        routes: request.routes.map((route) => ({
+          routeId: route.routeId,
+          routeName: route.routeName,
+          state: "shadow",
+          appliedConfigDigest: route.configDigest,
+          profileId: route.profileId,
+          skills: route.skills,
+          restrictedMcpTools: route.restrictedMcpTools,
+          transformerId: route.transformation.transformerId,
+          signatureVerificationConfigured: true,
+          secretStoredInHermes: true,
+          subscriptionState: route.subscription.required ? "active" : "not_applicable",
+          routeUrl: `https://hooks.example.test/webhooks/${route.routeName}`,
+          evidenceRefs: [`hermes-route:${route.routeId}`],
+          errors: []
+        }))
+      });
+    }) as typeof fetch
+  });
+}
 
 async function createMeasurementProject(): Promise<string> {
   const projectRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-measurements-"));
