@@ -235,6 +235,12 @@ function SessionRow({
           <dt className="text-muted">Capability</dt>
           <dd className="mt-0.5 font-mono font-medium">{session.capabilities.join(", ") || "none"}</dd>
         </div>
+        {session.refreshReuseDetectedAt ? (
+          <div className="col-span-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5 text-red-800">
+            <dt className="font-semibold">Refresh-token reuse detected</dt>
+            <dd className="mt-0.5">Family revoked {formatTime(session.refreshReuseDetectedAt)}</dd>
+          </div>
+        ) : null}
       </dl>
       <div className="flex flex-wrap gap-2 xl:justify-end">
         <button

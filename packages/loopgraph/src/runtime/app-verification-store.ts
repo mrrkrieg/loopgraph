@@ -7,7 +7,10 @@ import {
   type AppIndependentVerificationReceipt,
   type AppVerifierTrustKey
 } from "../core";
-import { verifyAppIndependentVerificationReceipt } from "./app-operational-maturity";
+import {
+  validateAppVerifierPublicKey,
+  verifyAppIndependentVerificationReceipt
+} from "./app-operational-maturity";
 
 export const APP_VERIFICATION_REGISTRY_SCHEMA_VERSION = "loopgraph-app-verification-registry/v1alpha1" as const;
 
@@ -75,6 +78,7 @@ export class FileAppVerificationStore implements AppVerificationStore {
 
   async trustVerifierKey(keyInput: AppVerifierTrustKey): Promise<AppVerificationRegistry> {
     const key = appVerifierTrustKeySchema.parse(keyInput);
+    if (!validateAppVerifierPublicKey(key)) throw new Error("Verifier public key must be a valid Ed25519 public key");
     return this.update((registry) => {
       const existing = registry.trustedVerifierKeys.find((candidate) => candidate.verifierId === key.verifierId && candidate.keyId === key.keyId);
       if (existing && (existing.publicKey.trim() !== key.publicKey.trim() || existing.algorithm !== key.algorithm)) {
