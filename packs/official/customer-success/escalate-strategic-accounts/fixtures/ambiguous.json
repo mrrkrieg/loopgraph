@@ -1,0 +1,1 @@
+{"id":"strategic-risk-ambiguous","eventType":"account.risk_detected","subject":{"type":"account","id":"account-305"},"normalizedPayload":{"ticketId":"305","accountId":"account-305","severity":"P1","renewalDaysRemaining":60,"candidateSubjectIds":["account-305-a","account-305-b"],"confidence":0.94},"evidenceRefs":["support:ticket:305"]}

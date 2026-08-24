@@ -1,6 +1,7 @@
 import { connectorInstallationHasExpectedNamespace, deriveCredentialChildReference, type ConnectorInstallationAdmin, type CredentialReference } from "../core";
 import type { OAuthLifecycleStore } from "./oauth-lifecycle";
 import { getProviderOnboardingProfile } from "./provider-onboarding";
+import { deriveJiraWebhookCallbackBinding } from "./provider-webhook-verifier";
 import type { CompositeVault } from "./vault-adapters";
 
 export class ProviderSubscriptionService {
@@ -28,14 +29,20 @@ export class ProviderSubscriptionService {
     if (!["connected", "subscription_pending", "active"].includes(installation.status)) {
       throw new ProviderSubscriptionError("installation_not_connected");
     }
+    const profile = getProviderOnboardingProfile(installation.providerId);
+    if (profile.ingestion.mode === "scheduled_detector") return this.activateScheduledDetector(installation, input, profile);
     if (installation.providerId === "stripe") return this.activateStripe(installation);
     const webhookSecretRef = deriveCredentialChildReference(installation.credentialRef, "webhooks/signing");
     if (input.webhookSecretRef && input.webhookSecretRef !== webhookSecretRef) {
       throw new ProviderSubscriptionError("webhook_secret_reference_mismatch");
     }
     const verificationLease = await this.dependencies.vault.resolve(webhookSecretRef, secretContext(installation));
-    verificationLease.dispose();
-    const profile = getProviderOnboardingProfile(installation.providerId);
+    let endpointUrl: string;
+    try {
+      endpointUrl = this.endpoint(installation, verificationLease.reveal());
+    } finally {
+      verificationLease.dispose();
+    }
     const pendingVerification = !input.providerConfigured;
     const updated: ConnectorInstallationAdmin = {
       ...installation,
@@ -57,9 +64,40 @@ export class ProviderSubscriptionService {
     await this.dependencies.store.saveInstallation(updated);
     return {
       installation: updated,
-      endpointUrl: this.endpoint(updated),
+      endpointUrl,
+      intakeMode: profile.ingestion.mode,
       requiresProviderConfirmation: pendingVerification,
       eventFamilies: profile.ingestion.eventFamilies
+    };
+  }
+
+  private async activateScheduledDetector(
+    installation: ConnectorInstallationAdmin,
+    input: { providerSubscriptionId?: string; providerConfigured?: boolean },
+    profile: ReturnType<typeof getProviderOnboardingProfile>
+  ) {
+    const pendingVerification = !input.providerConfigured;
+    const updated: ConnectorInstallationAdmin = {
+      ...installation,
+      status: pendingVerification ? "subscription_pending" : "active",
+      providerSubscriptionId: input.providerSubscriptionId,
+      webhookStatus: "not_configured",
+      allowedCapabilities: [...new Set([
+        ...installation.allowedCapabilities,
+        "provider.events.emit" as const,
+        "provider.health.read" as const,
+        "provider.data.read" as const
+      ])],
+      updatedAt: new Date().toISOString()
+    };
+    await this.dependencies.store.saveInstallation(updated);
+    return {
+      installation: updated,
+      endpointUrl: undefined,
+      intakeMode: "scheduled_detector" as const,
+      requiresProviderConfirmation: pendingVerification,
+      eventFamilies: profile.ingestion.eventFamilies,
+      pollCadenceMinutes: profile.ingestion.pollCadenceMinutes
     };
   }
 
@@ -107,14 +145,23 @@ export class ProviderSubscriptionService {
       updatedAt: new Date().toISOString()
     };
     await this.dependencies.store.saveInstallation(updated);
-    return { installation: updated, endpointUrl: this.endpoint(updated), requiresProviderConfirmation: false, eventFamilies: profile.ingestion.eventFamilies };
+    return { installation: updated, endpointUrl: this.endpoint(updated), intakeMode: profile.ingestion.mode, requiresProviderConfirmation: false, eventFamilies: profile.ingestion.eventFamilies };
   }
 
-  private endpoint(installation: ConnectorInstallationAdmin) {
-    return new URL(
+  private endpoint(installation: ConnectorInstallationAdmin, webhookSecret?: string) {
+    const endpoint = new URL(
       `/api/connector-broker/v1/webhooks/${installation.id}`,
       this.dependencies.publicUrl
-    ).toString();
+    );
+    if (installation.providerId === "jira") {
+      if (!webhookSecret) throw new ProviderSubscriptionError("jira_webhook_secret_required");
+      endpoint.searchParams.set("loopgraph_binding", deriveJiraWebhookCallbackBinding({
+        secret: webhookSecret,
+        ...installation.tenant,
+        installationId: installation.id
+      }));
+    }
+    return endpoint.toString();
   }
 }
 

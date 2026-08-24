@@ -1,0 +1,1 @@
+{"id":"deal-risk-excluded","eventType":"sales.opportunity_changed","subject":{"type":"opportunity","id":"deal-303"},"normalizedPayload":{"opportunityId":"303","stage":"closed_won","lastActivityAt":"2026-08-01T10:00:00.000Z","excluded":true,"confidence":1},"evidenceRefs":["policy:closed-opportunity"]}

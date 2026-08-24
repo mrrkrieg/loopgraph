@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: gitlab-jira-teams
+providerId: gitlab
+providerFamily: gitlab
+displayName: GitLab + Jira + Teams
+capabilities:
+  - { logicalCapability: repo.issue.read, providerOperation: gitlab.issues.read, minimumScopes: [read_api], authority: read, risk: low }
+  - { logicalCapability: project.issue.read, providerOperation: jira.issues.read, minimumScopes: [read:jira-work], authority: read, risk: low }
+  - { logicalCapability: incident.record.read, providerOperation: jira.incidents.read, minimumScopes: [read:jira-work], authority: read, risk: high }
+  - { logicalCapability: deployment.release.read, providerOperation: gitlab.deployments.read, minimumScopes: [read_api], authority: read, risk: medium }
+  - { logicalCapability: project.issue.create, providerOperation: jira.issues.create, minimumScopes: [write:jira-work], authority: approve, risk: high }
+  - { logicalCapability: project.issue.update, providerOperation: jira.issues.update, minimumScopes: [write:jira-work], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: teams.messages.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: high }
+eventSources:
+  - { eventFamily: engineering.issue_received, providerEvent: Issue Hook, transport: webhook, normalizationTransformer: gitlab.issue-to-engineering-signal.v1, signatureStrategy: gitlab-standard-webhooks, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: engineering.incident_detected, providerEvent: jira.incident.created, transport: webhook, normalizationTransformer: jira.incident-to-engineering-signal.v1, signatureStrategy: atlassian-jwt, replayProtection: true, fallbackPollMinutes: 5 }
+fieldMappings:
+  - { providerId: gitlab, objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }
+  - { providerId: jira, objectType: incident, requiredLogicalFields: [incident.id, incident.service, incident.detectedAt], optionalLogicalFields: [incident.severity, incident.customerImpact, incident.deploymentId] }
+healthCheck: { capability: repo.issue.read, sampleQuery: { state: opened, limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

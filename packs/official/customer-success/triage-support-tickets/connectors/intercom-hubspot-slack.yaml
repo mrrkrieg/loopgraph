@@ -1,0 +1,27 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: intercom-hubspot-slack
+providerId: intercom
+providerFamily: intercom
+displayName: Intercom + HubSpot + Slack
+capabilities:
+  - { logicalCapability: support.ticket.read, providerOperation: intercom.conversations.read, minimumScopes: [conversations:read], authority: read, risk: low }
+  - { logicalCapability: crm.account.read, providerOperation: hubspot.companies.read, minimumScopes: [crm.objects.companies.read], authority: read, risk: low }
+  - { logicalCapability: support.ticket.update, providerOperation: intercom.conversations.update, minimumScopes: [conversations:write], authority: approve, risk: high }
+  - { logicalCapability: support.message.draft, providerOperation: intercom.messages.draft, minimumScopes: [conversations:write], authority: draft, risk: medium }
+  - { logicalCapability: messaging.channel.post, providerOperation: slack.chat.postMessage, minimumScopes: [chat:write], authority: approve, risk: medium }
+eventSources:
+  - { eventFamily: support.ticket_created, providerEvent: conversation.user.created, transport: webhook, normalizationTransformer: intercom.conversation-to-support-ticket.v1, signatureStrategy: intercom-hmac-sha1, replayProtection: true, fallbackPollMinutes: 10 }
+fieldMappings:
+  - objectType: support_ticket
+    providerId: intercom
+    requiredLogicalFields: [ticket.id, ticket.summary, ticket.priority, ticket.requesterId]
+    optionalLogicalFields: [ticket.status, ticket.createdAt, ticket.assignee, ticket.sentiment]
+  - objectType: account
+    providerId: hubspot
+    requiredLogicalFields: [account.id, account.customerStatus]
+    optionalLogicalFields: [account.tier, account.owner, account.renewalDate, account.serviceLevel]
+healthCheck:
+  capability: support.ticket.read
+  sampleQuery: { state: open, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

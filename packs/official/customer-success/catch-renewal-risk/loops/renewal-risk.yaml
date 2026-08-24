@@ -1,0 +1,35 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: cs-renewal-risk, name: Renewal Risk, version: 1.0.0, description: "Join contract timing with health evidence and accountable renewal ownership.", department: customer_success, ownerRole: csm, tags: [renewal, contract, risk] }
+trigger: { type: event, source: hermes, event: cs.health_risk_detected }
+input: { requiredFields: [normalizedPayload.accountId, normalizedPayload.renewalAt, normalizedPayload.healthEvidenceRefs], subjectTypes: [account, subscription], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble renewal evidence, actor: system, type: observe, description: "Join contract timing, health, support, adoption, payment, owner, and strategic-account evidence." }
+  - { id: assess, name: Assess renewal risk, actor: agent, type: assess, description: "Apply renewal-window and risk policy while exposing missing commercial or product evidence." }
+  - { id: decide, name: Select recovery route, actor: agent, type: decide, description: "Route ordinary renewal risk or request strategic escalation when material evidence supports it." }
+  - { id: learn, name: Learn renewal outcome, actor: system, type: learn, description: "Return renewal, contraction, churn, recovery, and forecast-correction outcomes." }
+capabilities:
+  - { key: crm.account.read, authority: read, risk: low, required: true, purpose: Read ownership and relationship evidence., customerFacing: false }
+  - { key: support.ticket.read, authority: read, risk: high, required: true, purpose: Read support risk evidence., customerFacing: false }
+  - { key: billing.subscription.read, authority: read, risk: high, required: true, purpose: Read contract and renewal timing., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read adoption evidence., customerFacing: false }
+skills: [cs-risk-synthesis, cs-account-assessment]
+outcomes: [{ metric: at_risk_renewal_recovery_rate, description: At-risk renewals retained without unapproved commercial promises., direction: increase, sourceCapability: billing.subscription.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [customer_success.renewal_risk]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: cs.health_risk_detected, subjectTypes: [account, subscription], requiredFields: [normalizedPayload.accountId, normalizedPayload.renewalAt, normalizedPayload.healthEvidenceRefs], reason: A health risk has verified renewal timing. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: cs.account_snapshot_changed, subjectTypes: [], fields: [], reason: Raw health snapshots require health assessment first. }]
+  inputMapping: { accountId: normalizedPayload.accountId, renewalAt: normalizedPayload.renewalAt }
+  priority: 95
+  minimumConfidence: 0.92
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
+  examples: { shouldRoute: ["A health risk links to one renewal contract."], shouldNotRoute: ["Renewal date is unknown."] }
+policy: { forbiddenActions: [], escalationOwner: csm, escalationSla: 1d, separateCustomerFacingApproval: true }

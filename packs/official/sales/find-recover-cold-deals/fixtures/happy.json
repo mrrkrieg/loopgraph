@@ -1,0 +1,1 @@
+{"id":"deal-risk-happy","eventType":"sales.opportunity_changed","subject":{"type":"opportunity","id":"deal-301"},"normalizedPayload":{"opportunityId":"301","stage":"evaluation","lastActivityAt":"2026-07-01T10:00:00.000Z","ownerId":"owner-12","stageAgeDays":32,"closeDateSlipCount":2,"confidence":0.97},"evidenceRefs":["hubspot:deal:301","gmail:thread:deal-301","gcal:deal-301"]}

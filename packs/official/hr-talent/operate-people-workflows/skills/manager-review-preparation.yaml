@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: hr-manager-review-preparation
+name: Manager Review Preparation
+description: Reconcile declared goals, observable workflow evidence, limitations, and reviewer questions without generating a rating or sensitive decision.
+department: hr_talent
+goal: Reduce manager preparation time while improving evidence balance, provenance, missing-context visibility, and accountable human judgment.
+inputs: [review period, declared goals, authored evidence, approved aggregate signals, manager ownership, review policy, prior corrections]
+outputs: [balanced review packet, goal-to-evidence map, missing and conflicting evidence, reviewer questions, explicit no-rating receipt]
+instructions:
+  - Use only the declared review period, goals, policy, and approved authored or aggregate evidence.
+  - Present favorable, unfavorable, missing, and conflicting evidence with equal provenance standards.
+  - Distinguish direct evidence from reviewer interpretation and expose uncertainty.
+  - Prepare questions and citations; do not create wording that asserts an unsupported personal judgment.
+  - Record human corrections and process outcomes without retaining an agent-created person score.
+boundaries:
+  - No performance, potential, sentiment, attrition, personality, or culture-fit score.
+  - No compensation, promotion, discipline, termination, or retention recommendation.
+  - A qualified people reviewer must approve sensitive language and the final human-owned review.
+requiredCapabilities: [hris.employee.read, performance.goal.read]

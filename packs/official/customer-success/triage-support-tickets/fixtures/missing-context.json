@@ -1,0 +1,1 @@
+{"id":"support-ticket-missing-context","eventType":"support.ticket_created","subject":{"type":"support_ticket","id":"ticket-202"},"normalizedPayload":{"ticketId":"202","summary":"Need help","confidence":0.94},"evidenceRefs":["support:ticket:202"]}

@@ -1,0 +1,13 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: ops-finance-control-outcomes
+metrics:
+  - { id: forecast_variance_explanation_coverage, direction: increase, description: Material forecast variances with reconciled driver evidence. }
+  - { id: forecast_driver_accuracy, direction: increase, description: Forecast drivers confirmed by realized outcomes. }
+  - { id: approval_resolution_minutes, direction: decrease, description: Time from evidenced approval blockage to accountable resolution. }
+  - { id: close_cycle_time_hours, direction: decrease, description: Time from period end to verified close completion. }
+  - { id: overdue_receivable_days, direction: decrease, description: Days eligible receivables remain unresolved. }
+  - { id: vendor_commitment_utilization, direction: increase, description: Contracted vendor value supported by realized usage and service outcomes. }
+  - { id: resource_decision_latency_hours, direction: decrease, description: Time from complete tradeoff evidence to accountable resource decision. }
+  - { id: constrained_goal_improvement, direction: increase, description: Movement in the company constraint after an approved resource decision. }
+  - { id: human_correction_rate, direction: decrease, description: Hermes finance decisions materially corrected by accountable reviewers. }
+  - { id: review_minutes_per_decision, direction: decrease, description: Human review burden per governed finance decision. }

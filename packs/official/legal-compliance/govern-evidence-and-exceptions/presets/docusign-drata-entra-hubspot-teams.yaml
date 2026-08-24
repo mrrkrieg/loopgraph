@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: docusign-drata-entra-hubspot-teams
+name: DocuSign CLM + Drata + Entra + HubSpot + Teams
+description: Configure governed contract, compliance, identity, CRM, incident, questionnaire, and audit evidence around an enterprise Microsoft stack.
+connectorRecipe: connectors/docusign-drata-entra-hubspot-teams.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 30, rolloutMode: shadow, evidenceExportEnabled: false, externalClaimDraftingEnabled: true }
+requiredCompanyFields: [legal.playbookPolicy, compliance.controlPolicy, security.accessReviewPolicy, security.incidentEvidencePolicy, security.externalClaimPolicy, legal.escalationOwners]

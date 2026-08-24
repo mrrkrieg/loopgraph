@@ -1,0 +1,1 @@
+{"id":"product-feedback-permission-change","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-207"},"normalizedPayload":{"feedbackId":"207","text":"Publisher upgrade permission fixture","productArea":"settings","permissionChange":"project.issue.create: approve -> execute","confidence":1},"evidenceRefs":["fixture:permission-review"]}

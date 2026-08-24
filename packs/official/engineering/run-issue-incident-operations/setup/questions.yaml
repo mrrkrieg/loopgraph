@@ -1,0 +1,11 @@
+schemaVersion: loopgraph-app-setup/v1alpha1
+kind: AppSetup
+questions:
+  - { key: repositoryOwnership, prompt: "Which repositories, services, and teams own each engineering surface?", why: "Every issue and incident needs one accountable route.", valueType: object, requirement: required, inferFromContext: engineering.repositoryOwnership, confirmWhenInferred: true }
+  - { key: issuePolicy, prompt: "Which issue classes and labels require special handling?", why: "Security, privacy, and customer-impact work cannot use generic triage.", valueType: object, requirement: required, inferFromContext: engineering.issuePolicy, confirmWhenInferred: true }
+  - { key: severityPolicy, prompt: Which observed conditions define each incident severity?, why: Hermes must apply company policy rather than invent severity., valueType: object, requirement: required, inferFromContext: engineering.severityPolicy, confirmWhenInferred: true }
+  - { key: escalationPaths, prompt: "Who owns incidents, security escalation, customer impact, and executive review?", why: "Every high-risk route needs an accountable human.", valueType: object, requirement: required, inferFromContext: engineering.escalationPaths, confirmWhenInferred: true }
+  - { key: releasePolicy, prompt: Which evidence and verifiers are required before release?, why: Readiness cannot be inferred from issue status., valueType: object, requirement: required, inferFromContext: engineering.releasePolicy, confirmWhenInferred: true }
+  - { key: customerImpactPolicy, prompt: What evidence is required to name affected customers or publish impact?, why: Customer-impact claims require stricter identity and approval rules., valueType: object, requirement: required, inferFromContext: engineering.customerImpactPolicy, confirmWhenInferred: true }
+  - { key: responseSla, prompt: What acknowledgement and resolution targets apply by severity?, why: Operating outcomes need explicit company targets., valueType: object, requirement: required, inferFromContext: engineering.responseSla, confirmWhenInferred: true }
+  - { key: learningWindow, prompt: What window defines incident recurrence and release regression?, why: Prevention learning needs a declared observation period., valueType: object, requirement: required, inferFromContext: engineering.learningWindow, confirmWhenInferred: true }

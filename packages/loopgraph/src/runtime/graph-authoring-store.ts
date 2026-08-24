@@ -5,26 +5,35 @@ import { contentHash, graphEditorOperationSchema, graphEditorTransactionSchema, 
 
 export type GraphLayoutOverrides = Record<string, { x: number; y: number }>;
 
-export class FileGraphAuthoringStore {
+export type SubmitGraphEditorTransactionInput = {
+  transactionId?: string;
+  workspaceId: string;
+  companyId: string;
+  actorId: string;
+  expectedTopologyHash: string;
+  operations: GraphEditorOperation[];
+  now?: Date;
+};
+
+export interface GraphAuthoringStore {
+  readonly persistence: "file" | "distributed";
+  submit(input: SubmitGraphEditorTransactionInput): Promise<GraphEditorTransaction>;
+  getLayout(): Promise<GraphLayoutOverrides>;
+  list(): Promise<GraphEditorTransaction[]>;
+}
+
+export class FileGraphAuthoringStore implements GraphAuthoringStore {
+  readonly persistence = "file" as const;
+
   constructor(private readonly loopgraphRoot = path.join(process.cwd(), ".loopgraph")) {}
 
-  async submit(input: { workspaceId: string; companyId: string; actorId: string; expectedTopologyHash: string; operations: GraphEditorOperation[]; now?: Date }) {
-    const operations = input.operations.map((operation) => graphEditorOperationSchema.parse(operation));
-    const semantic = operations.some((operation) => operation.kind !== "move_node");
-    const transaction = graphEditorTransactionSchema.parse({
-      id: `graph_edit_${randomUUID()}`,
-      workspaceId: input.workspaceId,
-      companyId: input.companyId,
-      actorId: input.actorId,
-      expectedTopologyHash: input.expectedTopologyHash,
-      operations,
-      status: semantic ? "proposal_pending" : "layout_applied",
-      createdAt: (input.now ?? new Date()).toISOString()
-    });
+  async submit(input: SubmitGraphEditorTransactionInput) {
+    const transaction = createGraphEditorTransaction(input);
+    const semantic = transaction.operations.some((operation) => operation.kind !== "move_node");
     await atomicWrite(path.join(this.transactionsRoot(), `${transaction.id}.json`), transaction);
     if (!semantic) {
       const layout = await this.getLayout();
-      for (const operation of operations) if (operation.kind === "move_node") layout[operation.nodeId] = { x: operation.x, y: operation.y };
+      for (const operation of transaction.operations) if (operation.kind === "move_node") layout[operation.nodeId] = { x: operation.x, y: operation.y };
       await atomicWrite(this.layoutPath(), { schemaVersion: "graph-layout/v1alpha1", topologyHash: input.expectedTopologyHash, positions: layout, updatedAt: transaction.createdAt });
     }
     return transaction;
@@ -56,6 +65,25 @@ export class FileGraphAuthoringStore {
   private root() { return path.join(this.loopgraphRoot, "graph-authoring"); }
   private layoutPath() { return path.join(this.root(), "layout.json"); }
   private transactionsRoot() { return path.join(this.root(), "transactions"); }
+}
+
+export function createGraphEditorTransaction(
+  input: SubmitGraphEditorTransactionInput
+): GraphEditorTransaction {
+  const operations = input.operations.map((operation) =>
+    graphEditorOperationSchema.parse(operation)
+  );
+  const semantic = operations.some((operation) => operation.kind !== "move_node");
+  return graphEditorTransactionSchema.parse({
+    id: input.transactionId ?? `graph_edit_${randomUUID()}`,
+    workspaceId: input.workspaceId,
+    companyId: input.companyId,
+    actorId: input.actorId,
+    expectedTopologyHash: input.expectedTopologyHash,
+    operations,
+    status: semantic ? "proposal_pending" : "layout_applied",
+    createdAt: (input.now ?? new Date()).toISOString()
+  });
 }
 
 async function atomicWrite(filePath: string, value: unknown) {

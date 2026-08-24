@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { GENERATED_OFFICIAL_APP_CATALOG } from "../generated/official-app-catalog";
 import { DepartmentTypeSchema, type DepartmentType } from "./department-skills";
 
 export const COMPANY_LOOP_LIBRARY_SCHEMA_VERSION = "company-loop-library/v1alpha1" as const;
@@ -133,7 +134,7 @@ const campaignFanout = { mode: "declared_ordered", maxRoutes: 3, requiresIndepen
 const forecastFanout = { mode: "declared_ordered", maxRoutes: 4, requiresIndependentProblems: false } as const;
 const feedbackFanout = { mode: "independent_only", maxRoutes: 3, requiresIndependentProblems: true } as const;
 
-export const PREBUILT_COMPANY_LOOPS: PrebuiltLoopDefinition[] = [
+const LEGACY_PREBUILT_COMPANY_LOOPS: PrebuiltLoopDefinition[] = [
   // Product
   loop("product", "product-feedback_to_problem", "product.feedback_pattern", ["customer.feedback_repeated", "feedback.cluster_ready"], ["feedback_cluster", "product_area"], ["normalizedPayload.feedbackCount", "evidenceRefs"], ["support.read", "analytics.read"], ["validated problem brief", "customer segment impact", "feedback cluster evidence"], { fanoutPolicy: feedbackFanout, supportingLoopTemplateIds: ["customer_success-customer_health_risk", "product-bug_cluster_to_problem"], learningConsumers: ["product", "customer_success", "engineering"] }),
   loop("product", "product-problem_to_product_bet", "product.validated_problem", ["product.problem_validated"], ["product_problem"], ["normalizedPayload.problemStatement", "normalizedPayload.impact", "evidenceRefs"], ["analytics.read", "roadmap.read"], ["product bet options", "assumption register", "success metric"], { learningConsumers: ["product", "engineering", "management"] }),
@@ -204,6 +205,72 @@ export const PREBUILT_COMPANY_LOOPS: PrebuiltLoopDefinition[] = [
   loop("management", "management-improvement", "management.system_improvement", ["failure.pattern_repeated", "loop.improvement_proposed"], ["loop", "failure_cluster"], ["normalizedPayload.failurePattern", "normalizedPayload.affectedLoops", "evidenceRefs"], ["loopgraph.read", "project_system.read"], ["improvement change set", "acceptance criteria", "post-change evidence"], { minimumConfidence: 0.85 })
 ];
 
+export const OFFICIAL_APP_CATALOG_SOURCE_DIGEST = GENERATED_OFFICIAL_APP_CATALOG.sourceDigest;
+export const PACK_DERIVED_COMPANY_LOOPS: PrebuiltLoopDefinition[] = GENERATED_OFFICIAL_APP_CATALOG.entries
+  .map((entry) => prebuiltLoopDefinitionSchema.parse(entry.definition));
+
+export const LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES: Record<string, string> = {
+  "product-feedback_to_problem": "product-feedback-clustering",
+  "product-problem_to_product_bet": "product-problem-validation",
+  "product-release_learning": "product-release-learning",
+  "product-bug_cluster_to_problem": "product-bug-clustering",
+  "product-roadmap_signal": "product-roadmap-evidence",
+  "marketing-campaign_learning": "marketing-campaign-learning",
+  "marketing-channel_allocation": "marketing-channel-allocation",
+  "marketing-icp_messaging_learning": "marketing-icp-message-learning",
+  "sales-lead_qualification": "sales-inbound-lead-qualification",
+  "sales-account_research": "sales-inbound-account-research",
+  "sales-follow_up": "sales-inbound-follow-up",
+  "sales-crm_hygiene": "sales-missing-next-step",
+  "sales-deal_risk": "sales-deal-risk-detection",
+  "sales-pipeline_outcome": "sales-pipeline-outcome",
+  "support-ticket-triage": "customer-success-support-ticket-triage",
+  "customer_success-customer_health_risk": "cs-customer-health",
+  "customer_success-renewal_risk": "cs-renewal-risk",
+  "strategic-account-escalation": "cs-strategic-account-escalation",
+  "customer_success-qbr_preparation": "cs-qbr-preparation",
+  "github-issue-triage": "engineering-github-issue-triage",
+  "engineering-issue_to_plan": "engineering-issue-to-plan",
+  "engineering-release_readiness": "engineering-release-readiness",
+  "engineering-incident_response": "engineering-incident-response",
+  "engineering-incident_learning": "engineering-incident-learning",
+  "operations_finance-approval_bottleneck": "ops-finance-approval-bottleneck",
+  "operations_finance-forecast_variance": "ops-finance-forecast-variance",
+  "operations_finance-vendor_review": "ops-finance-vendor-review",
+  "operations_finance-close_readiness": "ops-finance-close-readiness",
+  "operations_finance-cash_collection": "ops-finance-cash-collection",
+  "operations_finance-resource_allocation": "ops-finance-resource-allocation",
+  "hr-candidate_pipeline": "hr-candidate-pipeline",
+  "hr-onboarding_progress": "hr-onboarding-progress",
+  "hr-manager_coaching": "hr-manager-coaching",
+  "hr-retention_signal": "hr-retention-review",
+  "hr-performance_review_prep": "hr-performance-review-preparation",
+  "legal_security-contract_triage": "legal-contract-exception-triage",
+  "legal_security-policy_drift": "legal-policy-control-drift",
+  "legal_security-access_review": "legal-privileged-access-review",
+  "legal_security-incident_evidence": "legal-incident-evidence",
+  "legal_security-security_questionnaire": "legal-security-questionnaire",
+  "legal_security-compliance_evidence": "legal-compliance-evidence-gap",
+  "management-review": "management-operating-review",
+  "management-weekly_anomaly_review": "management-company-anomaly-review",
+  "management-department_loop_review": "management-loop-health-review",
+  "management-decision_memo": "management-decision-memo",
+  "management-resource_allocation": "management-resource-allocation",
+  "management-improvement": "management-system-improvement"
+};
+
+const replacedLegacyTemplateIds = new Set(Object.keys(LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES));
+
+/**
+ * Canonical Hermes candidate library. Official LoopPacks replace code-defined
+ * entries whenever a canonical successor exists. Unmatched legacy entries are
+ * an explicit migration fallback, not an alternative definition of an app loop.
+ */
+export const PREBUILT_COMPANY_LOOPS: PrebuiltLoopDefinition[] = [
+  ...PACK_DERIVED_COMPANY_LOOPS,
+  ...LEGACY_PREBUILT_COMPANY_LOOPS.filter((item) => !replacedLegacyTemplateIds.has(item.templateId))
+].sort((left, right) => left.departmentType.localeCompare(right.departmentType) || left.templateId.localeCompare(right.templateId));
+
 function skill(
   departmentType: DepartmentType,
   name: string,
@@ -242,12 +309,12 @@ export const DEPARTMENT_OPERATING_SKILLS: DepartmentOperatingSkill[] = [
 ];
 
 export const CROSS_DEPARTMENT_PLAYBOOKS: CrossDepartmentPlaybook[] = [
-  crossPlaybook("feedback-to-product-learning", "Repeated complaints to product and release learning", ["customer.feedback_repeated", "feedback.cluster_ready"], "customer_success-customer_health_risk", ["product-feedback_to_problem", "product-bug_cluster_to_problem"], ["customer_success-customer_health_risk", "product-feedback_to_problem", "product-bug_cluster_to_problem", "product-release_learning"], ["customer_success-customer_health_risk", "product-release_learning"], true, "Create one customer-health problem and independent product problems only when account risk and recurring product pain are both evidenced.", "Hermes learns whether the complaints reflect support process, onboarding, usability, a recurring defect, or strategic-account risk."),
-  crossPlaybook("campaign-to-pipeline", "Campaign to qualified pipeline and customer outcome", ["campaign.cohort_outcome_ready"], "marketing-campaign_learning", ["sales-lead_qualification", "sales-pipeline_outcome"], ["marketing-campaign_learning", "sales-lead_qualification", "sales-pipeline_outcome"], ["marketing-campaign_learning", "marketing-icp_messaging_learning"], true, "Fan out only for the same campaign cohort with CRM qualification and customer outcome evidence.", "Hermes learns that cheap leads are not valuable unless they qualify, progress, and become healthy customers."),
-  crossPlaybook("incident-to-company-learning", "Production incident to customer and prevention learning", ["incident.customer_impact_detected"], "engineering-incident_response", ["strategic-account-escalation", "customer_success-customer_communication_review", "engineering-incident_learning"], ["engineering-incident_response", "strategic-account-escalation", "customer_success-customer_communication_review", "engineering-incident_learning"], ["engineering-incident_learning", "product-release_learning", "customer_success-customer_health_risk"], true, "Create one primary incident problem. Invoke customer risk and communication loops only for evidenced affected accounts, then run learning after resolution.", "Hermes connects technical mitigation, customer impact, communication quality, and recurrence prevention."),
-  crossPlaybook("forecast-to-resource-decision", "Forecast variance to management resource decision", ["forecast.variance_detected"], "operations_finance-forecast_variance", ["operations_finance-approval_bottleneck", "management-decision_memo", "management-resource_allocation"], ["operations_finance-forecast_variance", "operations_finance-approval_bottleneck", "management-decision_memo", "management-resource_allocation"], ["management-department_loop_review", "management-improvement"], true, "Fan out only when the same reconciled variance identifies a real approval constraint and a material resource tradeoff.", "Hermes learns whether forecast error came from source quality, operating delay, approval latency, or resource allocation."),
-  crossPlaybook("renewal-to-product-signal", "Renewal risk to customer, sales, and product learning", ["renewal.risk_changed"], "customer_success-renewal_risk", ["sales-deal_risk", "product-feedback_to_problem"], ["customer_success-renewal_risk", "sales-deal_risk", "product-feedback_to_problem"], ["customer_success-renewal_risk", "product-roadmap_signal"], false, "Supporting routes require independent commercial and product evidence; otherwise keep one renewal problem and append evidence.", "Hermes distinguishes commercial risk, relationship risk, missing value, and recurring product pain."),
-  crossPlaybook("contract-to-deal-outcome", "Contract exception to deal and reusable policy learning", ["contract.redline_received"], "legal_security-contract_triage", ["sales-deal_risk", "legal_security-policy_drift"], ["legal_security-contract_triage", "sales-deal_risk", "legal_security-policy_drift"], ["legal_security-contract_triage", "sales-pipeline_outcome"], false, "Legal review stays primary; Sales receives deal-risk evidence, and policy drift is created only for a repeated approved exception.", "Hermes learns which clauses block deals and which approved fallbacks can safely update the playbook." )
+  crossPlaybook("feedback-to-product-learning", "Repeated complaints to product and release learning", ["customer.feedback_repeated", "feedback.cluster_ready"], "cs-customer-health", ["product-feedback-clustering", "product-bug-clustering"], ["cs-customer-health", "product-feedback-clustering", "product-bug-clustering", "product-release-learning"], ["cs-customer-health", "product-release-learning"], true, "Create one customer-health problem and independent product problems only when account risk and recurring product pain are both evidenced.", "Hermes learns whether the complaints reflect support process, onboarding, usability, a recurring defect, or strategic-account risk."),
+  crossPlaybook("campaign-to-pipeline", "Campaign to qualified pipeline and customer outcome", ["campaign.cohort_outcome_ready"], "marketing-campaign-learning", ["marketing-campaign-lead-qualification", "marketing-campaign-pipeline-outcome"], ["marketing-campaign-learning", "marketing-campaign-lead-qualification", "marketing-campaign-pipeline-outcome"], ["marketing-campaign-learning", "marketing-icp-message-learning"], true, "Fan out only for the same campaign cohort with CRM qualification and customer outcome evidence.", "Hermes learns that cheap leads are not valuable unless they qualify, progress, and become healthy customers."),
+  crossPlaybook("incident-to-company-learning", "Production incident to customer and prevention learning", ["incident.customer_impact_detected"], "engineering-incident-response", ["cs-strategic-account-escalation", "engineering-customer-impact", "engineering-incident-learning"], ["engineering-incident-response", "cs-strategic-account-escalation", "engineering-customer-impact", "engineering-incident-learning"], ["engineering-incident-learning", "product-release-learning", "cs-customer-health"], true, "Create one primary incident problem. Invoke customer risk and communication loops only for evidenced affected accounts, then run learning after resolution.", "Hermes connects technical mitigation, customer impact, communication quality, and recurrence prevention."),
+  crossPlaybook("forecast-to-resource-decision", "Forecast variance to management resource decision", ["finance.forecast_variance_detected"], "ops-finance-forecast-variance", ["ops-finance-approval-bottleneck", "ops-finance-resource-allocation", "management-decision-memo", "management-resource-allocation"], ["ops-finance-forecast-variance", "ops-finance-approval-bottleneck", "ops-finance-resource-allocation", "management-decision-memo", "management-resource-allocation"], ["management-loop-health-review", "management-system-improvement"], true, "Fan out only when the same reconciled variance identifies a real approval constraint and a material resource tradeoff.", "Hermes learns whether forecast error came from source quality, operating delay, approval latency, or resource allocation."),
+  crossPlaybook("renewal-to-product-signal", "Renewal risk to customer, sales, and product learning", ["renewal.risk_changed"], "cs-renewal-risk", ["sales-deal-risk-detection", "product-feedback-clustering"], ["cs-renewal-risk", "sales-deal-risk-detection", "product-feedback-clustering"], ["cs-renewal-risk", "product-roadmap-evidence"], false, "Supporting routes require independent commercial and product evidence; otherwise keep one renewal problem and append evidence.", "Hermes distinguishes commercial risk, relationship risk, missing value, and recurring product pain."),
+  crossPlaybook("contract-to-deal-outcome", "Contract exception to deal and reusable policy learning", ["legal.contract_redline_received"], "legal-contract-exception-triage", ["sales-deal-risk-detection", "legal-policy-control-drift"], ["legal-contract-exception-triage", "sales-deal-risk-detection", "legal-policy-control-drift"], ["legal-contract-exception-triage", "sales-pipeline-outcome"], false, "Legal review stays primary; Sales receives deal-risk evidence, and policy drift is created only for a repeated approved exception.", "Hermes learns which clauses block deals and which approved fallbacks can safely update the playbook." )
 ].map((item) => crossDepartmentPlaybookSchema.parse(item));
 
 function crossPlaybook(
@@ -277,8 +344,13 @@ function crossPlaybook(
   };
 }
 
+export function resolveCompanyLoopTemplateId(templateId: string): string {
+  return LEGACY_COMPANY_LOOP_TEMPLATE_ALIASES[templateId] ?? templateId;
+}
+
 export function getPrebuiltLoopDefinition(templateId: string): PrebuiltLoopDefinition | undefined {
-  return PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === templateId);
+  const canonicalId = resolveCompanyLoopTemplateId(templateId);
+  return PREBUILT_COMPANY_LOOPS.find((item) => item.templateId === canonicalId);
 }
 
 export function getDepartmentOperatingSkill(departmentType: DepartmentType): DepartmentOperatingSkill {

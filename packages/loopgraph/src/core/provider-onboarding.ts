@@ -17,14 +17,25 @@ export const providerIdSchema = z.enum([
   "workday",
   "greenhouse",
   "netsuite",
-  "quickbooks"
+  "quickbooks",
+  "gmail",
+  "google_calendar",
+  "outlook",
+  "teams",
+  "posthog",
+  "amplitude",
+  "linear",
+  "jira",
+  "gitlab",
+  "bigquery",
+  "snowflake"
 ]);
 
 export const providerOnboardingProfileSchema = z.object({
   schemaVersion: z.literal(PROVIDER_ONBOARDING_SCHEMA_VERSION).default(PROVIDER_ONBOARDING_SCHEMA_VERSION),
   providerId: providerIdSchema,
   label: z.string().min(1),
-  systemClass: z.enum(["crm", "ads", "messaging", "knowledge", "payments", "repository", "support", "hris", "finance"]),
+  systemClass: z.enum(["crm", "ads", "messaging", "knowledge", "payments", "repository", "issue_tracker", "support", "hris", "finance", "email", "calendar", "analytics", "data_warehouse"]),
   controlPlane: z.literal("hermes").default("hermes"),
   authorization: z.discriminatedUnion("mode", [
     z.object({

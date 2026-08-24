@@ -4,22 +4,26 @@ import HomePage from "../../app/page";
 import TopologyPage from "../../app/topology/page";
 
 describe("primary navigation", () => {
-  it("keeps loop operation behind one focused navigation entry", () => {
+  it("leads with applications and keeps primitives under Advanced", () => {
     expect(primaryNav.map((item) => item.label)).toEqual([
-      "Hermes Brain",
-      "Operate",
-      "Management",
-      "Loops",
-      "Daily",
-      "Integrations"
+      "Marketplace",
+      "Installed Apps",
+      "Company Graph",
+      "Activity",
+      "Connections",
+      "Build",
+      "Settings",
+      "Advanced"
     ]);
     expect(primaryNav.map((item) => item.href)).toEqual([
+      "/marketplace",
+      "/apps",
       "/brain",
       "/operate",
-      "/management",
-      "/loops",
-      "/daily",
-      "/settings/integrations"
+      "/settings/integrations",
+      "/discovery",
+      "/settings",
+      "/advanced"
     ]);
   });
 

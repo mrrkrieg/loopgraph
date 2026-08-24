@@ -1,0 +1,48 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-missing-next-step
+  name: Missing Next Step Detection
+  version: 1.0.0
+  description: Verify whether an open deal has a dated, owned, evidence-backed next commitment.
+  department: sales
+  ownerRole: account_executive
+  tags: [next-step, commitments, pipeline]
+trigger: { type: event, source: hermes, event: sales.deal_risk_detected }
+input: { requiredFields: [normalizedPayload.opportunityId, normalizedPayload.ownerId, normalizedPayload.riskEvidenceRefs], subjectTypes: [opportunity, deal_risk], fixtures: [] }
+routine:
+  - { id: gather, name: Gather commitment evidence, actor: system, type: observe, description: "Load CRM next steps, recent threads, future meetings, and explicit buyer or seller commitments." }
+  - { id: extract, name: Extract commitments, actor: agent, type: assess, description: "Identify owner, counterparty, action, due date, status, and durable source for each commitment." }
+  - { id: verify, name: Verify the next step, actor: agent, type: decide, description: "Accept one current commitment, identify a missing next step, or request human clarification." }
+  - { id: prepare, name: Prepare gap evidence, actor: system, type: prepare, description: "Produce a bounded missing-next-step finding without modifying the opportunity." }
+  - { id: learn, name: Learn from follow-through, actor: system, type: learn, description: "Return whether the commitment occurred and whether it changed pipeline outcomes." }
+capabilities:
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read the recorded next step and owner., customerFacing: false }
+  - { key: mail.thread.read, authority: read, risk: high, required: true, purpose: Read bounded explicit commitment evidence., customerFacing: false }
+  - { key: calendar.event.read, authority: read, risk: medium, required: true, purpose: Verify future meetings and responsible participants., customerFacing: false }
+skills: [sales-commitment-extraction, sales-deal-diagnosis]
+outcomes:
+  - { metric: open_deals_with_verified_next_step, description: Open opportunities with one dated and owned commitment., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: missed_commitment_rate, description: Verified commitments that pass without completion or accountable update., direction: decrease, sourceCapability: calendar.event.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.missing_next_step]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: sales.deal_risk_detected, subjectTypes: [opportunity, deal_risk], requiredFields: [normalizedPayload.opportunityId, normalizedPayload.ownerId, normalizedPayload.riskEvidenceRefs], reason: A detected deal risk is ready for commitment verification. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: sales.opportunity_changed, subjectTypes: [], fields: [], reason: Raw CRM changes require risk diagnosis before next-step analysis. }]
+  inputMapping: { opportunityId: normalizedPayload.opportunityId, ownerId: normalizedPayload.ownerId }
+  priority: 90
+  minimumConfidence: 0.88
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.opportunity.read, mail.thread.read, calendar.event.read]
+  examples: { shouldRoute: ["A deal-risk finding has a resolved owner and traceable evidence."], shouldNotRoute: ["The owner is unresolved.", "A future meeting cannot be linked to this opportunity."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: account_executive
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

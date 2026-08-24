@@ -16,7 +16,7 @@ import { PROVIDER_OPERATION_CATALOG } from "./connector-capabilities";
 import { createProviderOperationHandlers } from "./provider-operation-handlers";
 import { OAuthLifecycleService, type OAuthLifecycleStore, type OAuthTransaction } from "./oauth-lifecycle";
 import { ProviderSubscriptionService } from "./provider-subscriptions";
-import { InMemoryWebhookReplayStore, ProviderWebhookVerifier } from "./provider-webhook-verifier";
+import { deriveJiraWebhookCallbackBinding, InMemoryWebhookReplayStore, ProviderWebhookVerifier } from "./provider-webhook-verifier";
 import { assertSecretFree, containsSecretMaterial, redactSensitive } from "./secret-redaction";
 import { CompositeVault, GcpSecretManagerAdapter, type SecretResolutionContext, type VaultAdapter } from "./vault-adapters";
 import { WorkloadIdentityVerifier } from "./workload-identity";
@@ -83,12 +83,79 @@ describe("enterprise connector security boundary", () => {
   it("ships a fixed handler for every provider data, draft, and action operation", () => {
     const handlers = createProviderOperationHandlers();
     for (const descriptor of PROVIDER_OPERATION_CATALOG.filter((item) =>
-      ["provider.data.read", "provider.draft.write", "provider.action.execute", "provider.health.read"].includes(item.capability)
+      ["provider.data.read", "provider.draft.write", "provider.action.execute", "provider.health.read", "provider.events.emit"].includes(item.capability)
     )) {
       expect(handlers.has(operationKey(descriptor.providerId, descriptor.operation)), `${descriptor.providerId}:${descriptor.operation}`).toBe(true);
     }
     expect([...handlers.keys()]).not.toContain("http.request");
     expect([...handlers.keys()]).not.toContain("provider.raw_api");
+  });
+
+  it("keeps scheduled detector rows process-local and requires the system scheduler actor", async () => {
+    const state = new InMemoryConnectorState();
+    const namespace = buildCredentialNamespace({
+      organizationId: "org-1",
+      projectKey: "main",
+      providerId: "bigquery",
+      installationId: "bigquery-1",
+      environment: "production"
+    });
+    const installation = connectorInstallationAdminSchema.parse({
+      id: "bigquery-1",
+      tenant: { organizationId: "org-1", projectKey: "main" },
+      providerId: "bigquery",
+      displayName: "BigQuery",
+      environment: "production",
+      status: "active",
+      credentialRef: `vault://${namespace}/tokens/provider`,
+      credentialNamespace: namespace,
+      grantedScopes: ["https://www.googleapis.com/auth/bigquery.readonly"],
+      allowedCapabilities: ["provider.events.emit"],
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z"
+    });
+    await state.save(installation);
+    const getResponse = vi.spyOn(state, "getResponse");
+    const reserve = vi.spyOn(state, "reserve");
+    const putResponse = vi.spyOn(state, "putResponse");
+    const handler = vi.fn(async () => ({
+      providerObjectRef: "bigquery:project:example:template:company-metrics.query",
+      sourceTimestamp: "2026-08-13T12:00:00.000Z",
+      responseStatusClass: "success",
+      schema: { fields: [{ name: "material" }] },
+      rows: [{ f: [{ v: "true" }] }]
+    }));
+    const broker = new HermesConnectorBroker({
+      installations: state,
+      idempotency: state,
+      audit: state,
+      vault: new CompositeVault([new MemoryVault([[installation.credentialRef, "opaque-token"]])]),
+      handlers: new Map([[operationKey("bigquery", "company-metrics.detect"), handler]]),
+      now: () => new Date("2026-08-13T12:00:00.000Z")
+    });
+    const request = connectorBrokerRequestSchema.parse({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: "request_detector_1",
+      idempotencyKey: "idempotency_detector_1",
+      tenant: installation.tenant,
+      actor: { type: "workload", subject: "spiffe://example/hermes" },
+      providerId: "bigquery",
+      installationId: installation.id,
+      capability: "provider.events.emit",
+      operation: "company-metrics.detect",
+      input: { windowStart: "2026-08-13T11:00:00.000Z", windowEnd: "2026-08-13T12:00:00.000Z", limit: 100 },
+      issuedAt: "2026-08-13T11:59:30.000Z",
+      expiresAt: "2026-08-13T12:00:30.000Z",
+      correlationId: "detector-run-1"
+    });
+    await expect(broker.execute(request)).resolves.toMatchObject({ status: "denied", error: { code: "system_actor_required" } });
+    const accepted = await broker.execute({ ...request, actor: { type: "system", subject: "system:provider-detector" } });
+    expect(accepted.error?.code).toBeUndefined();
+    expect(accepted).toMatchObject({ status: "succeeded" });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(getResponse).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+    expect(putResponse).not.toHaveBeenCalled();
   });
 
   it("enforces capability, scope, fixed operation, no arbitrary HTTP, and idempotency", async () => {
@@ -372,6 +439,29 @@ describe("enterprise connector security boundary", () => {
         routeJobId: "route-job-draft-1"
       }
     });
+    await expect(broker.reconcileAction({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: "request_slack_draft_reconcile",
+      idempotencyKey: "idempotency_slack_draft_reconcile",
+      tenant: installation.tenant,
+      actor: { type: "workload", subject: "spiffe://example/hermes" },
+      providerId: "slack",
+      installationId: installation.id,
+      capability: "provider.draft.write",
+      operation: "message.draft.create",
+      context,
+      preparedActionId: prepared.preparedAction.actionId,
+      preparedActionFingerprint: prepared.preparedAction.fingerprint,
+      originalRequestId: "request_slack_draft_commit",
+      originalIdempotencyKey: "idempotency_slack_draft_commit",
+      issuedAt: "2026-08-01T00:00:00.000Z",
+      expiresAt: "2026-08-01T00:01:00.000Z",
+      correlationId: "correlation_slack_draft_reconcile"
+    })).resolves.toMatchObject({
+      status: "resolved",
+      originalRequestId: "request_slack_draft_commit",
+      brokerResponse: { status: "succeeded", requestId: "request_slack_draft_commit" }
+    });
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
@@ -481,6 +571,86 @@ describe("enterprise connector security boundary", () => {
       installationId: installation.id,
       webhookSecretRef: `vault://${installation.credentialNamespace}/webhooks/attacker-selected`
     })).rejects.toMatchObject({ code: "webhook_secret_reference_mismatch" });
+  });
+
+  it("activates scheduled detectors without inventing a webhook secret or callback", async () => {
+    const namespace = buildCredentialNamespace({ organizationId: "org-1", projectKey: "main", providerId: "bigquery", installationId: "bigquery-1" });
+    const installation = connectorInstallationAdminSchema.parse({
+      id: "bigquery-1",
+      tenant: { organizationId: "org-1", projectKey: "main" },
+      providerId: "bigquery",
+      displayName: "BigQuery",
+      status: "connected",
+      credentialRef: `vault://${namespace}/tokens/provider`,
+      credentialNamespace: namespace,
+      grantedScopes: ["https://www.googleapis.com/auth/bigquery.readonly"],
+      allowedCapabilities: ["provider.health.read", "provider.data.read"],
+      createdAt: "2026-08-13T00:00:00.000Z",
+      updatedAt: "2026-08-13T00:00:00.000Z"
+    });
+    const store = new MemoryOAuthStore();
+    store.installations.set(installation.id, installation);
+    const subscriptions = new ProviderSubscriptionService({
+      store,
+      vault: new CompositeVault([new MemoryVault()]),
+      publicUrl: "https://broker.example"
+    });
+
+    const activated = await subscriptions.activate({
+      ...installation.tenant,
+      installationId: installation.id,
+      providerConfigured: true,
+      providerSubscriptionId: "hermes-detector-bigquery-1"
+    });
+
+    expect(activated).toMatchObject({
+      endpointUrl: undefined,
+      intakeMode: "scheduled_detector",
+      pollCadenceMinutes: 60,
+      installation: {
+        status: "active",
+        webhookStatus: "not_configured",
+        providerSubscriptionId: "hermes-detector-bigquery-1"
+      }
+    });
+    expect(activated.installation.webhookSecretRef).toBeUndefined();
+    expect(activated.installation.allowedCapabilities).toContain("provider.events.emit");
+    expect(activated.installation.allowedCapabilities).not.toContain("provider.webhooks.verify");
+  });
+
+  it("generates a Jira callback URL bound to the exact tenant installation", async () => {
+    const namespace = buildCredentialNamespace({ organizationId: "org-1", projectKey: "main", providerId: "jira", installationId: "jira-1" });
+    const installation = connectorInstallationAdminSchema.parse({
+      id: "jira-1",
+      tenant: { organizationId: "org-1", projectKey: "main" },
+      providerId: "jira",
+      displayName: "Jira",
+      status: "connected",
+      credentialRef: `vault://${namespace}/tokens/provider`,
+      credentialNamespace: namespace,
+      grantedScopes: ["read:jira-work", "manage:jira-webhook", "offline_access"],
+      allowedCapabilities: ["provider.health.read"],
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z"
+    });
+    const webhookSecretRef = deriveCredentialChildReference(installation.credentialRef, "webhooks/signing");
+    const webhookSecret = "jira-client-secret";
+    const store = new MemoryOAuthStore();
+    store.installations.set(installation.id, installation);
+    const subscriptions = new ProviderSubscriptionService({
+      store,
+      vault: new CompositeVault([new MemoryVault([[webhookSecretRef, webhookSecret]])]),
+      publicUrl: "https://broker.example"
+    });
+
+    const activated = await subscriptions.activate({ ...installation.tenant, installationId: installation.id, providerConfigured: true });
+    const callback = new URL(activated.endpointUrl!);
+    expect(callback.pathname).toBe("/api/connector-broker/v1/webhooks/jira-1");
+    expect(callback.searchParams.get("loopgraph_binding")).toBe(deriveJiraWebhookCallbackBinding({
+      secret: webhookSecret,
+      ...installation.tenant,
+      installationId: installation.id
+    }));
   });
 
   it("uses a workload access token for GCP Secret Manager and rejects cross-tenant references", async () => {

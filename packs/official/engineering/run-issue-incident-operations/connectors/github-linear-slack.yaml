@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: github-linear-slack
+providerId: github
+providerFamily: github
+displayName: GitHub + Linear + Slack
+capabilities:
+  - { logicalCapability: repo.issue.read, providerOperation: github.issues.read, minimumScopes: [issues:read], authority: read, risk: low }
+  - { logicalCapability: project.issue.read, providerOperation: linear.issues.read, minimumScopes: [read], authority: read, risk: low }
+  - { logicalCapability: incident.record.read, providerOperation: linear.incidents.read, minimumScopes: [read], authority: read, risk: high }
+  - { logicalCapability: deployment.release.read, providerOperation: github.deployments.read, minimumScopes: [deployments:read], authority: read, risk: medium }
+  - { logicalCapability: project.issue.create, providerOperation: linear.issues.create, minimumScopes: [write], authority: approve, risk: high }
+  - { logicalCapability: project.issue.update, providerOperation: linear.issues.update, minimumScopes: [write], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: slack.messages.draft, minimumScopes: [chat:write], authority: approve, risk: high }
+eventSources:
+  - { eventFamily: engineering.issue_received, providerEvent: issues, transport: webhook, normalizationTransformer: github.issue-to-engineering-signal.v1, signatureStrategy: github-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: engineering.incident_detected, providerEvent: incident.created, transport: webhook, normalizationTransformer: linear.incident-to-engineering-signal.v1, signatureStrategy: linear-webhook-signature, replayProtection: true, fallbackPollMinutes: 5 }
+fieldMappings:
+  - { providerId: github, objectType: engineering_issue, requiredLogicalFields: [issue.id, issue.repository, issue.title, issue.body], optionalLogicalFields: [issue.labels, issue.owner, issue.securitySensitive] }
+  - { providerId: linear, objectType: incident, requiredLogicalFields: [incident.id, incident.service, incident.detectedAt], optionalLogicalFields: [incident.severity, incident.customerImpact, incident.deploymentId] }
+healthCheck: { capability: repo.issue.read, sampleQuery: { state: open, limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

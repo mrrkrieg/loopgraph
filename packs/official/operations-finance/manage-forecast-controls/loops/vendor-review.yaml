@@ -1,0 +1,54 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: ops-finance-vendor-review
+  name: Vendor Review
+  version: 1.0.0
+  description: Join vendor spend, usage, contract, security, renewal, and ownership evidence into a governed review packet.
+  department: ops_finance
+  ownerRole: procurement_owner
+  tags: [vendors, contracts, spend, renewals]
+trigger: { type: event, source: "*", event: finance.vendor_review_due }
+input:
+  requiredFields: [normalizedPayload.vendorId, normalizedPayload.contractId, normalizedPayload.renewalAt, normalizedPayload.spend, normalizedPayload.ownerId]
+  subjectTypes: [vendor, vendor_contract]
+  fixtures: [{ id: vendor-review, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize vendor identity, actor: system, type: observe, description: "Resolve vendor, contract, renewal, owner, business unit, spend window, and approved usage identity." }
+  - { id: reconcile, name: Reconcile value evidence, actor: agent, type: assess, description: "Compare contracted spend, realized usage, service health, security status, and dependency evidence." }
+  - { id: identify, name: Identify exceptions, actor: agent, type: assess, description: "Surface price, utilization, concentration, control, renewal, and ownership exceptions without making legal conclusions." }
+  - { id: prepare, name: Prepare review packet, actor: agent, type: prepare, description: "Prepare renew, renegotiate, consolidate, or retire options with exact assumptions and accountable reviewers." }
+  - { id: learn, name: Return vendor outcome, actor: system, type: learn, description: "Record the approved decision, realized cost, service outcome, and recurring exception class." }
+capabilities:
+  - { key: finance.vendor.read, authority: read, risk: high, required: true, purpose: "Read vendor spend, owner, renewal, and approved usage evidence.", customerFacing: false }
+  - { key: contract.record.read, authority: read, risk: high, required: true, purpose: Read approved contract terms and renewal boundaries., customerFacing: false }
+  - { key: analytics.metric.query, authority: read, risk: medium, required: true, purpose: Query bounded utilization and service evidence., customerFacing: false }
+  - { key: project.task.create, authority: approve, risk: high, required: false, purpose: Create the exact approved vendor-review follow-up task., customerFacing: false }
+skills: [ops-finance-control-review, ops-finance-evidence-reconciliation]
+outcomes:
+  - { metric: vendor_review_evidence_completeness, description: "Vendor reviews with current spend, usage, contract, security, and ownership evidence.", direction: increase, sourceCapability: finance.vendor.read }
+  - { metric: vendor_commitment_utilization, description: Approved contract value supported by realized usage and service evidence., direction: increase, sourceCapability: analytics.metric.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [finance.vendor_risk]
+  accepts: [{ sourcePattern: "*", eventTypePattern: finance.vendor_review_due, subjectTypes: [vendor, vendor_contract], requiredFields: [normalizedPayload.vendorId, normalizedPayload.contractId, normalizedPayload.renewalAt, normalizedPayload.spend, normalizedPayload.ownerId], reason: "A vendor renewal or material review has resolvable contract, spend, owner, and timing evidence." }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle evidence cannot create a second vendor review. }]
+  inputMapping: { vendorId: normalizedPayload.vendorId, contractId: normalizedPayload.contractId, renewalAt: normalizedPayload.renewalAt, spend: normalizedPayload.spend, ownerId: normalizedPayload.ownerId }
+  priority: 75
+  minimumConfidence: 0.92
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 2592000 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [finance.vendor.read, contract.record.read, analytics.metric.query]
+  examples: { shouldRoute: [A vendor renewal has current spend, usage, contract, and accountable ownership.], shouldNotRoute: [Multiple contracts match the same vendor., The contract is privileged and outside the approved evidence scope.] }
+policy:
+  forbiddenActions:
+    - { capability: contract.commit.execute, reason: "Vendor commitments require procurement, finance, security, and legal approval." }
+    - { capability: finance.payment.execute, reason: Vendor review cannot move money. }
+  escalationOwner: procurement_owner
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

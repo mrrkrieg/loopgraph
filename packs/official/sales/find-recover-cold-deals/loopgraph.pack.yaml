@@ -1,0 +1,109 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.sales.find-recover-cold-deals
+  name: Find and Recover Deals Going Cold
+  version: 1.0.0
+  summary: Detect stalled deals, recover missing commitments, and learn which interventions improve pipeline outcomes.
+  description: Hermes joins CRM, email, calendar, stakeholder, and outcome evidence; diagnoses why a deal is at risk; prepares governed recovery work; and learns which signals improve stage progression and forecast accuracy.
+  department: sales
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [sales, deal-risk, pipeline, follow-up, forecast]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: stakeholder-analysis
+    name: Stakeholder analysis
+    description: Identify missing champions, decision makers, and multithreading gaps without inferring relationships.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/stakeholder-analysis.yaml, skills/multithreading.yaml]
+  - id: deal-recovery
+    name: Deal recovery
+    description: Prepare reviewable recovery actions and customer-facing drafts without autonomous sending.
+    defaultEnabled: true
+    dependsOn: [stakeholder-analysis]
+    assets: [loops/deal-follow-up.yaml, skills/follow-up.yaml]
+  - id: outcome-learning
+    name: Pipeline outcome learning
+    description: Learn which risk signals and interventions predict real stage and forecast outcomes.
+    defaultEnabled: true
+    dependsOn: [deal-recovery]
+    assets: [loops/pipeline-outcome.yaml, skills/deal-diagnosis.yaml]
+presets:
+  - id: hubspot-gmail-calendar-slack
+    name: HubSpot + Gmail + Google Calendar + Slack
+    description: Diagnose HubSpot opportunities from Gmail and Calendar evidence and prepare Slack-visible recovery work.
+    path: presets/hubspot-gmail-calendar-slack.yaml
+    providerFamily: hubspot
+  - id: salesforce-outlook-calendar-teams
+    name: Salesforce + Outlook + Microsoft Calendar + Teams
+    description: Diagnose Salesforce opportunities from Outlook and Calendar evidence and prepare Teams-visible recovery work.
+    path: presets/salesforce-outlook-calendar-teams.yaml
+    providerFamily: salesforce
+permissions:
+  - { capability: crm.opportunity.read, authority: read, mode: required, risk: low, purpose: "Read opportunity stage, value, owner, activity, and forecast evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data, business_contact] }
+  - { capability: mail.thread.read, authority: read, mode: required, risk: high, purpose: "Read bounded deal-related threads needed to extract commitments and silence signals.", customerFacing: false, defaultPolicy: allowed, dataClasses: [email_content, business_contact] }
+  - { capability: calendar.event.read, authority: read, mode: required, risk: medium, purpose: "Read bounded deal meetings and future commitments.", customerFacing: false, defaultPolicy: allowed, dataClasses: [calendar_content, business_contact] }
+  - { capability: crm.contact.read, authority: read, mode: optional, risk: low, purpose: "Resolve verified opportunity stakeholders and roles.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data, business_contact] }
+  - { capability: crm.opportunity.update, authority: approve, mode: optional, risk: high, purpose: "Apply the exact approved next step or risk status update.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [crm_data] }
+  - { capability: mail.message.draft, authority: approve, mode: optional, risk: high, purpose: "Create an exact approved recovery draft without sending it.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [email_content, business_contact] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: medium, purpose: "Prepare an internal deal-risk brief for the approved owner channel.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [crm_data, email_content] }
+requiredCapabilities: [crm.opportunity.read, mail.thread.read, calendar.event.read]
+optionalCapabilities: [crm.contact.read, crm.opportunity.update, mail.message.draft, collaboration.message.draft]
+topology:
+  objects:
+    - { id: opportunity, objectType: opportunity, label: Sales opportunity, description: A shared opportunity identity with account stage owner activity and forecast evidence., shared: true, identityKeys: [opportunityId, accountId] }
+    - { id: deal-risk, objectType: deal_risk, label: Deal risk, description: A bounded risk diagnosis with evidence confidence owner and recovery options., shared: true, identityKeys: [opportunityId, riskWindow] }
+    - { id: recovery-action, objectType: deal_recovery_action, label: Recovery action, description: An exact reviewed follow-up or stakeholder action tied to one deal-risk diagnosis., shared: false, identityKeys: [opportunityId, actionId] }
+    - { id: deal-pipeline-outcome, objectType: pipeline_outcome, label: Deal pipeline outcome, description: Observed opportunity progress loss win or no-change evidence after intervention., shared: true, identityKeys: [opportunityId, observationWindow] }
+  flows:
+    - { id: opportunity-enters-risk, source: { kind: object, id: opportunity }, target: { kind: loop, id: sales-deal-risk-detection }, type: evidence_in, reason: Hermes evaluates one resolved opportunity before choosing a risk route. }
+    - { id: risk-produces-diagnosis, source: { kind: loop, id: sales-deal-risk-detection }, target: { kind: object, id: deal-risk }, type: produces, reason: The risk diagnosis is durable evidence not an automatic CRM mutation. }
+    - { id: risk-enters-stakeholder-analysis, source: { kind: object, id: deal-risk }, target: { kind: loop, id: sales-stakeholder-analysis }, type: evidence_in, reason: Stakeholder analysis consumes a verified deal-risk diagnosis with activity and relationship evidence. }
+    - { id: risk-enters-follow-up, source: { kind: object, id: deal-risk }, target: { kind: loop, id: sales-deal-follow-up }, type: evidence_in, reason: Follow-up preparation requires a named owner exact evidence and explicit review boundaries. }
+    - { id: follow-up-produces-action, source: { kind: loop, id: sales-deal-follow-up }, target: { kind: object, id: recovery-action }, type: produces, reason: Customer-facing work remains a prepared action until the configured owner approves it. }
+    - { id: outcome-produces-pipeline-evidence, source: { kind: loop, id: sales-pipeline-outcome }, target: { kind: object, id: deal-pipeline-outcome }, type: produces, reason: The app records whether the intervention changed progression forecast win or loss. }
+    - { id: pipeline-returns-to-risk, source: { kind: loop, id: sales-pipeline-outcome }, target: { kind: loop, id: sales-deal-risk-detection }, type: learning_return, reason: Observed outcomes improve future risk detection and expose ineffective recovery patterns. }
+entrypoints:
+  loops:
+    - loops/deal-risk-detection.yaml
+    - loops/missing-next-step.yaml
+    - loops/stakeholder-analysis.yaml
+    - loops/deal-follow-up.yaml
+    - loops/pipeline-outcome.yaml
+  skills:
+    - skills/deal-diagnosis.yaml
+    - skills/commitment-extraction.yaml
+    - skills/multithreading.yaml
+    - skills/follow-up.yaml
+  connectors:
+    - connectors/hubspot-gmail-calendar-slack.yaml
+    - connectors/salesforce-outlook-calendar-teams.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/happy.json
+    - fixtures/missing-context.json
+    - fixtures/exclusion.json
+    - fixtures/duplicate.json
+    - fixtures/ambiguous.json
+    - fixtures/low-confidence.json
+    - fixtures/permission-change.json
+    - fixtures/customer-facing.json
+    - fixtures/outcome.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: sales_operations
+  reviewRoles: [account_executive, sales_manager, revenue_operations]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

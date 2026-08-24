@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: hr-fairness-and-boundary-review
+name: HR Fairness and Decision Boundary Review
+description: Verify that a proposed route and output stay within approved evidence, privacy, fairness, access, and human-decision boundaries.
+department: hr_talent
+goal: Block prohibited inference and automated employment judgment before any people-workflow output reaches an accountable reviewer.
+inputs: [proposed route, evidence packet, field provenance, purpose, policy version, human owner, prepared actions]
+outputs: [boundary decision, fairness and privacy exceptions, prohibited-action list, required reviewer, auditable review receipt]
+instructions:
+  - Verify the purpose, subject scope, field allowlist, consent, provenance, freshness, owner, and review policy.
+  - Detect protected-attribute use, proxy discrimination, unapproved scoring, private-message inference, and evidence used outside its purpose.
+  - Reject any route whose practical output is ranking, hiring, rejection, rating, compensation, discipline, termination, or attrition prediction.
+  - Require a qualified people or privacy owner for ambiguous evidence and every sensitive communication.
+  - Preserve a durable reason code for route, abstention, correction, approval, and deletion.
+boundaries:
+  - The skill cannot approve its own exception or expand its own data access.
+  - Human approval does not cure prohibited data use or a forbidden action.
+  - Never treat historical company practice as proof of fairness or legality.
+requiredCapabilities: [hris.employee.read, survey.response.read]

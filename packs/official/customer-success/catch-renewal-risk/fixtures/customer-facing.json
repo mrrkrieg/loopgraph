@@ -1,0 +1,1 @@
+{"id":"cs-qbr-customer-facing","eventType":"cs.qbr_window_open","subject":{"type":"qbr","id":"qbr-608"},"normalizedPayload":{"accountId":"608","ownerId":"csm-13","reviewWindow":"2026-Q3","confidence":0.99},"evidenceRefs":["salesforce:account:608","analytics:qbr:608"]}

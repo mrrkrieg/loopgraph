@@ -1,0 +1,29 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: netsuite-salesforce-warehouse-teams
+providerId: netsuite
+providerFamily: netsuite
+displayName: NetSuite + Salesforce + Warehouse + Teams
+capabilities:
+  - { logicalCapability: finance.forecast.read, providerOperation: enterprise-warehouse.finance_forecast.query, minimumScopes: [warehouse:read], authority: read, risk: high }
+  - { logicalCapability: finance.ledger.read, providerOperation: netsuite.saved-search.read, minimumScopes: [rest_web_services], authority: read, risk: high }
+  - { logicalCapability: finance.receivable.read, providerOperation: netsuite.receivables.read, minimumScopes: [rest_web_services], authority: read, risk: high }
+  - { logicalCapability: finance.vendor.read, providerOperation: netsuite.vendors.read, minimumScopes: [rest_web_services], authority: read, risk: high }
+  - { logicalCapability: approval.record.read, providerOperation: netsuite.approvals.read, minimumScopes: [rest_web_services], authority: read, risk: medium }
+  - { logicalCapability: contract.record.read, providerOperation: contract-repository.records.read, minimumScopes: [contracts:read], authority: read, risk: high }
+  - { logicalCapability: analytics.metric.query, providerOperation: enterprise-warehouse.operating_metrics.query, minimumScopes: [warehouse:read], authority: read, risk: medium }
+  - { logicalCapability: crm.account.read, providerOperation: salesforce.accounts.read, minimumScopes: [api], authority: read, risk: high }
+  - { logicalCapability: capacity.plan.read, providerOperation: enterprise-warehouse.capacity_plan.query, minimumScopes: [warehouse:read], authority: read, risk: high }
+  - { logicalCapability: finance.record.update, providerOperation: netsuite.records.update, minimumScopes: [rest_web_services], authority: approve, risk: critical }
+  - { logicalCapability: project.task.create, providerOperation: project-system.tasks.create, minimumScopes: [tasks:write], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: teams.messages.draft, minimumScopes: [ChannelMessage.Send], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: outlook.drafts.create, minimumScopes: [Mail.ReadWrite], authority: approve, risk: critical }
+eventSources:
+  - { eventFamily: finance.forecast_variance_detected, providerEvent: finance_forecast.material_variance, transport: poll, normalizationTransformer: warehouse.forecast-to-variance.v1, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: finance.receivable_risk_detected, providerEvent: customer_payment.changed, transport: webhook, normalizationTransformer: netsuite.receivable-to-risk.v1, signatureStrategy: netsuite-oauth-channel, replayProtection: true, fallbackPollMinutes: 30 }
+  - { eventFamily: operations.approval_overdue, providerEvent: approval.status_changed, transport: webhook, normalizationTransformer: netsuite.approval-to-operating-signal.v1, signatureStrategy: netsuite-oauth-channel, replayProtection: true, fallbackPollMinutes: 15 }
+fieldMappings:
+  - { providerId: enterprise_warehouse, objectType: forecast_window, requiredLogicalFields: [forecast.id, forecast.version, forecast.periodStart, forecast.periodEnd, forecast.baseline, forecast.current], optionalLogicalFields: [forecast.currency, forecast.scenario, forecast.ownerId] }
+  - { providerId: netsuite, objectType: invoice, requiredLogicalFields: [invoice.id, invoice.accountId, invoice.amount, invoice.currency, invoice.dueAt, invoice.status], optionalLogicalFields: [invoice.disputeStatus, invoice.ownerId, invoice.promiseAt] }
+  - { providerId: netsuite, objectType: approval_request, requiredLogicalFields: [approval.id, approval.policyVersion, approval.ownerId, approval.dueAt, approval.affectedOutcome], optionalLogicalFields: [approval.threshold, approval.requesterId, approval.dependencies] }
+healthCheck: { capability: finance.ledger.read, sampleQuery: { savedSearch: close_readiness, limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

@@ -1,0 +1,1 @@
+{"id":"product-feedback-ambiguous","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-205"},"normalizedPayload":{"feedbackId":"205","text":"Shared workspace behaves unexpectedly","productArea":"workspace","candidateSubjectIds":["workspace-a","workspace-b"],"confidence":0.93},"evidenceRefs":["intercom:conversation:205"]}

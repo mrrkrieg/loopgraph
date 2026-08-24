@@ -1,0 +1,1 @@
+{"id":"deal-recovery-customer-facing","eventType":"sales.recovery_plan_ready","subject":{"type":"opportunity","id":"deal-308"},"normalizedPayload":{"opportunityId":"308","ownerId":"owner-14","recoveryGoal":"Confirm the buyer's security-review decision and next meeting","confidence":0.98},"evidenceRefs":["loopgraph:problem:deal-risk-308","salesforce:opportunity:308"]}

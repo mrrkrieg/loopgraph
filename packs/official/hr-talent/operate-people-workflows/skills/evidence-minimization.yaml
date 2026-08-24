@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: hr-evidence-minimization
+name: HR Evidence Minimization
+description: Select the minimum approved people evidence needed for one declared workflow and make access, consent, freshness, and limitations explicit.
+department: hr_talent
+goal: Build an auditable evidence packet that answers a bounded workflow question without exposing unrelated or prohibited people data.
+inputs: [declared workflow purpose, authorized subject scope, field allowlist, source provenance, consent and aggregation rules, retention policy]
+outputs: [minimal evidence packet, excluded-field receipt, source and freshness table, missing-evidence list, deletion and retention obligations]
+instructions:
+  - Begin with the declared purpose and select fields only when they are necessary to answer it.
+  - Prefer aggregate or authored evidence and preserve source, author, timestamp, consent, and policy version.
+  - Exclude protected attributes, health data, private communications, unrelated compensation, and unapproved behavioral signals.
+  - Record why each retained field is necessary and why each restricted field was excluded.
+  - Apply tenant retention, deletion, regional, and access policies to prompts, traces, receipts, caches, and exports.
+boundaries:
+  - No broad HRIS, mailbox, chat, document, or survey export into model context.
+  - No secondary use of evidence for ranking, prediction, discipline, compensation, or hidden scoring.
+  - Conflicting access, consent, or residency policy requires privacy-owner review.
+requiredCapabilities: [hris.employee.read]

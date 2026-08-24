@@ -1,0 +1,1 @@
+{"id":"legal-contract-redline-missing-context","eventType":"legal.contract_redline_received","subject":{"type":"contract_review","id":"contract-c-888-v3"},"normalizedPayload":{"contractId":"c-888","version":"v3","clauseIds":["liability-4"],"legalOwnerId":"counsel-4","confidence":0.99},"evidenceRefs":["ironclad:contract:c-888:v3"]}

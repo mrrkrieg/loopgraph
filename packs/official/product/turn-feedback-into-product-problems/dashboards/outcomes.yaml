@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: product-feedback-to-problems-outcomes
+metrics:
+  - { id: feedback_to_theme_latency_hours, direction: decrease, description: Time from recurring feedback to an accountable theme. }
+  - { id: validated_problem_precision, direction: increase, description: Validated problems later confirmed as material for the stated workflow and segment. }
+  - { id: duplicate_defect_rate, direction: decrease, description: Proposed defects later merged into existing work. }
+  - { id: target_workflow_completion_change, direction: increase, description: Pre/post release change for the target workflow. }
+  - { id: related_support_volume_change, direction: decrease, description: Change in support demand tied to the original problem. }
+  - { id: routing_correction_rate, direction: decrease, description: Hermes routes corrected by accountable reviewers. }
+  - { id: product_review_minutes, direction: decrease, description: Human review burden per routed problem. }

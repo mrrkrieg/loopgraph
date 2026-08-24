@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: cs-risk-synthesis
+name: Customer Risk Synthesis
+description: Synthesize independent health, support, renewal, incident, and relationship signals into accountable routes.
+department: customer_success
+goal: Decide whether evidence updates existing work, creates one primary problem, permits fan-out, or requires human judgment.
+inputs: [account evidence, active problems, routing topology, thresholds, owner mapping]
+outputs: [problem identity, primary route, supporting routes, exclusions, confidence]
+instructions: [Determine whether evidence belongs to existing work., Preserve independent problem identities., Apply exclusions and active-connection checks., Permit fan-out only when declared by topology., Ask a human when one clear route is not evidenced.]
+boundaries: [Do not create duplicate risk cases., Do not infer strategic status., Do not make commercial commitments.]
+requiredCapabilities: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]

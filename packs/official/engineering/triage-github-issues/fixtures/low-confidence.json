@@ -1,0 +1,1 @@
+{"id":"github-issue-low-confidence","eventType":"github.issue_opened","subject":{"type":"repository_issue","id":"issue-106"},"normalizedPayload":{"issueId":"106","title":"Potential security problem","body":"The report is indirect and contains no safe reproduction.","confidence":0.42},"evidenceRefs":["github:issue:106"]}

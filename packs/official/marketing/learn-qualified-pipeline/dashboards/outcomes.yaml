@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: marketing-qualified-pipeline-outcomes
+metrics:
+  - { id: qualified_pipeline_per_dollar, direction: increase, description: Qualified pipeline created per unit of campaign spend. }
+  - { id: campaign_activated_customer_rate, direction: increase, description: Attributed cohort members reaching the activation definition. }
+  - { id: campaign_to_opportunity_rate, direction: increase, description: Qualified opportunities created from the attributed cohort. }
+  - { id: campaign_cac_quality, direction: increase, description: Cost per customer satisfying the company quality definition. }
+  - { id: allocation_qualified_pipeline_lift, direction: increase, description: Qualified-pipeline change after approved allocation. }
+  - { id: campaign_routing_correction_rate, direction: decrease, description: Hermes campaign routes corrected by reviewers. }
+  - { id: campaign_review_minutes, direction: decrease, description: Human review burden per campaign learning decision. }

@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: cs-executive-brief
+name: Customer Executive Brief
+description: Prepare a concise evidence-backed account review for accountable internal or customer audiences.
+department: customer_success
+goal: Make outcomes, risks, decisions, uncertainty, and next steps reviewable.
+inputs: [account goals, product outcomes, support outcomes, renewal context, decisions, open work]
+outputs: [executive summary, evidence appendix, decisions, risks, questions, approval needs]
+instructions: [Lead with verified customer goals and outcomes., Separate facts from interpretations., Preserve material risks and missing evidence., Attribute decisions and next steps to owners., Require review for every customer-facing claim.]
+boundaries: [Do not fabricate value or customer quotes., Do not promise roadmap or commercial terms., Do not send or publish the brief.]
+requiredCapabilities: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]

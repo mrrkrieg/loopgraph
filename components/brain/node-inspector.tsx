@@ -2,10 +2,16 @@
 
 import React from "react";
 import Link from "next/link";
+import type { GraphEditorProposalLifecycleReference } from "loopgraph/runtime";
 import type { BrainGraphEdge, BrainGraphNode } from "./graph-types";
+import type { PendingGraphChange } from "./proposal-lifecycle-overlay";
 
 export type BrainGraphActions = {
-  submitGraphEdit?: (formData: FormData) => Promise<{ id: string; status: string }>;
+  submitGraphEdit?: (formData: FormData) => Promise<{
+    id: string;
+    status: "layout_applied" | "proposal_pending" | "rejected";
+    proposalLifecycle: GraphEditorProposalLifecycleReference[];
+  }>;
   validateLoop?: (formData: FormData) => void | Promise<void>;
   simulateFixture?: (formData: FormData) => void | Promise<void>;
   simulateManualEvent?: (formData: FormData) => void | Promise<void>;
@@ -41,6 +47,7 @@ export function NodeInspector({
   const metrics = stringList(node.metadata?.metrics);
   const routine = stringList(node.metadata?.routine);
   const verification = stringList(node.metadata?.verification);
+  const pendingChanges = pendingGraphChanges(node);
 
   return (
     <aside className="h-full overflow-auto border-l border-line bg-white p-5">
@@ -48,7 +55,7 @@ export function NodeInspector({
       <div className="mt-3 flex items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold leading-tight">{node.label}</h2>
-          <p className="mt-1 text-sm text-ink/55">{readableType(node.type)}</p>
+          <p className="mt-1 text-sm text-ink/55">{node.metadata?.appNode === true ? "installed app" : readableType(node.type)}</p>
         </div>
         <span className="rounded-full border border-line px-2.5 py-1 text-xs font-semibold text-ink/70">
           {node.status.replace(/_/g, " ")}
@@ -69,13 +76,17 @@ export function NodeInspector({
         <InspectorFact label="Next action" value={nextActionForNode(node)} />
       </div>
 
-      {node.type === "workflow_loop" ? (
+      {node.type === "workflow_loop" && node.metadata?.appNode !== true ? (
         <div className="mt-5 space-y-4 rounded-md border border-line bg-paper p-4">
           <CompactList title="Trigger" items={trigger ? [trigger] : []} empty="Manual or event trigger not configured" />
           <CompactList title="Data" items={dataSources.values.slice(0, 4)} empty="No data source listed" />
           <CompactList title="Routine" items={routine.values.slice(0, 4)} empty="No routine steps listed" />
           <CompactList title="Verifier" items={verification.values.slice(0, 3)} empty="No verifier listed" />
         </div>
+      ) : null}
+
+      {pendingChanges.length > 0 ? (
+        <PendingGraphChanges changes={pendingChanges} />
       ) : null}
 
       <LoopRunControls actions={actions} node={node} />
@@ -91,9 +102,66 @@ export function NodeInspector({
             View full spec
           </Link>
         ) : null}
+        {node.metadata?.appNode === true && stringValue(node.metadata.installationId) ? (
+          <Link className="rounded-md border border-ink px-4 py-2 text-sm font-semibold text-ink" href={`/apps/${encodeURIComponent(stringValue(node.metadata.installationId)!)}`}>
+            Open installed app
+          </Link>
+        ) : null}
       </div>
     </aside>
   );
+}
+
+function PendingGraphChanges({ changes }: { changes: PendingGraphChange[] }) {
+  return (
+    <div className="mt-5 rounded-md border border-amber-300 bg-amber-50 p-4 text-amber-950">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em]">Pending Hermes graph changes</div>
+      <p className="mt-2 text-sm leading-6">
+        These are governed proposals. This loop remains live and unchanged until an authorized reviewer approves and applies a change set.
+      </p>
+      <div className="mt-3 space-y-3">
+        {changes.map((change) => (
+          <div className="rounded-md border border-amber-200 bg-white/75 p-3" key={change.opportunityId}>
+            <div className="font-semibold">{change.title}</div>
+            <div className="mt-1 text-xs text-amber-900/75">
+              {change.kind.replace(/_/g, " ")} · {(change.graphChangeSetStatus ?? change.status).replace(/_/g, " ")}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-3 text-xs">
+              {change.nextAction === "answer_questions" && change.discoverySessionId ? (
+                <Link
+                  className="font-semibold underline underline-offset-2"
+                  href={`/discovery/questions?sessionId=${encodeURIComponent(change.discoverySessionId)}`}
+                >
+                  Answer Hermes
+                </Link>
+              ) : null}
+              <Link className="font-semibold underline underline-offset-2" href="/operate/changes">
+                Review change set
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function pendingGraphChanges(node: BrainGraphNode): PendingGraphChange[] {
+  const value = node.metadata?.pendingGraphChanges;
+  if (!Array.isArray(value)) return [];
+  return value.filter(isPendingGraphChange);
+}
+
+function isPendingGraphChange(value: unknown): value is PendingGraphChange {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.opportunityId === "string" &&
+    typeof candidate.kind === "string" &&
+    typeof candidate.status === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.department === "string" &&
+    typeof candidate.updatedAt === "string" &&
+    typeof candidate.nextAction === "string";
 }
 
 function LoopRunControls({
@@ -328,6 +396,9 @@ function summaryForNode(node: BrainGraphNode) {
   if (node.type === "department_loop") {
     return "Coordinates workflow loops for a department and rolls evidence back into management.";
   }
+  if (node.metadata?.appNode === true) {
+    return node.purpose ?? "Operates a versioned set of loops, Hermes skills, connections, permissions, tests, and outcomes as one installed application.";
+  }
   if (node.type === "workflow_loop") {
     return node.purpose ?? node.subtitle ?? "Executes a recurring AI-human operating loop with evidence and review.";
   }
@@ -338,6 +409,7 @@ function nextActionForNode(node: BrainGraphNode) {
   if (node.status === "blocked") return "Resolve blocker";
   if (node.status === "needs_attention") return "Review evidence";
   if (node.type === "department_loop") return "Inspect managed workflows";
+  if (node.metadata?.appNode === true) return "Open installed app";
   if (node.type === "workflow_loop") return "Open loop detail";
   return "Monitor";
 }

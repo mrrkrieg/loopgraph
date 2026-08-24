@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: management-loop-value-review
+name: Company Loop Value Review
+description: Evaluate whether an installed loop creates verified value after connector, execution, review, supervision, reliability, and organizational-change cost.
+department: management
+goal: Identify whether to hold, repair, narrow, remeasure, retire, or improve a loop using governed health and outcome evidence.
+inputs: [loop version and mode, routing decisions, quality, outcomes, cost, review minutes, corrections, reliability, failures, owner, topology]
+outputs: [loop health finding, net-value assessment, failure-mode diagnosis, governed recovery options, acceptance and rollback criteria]
+instructions:
+  - Resolve loop version, mode, owner, connections, policy, routing window, outcome window, and value definition.
+  - Include execution, connector, review, supervision, failure, correction, and organizational-change costs.
+  - Separate local loop defects from routing, object identity, connector, ownership, policy, or measurement failures.
+  - Require repeated governed evidence before proposing topology or policy change.
+  - Compare post-change recurrence and value to the exact pre-change baseline and preserve rollback.
+boundaries:
+  - No autonomous retirement, graph mutation, policy change, or autonomy promotion.
+  - No activity metric presented as business value.
+  - Missing baseline or outcome measurement produces an undefined-value finding, not a positive claim.
+requiredCapabilities: [loopgraph.topology.read, loopgraph.routing.read, loopgraph.outcome.read]

@@ -1,0 +1,43 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: product-release-learning, name: Release Learning, version: 1.0.0, description: "Compare post-release behavior and support outcomes with the original validated product problem.", department: product, ownerRole: product_operations, tags: [release, outcomes, learning] }
+trigger: { type: event, source: "*", event: product.release_completed }
+input: { requiredFields: [normalizedPayload.releaseId, normalizedPayload.problemId, normalizedPayload.releasedAt], subjectTypes: [release, product_problem], fixtures: [] }
+routine:
+  - { id: baseline, name: Recover original hypothesis, actor: system, type: observe, description: "Load the original problem, target segment, workflow, baseline metrics, expected change, and guardrails." }
+  - { id: measure, name: Collect post-release evidence, actor: system, type: observe, description: "Query bounded adoption, completion, support, defect, and segment outcomes for the approved window." }
+  - { id: evaluate, name: Evaluate release effect, actor: agent, type: assess, description: "Separate evidence of improvement, no change, regression, and measurement uncertainty." }
+  - { id: decide, name: Prepare learning review, actor: agent, type: decide, description: "Recommend keep, iterate, revert-review, or extend measurement without autonomously changing the product." }
+  - { id: learn, name: Return shared evidence, actor: system, type: learn, description: "Feed release evidence into future feedback, defect, and product-problem decisions." }
+capabilities:
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Measure the approved pre/post product outcomes., customerFacing: false }
+  - { key: support.feedback.read, authority: read, risk: low, required: true, purpose: Measure feedback and support burden after release., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Read the original problem and implementation references., customerFacing: false }
+  - { key: product.release.read, authority: read, risk: low, required: false, purpose: "Verify release scope, timing, and affected versions.", customerFacing: false }
+skills: [product-release-evaluation, product-evidence-quality]
+outcomes:
+  - { metric: target_workflow_completion_change, description: Change in successful target-workflow completion after release., direction: increase, sourceCapability: analytics.event.query }
+  - { metric: related_support_volume_change, description: Change in support demand tied to the original problem., direction: decrease, sourceCapability: support.feedback.read }
+  - { metric: post_release_regression_rate, description: Releases with a material guardrail regression., direction: decrease, sourceCapability: analytics.event.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [product.release_learning]
+  accepts: [{ sourcePattern: "*", eventTypePattern: product.release_completed, subjectTypes: [release, product_problem], requiredFields: [normalizedPayload.releaseId, normalizedPayload.problemId, normalizedPayload.releasedAt], reason: A release linked to a validated problem is ready for outcome measurement. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: product.problem_validated, subjectTypes: [], fields: [], reason: A problem without a completed release has no post-release outcome yet. }]
+  inputMapping: { releaseId: normalizedPayload.releaseId, problemId: normalizedPayload.problemId, releasedAt: normalizedPayload.releasedAt }
+  priority: 75
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.feedback.read, analytics.event.query, project.issue.read]
+  examples: { shouldRoute: ["A completed release links to the original problem and approved measurement window."], shouldNotRoute: ["The release is not linked to a problem.", "Baseline or outcome definitions are missing."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: product_operations
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

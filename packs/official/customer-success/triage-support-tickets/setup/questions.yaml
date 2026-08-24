@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-setup/v1alpha1
+kind: AppSetup
+questions:
+  - { key: supportQueues, prompt: Which queues and request types should Hermes triage?, why: The app needs an explicit operating boundary., valueType: object, requirement: required, inferFromContext: customerSuccess.supportQueues, confirmWhenInferred: true }
+  - { key: priorityPolicy, prompt: "How do severity, urgency, and account impact determine priority?", why: Provider priority alone is not enough for a business decision., valueType: object, requirement: required, inferFromContext: customerSuccess.priorityPolicy, confirmWhenInferred: true }
+  - { key: ownership, prompt: Who owns each queue and escalation class?, why: A clear accountable owner is required for routing., valueType: object, requirement: required, inferFromContext: customerSuccess.supportOwnership, confirmWhenInferred: true }
+  - { key: serviceLevels, prompt: What response and resolution service levels apply?, why: Loopgraph uses these definitions to measure outcomes and urgency., valueType: object, requirement: required, inferFromContext: customerSuccess.serviceLevels, confirmWhenInferred: true }
+  - { key: escalationSignals, prompt: "Which customer, incident, or renewal signals require escalation?", why: High-risk support work must follow company policy rather than sentiment alone., valueType: object, requirement: required, inferFromContext: customerSuccess.escalationSignals, confirmWhenInferred: true }
+  - { key: responsePolicy, prompt: Should Hermes stop at a draft or allow exact approved ticket updates?, why: Customer-facing and provider-write authority must be explicit., valueType: string, requirement: required, inferFromContext: policy.customerSupportAutomation, confirmWhenInferred: true, defaultValue: draft_only }
+  - { key: supportChannel, prompt: Where should internal escalation recommendations be reviewed?, why: Notifications need an explicit approved destination., valueType: string, requirement: conditional, condition: messaging.channel.post is connected, inferFromContext: customerSuccess.supportChannel, confirmWhenInferred: true }

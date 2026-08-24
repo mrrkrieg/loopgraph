@@ -78,7 +78,65 @@ export const PROVIDER_OPERATION_CATALOG: ProviderOperationDescriptor[] = [
     ["job.read", "provider.data.read", ["jobs:read"]]
   ]),
   ...provider("netsuite", [["transaction.read", "provider.data.read", []]]),
-  ...provider("quickbooks", [["accounting.read", "provider.data.read", []]])
+  ...provider("quickbooks", [["accounting.read", "provider.data.read", []]]),
+  ...provider("gmail", [
+    ["threads.read", "provider.data.read", ["https://www.googleapis.com/auth/gmail.readonly"]],
+    ["drafts.create", "provider.draft.write", ["https://www.googleapis.com/auth/gmail.compose"], true],
+    ["messages.send", "provider.action.execute", ["https://www.googleapis.com/auth/gmail.send"], true, true]
+  ]),
+  ...provider("google_calendar", [
+    ["events.read", "provider.data.read", ["https://www.googleapis.com/auth/calendar.events.readonly"]]
+  ]),
+  ...provider("outlook", [
+    ["threads.read", "provider.data.read", ["Mail.Read"]],
+    ["events.read", "provider.data.read", ["Calendars.Read"]],
+    ["drafts.create", "provider.draft.write", ["Mail.ReadWrite"], true],
+    ["message.draft", "provider.draft.write", ["Mail.ReadWrite"], true],
+    ["message.send", "provider.action.execute", ["Mail.Send"], true, true]
+  ]),
+  ...provider("teams", [
+    ["messages.draft", "provider.draft.write", ["ChannelMessage.Send"], true],
+    ["channel.post", "provider.action.execute", ["ChannelMessage.Send"], true, true]
+  ]),
+  ...provider("posthog", [["insights.query", "provider.data.read", ["query:read"]]]),
+  ...provider("amplitude", [["events.query", "provider.data.read", ["analytics:read"]]]),
+  ...provider("linear", [
+    ["issues.read", "provider.data.read", ["read"]],
+    ["incidents.read", "provider.data.read", ["read"]],
+    ["projects.read", "provider.data.read", ["read"]],
+    ["issues.create", "provider.action.execute", ["write"], true, true],
+    ["issues.update", "provider.action.execute", ["write"], true, true]
+  ]),
+  ...provider("jira", [
+    ["issues.read", "provider.data.read", ["read:jira-work"]],
+    ["incidents.read", "provider.data.read", ["read:jira-work"]],
+    ["versions.read", "provider.data.read", ["read:jira-work"]],
+    ["issues.create", "provider.action.execute", ["write:jira-work"], true, true],
+    ["issues.update", "provider.action.execute", ["write:jira-work"], true, true]
+  ]),
+  ...provider("gitlab", [
+    ["issues.read", "provider.data.read", ["read_api"]],
+    ["deployments.read", "provider.data.read", ["read_api"]]
+  ]),
+  ...provider("bigquery", [
+    ["company-metrics.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["finance-forecast.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["capacity-plan.query", "provider.data.read", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["company-metrics.detect", "provider.events.emit", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["finance-forecast.detect", "provider.events.emit", ["https://www.googleapis.com/auth/bigquery.readonly"]],
+    ["capacity-plan.detect", "provider.events.emit", ["https://www.googleapis.com/auth/bigquery.readonly"]]
+  ]),
+  ...provider("snowflake", [
+    ["company-metrics.query", "provider.data.read", ["warehouse:read"]],
+    ["finance-forecast.query", "provider.data.read", ["warehouse:read"]],
+    ["capacity-plan.query", "provider.data.read", ["warehouse:read"]],
+    ["finance_forecast.query", "provider.data.read", ["warehouse:read"]],
+    ["operating_metrics.query", "provider.data.read", ["warehouse:read"]],
+    ["capacity_plan.query", "provider.data.read", ["warehouse:read"]],
+    ["company-metrics.detect", "provider.events.emit", ["warehouse:read"]],
+    ["finance-forecast.detect", "provider.events.emit", ["warehouse:read"]],
+    ["capacity-plan.detect", "provider.events.emit", ["warehouse:read"]]
+  ])
 ];
 
 export function getProviderOperation(providerId: ProviderId, operation: string) {

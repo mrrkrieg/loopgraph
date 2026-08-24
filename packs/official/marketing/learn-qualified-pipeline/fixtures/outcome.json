@@ -1,0 +1,1 @@
+{"id":"campaign-pipeline-outcome","eventType":"marketing.pipeline_outcome_observed","subject":{"type":"pipeline_outcome","id":"campaign-409-outcome"},"normalizedPayload":{"campaignId":"409","cohortId":"cohort-409-july","outcome":"qualified_opportunity_created","observedAt":"2026-08-08T10:00:00.000Z","confidence":0.99},"evidenceRefs":["hubspot:deal:409","posthog:cohort:409"]}

@@ -1,0 +1,24 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: zendesk-amplitude-jira
+providerId: zendesk
+providerFamily: zendesk
+displayName: Zendesk + Amplitude + Jira
+capabilities:
+  - { logicalCapability: support.feedback.read, providerOperation: zendesk.tickets.read, minimumScopes: [tickets:read], authority: read, risk: low }
+  - { logicalCapability: analytics.event.query, providerOperation: amplitude.events.query, minimumScopes: [analytics:read], authority: read, risk: medium }
+  - { logicalCapability: project.issue.read, providerOperation: jira.issues.read, minimumScopes: [read:jira-work], authority: read, risk: low }
+  - { logicalCapability: project.issue.create, providerOperation: jira.issues.create, minimumScopes: [write:jira-work], authority: approve, risk: high }
+  - { logicalCapability: project.issue.update, providerOperation: jira.issues.update, minimumScopes: [write:jira-work], authority: approve, risk: high }
+  - { logicalCapability: product.release.read, providerOperation: jira.versions.read, minimumScopes: [read:jira-work], authority: read, risk: low }
+eventSources:
+  - { eventFamily: product.feedback_received, providerEvent: ticket.created, transport: webhook, normalizationTransformer: zendesk.ticket-to-product-signal.v1, signatureStrategy: zendesk-hmac-sha256, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: product.release_completed, providerEvent: version.released, transport: webhook, normalizationTransformer: jira.release-to-product-outcome.v1, signatureStrategy: atlassian-jwt, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { providerId: zendesk, objectType: feedback, requiredLogicalFields: [feedback.id, feedback.text, feedback.productArea, feedback.customerId], optionalLogicalFields: [feedback.segment, feedback.sentiment, feedback.createdAt] }
+  - { providerId: amplitude, objectType: product_event, requiredLogicalFields: [event.name, event.distinctId, event.timestamp], optionalLogicalFields: [event.productArea, event.releaseId, event.segment] }
+  - { providerId: jira, objectType: project_issue, requiredLogicalFields: [issue.id, issue.title, issue.status], optionalLogicalFields: [issue.productArea, issue.releaseId, issue.labels] }
+healthCheck:
+  capability: support.feedback.read
+  sampleQuery: { status: open, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

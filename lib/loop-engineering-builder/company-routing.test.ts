@@ -42,60 +42,68 @@ function eligible(templateId: string, businessEvent: EventEnvelope) {
 
 describe("prebuilt company routing", () => {
   it("permits the declared campaign to pipeline learning sequence", () => {
-    const businessEvent = event({
-      eventType: "campaign.cohort_outcome_ready",
+    const campaignEvent = event({
+      eventType: "marketing.campaign_window_closed",
       subjectType: "campaign",
       normalizedPayload: {
-        spend: 10_000,
-        qualifiedOutcome: { customers: 8 },
-        fitSignals: ["segment-match"],
-        intentSignals: ["demo-request"],
-        qualifiedPipeline: 120_000,
-        customerOutcome: { retained: 7 }
+        campaignId: "campaign-1",
+        windowStart: "2026-07-01",
+        windowEnd: "2026-07-31",
+        spend: 10_000
       }
     });
+    const cohortEvent = event({
+      eventType: "marketing.campaign_cohort_ready",
+      subjectType: "campaign_cohort",
+      normalizedPayload: { campaignId: "campaign-1", cohortId: "cohort-1", leadIds: ["lead-1"] }
+    });
+    const outcomeEvent = event({
+      eventType: "marketing.pipeline_outcome_observed",
+      subjectType: "pipeline_outcome",
+      normalizedPayload: { campaignId: "campaign-1", cohortId: "cohort-1", outcome: "qualified", observedAt: "2026-08-01" }
+    });
 
-    expect(eligible("marketing-campaign_learning", businessEvent).eligible).toBe(true);
-    // The same normalized event can be re-expressed for the cohort object claimed by Sales.
-    const cohortEvent = { ...businessEvent, subject: { type: "campaign_cohort", id: businessEvent.subject.id } };
-    expect(eligible("sales-lead_qualification", cohortEvent).eligible).toBe(true);
-    expect(eligible("sales-pipeline_outcome", cohortEvent).eligible).toBe(true);
+    expect(eligible("marketing-campaign-learning", campaignEvent).eligible).toBe(true);
+    expect(eligible("marketing-campaign-lead-qualification", cohortEvent).eligible).toBe(true);
+    expect(eligible("marketing-campaign-pipeline-outcome", outcomeEvent).eligible).toBe(true);
   });
 
-  it("permits only the declared incident support sequence when all context exists", () => {
-    const businessEvent = event({
-      eventType: "incident.customer_impact_detected",
+  it("permits the declared incident support sequence through bounded derived events", () => {
+    const incidentEvent = event({
+      eventType: "engineering.incident_detected",
       subjectType: "incident",
-      normalizedPayload: {
-        severity: "critical",
-        affectedServices: ["api"],
-        accountTier: "strategic",
-        businessImpact: "checkout unavailable",
-        audience: ["affected admins"],
-        knownFacts: ["api unavailable"],
-        timeline: [{ at: "12:00", event: "alert" }],
-        rootCause: "deployment regression"
-      }
+      normalizedPayload: { incidentId: "incident-1", service: "api", detectedAt: "2026-08-01T12:00:00Z" }
+    });
+    const impactEvent = event({
+      eventType: "engineering.customer_impact_ready",
+      subjectType: "customer_impact",
+      normalizedPayload: { incidentId: "incident-1", impactEvidenceRefs: ["evidence://impact"], owner: "incident-commander" }
+    });
+    const accountRiskEvent = event({
+      eventType: "cs.strategic_account_risk_ready",
+      subjectType: "account_risk",
+      normalizedPayload: { accountId: "account-1", ownerId: "csm-1", riskEvidenceRefs: ["evidence://impact"] }
+    });
+    const learningEvent = event({
+      eventType: "engineering.incident_resolved",
+      subjectType: "incident",
+      normalizedPayload: { incidentId: "incident-1", resolvedAt: "2026-08-01T13:00:00Z", resolutionEvidenceRefs: ["evidence://resolution"] }
     });
 
-    for (const templateId of [
-      "engineering-incident_response",
-      "strategic-account-escalation",
-      "customer_success-customer_communication_review",
-      "engineering-incident_learning"
-    ]) {
-      expect(eligible(templateId, businessEvent).eligible).toBe(true);
-    }
+    expect(eligible("engineering-incident-response", incidentEvent).eligible).toBe(true);
+    expect(eligible("engineering-customer-impact", impactEvent).eligible).toBe(true);
+    expect(eligible("cs-strategic-account-escalation", accountRiskEvent).eligible).toBe(true);
+    expect(eligible("engineering-incident-learning", learningEvent).eligible).toBe(true);
   });
 
   it("rejects missing context and exclusion matches so Hermes can abstain", () => {
     const missingEvidence = event({
-      eventType: "campaign.performance_anomaly",
+      eventType: "marketing.campaign_window_closed",
       subjectType: "campaign",
-      normalizedPayload: { spend: 5_000, qualifiedOutcome: "" }
+      normalizedPayload: { campaignId: "campaign-1", spend: 5_000 }
     });
     missingEvidence.evidenceRefs = [];
-    const missingResult = eligible("marketing-campaign_learning", missingEvidence);
+    const missingResult = eligible("marketing-campaign-learning", missingEvidence);
     expect(missingResult.eligible).toBe(false);
     expect(missingResult.reasons.join(" ")).toContain("Missing required field");
 

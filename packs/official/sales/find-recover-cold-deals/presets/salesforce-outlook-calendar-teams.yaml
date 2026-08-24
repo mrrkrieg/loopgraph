@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: salesforce-outlook-calendar-teams
+name: Salesforce + Outlook + Microsoft Calendar + Teams
+description: Configure deal-risk diagnosis for a Salesforce and Microsoft 365 sales team.
+connectorRecipe: connectors/salesforce-outlook-calendar-teams.yaml
+defaults:
+  stageAgePolicy: company_overlay
+  followUpMode: prepare_for_approval
+  internalChannel: company_overlay
+  historicalReplayDays: 90
+  rolloutMode: shadow
+requiredCompanyFields: [sales.pipelineStages, sales.stageAgeThresholds, sales.ownerMapping, sales.strategicAccounts]

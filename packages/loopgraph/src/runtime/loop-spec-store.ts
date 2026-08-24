@@ -45,6 +45,7 @@ export type LoopSpecMaterializationCommitInput = {
   projectRoot: string;
   committedAt: string;
   artifacts: StoredLoopSpecArtifact[];
+  removeLoopIds?: string[];
   discoverySessionTransition?: {
     expectedRevision: number;
     session: BusinessDiscoverySession;
@@ -55,6 +56,7 @@ export type LoopSpecMaterializationCommitResult = {
   workspace: LoopgraphWorkspaceRegistry;
   workspaceRevision: number;
   artifacts: StoredLoopSpecArtifact[];
+  removedLoopIds?: string[];
   discoverySession?: BusinessDiscoverySession;
   created: boolean;
   commitRef: string;
@@ -159,6 +161,12 @@ export class FileLoopSpecRegistryStore implements LoopSpecRegistryStore {
       const entriesById = new Map(
         current.workspace.registeredSpecs.map((entry) => [entry.id, entry])
       );
+      const removeLoopIds = Array.from(new Set(input.removeLoopIds ?? [])).sort();
+      const removedEntries = removeLoopIds.flatMap((loopId) => {
+        const entry = entriesById.get(loopId);
+        return entry ? [entry] : [];
+      });
+      for (const loopId of removeLoopIds) entriesById.delete(loopId);
       for (const artifact of input.artifacts) {
         const finalPath = resolveConfinedPath(projectRoot, artifact.entry.path);
         await writeSpecAtomic(finalPath, artifact.spec);
@@ -178,6 +186,9 @@ export class FileLoopSpecRegistryStore implements LoopSpecRegistryStore {
       };
       await writeWorkspaceFile(projectRoot, workspace);
       await writeRevisionFile(projectRoot, current.revision + 1);
+      for (const entry of removedEntries) {
+        await rm(resolveConfinedPath(projectRoot, entry.path), { force: true });
+      }
 
       const result: LoopSpecMaterializationCommitResult = {
         workspace,
@@ -193,6 +204,7 @@ export class FileLoopSpecRegistryStore implements LoopSpecRegistryStore {
           },
           sourceRef: resolveConfinedPath(projectRoot, artifact.entry.path)
         })),
+        removedLoopIds: removeLoopIds,
         ...(input.discoverySessionTransition
           ? { discoverySession: input.discoverySessionTransition.session }
           : {}),
@@ -236,8 +248,9 @@ function validateCommitInput(input: LoopSpecMaterializationCommitInput): void {
   if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
     throw new Error("LoopSpec workspace revision is invalid");
   }
-  if (input.artifacts.length === 0 || input.artifacts.length > 32) {
-    throw new Error("LoopSpec materialization must contain 1 to 32 artifacts");
+  const removeLoopIds = Array.from(new Set(input.removeLoopIds ?? []));
+  if (input.artifacts.length + removeLoopIds.length === 0 || input.artifacts.length + removeLoopIds.length > 32) {
+    throw new Error("LoopSpec materialization must contain 1 to 32 artifact writes or removals");
   }
   const loopIds = new Set<string>();
   for (const artifact of input.artifacts) {
@@ -251,6 +264,10 @@ function validateCommitInput(input: LoopSpecMaterializationCommitInput): void {
       throw new Error(`Duplicate LoopSpec in materialization: ${artifact.loopId}`);
     }
     loopIds.add(artifact.loopId);
+  }
+  for (const loopId of removeLoopIds) {
+    if (!loopId) throw new Error("Removed LoopSpec identity is required");
+    if (loopIds.has(loopId)) throw new Error(`LoopSpec cannot be written and removed in one materialization: ${loopId}`);
   }
 }
 
@@ -266,7 +283,10 @@ function assertSameCommit(
     loopId: artifact.loopId,
     versionHash: artifact.versionHash
   }));
-  if (contentHash(expected) !== contentHash(actual)) {
+  if (contentHash({ artifacts: expected, removedLoopIds: [...(input.removeLoopIds ?? [])].sort() }) !== contentHash({
+    artifacts: actual,
+    removedLoopIds: [...(existing.removedLoopIds ?? [])].sort()
+  })) {
     throw new Error(
       "Idempotent LoopSpec materialization resolved to conflicting content"
     );
@@ -430,6 +450,7 @@ async function writeCommitReceipt(
       loopId: artifact.loopId,
       versionHash: artifact.versionHash
     })),
+    removedLoopIds: [...(input.removeLoopIds ?? [])].sort(),
     result
   });
 }

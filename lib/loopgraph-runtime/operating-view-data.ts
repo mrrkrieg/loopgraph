@@ -1,15 +1,19 @@
 import {
-  FileMeasurementStore,
-  FileOutcomeStore,
+  compileRoutingLearningEffectiveness,
   listGraphChangeSets,
-  listLoopOpportunities
+  listLoopOpportunities,
+  type RoutingLearningEffectiveness
 } from "loopgraph/runtime";
 import { isHostedPreview } from "@/lib/hosted-preview";
 import {
   getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopgraphRoot,
+  getMeasurementStore,
+  getOutcomeStore,
+  getRoutingStore,
   getSemanticGraphStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 
@@ -30,6 +34,10 @@ export type OpportunityView = {
 
 export type ChangeReviewView = {
   id: string;
+  changeSetId: string;
+  changeId: string;
+  primaryChange: boolean;
+  changeCount: number;
   opportunityId: string;
   status: string;
   version: number;
@@ -40,6 +48,11 @@ export type ChangeReviewView = {
   expectedOutcome: string;
   evidenceCount: number;
   requiresExplicitApproval: boolean;
+  designStatus?: string;
+  canApprove: boolean;
+  approvalBlockedReason?: string;
+  canApply: boolean;
+  applicationBlockedReason?: string;
   approvalDecision?: string;
   approvalActor?: string;
   transactionStatus?: string;
@@ -140,6 +153,7 @@ export type OperatingViewData = {
     runs: ControllerRunView[];
   };
   learning: {
+    routing: RoutingLearningEffectiveness;
     bindings: LearningBindingView[];
     outcomes: OutcomeView[];
     reconciliation?: {
@@ -173,14 +187,17 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const loopgraphRoot = getLoopgraphRoot(projectRoot);
   const graphStore = getSemanticGraphStore({ projectRoot });
+  const hermesDesignStore = getHermesDesignStore();
   const controllerStore = getLoopControllerStore({ projectRoot });
   const opportunityStore = getLoopOpportunityStore({ projectRoot });
-  const outcomeStore = new FileOutcomeStore(loopgraphRoot);
-  const measurementStore = new FileMeasurementStore(loopgraphRoot);
+  const outcomeStore = getOutcomeStore({ projectRoot });
+  const measurementStore = getMeasurementStore({ projectRoot });
+  const routingStore = getRoutingStore({ rootDir: loopgraphRoot });
 
   const [
     opportunities,
     changeSets,
+    designTasks,
     approvals,
     transactions,
     policy,
@@ -192,10 +209,12 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
     reconciliationReports,
     samples,
     outcomes,
-    valueEntries
+    valueEntries,
+    routingLearning
   ] = await Promise.all([
     listLoopOpportunities(projectRoot, {}, opportunityStore),
     listGraphChangeSets(projectRoot, undefined, opportunityStore),
+    hermesDesignStore.listTasks(),
     graphStore.listApprovals(),
     graphStore.listTransactions(),
     controllerStore.readPolicy(),
@@ -207,7 +226,8 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
     measurementStore.listReconciliationReports(),
     outcomeStore.listMetricSamples(),
     outcomeStore.listObservedOutcomes(),
-    outcomeStore.listValueLedgerEntries()
+    outcomeStore.listValueLedgerEntries(),
+    compileRoutingLearningEffectiveness(routingStore)
   ]);
 
   const mappedOpportunities: OpportunityView[] = opportunities.map((item) => ({
@@ -233,6 +253,8 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
       latestApprovalByChangeSet.set(approval.changeSetId, approval);
     }
   }
+  const opportunityById = new Map(opportunities.map((item) => [item.id, item]));
+  const designTaskById = new Map(designTasks.map((task) => [task.id, task]));
   const transactionById = new Map(transactions.map((transaction) => [transaction.id, transaction]));
   const transactionByChangeSet = new Map<string, (typeof transactions)[number]>();
   for (const transaction of transactions) {
@@ -241,13 +263,28 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
     }
   }
   const mappedChanges: ChangeReviewView[] = changeSets.flatMap((set) =>
-    set.changes.map((change) => {
+    set.changes.map((change, index) => {
       const approval = latestApprovalByChangeSet.get(set.id);
+      const opportunity = opportunityById.get(set.opportunityId);
+      const taskId = set.designTaskId ?? opportunity?.designTaskId;
+      const task = taskId ? designTaskById.get(taskId) : undefined;
+      const designRunId = task?.designRunIds.at(-1) ?? set.designRunId;
+      const canApprove = set.status === "proposed" &&
+        task?.status === "completed" &&
+        Boolean(designRunId);
+      const canApply = set.status === "approved" &&
+        approval?.decision === "approved" &&
+        Boolean(set.designRunId) &&
+        set.changes.length === 1;
       const transaction = (set.appliedTransactionId
         ? transactionById.get(set.appliedTransactionId)
         : undefined) ?? transactionByChangeSet.get(set.id);
       return {
         id: `${set.id}:${change.id}`,
+        changeSetId: set.id,
+        changeId: change.id,
+        primaryChange: index === 0,
+        changeCount: set.changes.length,
         opportunityId: set.opportunityId,
         status: humanize(set.status),
         version: set.version,
@@ -258,6 +295,20 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
         expectedOutcome: change.expectedOutcome,
         evidenceCount: change.evidenceRefs.length,
         requiresExplicitApproval: change.requiresExplicitApproval,
+        designStatus: task ? humanize(task.status) : undefined,
+        canApprove,
+        approvalBlockedReason: approvalBlockedReason({
+          changeSetStatus: set.status,
+          taskStatus: task?.status,
+          designRunId
+        }),
+        canApply,
+        applicationBlockedReason: applicationBlockedReason({
+          changeSetStatus: set.status,
+          changeCount: set.changes.length,
+          approvalDecision: approval?.decision,
+          designRunId: set.designRunId
+        }),
         approvalDecision: approval ? humanize(approval.decision) : undefined,
         approvalActor: approval?.actorId,
         transactionStatus: transaction ? humanize(transaction.status) : undefined,
@@ -315,6 +366,7 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
       }))
     },
     learning: {
+      routing: routingLearning,
       bindings: bindings.map((binding) => {
         const bindingJobs = jobsByBinding.get(binding.id) ?? [];
         const bindingSamples = samplesByLoopMetric.get(`${binding.loopId}:${binding.metricKey}`) ?? [];
@@ -536,6 +588,10 @@ export function buildHostedOperatingPreview(): OperatingViewData {
     changes: [
       {
         id: "preview-change-product-activation:add-product-activation",
+        changeSetId: "preview-change-product-activation",
+        changeId: "add-product-activation",
+        primaryChange: true,
+        changeCount: 1,
         opportunityId: "preview-opportunity-product-activation",
         status: "Proposed",
         version: 1,
@@ -546,10 +602,18 @@ export function buildHostedOperatingPreview(): OperatingViewData {
         expectedOutcome: "Reduce qualified-account activation stalls without increasing unwanted outreach.",
         evidenceCount: 9,
         requiresExplicitApproval: true,
+        designStatus: "Completed",
+        canApprove: false,
+        canApply: false,
+        approvalBlockedReason: "The public preview is read-only.",
         updatedAt: "2026-07-28T17:42:00.000Z"
       },
       {
         id: "preview-change-support:split-support",
+        changeSetId: "preview-change-support",
+        changeId: "split-support",
+        primaryChange: true,
+        changeCount: 1,
         opportunityId: "preview-opportunity-support-escalation",
         status: "Approved",
         version: 2,
@@ -560,12 +624,19 @@ export function buildHostedOperatingPreview(): OperatingViewData {
         expectedOutcome: "Cut urgent-ticket response time while preserving routine triage precision.",
         evidenceCount: 14,
         requiresExplicitApproval: true,
+        designStatus: "Completed",
+        canApprove: false,
+        canApply: false,
         approvalDecision: "Approved",
         approvalActor: "support-director",
         updatedAt: "2026-07-28T16:02:00.000Z"
       },
       {
         id: "preview-change-ads:update-ads",
+        changeSetId: "preview-change-ads",
+        changeId: "update-ads",
+        primaryChange: true,
+        changeCount: 1,
         opportunityId: "preview-opportunity-ads",
         status: "Applied",
         version: 1,
@@ -576,6 +647,9 @@ export function buildHostedOperatingPreview(): OperatingViewData {
         expectedOutcome: "Faster decisions with no increase in false budget alerts.",
         evidenceCount: 11,
         requiresExplicitApproval: true,
+        designStatus: "Completed",
+        canApprove: false,
+        canApply: false,
         approvalDecision: "Approved",
         approvalActor: "growth-lead",
         transactionStatus: "Committed",
@@ -645,6 +719,77 @@ export function buildHostedOperatingPreview(): OperatingViewData {
       ]
     },
     learning: {
+      routing: {
+        schemaVersion: "routing-learning-effectiveness/v1alpha1",
+        generatedAt: "2026-07-28T18:00:00.000Z",
+        attempts: {
+          total: 86,
+          committed: 78,
+          rejected: 8,
+          evidenceAcknowledged: 82,
+          evidenceUnacknowledged: 4,
+          evidenceNotRecorded: 0,
+          staleEvidenceRejected: 3,
+          evidenceCoverageRate: 82 / 86,
+          actions: {
+            route: 61,
+            append_evidence: 9,
+            ignore: 2,
+            defer: 3,
+            request_human: 7,
+            unhandled: 4
+          }
+        },
+        humanFeedback: {
+          corrections: 5,
+          correctedAttempts: 5
+        },
+        evaluations: {
+          total: 48,
+          passed: 45,
+          failed: 3,
+          passRate: 45 / 48
+        },
+        loops: [
+          { loopId: "product_activation_recovery", selected: 21, expected: 18, correctedSelections: 1, evaluated: 18, passed: 17, failed: 1 },
+          { loopId: "support_priority_triage", selected: 19, expected: 16, correctedSelections: 2, evaluated: 16, passed: 15, failed: 1 },
+          { loopId: "marketing_ads", selected: 14, expected: 9, correctedSelections: 1, evaluated: 9, passed: 8, failed: 1 },
+          { loopId: "marketing_content_creation", selected: 7, expected: 5, correctedSelections: 1, evaluated: 5, passed: 5, failed: 0 }
+        ],
+        recentDecisions: [
+          {
+            attemptId: "preview-route-product-activation",
+            eventId: "evt_product_account_inactivity",
+            createdAt: "2026-07-28T17:48:00.000Z",
+            status: "committed",
+            action: "route",
+            selectedLoopIds: ["product_activation_recovery"],
+            evidenceState: "acknowledged",
+            staleEvidenceRejected: false
+          },
+          {
+            attemptId: "preview-route-support-review",
+            eventId: "evt_support_enterprise_risk",
+            createdAt: "2026-07-28T17:31:00.000Z",
+            status: "committed",
+            action: "request_human",
+            selectedLoopIds: [],
+            evidenceState: "acknowledged",
+            staleEvidenceRejected: false
+          },
+          {
+            attemptId: "preview-route-ads-stale",
+            eventId: "evt_ads_qualified_pipeline_drop",
+            createdAt: "2026-07-28T17:08:00.000Z",
+            status: "rejected",
+            action: "route",
+            selectedLoopIds: ["marketing_ads"],
+            evidenceState: "unacknowledged",
+            staleEvidenceRejected: true
+          }
+        ],
+        truncated: { loops: false, recentDecisions: true }
+      },
       bindings: [
         {
           id: "preview-binding-activation",
@@ -794,6 +939,45 @@ function humanize(value: string): string {
   return value
     .replaceAll("_", " ")
     .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function approvalBlockedReason(input: {
+  changeSetStatus: string;
+  taskStatus?: string;
+  designRunId?: string;
+}): string | undefined {
+  if (input.changeSetStatus !== "proposed") {
+    return `This change set is already ${humanize(input.changeSetStatus).toLowerCase()}.`;
+  }
+  if (!input.taskStatus) {
+    return "Hermes has not created the governed design task yet.";
+  }
+  if (input.taskStatus !== "completed") {
+    return `Hermes design is ${humanize(input.taskStatus).toLowerCase()}; finish the requested evidence or repair work before approval.`;
+  }
+  if (!input.designRunId) {
+    return "The completed Hermes task is missing its immutable design run.";
+  }
+  return undefined;
+}
+
+function applicationBlockedReason(input: {
+  changeSetStatus: string;
+  changeCount: number;
+  approvalDecision?: string;
+  designRunId?: string;
+}): string | undefined {
+  if (input.changeSetStatus !== "approved") return undefined;
+  if (input.approvalDecision !== "approved") {
+    return "No accountable approval receipt is attached to this change set.";
+  }
+  if (!input.designRunId) {
+    return "The approval is missing its immutable Hermes design run.";
+  }
+  if (input.changeCount !== 1) {
+    return "This change set needs an explicit operation-to-proposal mapping before UI application.";
+  }
+  return undefined;
 }
 
 function highestSeverity(severities: string[]): string {

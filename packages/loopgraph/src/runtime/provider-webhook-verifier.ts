@@ -117,6 +117,9 @@ export class WebhookVerificationError extends Error {
 }
 
 function verifyProviderSignature(input: {
+  organizationId: string;
+  projectKey: string;
+  installationId: string;
   providerId: ProviderId;
   rawBody: string;
   headers: Record<string, string>;
@@ -210,6 +213,57 @@ function verifyProviderSignature(input: {
       "quickbooks:intuit-signature"
     );
   }
+  if (input.providerId === "outlook" || input.providerId === "teams") {
+    const notifications = readMicrosoftGraphNotifications(input.rawBody);
+    const verified = notifications.length > 0 && notifications.every((notification) =>
+      typeof notification.clientState === "string" && constantTimeEqual(notification.clientState, input.webhookSecret)
+    );
+    return result(
+      verified,
+      verified ? hash(input.rawBody) : "",
+      `${input.providerId}:microsoft-graph-client-state`,
+      verified ? undefined : "invalid_client_state"
+    );
+  }
+  if (input.providerId === "linear") {
+    const payload = readJsonRecord(input.rawBody);
+    const webhookTimestamp = typeof payload.webhookTimestamp === "number" ? payload.webhookTimestamp : Number(header("linear-timestamp"));
+    if (!Number.isFinite(webhookTimestamp) || Math.abs(input.now.getTime() - webhookTimestamp) > 60_000) return result(false, "", "linear:hmac-sha256", "stale_timestamp");
+    return result(
+      constantTimeEqual(header("linear-signature"), hmacHex(input.webhookSecret, input.rawBody)),
+      hash(input.rawBody),
+      "linear:hmac-sha256"
+    );
+  }
+  if (input.providerId === "jira") {
+    const authorization = header("authorization");
+    const token = /^Bearer\s+(.+)$/i.exec(authorization)?.[1] ?? "";
+    const verified = verifyAtlassianWebhookJwt(token, input.webhookSecret, input.now)
+      && verifyJiraWebhookCallbackBinding({
+        requestUrl: input.requestUrl,
+        secret: input.webhookSecret,
+        organizationId: input.organizationId,
+        projectKey: input.projectKey,
+        installationId: input.installationId
+      });
+    const claims = verified ? readJwtClaims(token) : {};
+    const deliveryId = typeof claims.jti === "string" ? claims.jti : hash(`${String(claims.iat ?? "")}:${input.rawBody}`);
+    return result(verified, verified ? deliveryId : "", "jira:oauth-webhook-jwt", verified ? undefined : "invalid_bearer_jwt");
+  }
+  if (input.providerId === "gitlab") {
+    const messageId = header("webhook-id") || header("idempotency-key") || header("x-gitlab-event-uuid");
+    const timestamp = header("webhook-timestamp");
+    const signatures = header("webhook-signature");
+    if (signatures) {
+      if (!timestampFresh(timestamp)) return result(false, "", "gitlab:standard-webhooks", "stale_timestamp");
+      const encodedKey = input.webhookSecret.startsWith("whsec_") ? input.webhookSecret.slice(6) : "";
+      let key: Buffer;
+      try { key = encodedKey ? Buffer.from(encodedKey, "base64") : Buffer.alloc(0); } catch { key = Buffer.alloc(0); }
+      const expected = key.length > 0 ? `v1,${createHmac("sha256", key).update(`${messageId}.${timestamp}.${input.rawBody}`).digest("base64")}` : "";
+      return result(signatures.split(/\s+/).some((signature) => constantTimeEqual(signature, expected)), messageId, "gitlab:standard-webhooks");
+    }
+    return result(constantTimeEqual(header("x-gitlab-token"), input.webhookSecret), messageId, "gitlab:legacy-secret-token");
+  }
   return result(false, "", `${input.providerId}:unsupported`, "provider_signature_strategy_unimplemented");
 }
 
@@ -257,6 +311,80 @@ function readJsonId(body: string) {
     return typeof value.id === "string" ? value.id : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function readJsonRecord(body: string): Record<string, unknown> {
+  try {
+    const value = JSON.parse(body) as unknown;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function verifyAtlassianWebhookJwt(token: string, secret: string, now: Date): boolean {
+  const [encodedHeader, encodedClaims, signature, ...extra] = token.split(".");
+  if (!encodedHeader || !encodedClaims || !signature || extra.length > 0) return false;
+  try {
+    const header = JSON.parse(Buffer.from(encodedHeader, "base64url").toString("utf8")) as Record<string, unknown>;
+    const claims = JSON.parse(Buffer.from(encodedClaims, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (header.alg !== "HS256" || (header.typ !== undefined && header.typ !== "JWT")) return false;
+    const expected = createHmac("sha256", secret).update(`${encodedHeader}.${encodedClaims}`).digest("base64url");
+    if (!constantTimeEqual(signature, expected)) return false;
+    const nowSeconds = Math.floor(now.getTime() / 1_000);
+    if (typeof claims.exp !== "number" || claims.exp < nowSeconds) return false;
+    if (typeof claims.iat === "number" && Math.abs(nowSeconds - claims.iat) > 10 * 60) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function deriveJiraWebhookCallbackBinding(input: {
+  secret: string;
+  organizationId: string;
+  projectKey: string;
+  installationId: string;
+}) {
+  return createHmac("sha256", input.secret)
+    .update(`loopgraph:jira-webhook:v1:${input.organizationId}:${input.projectKey}:${input.installationId}`)
+    .digest("base64url");
+}
+
+function verifyJiraWebhookCallbackBinding(input: {
+  requestUrl?: string;
+  secret: string;
+  organizationId: string;
+  projectKey: string;
+  installationId: string;
+}) {
+  if (!input.requestUrl) return false;
+  try {
+    const provided = new URL(input.requestUrl).searchParams.get("loopgraph_binding") ?? "";
+    return constantTimeEqual(provided, deriveJiraWebhookCallbackBinding(input));
+  } catch {
+    return false;
+  }
+}
+
+function readJwtClaims(token: string): Record<string, unknown> {
+  try {
+    const claims = token.split(".")[1];
+    return claims ? JSON.parse(Buffer.from(claims, "base64url").toString("utf8")) as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function readMicrosoftGraphNotifications(body: string): Array<Record<string, unknown>> {
+  try {
+    const value = JSON.parse(body) as Record<string, unknown>;
+    return Array.isArray(value.value)
+      ? value.value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      : [];
+  } catch {
+    return [];
   }
 }
 

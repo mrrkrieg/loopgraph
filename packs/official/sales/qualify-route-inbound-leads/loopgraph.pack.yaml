@@ -104,6 +104,24 @@ permissions:
     dataClasses: [business_contact, crm_activity]
 requiredCapabilities: [crm.lead.read, crm.account.read]
 optionalCapabilities: [enrichment.account.read, crm.lead.update, mail.message.draft, mail.message.send, messaging.channel.post]
+topology:
+  objects:
+    - { id: inbound-lead, objectType: lead, label: Inbound lead, description: A durable lead and source identity with consent fit intent and campaign evidence., shared: true, identityKeys: [leadId, email] }
+    - { id: account-research, objectType: account_research, label: Account research, description: Verified company buyer trigger and fit evidence with source references and freshness., shared: true, identityKeys: [accountId, researchVersion] }
+    - { id: qualification, objectType: lead_qualification, label: Qualification decision, description: A versioned fit and intent decision with evidence confidence and reviewer corrections., shared: true, identityKeys: [leadId, qualificationVersion] }
+    - { id: lead-assignment, objectType: lead_assignment, label: Lead assignment, description: The exact owner queue SLA and routing reason selected for a qualified lead., shared: true, identityKeys: [leadId, assignmentVersion] }
+    - { id: sales-outcome, objectType: sales_outcome, label: Sales outcome, description: Observed meeting opportunity rejection and customer-quality evidence returned to qualification., shared: true, identityKeys: [leadId, observationWindow] }
+  flows:
+    - { id: lead-enters-intake, source: { kind: object, id: inbound-lead }, target: { kind: loop, id: sales-inbound-lead-intake }, type: evidence_in, reason: Hermes starts one lead problem only after source identity and minimum consent evidence resolve. }
+    - { id: intake-returns-to-research, source: { kind: loop, id: sales-inbound-lead-intake }, target: { kind: loop, id: sales-inbound-account-research }, type: learning_return, reason: Accepted intake evidence becomes a bounded research request. }
+    - { id: research-produces-account, source: { kind: loop, id: sales-inbound-account-research }, target: { kind: object, id: account-research }, type: produces, reason: Account claims remain cited and time-bounded instead of becoming unverified personalization. }
+    - { id: research-enters-qualification, source: { kind: object, id: account-research }, target: { kind: loop, id: sales-inbound-lead-qualification }, type: evidence_in, reason: Qualification combines verified account evidence with the confirmed company definition. }
+    - { id: qualification-produces-decision, source: { kind: loop, id: sales-inbound-lead-qualification }, target: { kind: object, id: qualification }, type: produces, reason: Qualification is an explainable decision with evidence confidence and a policy version. }
+    - { id: qualification-returns-to-routing, source: { kind: loop, id: sales-inbound-lead-qualification }, target: { kind: loop, id: sales-inbound-lead-routing }, type: learning_return, reason: Only an eligible qualification can request owner and SLA routing. }
+    - { id: routing-produces-assignment, source: { kind: loop, id: sales-inbound-lead-routing }, target: { kind: object, id: lead-assignment }, type: produces, reason: The assignment is reviewable before any CRM mutation or notification. }
+    - { id: routing-returns-to-follow-up, source: { kind: loop, id: sales-inbound-lead-routing }, target: { kind: loop, id: sales-inbound-follow-up }, type: learning_return, reason: Follow-up preparation receives the exact qualification assignment and approved message context. }
+    - { id: follow-up-returns-to-learning, source: { kind: loop, id: sales-inbound-follow-up }, target: { kind: loop, id: sales-inbound-qualification-learning }, type: learning_return, reason: Downstream meeting and opportunity evidence evaluates whether qualification and routing were useful. }
+    - { id: learning-produces-sales-outcome, source: { kind: loop, id: sales-inbound-qualification-learning }, target: { kind: object, id: sales-outcome }, type: produces, reason: Reviewer corrections and observed outcomes become shared learning for Sales and Marketing. }
 entrypoints:
   loops:
     - loops/lead-intake.yaml
@@ -129,9 +147,11 @@ entrypoints:
     - fixtures/duplicate-lead.json
     - fixtures/existing-customer.json
     - fixtures/ambiguous-account.json
+    - fixtures/low-confidence.json
     - fixtures/connector-unavailable.json
     - fixtures/missing-field.json
     - fixtures/approval-required.json
+    - fixtures/customer-facing-action.json
     - fixtures/outcome-unavailable.json
     - fixtures/retry-replay.json
     - fixtures/upgrade-rollback.json
@@ -143,4 +163,3 @@ ownership:
   reviewRoles: [sales_manager, revenue_operations]
   supportUrl: https://github.com/mrrkrieg/loopgraph/issues
 defaultRolloutMode: shadow
-

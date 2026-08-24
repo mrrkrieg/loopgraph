@@ -25,12 +25,32 @@ flowchart LR
    capability, have every minimum OAuth scope, and pass the immutable prepare/commit fingerprint.
    Privileged writes additionally require a server-side human-approval receipt; draft writes stay
    fingerprint-bound without inventing an unnecessary human approval.
+   App installation enforces the same catalog boundary earlier: every logical capability resolves
+   through its immutable Connector Recipe to a persisted exact operation binding. A connection's
+   self-advertised capability label cannot authorize an operation absent from the compiled catalog.
 3. The installation must belong to the same organization/project and be active. Revocation removes
    allowed capabilities before remote cleanup, so a broker outage cannot leave new actions enabled.
 4. Credentials are resolved only inside the selected handler and cannot be returned. Broker output,
    errors, structured logs, and metadata pass through the central secret boundary.
 5. Every accepted, denied, or failed call produces an idempotent receipt containing hashes—not raw
    inputs or outputs—and appends an event to the tenant security audit chain.
+
+Installed Apps add a route-bound authority check before this broker boundary. Hermes cannot submit
+a provider, operation, connection, URL, tenant, workspace, or company object. It supplies a logical
+capability and durable execution identity; Loopgraph derives the exact pinned App binding and
+requires an active matching route job, exact LoopSpec hash, fresh assigned agent, matching durable
+event/problem subject, exact Broker environment, current scopes, and healthy secret-free connection
+projection. Reads may execute, while any write returns only a prepared-action fingerprint for the
+separate approval and commit controls. Secret-shaped operation input is rejected before the Broker.
+The headless endpoint requires a dedicated `hermes.app_operations` durable workload grant and binds
+the tenant from verified deployment configuration; browser session authority and the broader
+provider-broker grant do not authorize this route.
+
+Bindings owned by the Loopgraph provider do not fall through to the Connector Broker. Three
+allowlisted internal reads—topology, routing decisions, and outcome/value evidence—run in a separate
+fixed registry after the same route/agent/tenant checks. They expose bounded summaries, omit raw
+provider payloads and model metadata, enforce tenant filters, reject secret-shaped input and output,
+and have no dynamic module, arbitrary file, SQL, URL, graph mutation, or action-commit mechanism.
 
 Before a provider handler runs, a tenant-scoped idempotency lease is atomically reserved. Concurrent
 duplicates return `request_in_progress`, and reuse of the key for a different actor, environment,
@@ -91,6 +111,11 @@ Set `LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS` to a JSON array of trusted issuer poli
 
 - accepts RS256 and ES256 JWTs only;
 - obtains keys from the configured JWKS URI and caches them for a bounded interval;
+- refreshes once when a previously unseen key ID appears or a cached same-ID key no longer verifies,
+  so an issuer can rotate signing keys before the prior cache TTL expires;
+- deduplicates concurrent JWKS loads, caps a JWKS at 100 keys, rejects redirects and malformed key
+  documents, caps even a provider-advertised long cache lifetime at five minutes, and permits at most one rotation-triggered refresh per issuer every 30 seconds so an
+  attacker-controlled key ID cannot become an outbound request amplifier;
 - checks issuer, audience, expiry/not-before, allowed subject patterns, tenant claims, and the exact
   machine capability;
 - derives a non-secret credential ID from issuer + subject for durable replay and rate-limit receipts;
@@ -104,6 +129,13 @@ web-identity token with STS or uses ECS/EC2/Lambda workload credentials. Static 
 tokens fail closed unless `LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` is deliberately enabled during
 migration. Static AWS access keys are also rejected in production unless the temporary
 `LOOPGRAPH_ALLOW_STATIC_AWS_CREDENTIALS=true` escape hatch is explicitly enabled.
+
+Use an overlap window when rotating issuer keys: publish the old and new public keys, begin issuing
+tokens with the new `kid`, wait through the maximum accepted token lifetime, and only then remove the
+old key. A same-`kid` emergency replacement is supported through the signature-failure refresh, but a
+new unique `kid` is preferred because it produces an unambiguous rotation boundary. A JWKS fetch or
+parse failure always denies the request; the verifier never accepts a token merely because an older
+cached key set exists.
 
 For sender-bound identities, set `LOOPGRAPH_TRUSTED_MTLS_PROXY=true` only when the broker origin is
 unreachable except through a gateway that removes inbound `x-loopgraph-mtls-*` headers, verifies the
@@ -141,8 +173,15 @@ POST /api/connector-broker/v1/webhooks/{installationId}
 
 The installation—not an untrusted URL/body provider field—selects the provider verifier. Verification
 reads the untouched raw body and implements provider-specific strategies for GitHub,
-Slack, Stripe, HubSpot v3, Intercom, Notion, Zendesk, Greenhouse, and QuickBooks. Scheduled/event-stream
-providers use their workload identity or stream receipt instead of pretending to have an HMAC.
+Slack, Stripe, HubSpot v3, Intercom, Notion, Zendesk, Greenhouse, QuickBooks, Linear,
+Jira Cloud, GitLab, and Microsoft Graph. Linear requires its raw-body HMAC and a timestamp within one
+minute, and derives replay identity from that signed raw body rather than an unsigned delivery header.
+Jira requires both the OAuth webhook bearer JWT signed by the app client secret and a high-entropy
+callback binding derived for the exact tenant installation. The binding is included only in the URL
+registered with Jira and must not be logged or exposed as integration metadata. New GitLab routes
+use Standard Webhooks HMAC signing tokens with a fresh timestamp; the weaker `X-Gitlab-Token` path is
+accepted only as a migration bridge. Scheduled/event-stream
+providers—including BigQuery and Snowflake bounded-query detectors—use their workload identity or stream receipt instead of pretending to have an HMAC.
 Timestamp windows and durable delivery claims prevent replay. A claimed delivery is marked forwarded
 only after Hermes accepts it; failed or expired leases can be retried with the identical body hash,
 while already-forwarded deliveries and delivery-ID/body mismatches remain blocked. A signed receipt binds
@@ -184,7 +223,7 @@ HERMES_WEBHOOK_URL=https://hermes.example/webhooks/loopgraph
 LOOPGRAPH_HERMES_WEBHOOK_AUDIENCE=https://hermes.example
 ```
 
-Apply `202608010001_enterprise_connector_broker.sql`, configure provider callback URLs, and validate
+Apply `202608010001_enterprise_connector_broker.sql`, `202608100001_expand_connector_broker_providers.sql`, `202608100002_expand_engineering_connector_providers.sql`, `20260813133306_expand_warehouse_connector_providers.sql`, and `20260813200615_provider_detector_scheduler.sql`; configure provider callback URLs and scheduled detectors; and validate
 each provider in its sandbox before granting live scopes. Do not enable a provider if production
 dependency audit, RLS checks, backup/restore rehearsal, revocation drill, alerting, or audit export
 validation is failing.

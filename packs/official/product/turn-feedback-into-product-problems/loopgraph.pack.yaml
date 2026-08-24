@@ -1,0 +1,107 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.product.turn-feedback-into-product-problems
+  name: Turn Customer Feedback Into Validated Product Problems
+  version: 1.0.0
+  summary: Convert recurring customer and usage evidence into validated product problems and measurable release learning.
+  description: Hermes joins feedback, support, product analytics, issue, and release evidence; separates anecdotes from recurring problems; routes defects independently; prepares governed roadmap evidence; and learns whether shipped work changed adoption or support burden.
+  department: product
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [product, feedback, discovery, bugs, roadmap, release-learning]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: bug-clustering
+    name: Bug clustering
+    description: Separate recurring defects from broader usability and onboarding problems.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/bug-clustering.yaml, skills/evidence-quality.yaml]
+  - id: roadmap-evidence
+    name: Roadmap evidence
+    description: Prepare governed evidence briefs and issue proposals without changing roadmap priority.
+    defaultEnabled: true
+    dependsOn: [bug-clustering]
+    assets: [loops/roadmap-evidence.yaml, skills/product-problem-framing.yaml]
+  - id: release-learning
+    name: Release learning
+    description: Compare observed product and support outcomes with the original problem hypothesis.
+    defaultEnabled: true
+    dependsOn: [roadmap-evidence]
+    assets: [loops/release-learning.yaml, skills/release-evaluation.yaml]
+presets:
+  - id: intercom-posthog-linear
+    name: Intercom + PostHog + Linear
+    description: Join Intercom feedback with PostHog behavior and prepare governed Linear issue work.
+    path: presets/intercom-posthog-linear.yaml
+    providerFamily: intercom
+  - id: zendesk-amplitude-jira
+    name: Zendesk + Amplitude + Jira
+    description: Join Zendesk feedback with Amplitude behavior and prepare governed Jira issue work.
+    path: presets/zendesk-amplitude-jira.yaml
+    providerFamily: zendesk
+permissions:
+  - { capability: support.feedback.read, authority: read, mode: required, risk: low, purpose: "Read normalized customer feedback and durable source identity.", customerFacing: false, defaultPolicy: allowed, dataClasses: [support_content, business_contact] }
+  - { capability: analytics.event.query, authority: read, mode: required, risk: medium, purpose: "Query bounded product behavior evidence for affected workflows and segments.", customerFacing: false, defaultPolicy: allowed, dataClasses: [product_usage] }
+  - { capability: project.issue.read, authority: read, mode: required, risk: low, purpose: "Read existing product issues and detect duplicate or already-planned work.", customerFacing: false, defaultPolicy: allowed, dataClasses: [project_data] }
+  - { capability: project.issue.create, authority: approve, mode: optional, risk: high, purpose: "Create the exact approved product-problem or defect issue.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [support_content, product_usage, project_data] }
+  - { capability: project.issue.update, authority: approve, mode: optional, risk: high, purpose: "Append approved evidence to an existing product issue.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [support_content, product_usage, project_data] }
+  - { capability: product.release.read, authority: read, mode: optional, risk: low, purpose: "Read release scope and dates needed for outcome learning.", customerFacing: false, defaultPolicy: allowed, dataClasses: [project_data] }
+requiredCapabilities: [support.feedback.read, analytics.event.query, project.issue.read]
+optionalCapabilities: [project.issue.create, project.issue.update, product.release.read]
+topology:
+  objects:
+    - { id: customer-feedback, objectType: customer_feedback, label: Customer feedback, description: "Durable feedback items joined to customer, workflow, segment, and provider identity.", shared: true, identityKeys: [feedbackId, accountId, productArea] }
+    - { id: feedback-cluster, objectType: feedback_cluster, label: Feedback cluster, description: "A recurring theme with source evidence, affected segments, and an observation window.", shared: true, identityKeys: [clusterId, productArea, observationWindow] }
+    - { id: product-problem, objectType: product_problem, label: Validated product problem, description: "A bounded problem statement with impact, counter-evidence, owner, and success metric.", shared: true, identityKeys: [problemId, productArea] }
+    - { id: release-outcome, objectType: release_outcome, label: Release outcome, description: "Post-release adoption, support, defect, and rollback evidence tied to the original problem.", shared: true, identityKeys: [releaseId, problemId, measurementWindow] }
+  flows:
+    - { id: feedback-enters-clustering, source: { kind: object, id: customer-feedback }, target: { kind: loop, id: product-feedback-clustering }, type: evidence_in, reason: Hermes sends durable feedback evidence to clustering only after source and subject identity resolve. }
+    - { id: clustering-produces-cluster, source: { kind: loop, id: product-feedback-clustering }, target: { kind: object, id: feedback-cluster }, type: produces, reason: The loop emits one traceable cluster rather than an ungrounded theme. }
+    - { id: cluster-enters-validation, source: { kind: object, id: feedback-cluster }, target: { kind: loop, id: product-problem-validation }, type: evidence_in, reason: Validation begins only from a stable cluster with affected workflow and segment evidence. }
+    - { id: validation-produces-problem, source: { kind: loop, id: product-problem-validation }, target: { kind: object, id: product-problem }, type: produces, reason: A validated problem becomes a reusable company object for roadmap and engineering work. }
+    - { id: problem-enters-roadmap, source: { kind: object, id: product-problem }, target: { kind: loop, id: product-roadmap-evidence }, type: evidence_in, reason: Roadmap evidence consumes a validated problem but cannot set priority autonomously. }
+    - { id: problem-enters-release-learning, source: { kind: object, id: product-problem }, target: { kind: loop, id: product-release-learning }, type: evidence_in, reason: Release learning keeps the original problem and success criteria attached to the shipped change. }
+    - { id: release-produces-outcome, source: { kind: loop, id: product-release-learning }, target: { kind: object, id: release-outcome }, type: produces, reason: Observed release effects become durable evidence rather than a one-time report. }
+    - { id: release-learning-returns-to-validation, source: { kind: loop, id: product-release-learning }, target: { kind: loop, id: product-problem-validation }, type: learning_return, reason: "Outcome evidence improves future validation thresholds and distinguishes product, onboarding, support, and defect problems." }
+entrypoints:
+  loops:
+    - loops/feedback-clustering.yaml
+    - loops/product-problem-validation.yaml
+    - loops/bug-clustering.yaml
+    - loops/roadmap-evidence.yaml
+    - loops/release-learning.yaml
+  skills:
+    - skills/feedback-synthesis.yaml
+    - skills/evidence-quality.yaml
+    - skills/product-problem-framing.yaml
+    - skills/release-evaluation.yaml
+  connectors:
+    - connectors/intercom-posthog-linear.yaml
+    - connectors/zendesk-amplitude-jira.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/happy.json
+    - fixtures/missing-context.json
+    - fixtures/exclusion.json
+    - fixtures/duplicate.json
+    - fixtures/ambiguous.json
+    - fixtures/low-confidence.json
+    - fixtures/permission-change.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: product_operations
+  reviewRoles: [product_manager, product_lead, engineering_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

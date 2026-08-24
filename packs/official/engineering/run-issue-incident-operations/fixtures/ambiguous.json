@@ -1,0 +1,1 @@
+{"id":"engineering-issue-ambiguous","eventType":"engineering.issue_received","subject":{"type":"issue","id":"issue-505"},"normalizedPayload":{"issueId":"505","repository":"platform","title":"Shared gateway error","candidateSubjectIds":["service-api","service-auth"],"confidence":0.97},"evidenceRefs":["github:issue:505"]}

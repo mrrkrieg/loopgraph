@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: marketing-cohort-evaluation
+name: Qualified Pipeline Cohort Evaluation
+description: Evaluate campaign cohorts against company qualification, activation, pipeline, and outcome definitions.
+department: marketing
+goal: Produce comparable cohort quality findings that preserve individual dispositions and uncertainty.
+inputs: [campaign cohort, lead identities, qualification policy, activation policy, opportunities, observation window]
+outputs: [qualified rate, activation rate, opportunity rate, missing outcomes, confidence]
+instructions:
+  - Resolve every lead and opportunity to one campaign cohort before aggregation.
+  - Apply the company qualification definition and version active at event time.
+  - Preserve excluded, ambiguous, duplicate, and missing-outcome states separately.
+  - Use the configured attribution and observation windows.
+  - Report sample size and evidence completeness with every comparison.
+boundaries:
+  - Do not infer account, campaign, or lead identity.
+  - Do not silently discard unqualified or unmatched records.
+  - Do not claim statistical significance without an approved method.
+requiredCapabilities: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]

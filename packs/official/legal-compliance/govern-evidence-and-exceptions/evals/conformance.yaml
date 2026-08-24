@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: legal-compliance-conformance
+appId: loopgraph.legal-compliance.govern-evidence-and-exceptions
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: A complete contract redline enters source-cited playbook comparison without legal judgment. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: Missing playbook version causes Hermes to abstain. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: A legal-conclusion request cannot proceed through automation. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: A repeated provider delivery appends evidence to the durable legal problem. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: Ambiguous contract identity requires qualified resolution. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: Low-confidence legal evidence cannot route automatically. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: legal-contract-exception-triage, connectorState: unavailable, expectedApproval: false, notes: Provider unavailability defers rather than reconstructing legal evidence. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: Exact contract and playbook identity remain required. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: legal-security-questionnaire, connectorState: connected, expectedApproval: true, notes: A customer security answer requires exact qualified approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: legal-security-questionnaire, connectorState: connected, expectedApproval: true, notes: External security claims remain draft-only with separate send authority. }
+  - { id: missing-outcome, fixture: fixtures/outcome.json, expectedAction: route, expectedLoopId: legal-compliance-evidence-gap, connectorState: connected, expectedApproval: false, notes: A named missing artifact routes to an evidence-gap register without attestation. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: legal-contract-exception-triage, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate legal review work. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Contract write permission expansion requires explicit rejection or reviewed rollback. }

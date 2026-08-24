@@ -1,0 +1,22 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: customer-success-strategic-risk-synthesis
+name: Strategic Account Risk Synthesis
+description: Join service, relationship, incident, and renewal evidence into an accountable, bounded strategic-account response.
+department: customer_success
+goal: Explain one strategic account risk, prepare a recovery plan, and keep internal action and customer communication separately governed.
+inputs: [resolved account identity, support evidence, incident evidence, renewal context, ownership and approval policy]
+outputs: [risk narrative, confidence and gaps, accountable owners, recovery actions, customer update draft, outcome plan]
+instructions:
+  - Resolve one affected account and append new signals to its existing durable problem when appropriate.
+  - Separate technical incident severity from verified customer and commercial impact.
+  - Explain evidence, assumptions, missing context, urgency, and confidence.
+  - Create one primary risk response and invoke supporting loops only when topology policy permits explicit fan-out.
+  - Prepare exact internal actions and a separately reviewable customer communication.
+  - Return incident resolution, response quality, relationship recovery, and renewal outcomes as evidence.
+boundaries:
+  - Never invent contract terms, credits, deadlines, incident causes, or remediation commitments.
+  - Never send external communication or change CRM/support records directly.
+  - Never fan out to unrelated departments without an independently evidenced problem.
+  - Ask a human when identity, business impact, authority, or commercial risk is ambiguous.
+requiredCapabilities: [support.ticket.read, crm.account.read]

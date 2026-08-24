@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: sales-deal-risk-outcomes
+metrics:
+  - { id: deal_risk_precision, direction: increase, description: Flagged opportunities confirmed as requiring intervention. }
+  - { id: at_risk_deal_reengagement_rate, direction: increase, description: Verified buyer response after reviewed recovery work. }
+  - { id: recovery_meeting_booked_rate, direction: increase, description: Verified meeting booked after reviewed recovery work. }
+  - { id: at_risk_stage_progression_rate, direction: increase, description: Flagged opportunities progressing within the outcome window. }
+  - { id: forecast_accuracy_change, direction: increase, description: Forecast calibration change for monitored opportunities. }
+  - { id: deal_risk_false_positive_rate, direction: decrease, description: Healthy opportunities incorrectly flagged as requiring intervention. }
+  - { id: deal_risk_review_minutes, direction: decrease, description: Human review burden per risk decision. }

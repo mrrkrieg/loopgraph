@@ -21,11 +21,11 @@ Peer dependencies: `zod`, `yaml`. Optional: `openai` (for execute mode).
 ### Hermes Agent company brain
 
 ```bash
-npx loopgraph workspace init --project .
-npx loopgraph hermes install --project .
-npx loopgraph hermes doctor --project .
-npx loopgraph studio --project .
+npx loopgraph setup --project . --activate
+npx loopgraph start --project . --no-studio
 ```
+
+The package does not bundle the Next.js Studio, so `start` runs the local supervisor headlessly. From the full repository clone, omit `--no-studio` to start the Hermes Brain UI and supervisor together. Use `npx loopgraph start --project . --once` for one complete health and work cycle.
 
 Then start Hermes with:
 
@@ -69,6 +69,45 @@ The worker atomically claims work, verifies the immutable LoopSpec hash and rout
 
 See [Hermes examples](../../docs/HERMES-EXAMPLES.md) for the Marketing reference flow, strict Legal / Compliance sensitive-work example, and Custom field-ops example.
 
+### Private hosted apps from Hermes or CLI
+
+For an interactive terminal, authorize once in the hosted browser. The CLI persists
+the origin and tenant binding, so later app commands do not require token or tenant
+environment variables:
+
+```bash
+npx loopgraph auth login \
+  --url https://loopgraph.example \
+  --audience https://loopgraph.example/marketplace
+
+npx loopgraph apps search "renewal risk" --department customer_success
+npx loopgraph auth logout
+```
+
+The session grants only `marketplace.consume`, uses a 15-minute access token with a
+rotating refresh token, and is stored in a `0600` current-user file. See the
+[interactive CLI authorization guide](../../docs/CLI-DEVICE-AUTHORIZATION.md).
+
+For Hermes or a managed CLI runner, use workload identity instead:
+
+Managed Hermes and CLI processes can use private hosted LoopPacks with a
+short-lived workload identity—never a Supabase service key or provider token:
+
+```bash
+export LOOPGRAPH_MARKETPLACE_URL=https://loopgraph.example/
+export LOOPGRAPH_MARKETPLACE_AUDIENCE=https://loopgraph.example/marketplace
+export LOOPGRAPH_MARKETPLACE_ORGANIZATION_ID=YOUR_ORGANIZATION_UUID
+export LOOPGRAPH_MARKETPLACE_PROJECT_KEY=main
+export LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE=/absolute/path/to/projected.jwt
+
+npx loopgraph apps search "renewal risk" --department customer_success
+```
+
+The hosted admin must grant the workload `marketplace.consume`. Existing app
+detail, planning, mapping, and apply tools then fetch only the selected release,
+recheck tenant visibility, verify its signature and file digests, and use the
+normal write-blocked installer. See the [workload access guide](../../docs/HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md).
+
 ### Runtime API
 
 ```typescript
@@ -105,6 +144,8 @@ Wire `StorageAdapter` (Postgres, files, etc.) and call `runLoop()` from a cron o
 
 | Command | Description |
 |---------|-------------|
+| `setup` | Prepare an empty workspace, Hermes contract, safe routes, and Studio plan |
+| `start` | Supervise routes, connections, measurements, workers, opportunities, app updates, controller, and aggregate health |
 | `validate <spec>` | Validate `loopgraph.yaml` |
 | `simulate <spec> --fixture <file>` | Deterministic fixture run |
 | `trace <runId>` | Inspect a saved trace |

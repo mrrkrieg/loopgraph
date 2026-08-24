@@ -8,6 +8,7 @@ import {
   connectorManifestSchema,
   type ConnectionInstance,
   type ConnectorCapability,
+  type ConnectorInstallationView,
   type ConnectorManifest
 } from "../core";
 import { getLoopgraphRoot } from "./storage-resolver";
@@ -220,6 +221,301 @@ export const DEFAULT_CONNECTOR_MANIFESTS: ConnectorManifest[] = [
     notes: ["Initial mode should log notifications until owners approve a real messaging channel."]
   }),
   manifest({
+    id: "salesforce",
+    label: "Salesforce",
+    category: "crm",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("crm.read", "Read leads, contacts, accounts, opportunities, and cases", ["api"], "Provide a redacted Salesforce export."),
+      eventCapability("crm.events", "Receive Salesforce change events through Hermes"),
+      approvedWriteCapability("crm.approved_write", "Apply an exact fingerprint-approved Salesforce record update", ["api"], "Apply the approved CRM update manually.")
+    ],
+    notes: ["Salesforce writes remain blocked unless the broker grants approved execution and the exact action fingerprint is approved."]
+  }),
+  manifest({
+    id: "stripe",
+    label: "Stripe",
+    category: "billing",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("billing.read", "Read customers, subscriptions, invoices, payments, and disputes", ["read_only"], "Provide a redacted Stripe export."),
+      eventCapability("billing.events", "Receive verified Stripe events through Hermes"),
+      approvedWriteCapability("billing.approved_write", "Apply an exact fingerprint-approved billing action", [], "Apply the approved billing action manually.")
+    ],
+    notes: ["Financial mutations require a separate broker action capability and fingerprint-bound human approval."]
+  }),
+  manifest({
+    id: "zendesk",
+    label: "Zendesk",
+    category: "support",
+    transport: "http_api",
+    authType: "api_key",
+    capabilities: [
+      readCapability("support.read", "Read bounded ticket, requester, priority, and satisfaction evidence", [], "Provide a redacted Zendesk export."),
+      eventCapability("support.events", "Receive verified Zendesk ticket events through Hermes"),
+      draftCapability("support.draft_write", "Prepare a support reply draft without sending it", [], "Create the draft in a local review artifact.")
+    ],
+    notes: ["Use a dedicated least-privilege integration identity; customer replies stay review-gated."]
+  }),
+  manifest({
+    id: "intercom",
+    label: "Intercom",
+    category: "support",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("support.read", "Read bounded conversations, contacts, and support evidence", ["read_conversations"], "Provide a redacted Intercom export."),
+      eventCapability("support.events", "Receive verified Intercom conversation events through Hermes"),
+      draftCapability("support.draft_write", "Prepare a conversation reply draft without sending it", [], "Create the draft in a local review artifact.")
+    ],
+    notes: ["Customer-facing replies stay as prepared drafts until an accountable owner approves them."]
+  }),
+  manifest({
+    id: "workday",
+    label: "Workday",
+    category: "hris",
+    transport: "http_api",
+    authType: "provider_app",
+    capabilities: [
+      readCapability("hris.read", "Read bounded worker, job, and onboarding evidence", [], "Provide a redacted Workday report."),
+      eventCapability("hris.events", "Receive verified Workday worker events through Hermes")
+    ],
+    notes: ["Protected attributes must be excluded from routing and model context unless explicitly required and approved."]
+  }),
+  manifest({
+    id: "greenhouse",
+    label: "Greenhouse",
+    category: "ats",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("ats.read", "Read bounded candidate, application, job, and stage evidence", ["candidates:read"], "Provide a redacted Greenhouse export."),
+      eventCapability("ats.events", "Receive verified Greenhouse recruiting events through Hermes")
+    ],
+    notes: ["Candidate data is restricted; protected attributes are excluded from default field mappings."]
+  }),
+  manifest({
+    id: "netsuite",
+    label: "NetSuite",
+    category: "finance",
+    transport: "http_api",
+    authType: "provider_app",
+    capabilities: [
+      readCapability("finance.read", "Read bounded ledger, receivable, vendor, approval, and forecast evidence", [], "Provide a redacted NetSuite export."),
+      eventCapability("finance.events", "Receive verified NetSuite finance events through Hermes"),
+      approvedWriteCapability("finance.approved_write", "Apply an exact fingerprint-approved finance record update", [], "Apply the approved record update manually.")
+    ],
+    notes: ["Finance writes require approved execution authority and remain fingerprint-bound."]
+  }),
+  manifest({
+    id: "quickbooks",
+    label: "QuickBooks",
+    category: "finance",
+    transport: "http_api",
+    authType: "provider_app",
+    capabilities: [
+      readCapability("finance.read", "Read bounded accounting, receivable, vendor, and cash evidence", ["com.intuit.quickbooks.accounting"], "Provide a redacted QuickBooks export."),
+      eventCapability("finance.events", "Receive verified QuickBooks accounting events through Hermes"),
+      approvedWriteCapability("finance.approved_write", "Apply an exact fingerprint-approved accounting record update", ["com.intuit.quickbooks.accounting"], "Apply the approved accounting update manually.")
+    ],
+    notes: ["Accounting writes require approved execution authority and remain fingerprint-bound."]
+  }),
+  manifest({
+    id: "gmail",
+    label: "Gmail",
+    category: "email",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("mail.thread.read", "Read a bounded Gmail thread and metadata", ["https://www.googleapis.com/auth/gmail.readonly"], "Provide a redacted email-thread export."),
+      draftCapability("mail.message.draft", "Prepare an email draft without sending it", ["https://www.googleapis.com/auth/gmail.compose"], "Create the draft in a local review artifact."),
+      approvedWriteCapability("mail.message.send", "Send an exact fingerprint-approved email", ["https://www.googleapis.com/auth/gmail.send"], "Send the approved email manually.")
+    ],
+    notes: ["Gmail read and compose scopes are restricted Google scopes; deployments must complete the applicable verification and security-assessment requirements."]
+  }),
+  manifest({
+    id: "google_calendar",
+    label: "Google Calendar",
+    category: "calendar",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("calendar.event.read", "Read bounded calendar commitments", ["https://www.googleapis.com/auth/calendar.events.readonly"], "Provide a redacted calendar export.")
+    ],
+    notes: ["The default connector is read-only and returns only the configured event window."]
+  }),
+  manifest({
+    id: "outlook",
+    label: "Microsoft Outlook",
+    category: "email",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("mail.thread.read", "Read a bounded Outlook conversation", ["Mail.Read"], "Provide a redacted conversation export."),
+      readCapability("calendar.event.read", "Read bounded Outlook calendar commitments", ["Calendars.Read"], "Provide a redacted calendar export."),
+      draftCapability("mail.message.draft", "Prepare an Outlook email draft without sending it", ["Mail.ReadWrite"], "Create the draft in a local review artifact."),
+      approvedWriteCapability("mail.message.send", "Send an exact fingerprint-approved Outlook email", ["Mail.Send"], "Send the approved email manually.")
+    ],
+    notes: ["Delegated permissions are requested per connected user; sending remains separately approval-gated."]
+  }),
+  manifest({
+    id: "teams",
+    label: "Microsoft Teams",
+    category: "messaging",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      draftCapability("collaboration.message.draft", "Prepare a Teams message without posting it", ["ChannelMessage.Send"], "Create the draft in a local review artifact."),
+      approvedWriteCapability("messaging.channel.post", "Post an exact fingerprint-approved Teams message", ["ChannelMessage.Send"], "Post the approved message manually.")
+    ],
+    notes: ["Channel posting remains blocked until the exact prepared message fingerprint and destination are approved."]
+  }),
+  manifest({
+    id: "posthog",
+    label: "PostHog",
+    category: "analytics",
+    transport: "http_api",
+    authType: "api_key",
+    capabilities: [
+      readCapability("analytics.event.query", "Read a bounded saved PostHog insight", ["query:read"], "Provide a redacted PostHog insight export.")
+    ],
+    notes: ["The connector reads saved insight IDs; it does not expose arbitrary HogQL or an HTTP proxy."]
+  }),
+  manifest({
+    id: "amplitude",
+    label: "Amplitude",
+    category: "analytics",
+    transport: "http_api",
+    authType: "api_key",
+    capabilities: [
+      readCapability("analytics.event.query", "Run a bounded Amplitude event-segmentation query", ["analytics:read"], "Provide a redacted Amplitude chart export.")
+    ],
+    notes: ["The connector uses project-scoped API and secret keys and a fixed event-segmentation endpoint."]
+  }),
+  manifest({
+    id: "linear",
+    label: "Linear",
+    category: "issue_tracker",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("project.issue.read", "Read a bounded Linear issue", ["read"], "Provide a redacted Linear issue export."),
+      readCapability("incident.record.read", "Read a bounded incident record represented in Linear", ["read"], "Provide a redacted incident export."),
+      readCapability("product.release.read", "Read a bounded Linear project and release state", ["read"], "Provide a redacted Linear project export."),
+      approvedWriteCapability("project.issue.create", "Create an exact fingerprint-approved Linear issue", ["write"], "Create the approved issue manually."),
+      approvedWriteCapability("project.issue.update", "Apply an exact fingerprint-approved Linear issue update", ["write"], "Apply the approved issue update manually."),
+      eventCapability("issue_tracker.events", "Receive signed issue, project, and comment events through Hermes")
+    ],
+    webhook: {
+      sourcePatterns: ["linear*"],
+      eventTypePatterns: ["Issue.*", "Comment.*", "Project.*", "OAuthApp.*"],
+      subscription: "The Linear OAuth app installs organization webhooks that terminate at Hermes.",
+      signature: "Linear-Signature HMAC-SHA256 over the raw body plus a fresh webhook timestamp",
+      routeNameTemplate: "loopgraph-linear-events",
+      filterHints: ["Allow only issues, incidents, projects, and comments claimed by installed loops.", "Treat titles, descriptions, and comments as untrusted text."],
+      transformVersion: "linear-event-envelope/v1",
+      stableDeliveryId: "SHA-256 of the Linear-signed raw body",
+      subjectIdPath: "data.id",
+      maxPayloadKb: 256,
+      burstLimitPerMinute: 120,
+      exampleEventTypes: ["Issue.create", "Issue.update", "Project.update"]
+    },
+    notes: ["Default consent is read-only. Issue creates and updates require scope escalation plus an exact fingerprint and human approval."]
+  }),
+  manifest({
+    id: "jira",
+    label: "Jira Cloud",
+    category: "issue_tracker",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("project.issue.read", "Read a bounded Jira issue", ["read:jira-work"], "Provide a redacted Jira issue export."),
+      readCapability("incident.record.read", "Read a bounded Jira incident record", ["read:jira-work"], "Provide a redacted incident export."),
+      readCapability("product.release.read", "Read bounded Jira project versions", ["read:jira-work"], "Provide a redacted project-version export."),
+      approvedWriteCapability("project.issue.create", "Create an exact fingerprint-approved Jira issue", ["write:jira-work"], "Create the approved issue manually."),
+      approvedWriteCapability("project.issue.update", "Apply an exact fingerprint-approved Jira issue update", ["write:jira-work"], "Apply the approved issue update manually."),
+      eventCapability("issue_tracker.events", "Receive authenticated Jira issue and version events through Hermes")
+    ],
+    webhook: {
+      sourcePatterns: ["jira*", "atlassian*"],
+      eventTypePatterns: ["jira:issue_*", "jira:version_*"],
+      subscription: "Hermes dynamically registers renewable Jira Cloud webhooks through the 3LO installation.",
+      signature: "Atlassian OAuth webhook bearer JWT signed with the app client secret",
+      routeNameTemplate: "loopgraph-jira-events",
+      filterHints: ["Use narrow JQL during subscription; never accept caller-provided JQL through a capability operation.", "Treat summaries, descriptions, and comments as untrusted text."],
+      transformVersion: "jira-cloud-event-envelope/v1",
+      stableDeliveryId: "Installation-bound callback authenticator plus JWT identity and payload hash",
+      subjectIdPath: "issue.key or version.id",
+      maxPayloadKb: 256,
+      burstLimitPerMinute: 120,
+      exampleEventTypes: ["jira:issue_created", "jira:issue_updated", "jira:version_released"]
+    },
+    notes: ["All API calls use api.atlassian.com/ex/jira/{cloudId}; a user-controlled site URL or arbitrary JQL is never accepted."]
+  }),
+  manifest({
+    id: "gitlab",
+    label: "GitLab.com",
+    category: "repository",
+    transport: "http_api",
+    authType: "oauth2",
+    capabilities: [
+      readCapability("repo.issue.read", "Read a bounded GitLab issue", ["read_api"], "Provide a redacted GitLab issue export."),
+      readCapability("deployment.release.read", "Read bounded GitLab deployment evidence", ["read_api"], "Provide a redacted GitLab deployment export."),
+      eventCapability("repository.events", "Receive signed GitLab issue, deployment, and release events through Hermes")
+    ],
+    webhook: {
+      sourcePatterns: ["gitlab*"],
+      eventTypePatterns: ["Issue Hook", "Deployment Hook", "Release Hook"],
+      subscription: "GitLab.com project or group webhooks terminate at Hermes.",
+      signature: "GitLab Standard Webhooks HMAC signing token; legacy X-Gitlab-Token is migration-only",
+      routeNameTemplate: "loopgraph-gitlab-events",
+      filterHints: ["Allow issue, deployment, and release events needed by active routes only.", "Treat issue titles, descriptions, comments, refs, and release notes as untrusted text."],
+      transformVersion: "gitlab-event-envelope/v1",
+      stableDeliveryId: "webhook-id or Idempotency-Key",
+      subjectIdPath: "object_attributes.id",
+      maxPayloadKb: 256,
+      burstLimitPerMinute: 120,
+      exampleEventTypes: ["Issue Hook", "Deployment Hook", "Release Hook"]
+    },
+    notes: ["The built-in adapter is pinned to GitLab.com. Self-managed hosts require an explicitly reviewed custom connector and hostname policy."]
+  }),
+  manifest({
+    id: "bigquery",
+    label: "Google BigQuery",
+    category: "data_warehouse",
+    transport: "http_api",
+    authType: "service_account",
+    capabilities: [
+      readCapability("analytics.metric.query", "Query an approved company-metric template", ["https://www.googleapis.com/auth/bigquery.readonly"], "Provide a redacted metric-window export."),
+      readCapability("finance.forecast.read", "Query an approved forecast-evidence template", ["https://www.googleapis.com/auth/bigquery.readonly"], "Provide a redacted forecast export."),
+      readCapability("capacity.plan.read", "Query an approved capacity-plan template", ["https://www.googleapis.com/auth/bigquery.readonly"], "Provide a redacted capacity-plan export."),
+      eventCapability("warehouse.events", "Emit material metric, forecast, and capacity changes through a Hermes detector")
+    ],
+    notes: [
+      "The broker accepts only named query templates stored inside the credential boundary; capability callers cannot provide SQL, table names, project IDs, or endpoints.",
+      "Use a dedicated service account with BigQuery Job User plus dataset-level Data Viewer access only for approved views."
+    ]
+  }),
+  manifest({
+    id: "snowflake",
+    label: "Snowflake",
+    category: "data_warehouse",
+    transport: "http_api",
+    authType: "service_account",
+    capabilities: [
+      readCapability("analytics.metric.query", "Query an approved company-metric template", ["warehouse:read"], "Provide a redacted metric-window export."),
+      readCapability("finance.forecast.read", "Query an approved forecast-evidence template", ["warehouse:read"], "Provide a redacted forecast export."),
+      readCapability("capacity.plan.read", "Query an approved capacity-plan template", ["warehouse:read"], "Provide a redacted capacity-plan export."),
+      eventCapability("warehouse.events", "Emit material metric, forecast, and capacity changes through a Hermes detector")
+    ],
+    notes: [
+      "The broker accepts only named query templates stored inside the credential boundary; capability callers cannot provide SQL, object names, roles, warehouses, or endpoints.",
+      "Use an OAuth or workload-identity token restricted to a read-only role and approved secure views."
+    ]
+  }),
+  manifest({
     id: "manual_file",
     label: "Manual File Import",
     category: "manual",
@@ -267,9 +563,72 @@ export async function readConnectionInstances(projectRoot: string): Promise<Conn
   }
 }
 
+export function connectionInstanceFromBrokerInstallation(
+  installation: ConnectorInstallationView,
+  manifests: ConnectorManifest[] = DEFAULT_CONNECTOR_MANIFESTS
+): ConnectionInstance {
+  const connector = manifests.find((candidate) => candidate.id === installation.providerId);
+  if (!connector) throw new Error(`No App Platform connector manifest exists for broker provider: ${installation.providerId}`);
+  const allowed = new Set(installation.allowedCapabilities);
+  const canRead = allowed.has("provider.data.read");
+  const canDraft = allowed.has("provider.draft.write");
+  const canExecute = allowed.has("provider.action.execute");
+  const canReceiveEvents = allowed.has("provider.webhooks.verify") || allowed.has("provider.webhooks.subscribe") || allowed.has("provider.events.emit");
+  const capabilityKeys = connector.capabilities
+    .filter((capability) => {
+      if (capability.direction === "read") return canRead;
+      if (capability.direction === "event") return canReceiveEvents;
+      if (capability.direction === "draft_write") return canDraft;
+      return canExecute;
+    })
+    .map((capability) => capability.key);
+  const status = brokerConnectionStatus(installation.status);
+  const healthStatus = status === "connected" ? "connected" : status === "degraded" ? "degraded" : "missing";
+  return connectionInstanceSchema.parse({
+    schemaVersion: CONNECTION_INSTANCE_SCHEMA_VERSION,
+    id: installation.id,
+    manifestId: installation.providerId,
+    source: "hermes_connector_broker",
+    externalInstallationId: installation.id,
+    brokerCapabilities: installation.allowedCapabilities,
+    accountLabel: installation.displayName,
+    capabilityKeys,
+    grantedScopes: installation.grantedScopes,
+    status,
+    statusReason: status === "connected" ? undefined : `Hermes Connector Broker installation is ${installation.status}.`,
+    environment: installation.environment === "production" ? "live" : "sandbox",
+    brokerEnvironment: installation.environment,
+    readPolicy: canRead ? "read_only" : "not_allowed",
+    writePolicy: canExecute ? "approved_only" : canDraft ? "draft_only" : "not_allowed",
+    lastHealthCheckAt: installation.lastHealthCheckAt,
+    health: installation.lastHealthCheckAt ? {
+      status: healthStatus,
+      checkedAt: installation.lastHealthCheckAt,
+      checkedBy: "hermes_connector_broker",
+      evidenceRefs: [`broker-installation:${installation.id}`]
+    } : undefined
+  });
+}
+
+export function mergeConnectionInstances(
+  local: ConnectionInstance[],
+  projected: ConnectionInstance[]
+): ConnectionInstance[] {
+  const byId = new Map(local.map((connection) => [connection.id, connection]));
+  for (const connection of projected) byId.set(connection.id, connection);
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function brokerConnectionStatus(status: ConnectorInstallationView["status"]): ConnectionInstance["status"] {
+  if (status === "active" || status === "connected") return "connected";
+  if (status === "degraded" || status === "subscription_pending" || status === "rotating") return "degraded";
+  return "missing";
+}
+
 export async function upsertConnectionInstance(
   projectRoot: string,
-  input: Omit<ConnectionInstance, "schemaVersion">
+  input: Omit<ConnectionInstance, "schemaVersion" | "source" | "brokerCapabilities"> &
+    Partial<Pick<ConnectionInstance, "source" | "brokerCapabilities">>
 ): Promise<ConnectionInstance> {
   const manifest = defaultConnectorManifests().find((candidate) => candidate.id === input.manifestId);
   if (!manifest) throw new Error(`Unknown connector manifest: ${input.manifestId}`);

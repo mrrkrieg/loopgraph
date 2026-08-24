@@ -1,0 +1,50 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: marketing-campaign-pipeline-outcome
+  name: Campaign Pipeline Outcome
+  version: 1.0.0
+  description: Join qualified leads, activation, opportunities, wins, and losses back to one campaign cohort.
+  department: marketing
+  ownerRole: revenue_operations
+  tags: [pipeline, activation, outcomes]
+trigger: { type: event, source: "*", event: marketing.pipeline_outcome_observed }
+input: { requiredFields: [normalizedPayload.campaignId, normalizedPayload.cohortId, normalizedPayload.outcome, normalizedPayload.observedAt], subjectTypes: [campaign_cohort, pipeline_outcome], fixtures: [] }
+routine:
+  - { id: recover, name: Recover campaign cohort, actor: system, type: observe, description: "Load the original campaign, spend, qualification, activation, and observation-window evidence." }
+  - { id: measure, name: Measure business outcomes, actor: system, type: observe, description: "Record qualified pipeline, activation, revenue, loss, and missing-outcome states separately." }
+  - { id: assess, name: Evaluate cohort result, actor: agent, type: assess, description: "Compare cost and downstream outcomes while exposing attribution uncertainty and confounders." }
+  - { id: decide, name: Prepare outcome finding, actor: agent, type: decide, description: "Classify the cohort as promising, inefficient, uncertain, or incomplete without changing spend." }
+  - { id: learn, name: Return shared learning, actor: system, type: learn, description: "Feed observed outcome evidence into future campaign, allocation, and message decisions." }
+capabilities:
+  - { key: ads.campaign.read, authority: read, risk: low, required: true, purpose: Read original campaign spend., customerFacing: false }
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read qualification outcomes., customerFacing: false }
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read observed pipeline and revenue outcomes., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read bounded activation outcomes., customerFacing: false }
+skills: [marketing-funnel-diagnosis, marketing-cohort-evaluation]
+outcomes:
+  - { metric: qualified_pipeline_per_dollar, description: Qualified pipeline created per unit of campaign spend., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: campaign_activated_customer_rate, description: Attributed cohort members reaching the defined activation event., direction: increase, sourceCapability: analytics.event.query }
+  - { metric: campaign_cac_quality, description: Cost per customer meeting the company quality and outcome definition., direction: increase, sourceCapability: crm.opportunity.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [marketing.campaign_pipeline_outcome]
+  accepts: [{ sourcePattern: "*", eventTypePattern: marketing.pipeline_outcome_observed, subjectTypes: [campaign_cohort, pipeline_outcome], requiredFields: [normalizedPayload.campaignId, normalizedPayload.cohortId, normalizedPayload.outcome, normalizedPayload.observedAt], reason: A durable downstream outcome can update one campaign cohort. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: marketing.campaign_window_closed, subjectTypes: [], fields: [], reason: Campaign delivery is not a qualified pipeline outcome. }]
+  inputMapping: { campaignId: normalizedPayload.campaignId, cohortId: normalizedPayload.cohortId, outcome: normalizedPayload.outcome }
+  priority: 85
+  minimumConfidence: 0.92
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
+  examples: { shouldRoute: ["An observed opportunity outcome links to one campaign cohort."], shouldNotRoute: ["Attribution maps to multiple campaigns.", "The observation window remains open."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: revenue_operations
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

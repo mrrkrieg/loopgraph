@@ -21,6 +21,18 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/marketplace-verifier",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/app-action-reconciliation",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/app-evidence-health",
+      "schedule": "17 * * * *"
+    },
+    {
       "path": "/api/connector-broker/v1/workers/oauth-refresh",
       "schedule": "*/5 * * * *"
     },
@@ -31,6 +43,10 @@
     {
       "path": "/api/connector-broker/v1/workers/webhook-events",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/connector-broker/v1/workers/provider-detectors",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

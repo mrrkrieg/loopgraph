@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: ironclad-vanta-okta-salesforce-slack
+name: Ironclad + Vanta + Okta + Salesforce + Slack
+description: Configure governed contract, control, access, incident, questionnaire, and audit evidence around Ironclad, Vanta, Okta, Salesforce, and approved review surfaces.
+connectorRecipe: connectors/ironclad-vanta-okta-salesforce-slack.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 30, rolloutMode: shadow, evidenceExportEnabled: false, externalClaimDraftingEnabled: true }
+requiredCompanyFields: [legal.playbookPolicy, compliance.controlPolicy, security.accessReviewPolicy, security.incidentEvidencePolicy, security.externalClaimPolicy, legal.escalationOwners]

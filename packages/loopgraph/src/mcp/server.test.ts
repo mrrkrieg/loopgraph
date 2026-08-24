@@ -349,6 +349,7 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_events_get" }),
           expect.objectContaining({ name: "loopgraph_problems_get" }),
           expect.objectContaining({ name: "loopgraph_routing_decision_get" }),
+          expect.objectContaining({ name: "loopgraph_routing_learning_effectiveness_get" }),
           expect.objectContaining({ name: "loopgraph_route_jobs_get" }),
           expect.objectContaining({ name: "loopgraph_routing_evaluations_get" }),
           expect.objectContaining({ name: "loopgraph_lifecycle_events_get" }),
@@ -359,16 +360,72 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_plan" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_sync" }),
           expect.objectContaining({ name: "loopgraph_hermes_webhooks_doctor" }),
-          expect.objectContaining({ name: "loopgraph_hermes_webhooks_test" })
+          expect.objectContaining({ name: "loopgraph_hermes_webhooks_test" }),
+          expect.objectContaining({ name: "loopgraph_hermes_webhooks_prepare" }),
+          expect.objectContaining({ name: "loopgraph_hermes_webhooks_activation_status" })
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(91);
+    expect(listLoopgraphMcpTools()).toHaveLength(155);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
       "loopgraph_hermes_execution_event_ingest",
-      "loopgraph_agent_operations_get"
+      "loopgraph_agent_operations_get",
+      "loopgraph_company_context_get",
+      "loopgraph_company_context_approve",
+      "loopgraph_marketplace_search",
+      "loopgraph_app_get",
+      "loopgraph_app_onboarding_get",
+      "loopgraph_app_onboarding_save",
+      "loopgraph_app_onboarding_reset",
+      "loopgraph_app_install_plan",
+      "loopgraph_app_install_apply",
+      "loopgraph_app_install_status",
+      "loopgraph_app_operation_resolve",
+      "loopgraph_app_operation_invoke",
+      "loopgraph_app_operation_actions_get",
+      "loopgraph_app_operation_action_commit",
+      "loopgraph_app_operation_action_reconcile",
+      "loopgraph_app_maturity_get",
+      "loopgraph_apps_renewal_plan",
+      "loopgraph_app_verification_registry_get",
+      "loopgraph_app_verifier_trust_add",
+      "loopgraph_app_verifier_trust_revoke",
+      "loopgraph_app_verification_import",
+      "loopgraph_connector_schema_record",
+      "loopgraph_app_field_mappings_get",
+      "loopgraph_app_field_mapping_confirm",
+      "loopgraph_app_test",
+      "loopgraph_app_historical_replay",
+      "loopgraph_app_evaluation_label",
+      "loopgraph_app_promotion_recommendation",
+      "loopgraph_app_configure",
+      "loopgraph_app_overlay_apply",
+      "loopgraph_app_repair",
+      "loopgraph_app_duplicate",
+      "loopgraph_app_diff",
+      "loopgraph_app_update_plan",
+      "loopgraph_app_update_apply",
+      "loopgraph_app_rollback",
+      "loopgraph_app_detach",
+      "loopgraph_app_uninstall",
+      "loopgraph_app_activation_gate_get",
+      "loopgraph_app_activate",
+      "loopgraph_app_pause",
+      "loopgraph_app_resume",
+      "loopgraph_app_publisher_key_generate",
+      "loopgraph_app_publisher_keys_get",
+      "loopgraph_app_init",
+      "loopgraph_app_capture",
+      "loopgraph_app_validate",
+      "loopgraph_app_pack",
+      "loopgraph_app_sign",
+      "loopgraph_app_publish",
+      "loopgraph_app_release_status",
+      "loopgraph_marketplace_sources_get",
+      "loopgraph_marketplace_source_add",
+      "loopgraph_marketplace_source_refresh"
     ]));
     const graphApply = listLoopgraphMcpTools()
       .find((tool) => tool.name === "loopgraph_graph_change_apply");
@@ -396,7 +453,9 @@ describe("Loopgraph MCP server", () => {
       projectRoot,
       exposure: "webhook_router"
     });
-    const tools = (toolsResponse as { result?: { tools?: Array<{ name: string }> } }).result?.tools ?? [];
+    const tools = (toolsResponse as {
+      result?: { tools?: Array<{ name: string; inputSchema?: { required?: string[] } }> }
+    }).result?.tools ?? [];
     const toolNames = tools.map((tool) => tool.name);
 
     expect(toolNames).toEqual([...LOOPGRAPH_WEBHOOK_ROUTER_MCP_TOOL_NAMES]);
@@ -410,6 +469,16 @@ describe("Loopgraph MCP server", () => {
     expect(toolNames).not.toContain("loopgraph_route_worker_run");
     expect(toolNames).not.toContain("loopgraph_graph_change_apply");
     expect(toolNames).not.toContain("loopgraph_graph_rollback");
+    const routerDecisionSchema = JSON.stringify(
+      tools.find((tool) => tool.name === "loopgraph_routing_decision_submit")?.inputSchema
+    );
+    const adminDecisionSchema = JSON.stringify(
+      listLoopgraphMcpTools()
+        .find((tool) => tool.name === "loopgraph_routing_decision_submit")
+        ?.inputSchema
+    );
+    expect(routerDecisionSchema).toMatch(/"required":\[[^\]]*"learningContextDigest"/);
+    expect(adminDecisionSchema).not.toMatch(/"required":\[[^\]]*"learningContextDigest"/);
     expect(listLoopgraphMcpTools({ exposure: "lifecycle_router" }).map((tool) => tool.name)).toEqual([
       ...LOOPGRAPH_LIFECYCLE_ROUTER_MCP_TOOL_NAMES
     ]);
@@ -467,11 +536,14 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_case_resolve",
       "loopgraph_events_replay",
       "loopgraph_routing_human_choice_submit",
+      "loopgraph_routing_learning_effectiveness_get",
       "loopgraph_route_commit_simulate",
       "loopgraph_routing_evaluation_run",
       "loopgraph_hermes_webhooks_plan",
       "loopgraph_hermes_webhooks_sync",
-      "loopgraph_hermes_webhooks_test"
+      "loopgraph_hermes_webhooks_test",
+      "loopgraph_hermes_webhooks_prepare",
+      "loopgraph_hermes_webhooks_activation_status"
     ]) {
       await expectMcpToolDenied({
         projectRoot,
@@ -483,6 +555,7 @@ describe("Loopgraph MCP server", () => {
     for (const toolName of [
       "loopgraph_routing_catalog_get",
       "loopgraph_routing_decision_submit",
+      "loopgraph_routing_learning_effectiveness_get",
       "loopgraph_problems_get",
       "loopgraph_routing_decision_get",
       "loopgraph_graph_change_decide",
@@ -522,6 +595,8 @@ describe("Loopgraph MCP server", () => {
       "loopgraph://schemas/event-envelope",
       "loopgraph://schemas/routing-card",
       "loopgraph://schemas/routing-decision",
+      "loopgraph://schemas/routing-learning-context",
+      "loopgraph://schemas/routing-learning-context-binding",
       "loopgraph://graph/company"
     ]);
 
@@ -543,6 +618,70 @@ describe("Loopgraph MCP server", () => {
         data: expect.stringContaining("unavailable for webhook_router exposure")
       }
     });
+  });
+
+  it("exposes app discovery and lifecycle only through the governed admin surface", async () => {
+    const { projectRoot } = await createRoutingProject();
+    const appToolNames = [
+      "loopgraph_company_blueprints_search",
+      "loopgraph_company_blueprint_get",
+      "loopgraph_department_packs_search",
+      "loopgraph_department_pack_get",
+      "loopgraph_marketplace_search",
+      "loopgraph_app_get",
+      "loopgraph_app_onboarding_get",
+      "loopgraph_app_onboarding_save",
+      "loopgraph_app_onboarding_reset",
+      "loopgraph_app_install_plan",
+      "loopgraph_app_install_apply",
+      "loopgraph_app_install_status",
+      "loopgraph_app_operation_resolve",
+      "loopgraph_app_operation_invoke",
+      "loopgraph_app_test",
+      "loopgraph_app_historical_replay",
+      "loopgraph_app_evaluation_label",
+      "loopgraph_app_promotion_recommendation",
+      "loopgraph_app_activate",
+      "loopgraph_app_pause",
+      "loopgraph_app_resume",
+      "loopgraph_app_publisher_key_generate",
+      "loopgraph_app_publisher_keys_get",
+      "loopgraph_app_init",
+      "loopgraph_app_capture",
+      "loopgraph_app_validate",
+      "loopgraph_app_pack",
+      "loopgraph_app_sign",
+      "loopgraph_app_publish",
+      "loopgraph_app_release_status",
+      "loopgraph_marketplace_sources_get",
+      "loopgraph_marketplace_source_add",
+      "loopgraph_marketplace_source_refresh"
+    ];
+    const adminNames = listLoopgraphMcpTools().map((tool) => tool.name);
+    const webhookNames = listLoopgraphMcpTools({ exposure: "webhook_router" }).map((tool) => tool.name);
+    const lifecycleNames = listLoopgraphMcpTools({ exposure: "lifecycle_router" }).map((tool) => tool.name);
+    expect(adminNames).toEqual(expect.arrayContaining(appToolNames));
+    expect(webhookNames).not.toEqual(expect.arrayContaining(appToolNames));
+    expect(lifecycleNames).not.toEqual(expect.arrayContaining(appToolNames));
+
+    const response = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "marketplace-search",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_marketplace_search",
+        arguments: { query: "inbound leads" }
+      }
+    }, { projectRoot });
+    expect(response).toMatchObject({
+      result: {
+        structuredContent: {
+          schemaVersion: "loopgraph-marketplace-search/v1alpha1",
+          count: expect.any(Number)
+        }
+      }
+    });
+    expect(JSON.stringify(response)).toContain("loopgraph.sales.qualify-route-inbound-leads");
   });
 
   it("exposes semantic graph history only to trusted admin turns", async () => {
@@ -605,6 +744,8 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ uri: "loopgraph://schemas/event-envelope" }),
           expect.objectContaining({ uri: "loopgraph://schemas/routing-card" }),
           expect.objectContaining({ uri: "loopgraph://schemas/routing-decision" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/routing-learning-context" }),
+          expect.objectContaining({ uri: "loopgraph://schemas/routing-learning-context-binding" }),
           expect.objectContaining({ uri: "loopgraph://schemas/evidence-gap-set" }),
           expect.objectContaining({ uri: "loopgraph://schemas/hermes-design-task" }),
           expect.objectContaining({ uri: "loopgraph://schemas/loop-opportunity" }),
@@ -1484,6 +1625,110 @@ describe("Loopgraph MCP server", () => {
           eligibleRoutes: [expect.objectContaining({
             card: expect.objectContaining({ loopId: "marketing_ads" })
           })]
+        }
+      }
+    });
+  });
+
+  it("requires isolated Hermes decisions to acknowledge the exact ingest evidence packet", async () => {
+    const { projectRoot } = await createRoutingProject();
+    const event = adsEvent("delivery_mcp_evidence_bound_1");
+    const ingestResponse = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "evidence-bound-ingest",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_events_ingest",
+        arguments: { projectRoot, event }
+      }
+    }, {
+      projectRoot,
+      exposure: "webhook_router",
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+    const ingest = (ingestResponse as {
+      result?: { structuredContent?: { catalogVersion?: string; learningContextDigest?: string } }
+    }).result?.structuredContent;
+    expect(ingest?.catalogVersion).toBeTruthy();
+    expect(ingest?.learningContextDigest).toMatch(/^[a-f0-9]{64}$/);
+
+    const decision = {
+      schemaVersion: "routing-decision/v1alpha1",
+      eventId: event.id,
+      catalogVersion: ingest!.catalogVersion!,
+      action: "route",
+      problem: {
+        summary: "Campaign efficiency dropped.",
+        problemTypes: ["paid_acquisition_efficiency_drop"],
+        subject: event.subject,
+        severity: "medium",
+        dedupeKeyInputs: [event.subject.id]
+      },
+      selectedRoutes: [{
+        loopId: "marketing_ads",
+        role: "primary",
+        confidence: 0.92,
+        reasonSummary: "Campaign anomaly includes qualified-cost evidence.",
+        evidenceRefs: [],
+        inputMapping: { campaignId: event.subject.id },
+        priority: 0
+      }],
+      alternatives: [],
+      modelMetadata: { hermesTaskId: "task_mcp_evidence_bound_1" },
+      policyVersion: "routing-policy/v1alpha1"
+    };
+    const unboundResponse = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "unbound-decision",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_routing_decision_submit",
+        arguments: { projectRoot, decision }
+      }
+    }, {
+      projectRoot,
+      exposure: "webhook_router",
+      now: new Date("2026-07-21T12:00:03.000Z")
+    });
+    expect(unboundResponse).toMatchObject({
+      result: {
+        isError: true,
+        content: [expect.objectContaining({
+          text: expect.stringContaining("require the valid learningContextDigest")
+        })]
+      }
+    });
+
+    const boundResponse = await handleLoopgraphMcpMessage({
+      jsonrpc: "2.0",
+      id: "bound-decision",
+      method: "tools/call",
+      params: {
+        name: "loopgraph_routing_decision_submit",
+        arguments: {
+          projectRoot,
+          decision,
+          learningContextDigest: ingest!.learningContextDigest
+        }
+      }
+    }, {
+      projectRoot,
+      exposure: "webhook_router",
+      now: new Date("2026-07-21T12:00:03.000Z")
+    });
+    expect(boundResponse).toMatchObject({
+      result: {
+        isError: false,
+        structuredContent: {
+          valid: true,
+          attempt: {
+            learningContextBinding: {
+              acknowledged: true,
+              contextDigest: ingest!.learningContextDigest,
+              acknowledgedDigest: ingest!.learningContextDigest
+            }
+          },
+          routeCommits: [expect.objectContaining({ loopId: "marketing_ads" })]
         }
       }
     });

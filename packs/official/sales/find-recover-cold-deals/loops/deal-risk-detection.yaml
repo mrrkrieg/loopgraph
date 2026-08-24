@@ -1,0 +1,55 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-deal-risk-detection
+  name: Deal Risk Detection
+  version: 1.0.0
+  description: Detect evidence-backed opportunity risk from stage age, activity, close-date, commitment, and stakeholder signals.
+  department: sales
+  ownerRole: sales_operations
+  tags: [deal-risk, pipeline, detection]
+trigger: { type: event, source: "*", event: sales.opportunity_changed }
+input:
+  requiredFields: [normalizedPayload.opportunityId, normalizedPayload.stage, normalizedPayload.lastActivityAt]
+  subjectTypes: [opportunity]
+  fixtures: [{ id: stalled-deal, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize opportunity snapshot, actor: system, type: observe, description: "Preserve provider identity, stage history, owner, value, activity, and close-date evidence." }
+  - { id: resolve, name: Resolve deal identity, actor: system, type: observe, description: "Join one opportunity with bounded mail, calendar, account, and stakeholder evidence." }
+  - { id: assess, name: Diagnose risk, actor: agent, type: assess, description: "Compare stage age, silence, close-date movement, commitments, and strategic-account policy." }
+  - { id: decide, name: Select risk route, actor: agent, type: decide, description: "Open or update one deal-risk problem, or abstain when the evidence is incomplete or ambiguous." }
+  - { id: learn, name: Learn from disposition, actor: system, type: learn, description: "Return false-positive, recovery, progression, loss, and forecast outcomes to Hermes." }
+capabilities:
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read opportunity state and stage history., customerFacing: false }
+  - { key: mail.thread.read, authority: read, risk: high, required: true, purpose: Read bounded deal-thread activity and commitment evidence., customerFacing: false }
+  - { key: calendar.event.read, authority: read, risk: medium, required: true, purpose: Read past and future deal meetings., customerFacing: false }
+skills: [sales-deal-diagnosis, sales-commitment-extraction]
+outcomes:
+  - { metric: deal_risk_precision, description: Flagged opportunities confirmed as requiring intervention., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: risk_detection_latency_hours, description: Time from risk threshold crossing to accountable detection., direction: decrease, sourceCapability: crm.opportunity.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.deal_risk]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: sales.opportunity_changed, subjectTypes: [opportunity], requiredFields: [normalizedPayload.opportunityId, normalizedPayload.stage, normalizedPayload.lastActivityAt], reason: A current open opportunity snapshot has the minimum evidence needed for risk diagnosis. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle callbacks are evidence and cannot create a new deal-risk problem. }
+  inputMapping: { opportunityId: normalizedPayload.opportunityId, stage: normalizedPayload.stage, lastActivityAt: normalizedPayload.lastActivityAt }
+  priority: 100
+  minimumConfidence: 0.85
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 100, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.opportunity.read, mail.thread.read, calendar.event.read]
+  examples:
+    shouldRoute: ["An open opportunity exceeded its stage-age policy and has no verified future commitment."]
+    shouldNotRoute: ["The opportunity is closed.", "Multiple opportunities match the communication evidence."]
+policy:
+  forbiddenActions: []
+  escalationOwner: sales_operations
+  escalationSla: 30m
+  separateCustomerFacingApproval: true

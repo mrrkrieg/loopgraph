@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: product-problem-framing
+name: Product Problem Framing
+description: Frame the narrowest validated product problem and prepare governed issue work without setting roadmap priority.
+department: product
+goal: Produce an accountable product-problem brief tied to workflow, segment, evidence, uncertainty, and measurable outcomes.
+inputs: [validated theme, affected workflow, segment, evidence assessment, existing roadmap work]
+outputs: [problem statement, evidence brief, issue proposal, decision questions]
+instructions:
+  - Describe who encounters the problem, in which workflow, and what observable failure occurs.
+  - Link every claim to a durable evidence reference.
+  - Include counter-evidence, exclusions, uncertainty, guardrails, and expected outcome measures.
+  - Match existing work before proposing a new issue.
+  - Prepare exact create or update actions for approval without priority or date commitments.
+boundaries:
+  - Do not promise a feature, customer outcome, priority, or release date.
+  - Do not create or update provider work without exact approval.
+  - Do not collapse distinct defects and usability problems into one issue.
+requiredCapabilities: [support.feedback.read, analytics.event.query, project.issue.read]

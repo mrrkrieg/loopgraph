@@ -1,0 +1,24 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: intercom-posthog-linear
+providerId: intercom
+providerFamily: intercom
+displayName: Intercom + PostHog + Linear
+capabilities:
+  - { logicalCapability: support.feedback.read, providerOperation: intercom.conversations.read, minimumScopes: [conversations:read], authority: read, risk: low }
+  - { logicalCapability: analytics.event.query, providerOperation: posthog.insights.query, minimumScopes: [query:read], authority: read, risk: medium }
+  - { logicalCapability: project.issue.read, providerOperation: linear.issues.read, minimumScopes: [read], authority: read, risk: low }
+  - { logicalCapability: project.issue.create, providerOperation: linear.issues.create, minimumScopes: [write], authority: approve, risk: high }
+  - { logicalCapability: project.issue.update, providerOperation: linear.issues.update, minimumScopes: [write], authority: approve, risk: high }
+  - { logicalCapability: product.release.read, providerOperation: linear.projects.read, minimumScopes: [read], authority: read, risk: low }
+eventSources:
+  - { eventFamily: product.feedback_received, providerEvent: conversation.user.created, transport: webhook, normalizationTransformer: intercom.feedback-to-product-signal.v1, signatureStrategy: intercom-hmac-sha1, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: product.release_completed, providerEvent: linear.project.completed, transport: webhook, normalizationTransformer: linear.release-to-product-outcome.v1, signatureStrategy: linear-webhook-signature, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { providerId: intercom, objectType: feedback, requiredLogicalFields: [feedback.id, feedback.text, feedback.productArea, feedback.customerId], optionalLogicalFields: [feedback.segment, feedback.sentiment, feedback.createdAt] }
+  - { providerId: posthog, objectType: product_event, requiredLogicalFields: [event.name, event.distinctId, event.timestamp], optionalLogicalFields: [event.productArea, event.releaseId, event.segment] }
+  - { providerId: linear, objectType: project_issue, requiredLogicalFields: [issue.id, issue.title, issue.status], optionalLogicalFields: [issue.productArea, issue.releaseId, issue.labels] }
+healthCheck:
+  capability: support.feedback.read
+  sampleQuery: { state: open, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

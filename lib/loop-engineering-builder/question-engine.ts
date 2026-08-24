@@ -99,7 +99,7 @@ export function createDefaultAnswers(
 
   return {
     initial_goal_summary: goal,
-    goal: template?.goal ?? goal,
+    goal: goal || template?.goal || "Improve a measurable business outcome with reviewable evidence.",
     target_metric: template?.primaryMetric ?? departmentTemplate?.commonMetrics[0] ?? "Quality-adjusted output per human hour",
     business_outcome: template?.businessOutcome ?? "A measurable business outcome improves while review, rework, escalation, governance, and botsitting costs are visible.",
     work_item: template?.name ?? "Recurring company loop",

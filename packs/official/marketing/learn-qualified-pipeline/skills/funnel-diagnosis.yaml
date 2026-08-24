@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: marketing-funnel-diagnosis
+name: Campaign Funnel Diagnosis
+description: Diagnose where a campaign cohort loses quality between delivery, qualification, activation, opportunity, and revenue.
+department: marketing
+goal: Explain what happened across the full business funnel without mistaking platform conversions for company value.
+inputs: [campaign evidence, attributed leads, qualification outcomes, activation events, opportunity outcomes, attribution policy]
+outputs: [funnel diagnosis, evidence gaps, alternative explanations, confidence, accountable route]
+instructions:
+  - Preserve campaign, cohort, message, audience, and observation-window identity.
+  - Evaluate delivery, lead, qualification, activation, opportunity, and revenue stages separately.
+  - Compare cohorts only when attribution and observation windows are compatible.
+  - Identify lag, missing joins, selection effects, and tracking changes as alternative explanations.
+  - Link every claim to durable provider evidence and distinguish unavailable from negative outcomes.
+boundaries:
+  - Do not rewrite attribution or claim causality beyond the evidence.
+  - Do not optimize for clicks or raw leads when qualified pipeline is defined.
+  - Do not change campaigns, budgets, targeting, or content.
+requiredCapabilities: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]

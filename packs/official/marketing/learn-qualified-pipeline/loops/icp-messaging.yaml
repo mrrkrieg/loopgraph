@@ -1,0 +1,51 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: marketing-icp-message-learning
+  name: ICP Message Learning
+  version: 1.0.0
+  description: Learn which message and segment combinations produce qualified and activated pipeline and prepare bounded creative briefs.
+  department: marketing
+  ownerRole: demand_generation
+  tags: [icp, messaging, creative, learning]
+trigger: { type: event, source: hermes, event: marketing.message_outcome_ready }
+input: { requiredFields: [normalizedPayload.messageId, normalizedPayload.segment, normalizedPayload.outcomeEvidenceRefs], subjectTypes: [message, campaign_cohort], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble message evidence, actor: system, type: observe, description: "Join message, segment, campaign, qualification, activation, pipeline, and guardrail evidence." }
+  - { id: assess, name: Evaluate message fit, actor: agent, type: assess, description: "Separate delivery performance from downstream segment and pipeline quality." }
+  - { id: decide, name: Select message learning, actor: agent, type: decide, description: "Identify supported claims, weak-fit segments, and the smallest next learning test." }
+  - { id: prepare, name: Prepare creative brief, actor: agent, type: prepare, description: "Draft a bounded message hypothesis and exact evidence references for approval." }
+  - { id: learn, name: Return experiment outcomes, actor: system, type: learn, description: "Return approvals, rejections, publication identity, and downstream cohort outcomes." }
+capabilities:
+  - { key: ads.campaign.read, authority: read, risk: low, required: true, purpose: Read message and campaign identity., customerFacing: false }
+  - { key: crm.lead.read, authority: read, risk: low, required: true, purpose: Read segment and qualification outcomes., customerFacing: false }
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read pipeline outcomes., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read activation outcomes., customerFacing: false }
+  - { key: marketing.content.draft, authority: approve, risk: high, required: false, purpose: Create the exact approved creative brief without publishing., customerFacing: true }
+skills: [marketing-message-learning, marketing-campaign-analysis]
+outcomes:
+  - { metric: message_qualified_pipeline_rate, description: Message cohorts producing qualified pipeline for the intended segment., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: message_activation_rate, description: Intended-segment members reaching the activation definition., direction: increase, sourceCapability: analytics.event.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [marketing.icp_message_learning]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: marketing.message_outcome_ready, subjectTypes: [message, campaign_cohort], requiredFields: [normalizedPayload.messageId, normalizedPayload.segment, normalizedPayload.outcomeEvidenceRefs], reason: A resolved message and segment have downstream outcome evidence for learning. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: marketing.campaign_window_closed, subjectTypes: [], fields: [], reason: Delivery evidence alone cannot support an ICP message claim. }]
+  inputMapping: { messageId: normalizedPayload.messageId, segment: normalizedPayload.segment }
+  priority: 75
+  minimumConfidence: 0.93
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]
+  examples: { shouldRoute: ["One resolved message and segment have complete downstream evidence."], shouldNotRoute: ["The message identity is ambiguous.", "Only engagement metrics exist."] }
+policy:
+  forbiddenActions:
+    - { capability: marketing.content.draft, reason: Customer-facing claims and creative require exact content approval and this app never publishes them. }
+  escalationOwner: demand_generation
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

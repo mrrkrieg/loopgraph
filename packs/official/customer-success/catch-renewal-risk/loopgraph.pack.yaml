@@ -1,0 +1,63 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.customer-success.catch-renewal-risk
+  name: Catch Strategic Account and Renewal Risk
+  version: 1.0.0
+  summary: Join customer health, support, billing, product, renewal, and ownership evidence into governed recovery.
+  description: Hermes maintains one durable account risk context; separates health, renewal, support, and strategic escalation routes; prepares governed recovery and QBR work; and learns from renewal and escalation outcomes.
+  department: customer_success
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [customer-success, health, renewal, support, qbr]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility: { loopgraph: ">=0.2.0 <1.0.0", hermes: ">=1.0.0", platforms: [darwin, linux, win32] }
+dependencies: []
+modules:
+  - { id: renewal, name: Renewal risk, description: Join contract timing and verified health evidence into renewal risk., defaultEnabled: true, dependsOn: [], assets: [loops/renewal-risk.yaml, skills/risk-synthesis.yaml] }
+  - { id: escalation, name: Strategic escalation, description: Prepare accountable cross-department recovery for material account risk., defaultEnabled: true, dependsOn: [renewal], assets: [loops/strategic-account-escalation.yaml, skills/recovery-plan.yaml] }
+  - { id: qbr, name: QBR preparation, description: Prepare evidence-backed customer reviews without unsupported commitments., defaultEnabled: true, dependsOn: [], assets: [loops/qbr-preparation.yaml, skills/executive-brief.yaml] }
+presets:
+  - { id: hubspot-intercom-stripe-slack, name: HubSpot + Intercom + Stripe + Slack, description: "Join account, support, subscription, usage, and owner evidence.", path: presets/hubspot-intercom-stripe-slack.yaml, providerFamily: hubspot }
+  - { id: salesforce-zendesk-billing-teams, name: Salesforce + Zendesk + Billing + Teams, description: "Join enterprise account, support, billing, usage, and owner evidence.", path: presets/salesforce-zendesk-billing-teams.yaml, providerFamily: salesforce }
+permissions:
+  - { capability: crm.account.read, authority: read, mode: required, risk: low, purpose: "Read account tier, owner, lifecycle, and renewal evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [crm_data, business_contact] }
+  - { capability: support.ticket.read, authority: read, mode: required, risk: high, purpose: "Read bounded support volume, severity, sentiment, and unresolved issue evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [support_content, business_contact] }
+  - { capability: billing.subscription.read, authority: read, mode: required, risk: high, purpose: "Read subscription, renewal, payment, and contract timing evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [billing_data, contract_data] }
+  - { capability: analytics.event.query, authority: read, mode: required, risk: medium, purpose: "Query bounded adoption and product-health evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [product_usage] }
+  - { capability: crm.account.update, authority: approve, mode: optional, risk: high, purpose: "Apply the exact approved account risk or next-step update.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [crm_data] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare an exact approved internal escalation brief.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [crm_data, support_content, billing_data] }
+  - { capability: mail.message.draft, authority: approve, mode: optional, risk: high, purpose: "Prepare exact approved customer communication without sending.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [email_content, crm_data] }
+requiredCapabilities: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]
+optionalCapabilities: [crm.account.update, collaboration.message.draft, mail.message.draft]
+topology:
+  objects:
+    - { id: account, objectType: account, label: Customer account, description: The shared commercial and relationship identity used across CRM billing support and product systems., shared: true, identityKeys: [accountId, crmAccountId] }
+    - { id: account-health, objectType: account_health, label: Account health, description: Time-bounded adoption support billing sentiment goal and owner evidence for one account., shared: true, identityKeys: [accountId, observationWindow] }
+    - { id: renewal-risk, objectType: renewal_risk, label: Renewal risk, description: A renewal-specific problem with contract timing risk drivers owner and recovery evidence., shared: true, identityKeys: [accountId, subscriptionId, renewalDate] }
+    - { id: strategic-risk, objectType: strategic_account_risk, label: Strategic account risk, description: Material relationship or business-impact evidence requiring cross-department ownership., shared: true, identityKeys: [accountId, riskWindow] }
+    - { id: recovery-outcome, objectType: customer_recovery_outcome, label: Recovery outcome, description: Observed health renewal support and relationship effects after an intervention., shared: true, identityKeys: [accountId, interventionId, measurementWindow] }
+  flows:
+    - { id: account-enters-health, source: { kind: object, id: account }, target: { kind: loop, id: cs-customer-health }, type: evidence_in, reason: Hermes joins account evidence before deciding whether the problem is health support renewal or strategic risk. }
+    - { id: health-produces-state, source: { kind: loop, id: cs-customer-health }, target: { kind: object, id: account-health }, type: produces, reason: Health becomes a traceable evidence object rather than an opaque score. }
+    - { id: health-enters-renewal, source: { kind: object, id: account-health }, target: { kind: loop, id: cs-renewal-risk }, type: evidence_in, reason: Renewal work requires contract timing plus current account-health evidence. }
+    - { id: renewal-produces-risk, source: { kind: loop, id: cs-renewal-risk }, target: { kind: object, id: renewal-risk }, type: produces, reason: The risk diagnosis owner save plan and outcome window share one durable identity. }
+    - { id: support-may-support-strategic, source: { kind: loop, id: cs-support-escalation }, target: { kind: loop, id: cs-strategic-account-escalation }, type: supports, reason: Material support impact can create a separate strategic problem only when business risk is independently evidenced., condition: The account is strategic and verified business impact exceeds the configured threshold. }
+    - { id: strategic-produces-risk, source: { kind: loop, id: cs-strategic-account-escalation }, target: { kind: object, id: strategic-risk }, type: produces, reason: Cross-department recovery work remains tied to accountable owners and verified account impact. }
+    - { id: strategic-may-support-qbr, source: { kind: loop, id: cs-strategic-account-escalation }, target: { kind: loop, id: cs-qbr-preparation }, type: supports, reason: Executive review preparation is supporting work and cannot replace the primary recovery problem., condition: An approved executive review is scheduled inside the risk window. }
+    - { id: strategic-returns-health, source: { kind: loop, id: cs-strategic-account-escalation }, target: { kind: loop, id: cs-customer-health }, type: learning_return, reason: Intervention and relationship outcomes update future health reasoning. }
+    - { id: health-produces-recovery, source: { kind: loop, id: cs-customer-health }, target: { kind: object, id: recovery-outcome }, type: produces, reason: Health recovery is observed after the configured measurement window and returned to Hermes. }
+entrypoints:
+  loops: [loops/customer-health.yaml, loops/renewal-risk.yaml, loops/support-escalation.yaml, loops/strategic-account-escalation.yaml, loops/qbr-preparation.yaml]
+  skills: [skills/account-assessment.yaml, skills/risk-synthesis.yaml, skills/executive-brief.yaml, skills/recovery-plan.yaml]
+  connectors: [connectors/hubspot-intercom-stripe-slack.yaml, connectors/salesforce-zendesk-billing-teams.yaml]
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures: [fixtures/happy.json, fixtures/missing-context.json, fixtures/exclusion.json, fixtures/duplicate.json, fixtures/ambiguous.json, fixtures/low-confidence.json, fixtures/permission-change.json, fixtures/customer-facing.json]
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership: { defaultOwnerRole: customer_success_operations, reviewRoles: [csm, customer_success_lead, executive_sponsor, finance_owner], supportUrl: https://github.com/mrrkrieg/loopgraph/issues }
+defaultRolloutMode: shadow

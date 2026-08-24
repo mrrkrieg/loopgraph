@@ -1,0 +1,10 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  repository.read: allowed
+  issue.update: approval_required
+  follow_up.create: approval_required
+  internal.notification: approval_required
+  public.response: forbidden
+  security.signal: request_human
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

@@ -1,0 +1,125 @@
+schemaVersion: loopgraph-pack/v1alpha1
+kind: LoopPack
+metadata:
+  id: loopgraph.hr-talent.operate-people-workflows
+  name: Operate Fair and Accountable People Workflows
+  version: 1.0.0
+  summary: Reduce hiring, onboarding, manager, retention-review, and performance-review friction without automating employment judgment.
+  description: Hermes receives normalized people-workflow events, resolves the affected candidate, employee, manager, team, plan, or review period, and routes one durable problem to the narrowest eligible loop. The app may assemble evidence and prepare work for review, but ranking, hiring, rejection, compensation, performance, discipline, retention, and sensitive communication remain human-owned.
+  department: hr_talent
+  publisher: { id: loopgraph, name: Loopgraph, verified: true }
+  license: MIT
+  visibility: official
+  tags: [hr, talent, recruiting, onboarding, managers, retention, performance, privacy, fairness]
+  homepage: https://github.com/mrrkrieg/loopgraph
+  repository: https://github.com/mrrkrieg/loopgraph
+compatibility:
+  loopgraph: ">=0.2.0 <1.0.0"
+  hermes: ">=1.0.0"
+  platforms: [darwin, linux, win32]
+dependencies: []
+modules:
+  - id: candidate-flow
+    name: Candidate flow
+    description: Identify evidenced hiring-process stalls and prepare accountable next actions without ranking or deciding on candidates.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/candidate-pipeline.yaml, skills/process-diagnosis.yaml]
+  - id: onboarding-progress
+    name: Onboarding progress
+    description: Resolve onboarding-plan identity, missing dependencies, ownership, and completion evidence.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/onboarding-progress.yaml, skills/evidence-minimization.yaml]
+  - id: manager-support
+    name: Manager support
+    description: Prepare a human-reviewed coaching packet from approved, bounded evidence without scoring a person.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/manager-coaching.yaml, skills/manager-review-preparation.yaml]
+  - id: retention-review
+    name: Retention review
+    description: Assemble an explicit human review packet for approved retention signals and process risk.
+    defaultEnabled: false
+    dependsOn: [manager-support]
+    assets: [loops/retention-review.yaml, skills/fairness-and-boundary-review.yaml]
+  - id: performance-review
+    name: Performance review preparation
+    description: Reconcile declared goals, authored evidence, review periods, and missing context for accountable manager review.
+    defaultEnabled: true
+    dependsOn: []
+    assets: [loops/performance-review-preparation.yaml, skills/manager-review-preparation.yaml]
+presets:
+  - id: workday-greenhouse-slack
+    name: Workday + Greenhouse + Slack
+    description: Join HRIS, ATS, calendar, project, survey, and governed Slack evidence for people workflows.
+    path: presets/workday-greenhouse-slack.yaml
+    providerFamily: workday
+  - id: rippling-ashby-teams
+    name: Rippling + Ashby + Teams
+    description: Join HRIS, recruiting, onboarding, performance, and governed Teams evidence for a modern people stack.
+    path: presets/rippling-ashby-teams.yaml
+    providerFamily: rippling
+permissions:
+  - { capability: ats.candidate.read, authority: read, mode: required, risk: critical, purpose: "Read bounded candidate stage, ownership, scheduling, and process evidence without protected attributes.", customerFacing: false, defaultPolicy: allowed, dataClasses: [candidate_data, restricted_people_data] }
+  - { capability: calendar.schedule.read, authority: read, mode: required, risk: high, purpose: "Read bounded interview, onboarding, and review scheduling evidence.", customerFacing: false, defaultPolicy: allowed, dataClasses: [calendar_data, restricted_people_data] }
+  - { capability: hris.employee.read, authority: read, mode: required, risk: critical, purpose: "Read the minimum employee, manager, team, tenure, and workflow fields authorized for the selected loop.", customerFacing: false, defaultPolicy: allowed, dataClasses: [workforce_data, restricted_people_data] }
+  - { capability: onboarding.plan.read, authority: read, mode: required, risk: high, purpose: "Read approved onboarding tasks, dependencies, due dates, completion, and ownership.", customerFacing: false, defaultPolicy: allowed, dataClasses: [workforce_data, operational_data] }
+  - { capability: survey.response.read, authority: read, mode: required, risk: critical, purpose: "Read only approved aggregate or explicitly consented survey evidence; never infer protected traits.", customerFacing: false, defaultPolicy: allowed, dataClasses: [restricted_people_data] }
+  - { capability: performance.goal.read, authority: read, mode: required, risk: critical, purpose: "Read declared goals and authored review evidence for a bounded review period.", customerFacing: false, defaultPolicy: allowed, dataClasses: [workforce_data, restricted_people_data] }
+  - { capability: project.task.read, authority: read, mode: required, risk: medium, purpose: "Read bounded workflow-task status used to explain process progress and dependencies.", customerFacing: false, defaultPolicy: allowed, dataClasses: [operational_data] }
+  - { capability: project.task.create, authority: approve, mode: optional, risk: high, purpose: "Create an exact approved workflow-remediation task without changing employment status.", customerFacing: false, defaultPolicy: approval_required, dataClasses: [operational_data, restricted_people_data] }
+  - { capability: collaboration.message.draft, authority: approve, mode: optional, risk: critical, purpose: "Prepare a sensitive internal people-workflow message for accountable human review.", customerFacing: true, defaultPolicy: approval_required, dataClasses: [restricted_people_data] }
+requiredCapabilities: [ats.candidate.read, calendar.schedule.read, hris.employee.read, onboarding.plan.read, survey.response.read, performance.goal.read, project.task.read]
+optionalCapabilities: [project.task.create, collaboration.message.draft]
+topology:
+  objects:
+    - { id: candidate-process, objectType: candidate_process, label: Candidate process, description: "A candidate-specific hiring workflow with requisition, current stage, accountable owner, scheduling state, and consented evidence boundaries.", shared: true, identityKeys: [candidateId, requisitionId] }
+    - { id: onboarding-plan, objectType: onboarding_plan, label: Onboarding plan, description: "A versioned employee onboarding plan with role, manager, tasks, dependencies, dates, and accountable owners.", shared: true, identityKeys: [employeeId, planId, version] }
+    - { id: manager-review-window, objectType: manager_review_window, label: Manager review window, description: "A bounded manager and team review period containing only approved aggregate or authored evidence.", shared: true, identityKeys: [managerId, teamId, periodStart, periodEnd] }
+    - { id: retention-review-case, objectType: retention_review_case, label: Retention review case, description: "A human-owned review case created from policy-approved signals, provenance, evidence limits, and fairness checks.", shared: true, identityKeys: [reviewId, subjectScope, reviewWindow] }
+    - { id: performance-review-period, objectType: performance_review_period, label: Performance review period, description: "A declared review period joined to goals, authored evidence, manager ownership, and missing-evidence flags.", shared: true, identityKeys: [employeeId, reviewPeriod, policyVersion] }
+    - { id: people-workflow-outcome, objectType: people_workflow_outcome, label: People workflow outcome, description: "A human-recorded process outcome, correction, completion, or review result without a hidden employee score.", shared: true, identityKeys: [problemId, outcomeType, observationWindow] }
+  flows:
+    - { id: candidate-enters-pipeline, source: { kind: object, id: candidate-process }, target: { kind: loop, id: hr-candidate-pipeline }, type: evidence_in, reason: "Hermes routes an evidenced process stall only after candidate, requisition, stage, and owner identity resolve." }
+    - { id: onboarding-enters-progress, source: { kind: object, id: onboarding-plan }, target: { kind: loop, id: hr-onboarding-progress }, type: evidence_in, reason: "Onboarding work starts from a versioned plan and explicit missing dependencies rather than an inferred employee judgment." }
+    - { id: manager-enters-coaching, source: { kind: object, id: manager-review-window }, target: { kind: loop, id: hr-manager-coaching }, type: evidence_in, reason: "Manager support uses a bounded review window and approved signals, with evidence limitations visible." }
+    - { id: retention-enters-review, source: { kind: object, id: retention-review-case }, target: { kind: loop, id: hr-retention-review }, type: evidence_in, reason: "Retention signals create a human review packet, not an automated employment decision or employee score." }
+    - { id: performance-enters-preparation, source: { kind: object, id: performance-review-period }, target: { kind: loop, id: hr-performance-review-preparation }, type: evidence_in, reason: "Review preparation reconciles declared goals and authored evidence for one explicit review period." }
+    - { id: onboarding-produces-outcome, source: { kind: loop, id: hr-onboarding-progress }, target: { kind: object, id: people-workflow-outcome }, type: produces, reason: "Completion, delays, reviewer corrections, and manager-owned outcomes return as auditable process evidence." }
+    - { id: coaching-returns-onboarding, source: { kind: loop, id: hr-manager-coaching }, target: { kind: loop, id: hr-onboarding-progress }, type: learning_return, reason: "Approved manager follow-through evidence helps explain onboarding outcomes without evaluating the employee." }
+entrypoints:
+  loops:
+    - loops/candidate-pipeline.yaml
+    - loops/onboarding-progress.yaml
+    - loops/manager-coaching.yaml
+    - loops/retention-review.yaml
+    - loops/performance-review-preparation.yaml
+  skills:
+    - skills/process-diagnosis.yaml
+    - skills/evidence-minimization.yaml
+    - skills/manager-review-preparation.yaml
+    - skills/fairness-and-boundary-review.yaml
+  connectors:
+    - connectors/workday-greenhouse-slack.yaml
+    - connectors/rippling-ashby-teams.yaml
+  setup: [setup/questions.yaml]
+  policies: [policies/default.yaml]
+  fixtures:
+    - fixtures/happy.json
+    - fixtures/missing-context.json
+    - fixtures/exclusion.json
+    - fixtures/duplicate.json
+    - fixtures/ambiguous.json
+    - fixtures/low-confidence.json
+    - fixtures/permission-change.json
+    - fixtures/customer-facing.json
+    - fixtures/outcome.json
+  evals: [evals/conformance.yaml]
+  dashboards: [dashboards/outcomes.yaml]
+  assets: []
+ownership:
+  defaultOwnerRole: people_operations
+  reviewRoles: [recruiting_lead, people_partner, direct_manager, privacy_owner]
+  supportUrl: https://github.com/mrrkrieg/loopgraph/issues
+defaultRolloutMode: shadow

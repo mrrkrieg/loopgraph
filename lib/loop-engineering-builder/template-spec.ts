@@ -236,6 +236,7 @@ export function createSpecFromTemplate(
       ambiguityPolicy: "request_human",
       noMatchPolicy: "unhandled",
       fanoutPolicy: route.fanoutPolicy,
+      permittedSupportingLoopIds: route.supportingLoopTemplateIds,
       cooldown: { seconds: 0, dedupeWindowSeconds: 300 },
       concurrency: { maxActive: 1, strategy: "append_evidence" },
       activationMode: "shadow",

@@ -1,0 +1,1 @@
+{"id":"campaign-learning-low-confidence","eventType":"marketing.campaign_window_closed","subject":{"type":"campaign_cohort","id":"campaign-406-window-7"},"normalizedPayload":{"campaignId":"406","windowStart":"2026-07-01T00:00:00.000Z","windowEnd":"2026-07-31T23:59:59.000Z","spend":9000,"confidence":0.42},"evidenceRefs":["linkedin-ads:campaign:406"]}

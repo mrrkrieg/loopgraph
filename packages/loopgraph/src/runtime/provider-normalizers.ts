@@ -88,6 +88,54 @@ function providerFields(provider: ProviderId, event: Record<string, unknown>): P
     const campaign = asRecord(event.campaign);
     return fields(string(event.eventType ?? event.type, "campaign.performance_anomaly"), "campaign", string(campaign.id ?? event.campaignId ?? event.id, "unknown"), event, occurredAt, []);
   }
+  if (provider === "gmail") {
+    const message = asRecord(event.message);
+    return fields(string(event.type, "mail.thread.changed"), "communication_thread", string(event.threadId ?? message.threadId ?? message.id ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.subject", "normalizedPayload.snippet", "normalizedPayload.body"]);
+  }
+  if (provider === "google_calendar") {
+    const calendarEvent = asRecord(event.event);
+    return fields(string(event.type, "calendar.event.changed"), "calendar_commitment", string(calendarEvent.id ?? event.eventId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.event.summary", "normalizedPayload.event.description", "normalizedPayload.event.attendees"]);
+  }
+  if (provider === "outlook") {
+    const resource = asRecord(event.resourceData);
+    const isCalendar = string(event.type ?? event.changeType, "").includes("calendar") || string(event.resource, "").includes("events");
+    return fields(string(event.type ?? event.changeType, isCalendar ? "calendar.event.changed" : "mail.message.changed"), isCalendar ? "calendar_commitment" : "communication_thread", string(resource.id ?? event.conversationId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.subject", "normalizedPayload.bodyPreview", "normalizedPayload.resourceData"]);
+  }
+  if (provider === "teams") {
+    const resource = asRecord(event.resourceData);
+    return fields(string(event.type ?? event.changeType, "teams.channel.message.created"), "conversation", string(resource.id ?? event.messageId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.body", "normalizedPayload.resourceData"]);
+  }
+  if (provider === "posthog" || provider === "amplitude") {
+    return fields(string(event.type, "metric.threshold_crossed"), "metric", string(event.insightId ?? event.chartId ?? event.metricId ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.breakdown", "normalizedPayload.sample"]);
+  }
+  if (provider === "linear") {
+    const data = asRecord(event.data);
+    const resourceType = string(event.type, "Issue");
+    const normalizedType = resourceType.toLowerCase() === "project" ? "release" : resourceType.toLowerCase() === "comment" ? "issue_comment" : "issue";
+    return fields(`${resourceType}.${string(event.action, "update")}`, normalizedType, string(data.id ?? data.identifier ?? event.id, "unknown"), event, iso(event.webhookTimestamp) ?? occurredAt, ["normalizedPayload.data.title", "normalizedPayload.data.description", "normalizedPayload.data.body"]);
+  }
+  if (provider === "jira") {
+    const issue = asRecord(event.issue);
+    const version = asRecord(event.version);
+    const eventType = string(event.webhookEvent ?? event.type, "jira:issue_updated");
+    const isRelease = eventType.includes("version") || Object.keys(version).length > 0;
+    return fields(eventType, isRelease ? "release" : eventType.includes("incident") ? "incident" : "issue", string(isRelease ? version.id : issue.key ?? issue.id ?? event.id, "unknown"), event, occurredAt, ["normalizedPayload.issue.fields.summary", "normalizedPayload.issue.fields.description", "normalizedPayload.comment.body", "normalizedPayload.version.description"]);
+  }
+  if (provider === "gitlab") {
+    const attributes = asRecord(event.object_attributes);
+    const kind = string(event.object_kind, "issue");
+    const subjectType = kind === "deployment" || kind === "release" ? "release" : "issue";
+    return fields(`${titleCase(kind)} Hook`, subjectType, string(attributes.id ?? attributes.iid ?? event.id, "unknown"), event, iso(attributes.updated_at ?? attributes.created_at) ?? occurredAt, ["normalizedPayload.object_attributes.title", "normalizedPayload.object_attributes.description", "normalizedPayload.object_attributes.note", "normalizedPayload.object_attributes.ref"]);
+  }
+  if (provider === "bigquery" || provider === "snowflake") {
+    const metric = asRecord(event.metric);
+    const forecast = asRecord(event.forecast);
+    const capacity = asRecord(event.capacityPlan ?? event.capacity_plan);
+    const eventType = string(event.eventType ?? event.type, "management.company_metric_anomaly");
+    const subjectType = eventType.includes("forecast") ? "forecast_window" : eventType.includes("capacity") ? "capacity_plan" : "company_metric_anomaly";
+    const subjectId = string(forecast.id ?? capacity.id ?? metric.id ?? event.id, "unknown");
+    return fields(eventType, subjectType, subjectId, event, occurredAt, ["normalizedPayload.metric.dimensions", "normalizedPayload.rows"]);
+  }
   if (["zendesk", "intercom"].includes(provider)) {
     const ticket = asRecord(event.ticket);
     const conversation = asRecord(event.conversation);
@@ -125,3 +173,4 @@ function mapEntityType(value: string) {
   if (normalized.includes("invoice")) return "invoice";
   return normalized.replace(/[^a-z0-9_]/g, "_") || "object";
 }
+function titleCase(value: string) { return value.length === 0 ? value : `${value[0]!.toUpperCase()}${value.slice(1)}`; }

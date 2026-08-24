@@ -11,6 +11,17 @@ export async function POST(request: Request, context: { params: Promise<{ instal
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$/.test(installationId)) {
     return NextResponse.json({ error: "Unknown provider route" }, { status: 404 });
   }
+  const validationToken = new URL(request.url).searchParams.get("validationToken");
+  if (validationToken !== null) {
+    if (validationToken.length === 0 || validationToken.length > 512 || /[\u0000-\u001f\u007f]/.test(validationToken)) {
+      return NextResponse.json({ error: "Invalid validation token" }, { status: 400, headers: { "cache-control": "no-store" } });
+    }
+    const installation = await getConnectorBrokerRuntime().store.findInstallationGlobal({ installationId });
+    if (!installation || !connectorInstallationHasExpectedNamespace(installation) || !["outlook", "teams"].includes(installation.providerId) || !["connected", "subscription_pending", "active"].includes(installation.status)) {
+      return NextResponse.json({ error: "Provider webhook is not available" }, { status: 410, headers: { "cache-control": "no-store" } });
+    }
+    return new NextResponse(validationToken, { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  }
   let claimedDelivery: {
     organizationId: string;
     projectKey: string;

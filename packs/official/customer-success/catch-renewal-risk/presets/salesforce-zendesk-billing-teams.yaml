@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: salesforce-zendesk-billing-teams
+name: Salesforce + Zendesk + Billing + Teams
+description: Configure enterprise customer and renewal risk for Salesforce and Microsoft collaboration.
+connectorRecipe: connectors/salesforce-zendesk-billing-teams.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 90, rolloutMode: shadow }
+requiredCompanyFields: [customerSuccess.accountTiers, customerSuccess.renewalWindows, customerSuccess.riskThresholds, customerSuccess.ownerMapping]

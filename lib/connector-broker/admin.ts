@@ -2,7 +2,8 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 import {
-  brokerCapabilitySchema,
+  canonicalAppDigest,
+  workloadCapabilitySchema,
   connectorInstallationAdminSchema,
   connectorInstallationHasExpectedNamespace,
   connectorInstallationViewSchema,
@@ -316,6 +317,39 @@ export async function approveConnectorPreparedAction(input: {
   return { approvalId, actionId: input.actionId, fingerprint: input.fingerprint, expiresAt };
 }
 
+export async function revokeConnectorPreparedAction(input: {
+  database: WorkspaceDatabase;
+  installationId: string;
+  actionId: string;
+  fingerprint: string;
+  reason: string;
+}) {
+  if (!input.database.organizationId || !input.database.userId) {
+    throw new Error("Hosted connector storage is unavailable");
+  }
+  const reason = input.reason.trim();
+  if (reason.length < 3 || reason.length > 1_000) throw new Error("Prepared action revocation reason must contain 3 to 1000 characters");
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const client = connectorControlPlaneClient();
+  const reasonDigest = canonicalAppDigest(reason);
+  const { data, error } = await client.rpc("revoke_connector_prepared_action", {
+    p_organization_id: input.database.organizationId,
+    p_project_key: projectKey,
+    p_installation_id: input.installationId,
+    p_action_id: input.actionId,
+    p_fingerprint: input.fingerprint,
+    p_revoked_by: input.database.userId,
+    p_reason_digest: reasonDigest,
+    p_now: new Date().toISOString()
+  });
+  if (error) throw error;
+  const result = data as { actionId?: unknown; fingerprint?: unknown; status?: unknown } | null;
+  if (!result || result.actionId !== input.actionId || result.fingerprint !== input.fingerprint || result.status !== "revoked") {
+    throw new Error("Connector action revocation returned an invalid receipt");
+  }
+  return { actionId: input.actionId, fingerprint: input.fingerprint, status: "revoked" as const };
+}
+
 export type WorkloadIdentityAdminView = {
   credentialId: string;
   issuer: string;
@@ -328,7 +362,7 @@ export type WorkloadIdentityAdminView = {
   confirmationKeyBound: boolean;
   grants: Array<{
     id: string;
-    capability: z.infer<typeof brokerCapabilitySchema>;
+    capability: z.infer<typeof workloadCapabilitySchema>;
     connectionId?: string;
     environment: "development" | "staging" | "production";
     status: "active" | "disabled" | "revoked" | "expired";
@@ -374,7 +408,7 @@ export async function listWorkloadIdentities(database: WorkspaceDatabase): Promi
     confirmationKeyBound: Boolean(principal.confirmation_key_thumbprint),
     grants: (grants ?? []).filter((grant) => grant.credential_id === principal.credential_id).map((grant) => ({
       id: String(grant.id),
-      capability: brokerCapabilitySchema.parse(grant.capability),
+      capability: workloadCapabilitySchema.parse(grant.capability),
       connectionId: grant.connection_id ? String(grant.connection_id) : undefined,
       environment: grant.environment as WorkloadIdentityAdminView["environment"],
       status: grant.status as WorkloadIdentityAdminView["status"],
@@ -391,7 +425,7 @@ export async function upsertWorkloadIdentityGrant(input: {
   audience: string;
   environment: "development" | "staging" | "production";
   workloadType: string;
-  capability: z.infer<typeof brokerCapabilitySchema>;
+  capability: z.infer<typeof workloadCapabilitySchema>;
   connectionId?: string;
   expiresAt?: string;
   confirmationKeyThumbprint?: string;

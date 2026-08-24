@@ -1,0 +1,1 @@
+{"id":"strategic-risk-excluded","eventType":"account.risk_detected","subject":{"type":"account","id":"account-303"},"normalizedPayload":{"ticketId":"303","accountId":"account-303","severity":"P3","renewalDaysRemaining":300,"excluded":true,"confidence":1},"evidenceRefs":["support:ticket:303","policy:non-strategic"]}

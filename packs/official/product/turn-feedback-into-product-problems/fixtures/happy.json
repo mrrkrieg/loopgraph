@@ -1,0 +1,1 @@
+{"id":"product-feedback-happy","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-201"},"normalizedPayload":{"feedbackId":"201","text":"Export setup repeatedly fails after column mapping","productArea":"exports","segment":"growth","confidence":0.96},"evidenceRefs":["intercom:conversation:201","posthog:insight:export-dropoff"]}

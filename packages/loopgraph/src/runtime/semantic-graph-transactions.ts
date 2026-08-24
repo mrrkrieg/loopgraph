@@ -61,6 +61,8 @@ import {
 export type GraphApprovalInput = {
   projectRoot?: string;
   changeSetId: string;
+  expectedChangeSetHash?: string;
+  expectedDesignRunId?: string;
   decision: "approved" | "rejected";
   approvedChangeIds?: string[];
   actorId: string;
@@ -75,6 +77,7 @@ export type ApplyGraphChangeSetInput = {
   projectRoot?: string;
   changeSetId: string;
   approvalReceiptId: string;
+  expectedApprovalEvidenceRefs?: string[];
   designRunId?: string;
   acceptedProposalIds?: string[];
   proposalIdsByChangeId?: Record<string, string[]>;
@@ -238,6 +241,22 @@ export async function approveGraphChangeSet(
       projectRoot,
       options.opportunityStore
     );
+    if (
+      input.expectedChangeSetHash &&
+      graphChangeSetHash(changeSet) !== input.expectedChangeSetHash
+    ) {
+      throw new Error(
+        `Graph change set ${changeSet.id} changed after Hermes design review`
+      );
+    }
+    if (
+      input.expectedDesignRunId &&
+      changeSet.designRunId !== input.expectedDesignRunId
+    ) {
+      throw new Error(
+        `Graph change set ${changeSet.id} is not bound to the reviewed Hermes design run`
+      );
+    }
     if (!["proposed", "approved"].includes(changeSet.status)) {
       throw new Error(`Graph change set ${changeSet.id} cannot be reviewed from status=${changeSet.status}`);
     }
@@ -324,6 +343,7 @@ export async function applyGraphChangeSet(
     );
     const approval = await requireApproval(input.approvalReceiptId, store);
     validateChangeApproval(changeSet, approval);
+    validateExpectedGraphApprovalEvidence(approval, input);
     if (changeSet.status === "applied" && changeSet.appliedTransactionId) {
       const existing = await store.getTransaction(changeSet.appliedTransactionId);
       if (existing) return { transaction: existing, changeSet };
@@ -1067,6 +1087,7 @@ async function applyGraphChangeSetDistributed(
       runtime.store
     );
     validateChangeApproval(changeSet, approval);
+    validateExpectedGraphApprovalEvidence(approval, input);
     if (changeSet.status === "applied" && changeSet.appliedTransactionId) {
       const existing = await runtime.store.getTransaction(
         changeSet.appliedTransactionId
@@ -2123,6 +2144,23 @@ function validateChangeApproval(
     .map((change) => change.id);
   if (requiredChanges.some((id) => !approval.approvedChangeIds.includes(id))) {
     throw new Error("Graph approval receipt does not approve every governed operation");
+  }
+}
+
+function validateExpectedGraphApprovalEvidence(
+  approval: GraphChangeApprovalReceipt,
+  input: ApplyGraphChangeSetInput
+) {
+  if (!input.expectedApprovalEvidenceRefs) return;
+  const expected = unique(input.expectedApprovalEvidenceRefs).sort();
+  const actual = unique(approval.evidenceRefs).sort();
+  if (
+    expected.length !== actual.length ||
+    contentHash(expected) !== contentHash(actual)
+  ) {
+    throw new Error(
+      "Graph approval receipt is not bound to the expected Hermes design evidence"
+    );
   }
 }
 
