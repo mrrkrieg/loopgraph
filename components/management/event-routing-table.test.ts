@@ -205,9 +205,14 @@ describe("EventRoutingTable", () => {
             ready: true,
             planDigest: "activation_plan_1",
             routes: [{
+              routeId: "hermes_route_google_ads",
               routeName: "loopgraph-google-ads-events",
+              routeKind: "provider_event",
+              loopIds: ["marketing_ads"],
               state: "shadow",
-              subscriptionState: "active"
+              subscriptionState: "active",
+              signatureVerificationConfigured: true,
+              ready: true
             }]
           },
           routes: [{

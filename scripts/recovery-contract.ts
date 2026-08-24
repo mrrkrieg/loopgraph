@@ -90,6 +90,7 @@ export const RECOVERY_TABLES = [
   "loopgraph_app_verification_registries",
   "loopgraph_app_verifier_keys",
   "loopgraph_app_verification_receipts",
+  "loopgraph_hermes_route_activation_records",
   "canonical_company_entities",
   "canonical_company_entity_aliases",
   "routing_state_records",

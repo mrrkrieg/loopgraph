@@ -24,6 +24,8 @@ import {
 import { doctorHermesWebhookRoutes } from "./hermes-webhooks";
 import {
   getHermesRouteActivationStatus,
+  type HermesRouteActivationAuthorityProvider,
+  type HermesRouteActivationStore,
   type HermesRouteActivationStatus
 } from "./hermes-route-activation";
 import { enqueueLoopControllerTriggerBestEffort } from "./loop-controller-triggers";
@@ -105,7 +107,10 @@ export async function scheduleDueMeasurements(input: {
   backfillWindows?: number;
   maxAttempts?: number;
   now?: Date;
-}, options: { store?: MeasurementStore } = {}): Promise<{
+}, options: {
+  store?: MeasurementStore;
+  routeActivationStore?: HermesRouteActivationStore;
+} = {}): Promise<{
   schemaVersion: "measurement-scheduler/v1alpha1";
   scheduledAt: string;
   created: MeasurementJob[];
@@ -375,7 +380,11 @@ export async function reconcileConnectionsAndMeasurements(input: {
   healthStaleAfterHours?: number;
   measurementOverdueAfterHours?: number;
   now?: Date;
-}, options: { store?: MeasurementStore } = {}): Promise<{
+}, options: {
+  store?: MeasurementStore;
+  routeActivationStore?: HermesRouteActivationStore;
+  routeActivationAuthorityProvider?: HermesRouteActivationAuthorityProvider;
+} = {}): Promise<{
   report: ConnectionReconciliationReport;
   controllerTrigger: Awaited<ReturnType<typeof enqueueLoopControllerTriggerBestEffort>>;
 }> {
@@ -393,7 +402,12 @@ export async function reconcileConnectionsAndMeasurements(input: {
   const [plan, webhook, activation, bindings, instances, jobs] = await Promise.all([
     buildConnectionPlan({ projectRoot, now }),
     doctorHermesWebhookRoutes({ projectRoot, now }),
-    safeHermesRouteActivationStatus(projectRoot, now),
+    safeHermesRouteActivationStatus(
+      projectRoot,
+      now,
+      options.routeActivationStore,
+      options.routeActivationAuthorityProvider
+    ),
     store.listMetricBindings(),
     readConnectionInstances(projectRoot),
     store.listMeasurementJobs()
@@ -495,8 +509,8 @@ export async function reconcileConnectionsAndMeasurements(input: {
     });
   }
 
-  const providerRouteCount = webhook.plan.routes.filter((route) => route.routeKind === "provider_event").length;
-  if (webhook.ok && providerRouteCount > 0) {
+  const routedEventCount = webhook.plan.routes.filter((route) => route.routeKind !== "loopgraph_lifecycle").length;
+  if (webhook.ok && routedEventCount > 0) {
     const activationEvidence = activation.planDigest
       ? [`hermes-route-activation:${activation.planDigest}`]
       : [];
@@ -504,7 +518,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
       addIssue({
         severity: "blocking",
         kind: "webhook_activation_missing",
-        summary: `${providerRouteCount} provider route${providerRouteCount === 1 ? " has" : "s have"} no Hermes controller activation receipt.`,
+        summary: `${routedEventCount} routed event contract${routedEventCount === 1 ? " has" : "s have"} no Hermes controller activation receipt.`,
         repairAction: "Prepare and confirm the current Hermes shadow-route plan through the workload-authenticated Route Controller.",
         evidenceRefs: []
       });
@@ -517,9 +531,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
         evidenceRefs: activationEvidence
       });
     } else if (!activation.ready) {
-      const unready = activation.routeStates.filter((route) =>
-        route.state !== "shadow" || !["active", "not_applicable"].includes(route.subscriptionState)
-      );
+      const unready = activation.routeStates.filter((route) => !route.ready);
       for (const route of unready.length > 0 ? unready : [{
         routeName: "Hermes route set",
         state: "degraded" as const,
@@ -565,7 +577,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
       metricBindingsHash: contentHash(bindings),
       webhookCatalogVersion: webhook.plan.catalogVersion,
       webhookActivationPlanDigest: activation.planDigest,
-      webhookActivationReady: providerRouteCount === 0 || activation.ready,
+      webhookActivationReady: routedEventCount === 0 || activation.ready,
       issues,
       checkedAt: now.toISOString()
     })}`,
@@ -575,7 +587,7 @@ export async function reconcileConnectionsAndMeasurements(input: {
     metricBindingsHash: contentHash(bindings),
     webhookCatalogVersion: webhook.plan.catalogVersion,
     webhookManifestOk: webhook.ok,
-    webhookActivationReady: providerRouteCount === 0 || activation.ready,
+    webhookActivationReady: routedEventCount === 0 || activation.ready,
     webhookActivationPlanDigest: activation.planDigest,
     checkedConnectionIds: instances.map((instance) => instance.id).sort(),
     checkedBindingIds: bindings.map((binding) => binding.id).sort(),
@@ -597,14 +609,21 @@ export async function reconcileConnectionsAndMeasurements(input: {
 
 async function safeHermesRouteActivationStatus(
   projectRoot: string,
-  now: Date
+  now: Date,
+  recordStore?: HermesRouteActivationStore,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
 ): Promise<HermesRouteActivationStatus> {
   try {
-    return await getHermesRouteActivationStatus({ projectRoot, now });
+    return await getHermesRouteActivationStatus({
+      projectRoot,
+      now,
+      recordStore,
+      authorityProvider
+    });
   } catch (error) {
     return {
       projectRoot,
-      recordPath: path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
+      recordPath: recordStore?.reference ?? path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
       checkedAt: now.toISOString(),
       exists: true,
       current: false,

@@ -2,18 +2,272 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { LOOPGRAPH_API_VERSION, LOOP_KIND, type HermesRouteControllerRequest } from "../core";
+import {
+  APP_INSTALL_SCHEMA_VERSION,
+  LOOPGRAPH_API_VERSION,
+  LOOP_KIND,
+  canonicalAppDigest,
+  workspaceAppInstallationSchema,
+  type HermesRouteControllerRequest
+} from "../core";
+import { appInstallationRegistrySchema } from "./app-installation-store";
 import {
   activateHermesRoutes,
   activationRecordPath,
   getHermesRouteActivationStatus,
-  prepareHermesRouteActivation
+  HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION,
+  prepareHermesRouteActivation,
+  type HermesRouteActivationAuthorityProvider
 } from "./hermes-route-activation";
 import { syncHermesWebhookRoutes } from "./hermes-webhooks";
 import { writeConnectionInstances } from "./connector-registry";
 import type { WorkloadTokenProvider } from "./workload-token-provider";
 
 describe("Hermes route activation", () => {
+  it("prepares Hermes-generated business-event routes without a provider subscription", async () => {
+    const projectRoot = await createProject();
+    const specPath = path.join(projectRoot, "loops", "marketing_ads.loopgraph.json");
+    const spec = JSON.parse(await readFile(specPath, "utf8")) as {
+      routing: { accepts: Array<{ sourcePattern: string; eventTypePattern: string }> };
+    };
+    spec.routing.accepts[0]!.sourcePattern = "hermes";
+    spec.routing.accepts[0]!.eventTypePattern = "marketing.campaign_evidence_ready";
+    await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+    await syncHermesWebhookRoutes({ projectRoot, now: new Date("2026-08-23T11:58:00.000Z") });
+
+    const plan = await prepareHermesRouteActivation({
+      projectRoot,
+      now: new Date("2026-08-23T11:59:00.000Z")
+    });
+
+    expect(plan.routes).toContainEqual(expect.objectContaining({
+      routeKind: "internal_business_event",
+      sourcePattern: "hermes",
+      transformation: expect.objectContaining({ transformerId: "hermes-business-event-envelope/v1alpha1" }),
+      subscription: {
+        owner: "hermes",
+        policy: "notification_only",
+        connectionIds: [],
+        required: false
+      }
+    }));
+  });
+
+  it("specializes provider-agnostic loop routes to each connected reviewed transformer", async () => {
+    const projectRoot = await createProject();
+    const specPath = path.join(projectRoot, "loops", "marketing_ads.loopgraph.json");
+    const spec = JSON.parse(await readFile(specPath, "utf8")) as {
+      routing: { accepts: Array<{ sourcePattern: string; eventTypePattern: string }> };
+    };
+    spec.routing.accepts[0]!.sourcePattern = "*";
+    spec.routing.accepts[0]!.eventTypePattern = "lead.created";
+    await writeFile(specPath, `${JSON.stringify(spec, null, 2)}\n`);
+    await syncHermesWebhookRoutes({ projectRoot, now: new Date("2026-08-23T11:58:00.000Z") });
+    await writeConnectionInstances(projectRoot, [{
+      schemaVersion: "connection-instance/v1alpha1",
+      id: "connection_hubspot_1",
+      manifestId: "hubspot",
+      source: "hermes_connector_broker",
+      brokerCapabilities: ["provider.webhooks.subscribe", "provider.webhooks.verify"],
+      capabilityKeys: ["crm.read", "crm.events"],
+      grantedScopes: ["crm.objects.contacts.read"],
+      status: "connected",
+      environment: "sandbox",
+      readPolicy: "read_only",
+      writePolicy: "not_allowed"
+    }]);
+
+    const plan = await prepareHermesRouteActivation({
+      projectRoot,
+      now: new Date("2026-08-23T11:59:00.000Z")
+    });
+
+    expect(plan.routes).toContainEqual(expect.objectContaining({
+      routeKind: "provider_event",
+      sourcePattern: "hubspot*",
+      loopIds: ["marketing_ads"],
+      transformation: expect.objectContaining({ transformerId: "hubspot-event-envelope/v1alpha1" }),
+      subscription: expect.objectContaining({
+        connectionIds: ["connection_hubspot_1"],
+        required: true
+      })
+    }));
+    expect(plan.routes.some((route) => route.routeName.startsWith("loopgraph-hubspot-events-"))).toBe(true);
+  });
+
+  it("uses the App installation's exact provider binding for wildcard routes", async () => {
+    const projectRoot = await createProject();
+    const originalSpecPath = path.join(projectRoot, "loops", "marketing_ads.loopgraph.json");
+    const spec = JSON.parse(await readFile(originalSpecPath, "utf8")) as {
+      routing: {
+        accepts: Array<{ sourcePattern: string; eventTypePattern: string }>;
+        requiredConnections: string[];
+      };
+    };
+    spec.routing.accepts[0]!.sourcePattern = "*";
+    spec.routing.accepts[0]!.eventTypePattern = "lead.created";
+    spec.routing.requiredConnections = ["crm.lead.read"];
+    const installationId = "install.sales";
+    const installedSpecPath = path.join(
+      projectRoot,
+      ".loopgraph",
+      "apps",
+      "installations",
+      installationId,
+      "generated",
+      "loops",
+      "marketing_ads.loopgraph.json"
+    );
+    await mkdir(path.dirname(installedSpecPath), { recursive: true });
+    await writeFile(installedSpecPath, `${JSON.stringify(spec, null, 2)}\n`);
+    await writeFile(path.join(projectRoot, ".loopgraph", "workspace.json"), `${JSON.stringify({
+      version: 1,
+      demoCatalogEnabled: false,
+      registeredSpecs: [{
+        id: "marketing_ads",
+        name: "Ads",
+        path: path.relative(projectRoot, installedSpecPath),
+        department: "marketing",
+        addedAt: "2026-08-23T12:00:00.000Z"
+      }]
+    }, null, 2)}\n`);
+    await writeAppInstallationRegistry(projectRoot, installationId, "connection_hubspot_1");
+    await syncHermesWebhookRoutes({ projectRoot, now: new Date("2026-08-23T11:58:00.000Z") });
+    await writeConnectionInstances(projectRoot, [
+      {
+        schemaVersion: "connection-instance/v1alpha1",
+        id: "connection_hubspot_1",
+        manifestId: "hubspot",
+        source: "hermes_connector_broker",
+        brokerCapabilities: ["provider.webhooks.subscribe", "provider.webhooks.verify"],
+        capabilityKeys: ["crm.read", "crm.events"],
+        grantedScopes: ["crm.objects.contacts.read"],
+        status: "connected",
+        environment: "sandbox",
+        readPolicy: "read_only",
+        writePolicy: "not_allowed"
+      },
+      {
+        schemaVersion: "connection-instance/v1alpha1",
+        id: "connection_google_ads_1",
+        manifestId: "google_ads",
+        source: "hermes_connector_broker",
+        brokerCapabilities: ["provider.webhooks.subscribe", "provider.webhooks.verify"],
+        capabilityKeys: ["ads.read", "ads.events"],
+        grantedScopes: ["https://www.googleapis.com/auth/adwords"],
+        status: "connected",
+        environment: "sandbox",
+        readPolicy: "read_only",
+        writePolicy: "not_allowed"
+      }
+    ]);
+
+    const plan = await prepareHermesRouteActivation({
+      projectRoot,
+      now: new Date("2026-08-23T11:59:00.000Z")
+    });
+
+    const appRoutes = plan.routes.filter((route) => route.loopIds.includes("marketing_ads"));
+    expect(appRoutes).toHaveLength(1);
+    expect(appRoutes[0]).toMatchObject({
+      sourcePattern: "hubspot*",
+      requiredCapabilities: ["crm.lead.read"],
+      transformation: { transformerId: "hubspot-event-envelope/v1alpha1" },
+      subscription: { connectionIds: ["connection_hubspot_1"], required: true }
+    });
+  });
+
+  it("prepares a hosted plan from an injected registry authority without a local manifest", async () => {
+    const projectRoot = await mkdtemp(path.join(tmpdir(), "loopgraph-hosted-route-authority-"));
+    const authorityProvider: HermesRouteActivationAuthorityProvider = async (input) => {
+      expect(input.projectRoot).toBe(projectRoot);
+      return {
+        schemaVersion: HERMES_ROUTE_ACTIVATION_AUTHORITY_SCHEMA_VERSION,
+        projectRootHash: "1111111111111111",
+        manifestDigest: "2222222222222222",
+        webhookPlan: {
+          schemaVersion: "hermes-webhook-plan/v1alpha1",
+          projectRoot,
+          generatedAt: input.now.toISOString(),
+          catalogVersion: "catalog_distributed_v1",
+          summary: { routeCount: 1, eventFamilyCount: 1, loopCount: 1, broadRouteCount: 1 },
+          routes: [{
+            routeKind: "provider_event",
+            routeName: "loopgraph-all-provider-events",
+            routeId: "hermes_route_all_providers",
+            sourcePattern: "*",
+            eventTypePatterns: ["feedback.received"],
+            subjectTypes: ["customer"],
+            loopIds: ["product_feedback"],
+            departments: ["product"],
+            requiredFields: ["subject.id"],
+            requiredConnections: ["crm.lead.read"],
+            requiredConnectionsByLoopId: { product_feedback: ["crm.lead.read"] },
+            skills: ["loopgraph-event-router"],
+            restrictedMcpTools: ["loopgraph_events_ingest"],
+            deliveryMode: "log",
+            auth: {
+              owner: "hermes",
+              secretStorage: "hermes",
+              instruction: "Hermes verifies the provider delivery before normalization."
+            },
+            transform: {
+              outputSchema: "EventEnvelope",
+              dropsRawPayload: true,
+              stableDeliveryIdRequired: true,
+              untrustedPayloadFields: []
+            },
+            filters: ["Accept only the declared event family."],
+            configPreview: {
+              routeKey: "loopgraph-all-provider-events",
+              events: ["feedback.received"],
+              skills: ["loopgraph-event-router"],
+              deliver: "log",
+              mcpTools: ["loopgraph_events_ingest"]
+            },
+            warnings: ["Wildcard route requires an exact App connection binding."]
+          }],
+          warnings: [],
+          nextActions: []
+        },
+        connections: [
+          connection("connection_hubspot_1", "hubspot", ["crm.lead.read"]),
+          connection("connection_google_ads_1", "google_ads", ["ads.read"])
+        ],
+        appConnectionBindingsByLoopId: {
+          product_feedback: ["connection_hubspot_1"]
+        },
+        warnings: []
+      };
+    };
+
+    const plan = await prepareHermesRouteActivation({
+      projectRoot,
+      authorityProvider,
+      now: new Date("2026-08-23T12:00:00.000Z")
+    });
+
+    expect(plan).toMatchObject({
+      projectRootHash: "1111111111111111",
+      manifestDigest: "2222222222222222",
+      catalogVersion: "catalog_distributed_v1",
+      routes: [expect.objectContaining({
+        sourcePattern: "hubspot*",
+        loopIds: ["product_feedback"],
+        transformation: expect.objectContaining({
+          transformerId: "hubspot-event-envelope/v1alpha1"
+        }),
+        subscription: expect.objectContaining({
+          connectionIds: ["connection_hubspot_1"],
+          required: true
+        })
+      })]
+    });
+    expect(plan.routes).toHaveLength(1);
+    await expect(readFile(path.join(projectRoot, ".loopgraph", "hermes-routes.json"), "utf8"))
+      .rejects.toThrow();
+  });
+
   it("prepares a content-bound, secret-free controller plan from a current route manifest", async () => {
     const projectRoot = await createProject();
     await syncHermesWebhookRoutes({ projectRoot, now: new Date("2026-08-23T12:00:00.000Z") });
@@ -168,6 +422,23 @@ describe("Hermes route activation", () => {
       }) as typeof fetch
     })).rejects.toMatchObject({ code: "controller_receipt_contract_mismatch" });
 
+    await expect(activateHermesRoutes({
+      projectRoot,
+      now,
+      controllerUrl: "https://hermes.example.test/v1/loopgraph/routes/reconcile",
+      audience: "hermes-controller",
+      confirmationDigest: plan.planDigest,
+      tokenProvider,
+      fetcher: (async (_url: string | URL | Request, init?: RequestInit) => {
+        const request = JSON.parse(String(init?.body)) as HermesRouteControllerRequest;
+        const receipt = controllerReceipt(request);
+        const providerRoute = receipt.routes.find((_route, index) => request.routes[index]?.subscription.required);
+        if (!providerRoute) throw new Error("Expected a provider route");
+        providerRoute.subscriptionState = "not_applicable";
+        return Response.json(receipt);
+      }) as typeof fetch
+    })).rejects.toMatchObject({ code: "controller_receipt_subscription_mismatch" });
+
     await expect(readFile(activationRecordPath(projectRoot), "utf8")).rejects.toThrow();
   });
 });
@@ -268,4 +539,81 @@ async function createProject(): Promise<string> {
     }]
   }, null, 2)}\n`);
   return projectRoot;
+}
+
+function connection(id: string, manifestId: string, capabilityKeys: string[]) {
+  return {
+    schemaVersion: "connection-instance/v1alpha1" as const,
+    id,
+    manifestId,
+    source: "hermes_connector_broker" as const,
+    brokerCapabilities: ["provider.webhooks.subscribe", "provider.webhooks.verify"],
+    capabilityKeys,
+    grantedScopes: [],
+    status: "connected" as const,
+    environment: "sandbox" as const,
+    readPolicy: "read_only" as const,
+    writePolicy: "not_allowed" as const
+  };
+}
+
+async function writeAppInstallationRegistry(
+  projectRoot: string,
+  installationId: string,
+  connectionId: string
+): Promise<void> {
+  const timestamp = "2026-08-23T12:00:00.000Z";
+  const appId = "io.loopgraph.sales";
+  const version = "1.0.0";
+  const installation = workspaceAppInstallationSchema.parse({
+    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+    id: installationId,
+    workspaceId: "acme",
+    appId,
+    version,
+    artifactDigest: canonicalAppDigest("sales-app"),
+    state: "ready_to_test",
+    mode: "shadow",
+    selectedModules: [],
+    presetId: "default",
+    configuration: {
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      appId,
+      version,
+      fields: [],
+      values: {},
+      provenance: {},
+      completedAt: timestamp
+    },
+    connectionBindings: { "crm.lead.read": connectionId },
+    operationBindings: {
+      "crm.lead.read": {
+        providerId: "hubspot",
+        providerOperation: "hubspot.contacts.read",
+        operation: "crm.leads.read",
+        executor: "connector_broker",
+        connectionId,
+        brokerCapability: "provider.data.read"
+      }
+    },
+    fieldMappingIds: [],
+    permissions: [],
+    ownedAssets: [],
+    history: [],
+    installedAt: timestamp,
+    updatedAt: timestamp,
+    installedBy: "operator"
+  });
+  const registry = appInstallationRegistrySchema.parse({
+    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+    workspaceId: "acme",
+    revision: 1,
+    installations: [installation],
+    assets: [],
+    evaluations: [],
+    updatedAt: timestamp
+  });
+  const appsRoot = path.join(projectRoot, ".loopgraph", "apps");
+  await mkdir(appsRoot, { recursive: true });
+  await writeFile(path.join(appsRoot, "installations.json"), `${JSON.stringify(registry, null, 2)}\n`);
 }

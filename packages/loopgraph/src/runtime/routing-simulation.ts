@@ -88,6 +88,7 @@ export type HermesLocalRouteTestResult = {
   event: EventEnvelope;
   ingest: EventIngestResult & {
     catalogVersion: string;
+    learningContextDigest: string;
   };
   decision?: RoutingDecision;
   submission?: RoutingDecisionSubmissionResult;
@@ -240,6 +241,7 @@ export async function runHermesLocalRouteTest(
   const submission = await loopgraph_routing_decision_submit({
     projectRoot,
     decision,
+    learningContextDigest: ingest.learningContextDigest,
     hermesMetadata: {
       mode: "local-shadow-route-test",
       sourceRoute: event.sourceRoute

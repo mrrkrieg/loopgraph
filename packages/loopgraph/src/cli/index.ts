@@ -20,6 +20,7 @@ import type { LoopControllerTriggerType } from "../core";
 import { normalizeLoopgraphMcpExposure, runLoopgraphMcpStdioServer } from "../mcp/server";
 import {
   doctorHermesIntegration,
+  deactivateHermesIntegration,
   installHermesIntegration,
   setupHermesIntegration,
   type HermesInstallScope,
@@ -184,7 +185,7 @@ program
   .description("Prepare an empty local workspace, install the project-local Hermes integration, and synchronize safe routes")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--name <name>", "Workspace display name")
-  .option("--activate", "Register generated MCP servers and the Loopgraph skill with Hermes")
+  .option("--activate", "Register generated MCP servers and the Loopgraph design/router skills with Hermes")
   .option("--host <host>", "Host for the local Studio launch plan", "localhost")
   .option("--port <port>", "Port for the local Studio launch plan", "3000")
   .option("--json", "Print the setup result as JSON")
@@ -2113,7 +2114,7 @@ hermes
   .description("Initialize, install, and check the project-local Hermes Brain integration")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--scope <scope>", "Install scope (project)", "project")
-  .option("--activate", "Register MCP servers and the GitHub-hosted skill with Hermes")
+  .option("--activate", "Register MCP servers and the GitHub-hosted design/router skills with Hermes")
   .option("--json", "Print the setup result as JSON")
   .action(async (options: { project: string; scope: string; json?: boolean; activate?: boolean }) => {
     await runHermesSetup(options);
@@ -2169,6 +2170,19 @@ hermes
   .option("--project <root>", "Explicit project root", process.cwd())
   .action(async (options: { project: string }) => {
     await runHermesDoctor(options);
+  });
+
+hermes
+  .command("disconnect")
+  .description("Remove Loopgraph MCP registrations while preserving company data and credentials")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--yes", "Explicitly confirm the disconnect")
+  .action(async (options: { project: string; yes?: boolean }) => {
+    if (!options.yes) throw new Error("hermes disconnect requires --yes");
+    const result = await deactivateHermesIntegration({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
   });
 
 hermesWebhooks
