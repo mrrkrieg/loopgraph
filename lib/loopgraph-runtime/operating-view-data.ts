@@ -1,8 +1,8 @@
 import {
-  FileMeasurementStore,
-  FileOutcomeStore,
+  compileRoutingLearningEffectiveness,
   listGraphChangeSets,
-  listLoopOpportunities
+  listLoopOpportunities,
+  type RoutingLearningEffectiveness
 } from "loopgraph/runtime";
 import { isHostedPreview } from "@/lib/hosted-preview";
 import {
@@ -11,6 +11,9 @@ import {
   getLoopControllerStore,
   getLoopOpportunityStore,
   getLoopgraphRoot,
+  getMeasurementStore,
+  getOutcomeStore,
+  getRoutingStore,
   getSemanticGraphStore
 } from "@/lib/loopgraph-runtime/storage-resolver";
 
@@ -150,6 +153,7 @@ export type OperatingViewData = {
     runs: ControllerRunView[];
   };
   learning: {
+    routing: RoutingLearningEffectiveness;
     bindings: LearningBindingView[];
     outcomes: OutcomeView[];
     reconciliation?: {
@@ -186,8 +190,9 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
   const hermesDesignStore = getHermesDesignStore();
   const controllerStore = getLoopControllerStore({ projectRoot });
   const opportunityStore = getLoopOpportunityStore({ projectRoot });
-  const outcomeStore = new FileOutcomeStore(loopgraphRoot);
-  const measurementStore = new FileMeasurementStore(loopgraphRoot);
+  const outcomeStore = getOutcomeStore({ projectRoot });
+  const measurementStore = getMeasurementStore({ projectRoot });
+  const routingStore = getRoutingStore({ rootDir: loopgraphRoot });
 
   const [
     opportunities,
@@ -204,7 +209,8 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
     reconciliationReports,
     samples,
     outcomes,
-    valueEntries
+    valueEntries,
+    routingLearning
   ] = await Promise.all([
     listLoopOpportunities(projectRoot, {}, opportunityStore),
     listGraphChangeSets(projectRoot, undefined, opportunityStore),
@@ -220,7 +226,8 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
     measurementStore.listReconciliationReports(),
     outcomeStore.listMetricSamples(),
     outcomeStore.listObservedOutcomes(),
-    outcomeStore.listValueLedgerEntries()
+    outcomeStore.listValueLedgerEntries(),
+    compileRoutingLearningEffectiveness(routingStore)
   ]);
 
   const mappedOpportunities: OpportunityView[] = opportunities.map((item) => ({
@@ -359,6 +366,7 @@ export async function getOperatingViewData(): Promise<OperatingViewData> {
       }))
     },
     learning: {
+      routing: routingLearning,
       bindings: bindings.map((binding) => {
         const bindingJobs = jobsByBinding.get(binding.id) ?? [];
         const bindingSamples = samplesByLoopMetric.get(`${binding.loopId}:${binding.metricKey}`) ?? [];
@@ -711,6 +719,77 @@ export function buildHostedOperatingPreview(): OperatingViewData {
       ]
     },
     learning: {
+      routing: {
+        schemaVersion: "routing-learning-effectiveness/v1alpha1",
+        generatedAt: "2026-07-28T18:00:00.000Z",
+        attempts: {
+          total: 86,
+          committed: 78,
+          rejected: 8,
+          evidenceAcknowledged: 82,
+          evidenceUnacknowledged: 4,
+          evidenceNotRecorded: 0,
+          staleEvidenceRejected: 3,
+          evidenceCoverageRate: 82 / 86,
+          actions: {
+            route: 61,
+            append_evidence: 9,
+            ignore: 2,
+            defer: 3,
+            request_human: 7,
+            unhandled: 4
+          }
+        },
+        humanFeedback: {
+          corrections: 5,
+          correctedAttempts: 5
+        },
+        evaluations: {
+          total: 48,
+          passed: 45,
+          failed: 3,
+          passRate: 45 / 48
+        },
+        loops: [
+          { loopId: "product_activation_recovery", selected: 21, expected: 18, correctedSelections: 1, evaluated: 18, passed: 17, failed: 1 },
+          { loopId: "support_priority_triage", selected: 19, expected: 16, correctedSelections: 2, evaluated: 16, passed: 15, failed: 1 },
+          { loopId: "marketing_ads", selected: 14, expected: 9, correctedSelections: 1, evaluated: 9, passed: 8, failed: 1 },
+          { loopId: "marketing_content_creation", selected: 7, expected: 5, correctedSelections: 1, evaluated: 5, passed: 5, failed: 0 }
+        ],
+        recentDecisions: [
+          {
+            attemptId: "preview-route-product-activation",
+            eventId: "evt_product_account_inactivity",
+            createdAt: "2026-07-28T17:48:00.000Z",
+            status: "committed",
+            action: "route",
+            selectedLoopIds: ["product_activation_recovery"],
+            evidenceState: "acknowledged",
+            staleEvidenceRejected: false
+          },
+          {
+            attemptId: "preview-route-support-review",
+            eventId: "evt_support_enterprise_risk",
+            createdAt: "2026-07-28T17:31:00.000Z",
+            status: "committed",
+            action: "request_human",
+            selectedLoopIds: [],
+            evidenceState: "acknowledged",
+            staleEvidenceRejected: false
+          },
+          {
+            attemptId: "preview-route-ads-stale",
+            eventId: "evt_ads_qualified_pipeline_drop",
+            createdAt: "2026-07-28T17:08:00.000Z",
+            status: "rejected",
+            action: "route",
+            selectedLoopIds: ["marketing_ads"],
+            evidenceState: "unacknowledged",
+            staleEvidenceRejected: true
+          }
+        ],
+        truncated: { loops: false, recentDecisions: true }
+      },
       bindings: [
         {
           id: "preview-binding-activation",
