@@ -36,6 +36,10 @@ describe("hosted App evidence health staging validation", () => {
           }
         });
       }
+      if (url.pathname === "/api/operations/audit-export") {
+        expect(authorization).toBe(`Bearer ${tokens.observability}`);
+        return auditFixture("app_evidence_health_123e4567-e89b-42d3-a456-426614174999");
+      }
       expect(url.pathname).toBe("/api/cron/app-evidence-health");
       expect(authorization).toBe(`Bearer ${tokens.schedule}`);
       const requestId = headers.get("x-loopgraph-request-id") ?? "";
@@ -57,12 +61,28 @@ describe("hosted App evidence health staging validation", () => {
     });
 
     expect(receipt).toMatchObject({
-      schemaVersion: "hosted-app-evidence-health-staging-validation/v1",
+      schemaVersion: "hosted-app-evidence-health-staging-validation/v3",
       targetOrigin: "https://staging.loopgraph.test",
       organizationId: config.organizationId,
       projectKey: config.projectKey,
       checkedAt: "2026-08-23T12:00:00.000Z",
       durationMs: 25,
+      auditEvidence: {
+        afterSequence: 10,
+        throughSequence: 12,
+        headHash: "c".repeat(64),
+        requestId: "app_evidence_health_123e4567-e89b-42d3-a456-426614174999"
+      },
+      classificationEvidence: {
+        cases: [
+          { status: "invalid", expectedHealth: "blocked", observedHealth: "blocked", ok: true },
+          { status: "expired", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "renew_soon", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "incomplete", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "current", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "not_applicable", expectedHealth: "healthy", observedHealth: "healthy", ok: true }
+        ]
+      },
       projection: {
         health: "degraded",
         totalInstallations: 5,
@@ -83,7 +103,9 @@ describe("hosted App evidence health staging validation", () => {
       "authorized_health_projection",
       "replay_denial",
       "aggregate_only_contract",
-      "metrics_projection_parity"
+      "metrics_projection_parity",
+      "classification_fixture_rehearsal",
+      "independent_audit_evidence"
     ]);
     const serialized = JSON.stringify(receipt);
     expect(serialized).not.toContain(tokens.schedule);
@@ -122,11 +144,36 @@ describe("hosted App evidence health staging validation", () => {
     )).rejects.toThrow(/must use HTTPS/i);
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it("rejects a projection whose accepted request is absent from the verified audit chain", async () => {
+    const fetcher = stagedFetcher(projectionFixture(), metricsFixture(), "other_request");
+    await expect(validateHostedAppEvidenceHealthStaging(config, tokens, {
+      fetcher,
+      requestId: () => "123e4567-e89b-42d3-a456-426614174999",
+      now: () => new Date("2026-08-23T12:00:00.000Z")
+    })).rejects.toThrow(/omitted the accepted machine request/i);
+  });
+
+  it("rejects a verified audit export projected for another tenant", async () => {
+    const fetcher = stagedFetcher(
+      projectionFixture(),
+      metricsFixture(),
+      "app_evidence_health_123e4567-e89b-42d3-a456-426614174999",
+      "00000000-0000-4000-8000-000000000001"
+    );
+    await expect(validateHostedAppEvidenceHealthStaging(config, tokens, {
+      fetcher,
+      requestId: () => "123e4567-e89b-42d3-a456-426614174999",
+      now: () => new Date("2026-08-23T12:00:00.000Z")
+    })).rejects.toThrow(/crossed its requested tenant or cursor scope/i);
+  });
 });
 
 function stagedFetcher(
   projection: Record<string, unknown>,
-  metrics = metricsFixture()
+  metrics = metricsFixture(),
+  auditedRequestId = "app_evidence_health_123e4567-e89b-42d3-a456-426614174999",
+  auditOrganizationId = config.organizationId
 ) {
   const acceptedRequestIds = new Set<string>();
   return vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -138,6 +185,9 @@ function stagedFetcher(
     }
     if (url.pathname === "/api/operations/metrics") {
       return new Response(metrics, { headers: { "cache-control": "no-store" } });
+    }
+    if (url.pathname === "/api/operations/audit-export") {
+      return auditFixture(auditedRequestId, auditOrganizationId);
     }
     const requestId = headers.get("x-loopgraph-request-id") ?? "";
     if (acceptedRequestIds.has(requestId)) return json({ error: "replayed" }, 409);
@@ -170,6 +220,7 @@ function projectionFixture(): Record<string, unknown> {
 function metricsFixture() {
   return [
     "loopgraph_ready 1",
+    "loopgraph_security_audit_head_sequence 10",
     "loopgraph_app_evidence_health 0",
     "loopgraph_app_evidence_installations_total 5",
     "loopgraph_app_evidence_invalid 0",
@@ -182,6 +233,27 @@ function metricsFixture() {
     "loopgraph_app_evidence_plan_truncated 0",
     ""
   ].join("\n");
+}
+
+function auditFixture(requestId: string, organizationId = config.organizationId) {
+  return json({
+    schemaVersion: "loopgraph-security-audit-export/v2",
+    organizationId,
+    projectKey: config.projectKey,
+    afterSequence: 10,
+    throughSequence: 12,
+    nextCursor: 12,
+    hasMore: false,
+    integrity: {
+      valid: true,
+      headHash: "c".repeat(64)
+    },
+    events: [{
+      event_type: "machine.request.authorized",
+      capability: "schedule.app_evidence_health",
+      request_id: requestId
+    }]
+  });
 }
 
 function json(body: unknown, status = 200) {
