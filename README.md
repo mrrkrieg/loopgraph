@@ -76,7 +76,7 @@ For every verified event, Hermes can ask:
 6. Is there one clear route, or is explicit fan-out permitted?
 7. Should Hermes abstain and request more context or human judgment?
 
-Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run.
+Loopgraph independently confirms that the proposed route exists, accepts the event, has the required evidence, is active, and is permitted to run. Every new Hermes decision can echo the learning-context digest returned by ingest; Loopgraph recomputes it, rejects stale evidence, and stores the exact bounded evidence packet with the durable routing attempt.
 
 ## Product example
 
@@ -120,6 +120,10 @@ The automation is not successful merely because it produced a brief. It is succe
 | The diagram documents the workflow | Governed graph changes update backend topology and routing contracts |
 | Automations optimize local activity | Evidence can improve decisions across departments |
 
+Each event turn now includes a bounded shared-learning context: scoped routing evaluations, accountable human corrections, subject-related outcomes, and observed net value. Hermes can use that evidence to compare eligible loops, append evidence to an existing problem, lower confidence, or abstain. The isolated Hermes router must acknowledge the exact context digest when it submits its decision; stale or omitted evidence cannot create a route commit. The context remains advisory and can never make an ineligible loop eligible or authorize execution. See [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md).
+
+The operator learning view measures whether that system is improving: evidence-binding coverage, stale submissions rejected, abstention and human-review behavior, accountable corrections, golden-event pass rate, per-loop routing quality, observed outcomes, and net value remain separate signals. High route volume is never presented as success by itself.
+
 Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer. It provides the company operating contract around recurring AI work: **context, routing, policy, evidence, approval, escalation, and outcome**. See the [competitive boundary](docs/competitive-boundary.md).
 
 ## What a loop contains
@@ -142,7 +146,7 @@ Materialization creates the graph nodes, connection requirements, routing contra
 
 ### Requirements
 
-- Node.js 22+ and npm
+- Git, Node.js 22+, and npm
 - A local [Hermes Agent](https://github.com/NousResearch/hermes-agent) installation
 
 Confirm Hermes is available:
@@ -151,7 +155,40 @@ Confirm Hermes is available:
 hermes --version
 ```
 
-Clone Loopgraph and activate the project-local Hermes integration:
+### Install directly from Hermes
+
+Install the narrow native plugin boundary from this repository, then bootstrap one empty company project:
+
+```bash
+mkdir loopgraph-company
+cd loopgraph-company
+hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable
+hermes plugins doctor loopgraph --ci
+hermes loopgraph plan --project .
+hermes loopgraph install --project . --yes
+```
+
+The plan is read-only. The confirmed install uses the exact Git commit recorded by Hermes, verifies the package-lock digest embedded in that same plugin revision, disables npm lifecycle scripts during dependency installation, builds the Loopgraph package, requires a clean production audit, and only then creates `.loopgraph/` and registers the scoped MCP servers. The plugin never accepts provider credentials. Omit activation with `--no-activate` when you want to inspect the generated Hermes configuration first.
+
+Restart Hermes and say:
+
+```text
+start Loopgraph
+```
+
+Hermes loads the bundled design skill, shows the department catalog when the workspace is empty, asks only unresolved questions, explains the proposed loops and required connections, and materializes only proposals you accept.
+
+Start the local operating plane and company graph from the company project:
+
+```bash
+hermes loopgraph start --project .
+```
+
+See the [native Hermes plugin contract](docs/HERMES-PLUGIN.md) for update, recovery, trust, and removal behavior.
+
+### Install from a source checkout
+
+Contributors and operators who prefer a visible source checkout can use the existing path:
 
 ```bash
 git clone https://github.com/mrrkrieg/loopgraph.git
@@ -161,15 +198,7 @@ npm run audit:prod
 npm run loopgraph -- setup --project . --activate
 ```
 
-The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`. Omit `--activate` when you want to inspect the generated Hermes configuration before applying it.
-
-Open Hermes and say:
-
-```text
-start Loopgraph
-```
-
-Hermes will show the department catalog, recommend Product as the first example, ask compact questions about your stack and goals, explain the proposed loops, and materialize only the proposals you accept.
+The top-level setup command creates an empty local workspace, generates the Loopgraph Hermes skill, registers the scoped MCP servers, synchronizes the non-secret route manifest, prepares the Studio launch plan, and runs doctor checks. It does not copy preview loops, provider credentials, OAuth tokens, or webhook secrets into `.loopgraph/`.
 
 Start the local operating plane and company graph:
 
@@ -342,7 +371,7 @@ npm run loopgraph -- apps detach <private-installation-id> --expected <artifact-
 npm run loopgraph -- apps uninstall <installation-id> --expected <artifact-digest> --reason "Replaced by private variant" --yes
 ```
 
-Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach journals the exact source revision and owned topology, stages and verifies a confined immutable snapshot, then disables upstream updates only after that snapshot exists. An interrupted detach accepts only the recorded actor, source, topology, and snapshot, while an exact completed retry returns the original receipt. In the browser, a successful duplicate opens the new private installation immediately, labels it with its private App ID instead of the upstream display name, and shows the exact upstream version and provenance. The private App workspace also gives the operator a ready-to-use Hermes handoff for governed capture, parameterization, write-blocked preview, validation, signing, and private-catalog publishing; nothing is signed or published automatically. Rollout changes are graph transactions: activation synchronizes every LoopSpec owned by the installation to the approved routing mode, pause moves those loops back to shadow, and resume restores the last approved mode. A missing or stale owned LoopSpec fails the transition instead of leaving the App badge and runtime graph inconsistent. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence.
+Updates use a three-way merge between the original base, the company overlay, and the new immutable base. New or higher-risk permissions require explicit review. Duplicate apps receive namespaced LoopSpecs; detach journals the exact source revision and owned topology, stages and verifies a confined immutable snapshot, then disables upstream updates only after that snapshot exists. Local runtimes promote an exact directory snapshot atomically. Authenticated hosted runtimes use a private, tenant-scoped Supabase Storage archive with first-writer-wins object identity and a verified per-replica read-through cache, so a retry or later App operation does not depend on the server instance that performed detach. An interrupted detach accepts only the recorded actor, source, topology, and snapshot, while an exact completed retry re-downloads and verifies the archive before returning the original receipt. In the browser, a successful duplicate opens the new private installation immediately, labels it with its private App ID instead of the upstream display name, and shows the exact upstream version and provenance. The private App workspace also gives the operator a ready-to-use Hermes handoff for governed capture, parameterization, write-blocked preview, validation, signing, and private-catalog publishing; nothing is signed or published automatically. Rollout changes are graph transactions: activation synchronizes every LoopSpec owned by the installation to the approved routing mode, pause moves those loops back to shadow, and resume restores the last approved mode. A missing or stale owned LoopSpec fails the transition instead of leaving the App badge and runtime graph inconsistent. Rollback restores the exact prior revision but does not reactivate it, and uninstall retains shared connections, field mappings, company context, entity identities, evaluations, and lifecycle evidence. See [Hosted App snapshots](docs/HOSTED-APP-SNAPSHOTS.md).
 
 ### Build and share a private App
 
@@ -387,13 +416,21 @@ Private catalogs can remain project-confined. Signed catalogs can also be synchr
 
 Every marketplace version carries its exact source ID, transport, URI, commit when applicable, snapshot digest, trust policy, and synchronization time. Refreshing a catalog replaces only versions owned by that source; mirrored versions from other sources survive, while the same semantic version with a different digest fails as an immutable conflict. Marketplace discovery cards show the exact included-loop count, required and optional capabilities, compatible stack presets, publisher, maturity, artifact trust, and honest historical-preview readiness from that immutable version. Maturity is evidence-derived: discovery alone remains `concept`, and `tested` requires a digest-bound receipt proving every required synthetic routing and safety scenario passed with provider writes blocked. A signature proves publisher origin, not behavioral maturity. Installed results open the installed App directly. The detail view also compiles the audience, problem, Hermes behavior, loops, expected outputs, setup inputs, permissions, compatible stacks, topology, proof modes, limitations, maturity evidence, version history, and changelog from that exact artifact. Synthetic examples remain clearly separate from an installed, connected, rehearsed, bounded historical replay.
 
-After installation, Loopgraph computes a stricter operational maturity ceiling that cannot skip gates. `connected` means every required logical capability and setup contract is ready for the exact tested artifact. `production_proven` requires reviewed historical routing plus completed work and observed outcome/value records—not task volume or modeled savings. `loopgraph_verified` additionally requires a signed receipt from an explicitly trusted independent verifier key. The installed-App view shows all four gates, their evidence references, and the next action needed to advance safely.
+After installation, Loopgraph computes a stricter operational maturity ceiling that cannot skip gates. `connected` means every required logical capability and setup contract is ready for the exact tested artifact. `production_proven` requires reviewed historical routing plus completed work and observed outcome/value records—not task volume or modeled savings—and automatically falls back to `connected` when any required source evidence is missing, unbound, older than 30 days, or materially future-dated. `loopgraph_verified` additionally requires a signed receipt from an explicitly trusted independent verifier key and therefore also decays when the underlying production proof expires. Hermes, the CLI, and the installed-App view receive the same per-evidence clock, earliest proof expiry, and seven-day renewal date so teams can refresh proof before maturity drops. A fleet-level renewal plan ranks invalid, expired, renew-soon, incomplete, and current Apps from one tenant-scoped snapshot and gives Hermes one read-only next action for each App. The local supervisor consumes that same plan on its App-health cadence: invalid proof blocks fleet health, expired or renew-soon proof degrades it, and the status file carries the first safe Hermes renewal action. Hosted deployments export aggregate proof-state metrics and run the same tenant projection hourly under a dedicated workload capability; App identities and provider data never enter those metrics. Monitoring never runs a replay, changes provider state, creates approval, promotes an App, or treats human consent as proof.
+
+Activation consumes that evidence instead of merely displaying it. Shadow requires `connected` maturity, including a current Hermes Route Controller receipt for every event route covering the App's owned Loop IDs; a synced local manifest alone is never runtime proof. Each route must be in shadow mode with verified authentication, and every provider-backed route must prove its required subscription is active. Provider-agnostic App routes compile to the exact provider connection selected during installation instead of every connected system. Hermes- and Loopgraph-generated business events remain internal routes and never pretend to be provider subscriptions. Unrelated pending routes remain visible without blocking this App. Local receipts are atomically owner-protected. Hosted desired state is compiled from a consistent tenant/project snapshot of the distributed LoopSpec registry, distributed App ownership/bindings, and secret-free Connector Broker connection state—not a deployment replica's `.loopgraph` files—and concurrent registry drift fails closed. Hosted receipts are append-only, tenant-scoped, RLS-protected, and shared with that same authority by App maturity/onboarding, activation, Management, and measurement reconciliation across replicas. Hosted storage fails closed rather than falling back to ephemeral disk. A dedicated workload-authenticated hosted API exposes the server-derived plan and accepts only its exact confirmation digest; callers cannot choose the tenant, path, controller, identity, routes, connections, or receipt. Recommendation mode additionally requires a passing, completely human-reviewed historical replay whose source-data window ended within the last 30 days; `execute_with_approval` requires `production_proven` maturity plus a completed App run and observed outcome/value windows from the same 30-day freshness horizon, while every execute capability stays approval-bound. Evidence dated more than five minutes into the future fails closed. `loopgraph apps activation-gate` returns the exact blockers before anyone creates authority. Every new approval embeds the immutable gate snapshot, and activation re-evaluates the current gate before consuming the one-time receipt. A human approval cannot override a failed or stale gate, and legacy receipts that predate evidence-bound gates remain readable for audit history but cannot be consumed.
 
 Hermes, the CLI, and the browser use the same maturity service and durable workspace trust registry:
 
 ```bash
 # Inspect the evidence-derived ceiling for one exact installation.
 loopgraph apps maturity <installation-id>
+
+# Rank operating-proof work across the tenant; this performs no writes.
+loopgraph apps renewal-plan --status invalid expired renew_soon
+
+# Explain why the next transition is ready or blocked; this creates no authority.
+loopgraph apps activation-gate <installation-id> --mode recommend
 
 # Inspect current public-key trust, revocations, and receipts.
 loopgraph apps verification-status
@@ -448,6 +485,43 @@ The protected gate uses separate projected allowed, foreign-tenant, revoked,
 and observability identities to prove exact signed delivery, isolation,
 revocation, replay rejection, and audit evidence before promotion. It emits a
 secret-free JSON receipt; it never accepts token text in configuration.
+
+Detached private Apps have a separate hosted release gate:
+`npm run validate:app-snapshots-staging`. On a protected runner it creates one unique
+service-owned archive, proves an authenticated non-service session cannot download,
+insert, replace, or delete it, repeats the immutable upload, recovers the exact signed
+LoopPack through a second empty replica root, and then removes the probe. Its secret-free
+receipt is content-bound into the production promotion manifest; the service-role key is
+accepted only through a private `0600` file and is never copied into the receipt or logs.
+
+The same staging job first runs `npm run probe:app-snapshot-fence` in a random reserved scope. It
+actively proves that registry insert/update/delete and Storage upload/replace/delete all advance
+the live mutation generation, then removes the probe registry, object, and generation row. The
+command is scope-pinned, requires an explicit mutation confirmation, and emits only eight booleans
+plus an opaque scope digest.
+
+Production recovery adds a distinct cross-origin gate:
+`npm run rehearse:app-snapshot-restore`. It exports one exact generated archive from the
+validated source bucket, restores it with first-writer semantics into a separately protected
+Supabase project, loads the signed LoopPack through an empty target runtime, proves target cleanup
+does not affect the source, and then removes only the fresh probe. Separate source and target
+service roles are accepted only through private `0600` files. Production promotion requires the
+fresh receipt and binds both reviewed Storage origins plus the exact artifact and file digests.
+
+Production promotion also requires `npm run reconcile:app-snapshots` against the exact validated
+Storage origin and tenant/project. The protected gate verifies every currently detached App through
+the signed archive loader, first attests that both live database mutation triggers are installed and
+retain their full unconditional row-level event masks, and that independently pinned function
+bodies, owners, search paths, and execute capabilities are exact. It rejects missing, corrupt,
+untracked, or unavailable recovery authority,
+inventories Storage back to current registry authority, rejects malformed objects, and requires an
+independently reviewed digest for any intentionally retained unreferenced archives. It repeats the
+full registry-plus-Storage pass until two consecutive content digests match and fails closed under
+continuous mutation. Registry and Storage triggers maintain one tenant/project generation that is
+checked before the registry and after the final Storage page, so a committed authority mutation
+forces another scan. It contributes only aggregate counts plus opaque scope/fence/generation/retention
+digests to the promotion manifest and never deletes
+archives automatically.
 
 ## Department loop library
 
@@ -612,6 +686,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 ### Get started
 
 - [Hermes Quickstart](docs/HERMES-QUICKSTART.md)
+- [Native Hermes plugin](docs/HERMES-PLUGIN.md)
 - [Local supervisor](docs/LOCAL-SUPERVISOR.md)
 - [Hermes examples](docs/HERMES-EXAMPLES.md)
 - [Company loop library](docs/COMPANY-LOOP-LIBRARY.md)
@@ -624,6 +699,7 @@ The safest path today is to **design locally, accept only relevant loops, rehear
 - [Topology guide](docs/topology-guide.md)
 - [Approval model](docs/approval-model.md)
 - [Outcomes and value](docs/OUTCOMES-AND-VALUE.md)
+- [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md)
 
 ### Runtime and enterprise operations
 
