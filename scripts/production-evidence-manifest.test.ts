@@ -34,6 +34,19 @@ const marketplaceApp = {
   version: "1.0.0",
   artifactDigest: `sha256:${"a".repeat(64)}`
 };
+const marketplaceReleaseRevocationApp = {
+  appId: "staging.release.revocation.probe",
+  version: "1.0.0",
+  artifactDigest: `sha256:${"c".repeat(64)}`
+};
+const workloadIssuerRotation = {
+  issuer: "https://identity.staging.test",
+  jwksUri: "https://identity.staging.test/.well-known/jwks.json",
+  rotationId: "staging-rotation-2026-08-23",
+  previousKid: "issuer-key-a",
+  nextKid: "issuer-key-b"
+};
+const workloadIssuerRotationScopeDigest = canonicalAppDigest(workloadIssuerRotation);
 
 const config: ProductionEvidenceConfig = {
   repository: "mrrkrieg/loopgraph",
@@ -48,6 +61,9 @@ const config: ProductionEvidenceConfig = {
   databaseIdentityDigest,
   marketplaceApp,
   expectedAppSnapshotUnreferencedInventoryDigest: unreferencedInventoryDigest,
+  expectedMarketplaceReleaseRevocationArtifactDigest:
+    marketplaceReleaseRevocationApp.artifactDigest,
+  expectedWorkloadIssuerRotationScopeDigest: workloadIssuerRotationScopeDigest,
   auditRetentionKeyId,
   auditRetentionPublicKeyPem,
   generatedAt,
@@ -60,7 +76,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v9",
+      schemaVersion: "loopgraph-production-promotion-evidence/v16",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -114,6 +130,80 @@ describe("production promotion evidence manifest", () => {
           }
         },
         marketplace: { summary: { checks: 7, artifactDigest: marketplaceApp.artifactDigest } },
+        cliSessions: {
+          summary: {
+            primaryOrigin: deploymentOrigin,
+            replicaOrigin: "https://staging-replica.loopgraph.test",
+            checks: 10,
+            requestRateLimit: 10,
+            deviceFingerprintLimit: 5,
+            auditedRequestId: "cli_rate_12345678",
+            auditThroughSequence: 45,
+            auditHeadHash: "8".repeat(64),
+            disposableSessionRevoked: true
+          }
+        },
+        cliAdmin: {
+          summary: {
+            checks: 5,
+            revokedCount: 1,
+            auditCorrelationId:
+              "cli_session_revoke_123e4567-e89b-42d3-a456-426614174099",
+            auditThroughSequence: 46,
+            auditHeadHash: "9".repeat(64),
+            aal1Denied: true,
+            aal2Required: true,
+            exactSessionScope: true,
+            atomicAuditReceipt: true,
+            disposableSessionRevoked: true
+          }
+        },
+        marketplaceReleaseRevocation: {
+          summary: {
+            appId: marketplaceReleaseRevocationApp.appId,
+            version: marketplaceReleaseRevocationApp.version,
+            artifactDigest: marketplaceReleaseRevocationApp.artifactDigest,
+            checks: 6,
+            changed: true,
+            auditCorrelationId:
+              "marketplace_release_status_123e4567-e89b-42d3-a456-426614174098",
+            auditThroughSequence: 47,
+            auditHeadHash: "a".repeat(64)
+          }
+        },
+        workloadIssuerRotation: {
+          summary: {
+            primaryOrigin: deploymentOrigin,
+            replicaOrigin: "https://staging-replica.loopgraph.test",
+            scopeDigest: workloadIssuerRotationScopeDigest,
+            checks: 8,
+            overlapReceiptDigest: `sha256:${"6".repeat(64)}`,
+            retirementReceiptDigest: `sha256:${"7".repeat(64)}`,
+            auditRequestId: "issuer_final_primary_12345678",
+            auditThroughSequence: 48,
+            auditHeadHash: "b".repeat(64)
+          }
+        },
+        appEvidenceHealth: {
+          summary: {
+            checks: 8,
+            auditedRequestId: "app_evidence_health_12345678",
+            auditThroughSequence: 44,
+            auditHeadHash: "7".repeat(64),
+            classificationCases: 6,
+            health: "degraded",
+            totalInstallations: 5,
+            totalMatched: 2,
+            itemsReturned: 2,
+            truncated: false,
+            invalid: 0,
+            expired: 0,
+            renewSoon: 1,
+            incomplete: 1,
+            current: 2,
+            notApplicable: 1
+          }
+        },
         appSnapshotFenceProbe: {
           summary: {
             scopeDigest: canonicalAppDigest({
@@ -202,7 +292,7 @@ describe("production promotion evidence manifest", () => {
         auditRetention: { summary: { throughSequence: 50 } }
       }
     });
-    expect(Object.keys(manifest.evidence)).toHaveLength(10);
+    expect(Object.keys(manifest.evidence)).toHaveLength(15);
     expect(manifest.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
 
     expect(verifyProductionEvidenceManifest({
@@ -222,6 +312,226 @@ describe("production promotion evidence manifest", () => {
     };
     expect(() => buildProductionEvidenceManifest(receipts, config))
       .toThrow(/exact promoted deployment origin/i);
+  });
+
+  it("requires CLI evidence from a distinct replica with the exact control contract", () => {
+    const sameReplica = releaseReceipts();
+    sameReplica.cliSessions = {
+      ...(sameReplica.cliSessions as Record<string, unknown>),
+      replicaOrigin: deploymentOrigin
+    };
+    expect(() => buildProductionEvidenceManifest(sameReplica, config))
+      .toThrow(/distinct replica origin/i);
+
+    const wrongStatus = releaseReceipts();
+    const receipt = wrongStatus.cliSessions as { checks: Array<Record<string, unknown>> };
+    wrongStatus.cliSessions = {
+      ...receipt,
+      checks: receipt.checks.map((check) =>
+        check.name === "refresh_replay_family_revocation"
+          ? { ...check, status: 200 }
+          : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
+  });
+
+  it("requires exact MFA administrator revocation and audit correlation evidence", () => {
+    const wrongStatus = releaseReceipts();
+    const receipt = wrongStatus.cliAdmin as { checks: Array<Record<string, unknown>> };
+    wrongStatus.cliAdmin = {
+      ...receipt,
+      checks: receipt.checks.map((check) =>
+        check.name === "aal1_step_up_denial" ? { ...check, status: 200 } : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
+
+    const wrongCorrelation = releaseReceipts();
+    const correlated = wrongCorrelation.cliAdmin as Record<string, unknown>;
+    wrongCorrelation.cliAdmin = {
+      ...correlated,
+      auditEvidence: {
+        ...(correlated.auditEvidence as Record<string, unknown>),
+        correlationId: "cli_session_revoke_123e4567-e89b-42d3-a456-426614174098"
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(wrongCorrelation, config)).toThrow();
+  });
+
+  it("requires the independently pinned marketplace release revocation proof", () => {
+    const wrongStatus = releaseReceipts();
+    const receipt = wrongStatus.marketplaceReleaseRevocation as {
+      checks: Array<Record<string, unknown>>;
+    };
+    wrongStatus.marketplaceReleaseRevocation = {
+      ...receipt,
+      checks: receipt.checks.map((check) =>
+        check.name === "workload_revocation_and_cache_eviction"
+          ? { ...check, status: 200 }
+          : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
+
+    const substitutedArtifact = releaseReceipts();
+    const substitutedReceipt = substitutedArtifact.marketplaceReleaseRevocation as
+      Record<string, unknown>;
+    substitutedArtifact.marketplaceReleaseRevocation = {
+      ...substitutedReceipt,
+      release: {
+        ...(substitutedReceipt.release as Record<string, unknown>),
+        artifactDigest: `sha256:${"f".repeat(64)}`
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(substitutedArtifact, config))
+      .toThrow(/independently pinned disposable artifact/i);
+
+    const unretainedAudit = releaseReceipts();
+    const auditedReceipt = unretainedAudit.marketplaceReleaseRevocation as
+      Record<string, unknown>;
+    unretainedAudit.marketplaceReleaseRevocation = {
+      ...auditedReceipt,
+      auditEvidence: {
+        ...(auditedReceipt.auditEvidence as Record<string, unknown>),
+        throughSequence: 48
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(unretainedAudit, config))
+      .toThrow(/exact release checkpoints/i);
+  });
+
+  it("requires the independently pinned workload issuer rotation proof", () => {
+    const wrongStatus = releaseReceipts();
+    const receipt = wrongStatus.workloadIssuerRotation as {
+      checks: Array<Record<string, unknown>>;
+    };
+    wrongStatus.workloadIssuerRotation = {
+      ...receipt,
+      checks: receipt.checks.map((check) =>
+        check.name === "previous_key_cross_replica_denial"
+          ? { ...check, status: 200 }
+          : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
+
+    const substitutedScope = releaseReceipts();
+    const substitutedReceipt = substitutedScope.workloadIssuerRotation as
+      Record<string, unknown>;
+    substitutedScope.workloadIssuerRotation = {
+      ...substitutedReceipt,
+      issuer: "https://other-identity.staging.test",
+      jwksUri: "https://other-identity.staging.test/.well-known/jwks.json"
+    };
+    expect(() => buildProductionEvidenceManifest(substitutedScope, config))
+      .toThrow(/independently pinned rotation scope/i);
+
+    const unretainedAudit = releaseReceipts();
+    const auditedReceipt = unretainedAudit.workloadIssuerRotation as
+      Record<string, unknown>;
+    unretainedAudit.workloadIssuerRotation = {
+      ...auditedReceipt,
+      auditEvidence: {
+        ...(auditedReceipt.auditEvidence as Record<string, unknown>),
+        throughSequence: 49
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(unretainedAudit, config))
+      .toThrow(/exact release checkpoints/i);
+  });
+
+  it("rejects App evidence health from another deployment, tenant, or stale projection", () => {
+    const wrongOrigin = releaseReceipts();
+    wrongOrigin.appEvidenceHealth = {
+      ...(wrongOrigin.appEvidenceHealth as Record<string, unknown>),
+      targetOrigin: "https://other.loopgraph.test"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongOrigin, config))
+      .toThrow(/exact promoted deployment origin/i);
+
+    const wrongTenant = releaseReceipts();
+    wrongTenant.appEvidenceHealth = {
+      ...(wrongTenant.appEvidenceHealth as Record<string, unknown>),
+      organizationId: "00000000-0000-4000-8000-000000000001"
+    };
+    expect(() => buildProductionEvidenceManifest(wrongTenant, config))
+      .toThrow(/exact tenant and project scope/i);
+
+    const staleProjection = releaseReceipts();
+    const receipt = staleProjection.appEvidenceHealth as Record<string, unknown>;
+    staleProjection.appEvidenceHealth = {
+      ...receipt,
+      projection: {
+        ...(receipt.projection as Record<string, unknown>),
+        generatedAt: "2026-08-17T01:00:00.000Z"
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(staleProjection, config)).toThrow();
+
+    const unretainedAudit = releaseReceipts();
+    const auditedReceipt = unretainedAudit.appEvidenceHealth as Record<string, unknown>;
+    unretainedAudit.appEvidenceHealth = {
+      ...auditedReceipt,
+      auditEvidence: {
+        ...(auditedReceipt.auditEvidence as Record<string, unknown>),
+        throughSequence: 45
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(unretainedAudit, config))
+      .toThrow(/exact release checkpoints/i);
+  });
+
+  it("rejects App evidence metric drift or an inexact control set", () => {
+    const drift = releaseReceipts();
+    const receipt = drift.appEvidenceHealth as Record<string, unknown>;
+    drift.appEvidenceHealth = {
+      ...receipt,
+      metrics: {
+        ...(receipt.metrics as Record<string, unknown>),
+        totalInstallations: 6
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(drift, config))
+      .toThrow(/metrics must match/i);
+
+    const duplicated = releaseReceipts();
+    const duplicatedReceipt = duplicated.appEvidenceHealth as {
+      checks: Array<Record<string, unknown>>;
+    };
+    duplicated.appEvidenceHealth = {
+      ...duplicatedReceipt,
+      checks: [duplicatedReceipt.checks[0], ...duplicatedReceipt.checks.slice(0, -1)]
+    };
+    expect(() => buildProductionEvidenceManifest(duplicated, config))
+      .toThrow(/omitted or duplicated/i);
+
+    const wrongStatus = releaseReceipts();
+    const statusReceipt = wrongStatus.appEvidenceHealth as {
+      checks: Array<Record<string, unknown>>;
+    };
+    wrongStatus.appEvidenceHealth = {
+      ...statusReceipt,
+      checks: statusReceipt.checks.map((check) =>
+        check.name === "authorized_health_projection" ? { ...check, status: 200 } : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
+
+    const classificationDrift = releaseReceipts();
+    const classificationReceipt = classificationDrift.appEvidenceHealth as Record<string, unknown>;
+    const classificationEvidence = classificationReceipt.classificationEvidence as {
+      cases: Array<Record<string, unknown>>;
+    };
+    classificationDrift.appEvidenceHealth = {
+      ...classificationReceipt,
+      classificationEvidence: {
+        cases: classificationEvidence.cases.map((item) =>
+          item.status === "expired" ? { ...item, observedHealth: "healthy" } : item)
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(classificationDrift, config))
+      .toThrow(/classification fixture set/i);
   });
 
   it("rejects snapshot evidence from another Storage origin or with a missing denial control", () => {
@@ -450,7 +760,12 @@ describe("production promotion evidence manifest", () => {
       ...receipt,
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "f".repeat(64) },
-        { name: "marketplace", sequence: 42, hash: "6".repeat(64) }
+        { name: "marketplace", sequence: 42, hash: "6".repeat(64) },
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
+        { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) },
+        { name: "cli_admin", sequence: 46, hash: "9".repeat(64) },
+        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 48, hash: "b".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(alteredCheckpoint, config))
@@ -515,7 +830,12 @@ describe("production promotion evidence manifest", () => {
       ...(aboveSignedHead.auditRetention as Record<string, unknown>),
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "4".repeat(64) },
-        { name: "marketplace", sequence: 51, hash: "7".repeat(64) }
+        { name: "marketplace", sequence: 51, hash: "7".repeat(64) },
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
+        { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) },
+        { name: "cli_admin", sequence: 46, hash: "9".repeat(64) },
+        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 48, hash: "b".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(aboveSignedHead, config))
@@ -543,6 +863,39 @@ describe("production promotion evidence manifest", () => {
       config: withoutGeneratedAt(delayedConfig),
       now: new Date("2026-08-17T13:28:00.000Z")
     })).toThrow(/staging validation.*evidence window/i);
+
+    const revocationReceipts = releaseReceipts();
+    revocationReceipts.marketplaceReleaseRevocation = {
+      ...(revocationReceipts.marketplaceReleaseRevocation as Record<string, unknown>),
+      checkedAt: "2026-08-17T01:00:00.000Z"
+    };
+    const revocationConfig = {
+      ...config,
+      generatedAt: new Date("2026-08-17T02:00:00.000Z")
+    };
+    const revocationManifest = buildProductionEvidenceManifest(
+      revocationReceipts,
+      revocationConfig
+    );
+    expect(() => verifyProductionEvidenceManifest({
+      manifest: revocationManifest,
+      receipts: revocationReceipts,
+      config: withoutGeneratedAt(revocationConfig),
+      now: new Date("2026-08-17T07:01:00.000Z")
+    })).toThrow(/marketplace release revocation validation.*evidence window/i);
+
+    const rotationReceipts = releaseReceipts();
+    rotationReceipts.workloadIssuerRotation = {
+      ...(rotationReceipts.workloadIssuerRotation as Record<string, unknown>),
+      checkedAt: "2026-08-17T01:00:00.000Z"
+    };
+    const rotationManifest = buildProductionEvidenceManifest(rotationReceipts, revocationConfig);
+    expect(() => verifyProductionEvidenceManifest({
+      manifest: rotationManifest,
+      receipts: rotationReceipts,
+      config: withoutGeneratedAt(revocationConfig),
+      now: new Date("2026-08-17T07:01:00.000Z")
+    })).toThrow(/workload issuer rotation validation.*evidence window/i);
   });
 
   it("rejects a retention acknowledgement outside the protected trust anchor", () => {
@@ -572,6 +925,10 @@ function withoutGeneratedAt(value: ProductionEvidenceConfig) {
     marketplaceApp: value.marketplaceApp,
     expectedAppSnapshotUnreferencedInventoryDigest:
       value.expectedAppSnapshotUnreferencedInventoryDigest,
+    expectedMarketplaceReleaseRevocationArtifactDigest:
+      value.expectedMarketplaceReleaseRevocationArtifactDigest,
+    expectedWorkloadIssuerRotationScopeDigest:
+      value.expectedWorkloadIssuerRotationScopeDigest,
     auditRetentionKeyId: value.auditRetentionKeyId,
     auditRetentionPublicKeyPem: value.auditRetentionPublicKeyPem,
     maximumEvidenceAgeMinutes: value.maximumEvidenceAgeMinutes
@@ -669,6 +1026,203 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         "replay_denial",
         "independent_audit_evidence"
       ].map((name) => ({ name, status: 200, ok: true, detail: `${name} passed` }))
+    },
+    cliSessions: {
+      schemaVersion: "hosted-cli-session-staging-validation/v1",
+      primaryOrigin: deploymentOrigin,
+      replicaOrigin: "https://staging-replica.loopgraph.test",
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 5_000,
+      controls: {
+        deviceFingerprintLimit: 5,
+        requestRateLimit: 10,
+        crossReplica: true,
+        disposableSessionRevoked: true
+      },
+      auditEvidence: {
+        afterSequence: 44,
+        throughSequence: 45,
+        headHash: "8".repeat(64),
+        requestId: "cli_rate_12345678"
+      },
+      checks: [
+        { name: "device_issuance_saturation", status: 429 },
+        { name: "polling_slow_down", status: 429 },
+        { name: "primary_refresh_rotation", status: 200 },
+        { name: "cross_replica_refresh_rotation", status: 200 },
+        { name: "stale_request_metadata_denial", status: 400 },
+        { name: "suspended_membership_denial", status: 403 },
+        { name: "revoked_session_denial", status: 401 },
+        { name: "request_rate_saturation", status: 429 },
+        { name: "refresh_replay_family_revocation", status: 400 },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
+    },
+    cliAdmin: {
+      schemaVersion: "hosted-cli-admin-staging-validation/v1",
+      targetOrigin: deploymentOrigin,
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 1_000,
+      controls: {
+        aal1Denied: true,
+        aal2Required: true,
+        exactSessionScope: true,
+        atomicAuditReceipt: true,
+        disposableSessionRevoked: true
+      },
+      revocation: {
+        revokedCount: 1,
+        correlationId: "cli_session_revoke_123e4567-e89b-42d3-a456-426614174099"
+      },
+      auditEvidence: {
+        afterSequence: 45,
+        throughSequence: 46,
+        headHash: "9".repeat(64),
+        correlationId: "cli_session_revoke_123e4567-e89b-42d3-a456-426614174099"
+      },
+      checks: [
+        { name: "aal1_step_up_denial", status: 403 },
+        { name: "aal2_exact_session_revocation", status: 200 },
+        { name: "post_revocation_inventory", status: 200 },
+        { name: "revoked_cli_access_denial", status: 401 },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
+    },
+    marketplaceReleaseRevocation: {
+      schemaVersion: "hosted-marketplace-release-revocation-staging-validation/v1",
+      targetOrigin: deploymentOrigin,
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 1_000,
+      release: marketplaceReleaseRevocationApp,
+      revocation: {
+        changed: true,
+        correlationId:
+          "marketplace_release_status_123e4567-e89b-42d3-a456-426614174098"
+      },
+      auditEvidence: {
+        afterSequence: 46,
+        throughSequence: 47,
+        headHash: "a".repeat(64),
+        correlationId:
+          "marketplace_release_status_123e4567-e89b-42d3-a456-426614174098"
+      },
+      checks: [
+        { name: "verified_release_cached", status: 200 },
+        { name: "aal1_step_up_denial", status: 403 },
+        { name: "denied_request_preserves_release", status: 200 },
+        { name: "aal2_exact_release_revocation", status: 200 },
+        { name: "workload_revocation_and_cache_eviction", status: 404 },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
+    },
+    workloadIssuerRotation: {
+      schemaVersion: "hosted-workload-issuer-rotation-staging-validation/v1",
+      primaryOrigin: deploymentOrigin,
+      replicaOrigin: "https://staging-replica.loopgraph.test",
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 310_000,
+      issuer: workloadIssuerRotation.issuer,
+      jwksUri: workloadIssuerRotation.jwksUri,
+      rotation: {
+        rotationId: workloadIssuerRotation.rotationId,
+        previousKid: workloadIssuerRotation.previousKid,
+        nextKid: workloadIssuerRotation.nextKid,
+        overlapReceiptDigest: `sha256:${"6".repeat(64)}`,
+        retirementReceiptDigest: `sha256:${"7".repeat(64)}`
+      },
+      auditEvidence: {
+        afterSequence: 47,
+        throughSequence: 48,
+        headHash: "b".repeat(64),
+        requestId: "issuer_final_primary_12345678"
+      },
+      checks: [
+        { name: "pre_rotation_jwks", status: 200 },
+        { name: "previous_key_cross_replica_acceptance", status: 200 },
+        { name: "overlap_published", status: 200 },
+        { name: "next_key_cross_replica_acceptance", status: 200 },
+        { name: "previous_key_retired", status: 200 },
+        { name: "previous_key_cross_replica_denial", status: 401 },
+        { name: "next_key_post_retirement_acceptance", status: 200 },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
+    },
+    appEvidenceHealth: {
+      schemaVersion: "hosted-app-evidence-health-staging-validation/v3",
+      targetOrigin: deploymentOrigin,
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 500,
+      auditEvidence: {
+        afterSequence: 42,
+        throughSequence: 44,
+        headHash: "7".repeat(64),
+        requestId: "app_evidence_health_12345678"
+      },
+      classificationEvidence: {
+        cases: [
+          { status: "invalid", expectedHealth: "blocked", observedHealth: "blocked", ok: true },
+          { status: "expired", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "renew_soon", expectedHealth: "degraded", observedHealth: "degraded", ok: true },
+          { status: "incomplete", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "current", expectedHealth: "healthy", observedHealth: "healthy", ok: true },
+          { status: "not_applicable", expectedHealth: "healthy", observedHealth: "healthy", ok: true }
+        ]
+      },
+      projection: {
+        generatedAt: checkedAt,
+        health: "degraded",
+        totalInstallations: 5,
+        totalMatched: 2,
+        itemsReturned: 2,
+        truncated: false,
+        counts: {
+          invalid: 0,
+          expired: 0,
+          renewSoon: 1,
+          incomplete: 1,
+          current: 2,
+          notApplicable: 1
+        }
+      },
+      metrics: {
+        health: 0,
+        totalInstallations: 5,
+        itemsReturned: 2,
+        truncated: 0,
+        counts: {
+          invalid: 0,
+          expired: 0,
+          renewSoon: 1,
+          incomplete: 1,
+          current: 2,
+          notApplicable: 1
+        }
+      },
+      checks: [
+        { name: "unauthenticated_denial", status: 401 },
+        { name: "cross_tenant_denial", status: 403 },
+        { name: "authorized_health_projection", status: 202 },
+        { name: "replay_denial", status: 409 },
+        { name: "aggregate_only_contract" },
+        { name: "metrics_projection_parity", status: 200 },
+        { name: "classification_fixture_rehearsal" },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({
+        name,
+        ...(status === undefined ? {} : { status }),
+        ok: true,
+        detail: `${name} passed`
+      }))
     },
     appSnapshotFenceProbe: {
       schemaVersion: "hosted-app-snapshot-fence-probe/v1",
@@ -845,7 +1399,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       }
     },
     auditRetention: {
-      schemaVersion: "audit-drain/v3",
+      schemaVersion: "audit-drain/v8",
       organizationId,
       projectKey: "main",
       sourceOrigin: deploymentOrigin,
@@ -861,7 +1415,12 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       lastDestinationAcknowledgement: acknowledgement,
       verifiedReleaseCheckpoints: [
         { name: "staging", sequence: 40, hash: "4".repeat(64) },
-        { name: "marketplace", sequence: 42, hash: "6".repeat(64) }
+        { name: "marketplace", sequence: 42, hash: "6".repeat(64) },
+        { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
+        { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) },
+        { name: "cli_admin", sequence: 46, hash: "9".repeat(64) },
+        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 48, hash: "b".repeat(64) }
       ]
     }
   };

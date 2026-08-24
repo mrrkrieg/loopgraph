@@ -9,6 +9,7 @@ import type {
   AppOnboardingJourney,
   AppInstallationLock,
   AppLifecycleReceipt,
+  AppEvidenceRenewalPlan,
   AppOperationalMaturityAssessment,
   AppOperationAction,
   AppOperationActionEvent,
@@ -217,6 +218,7 @@ export type InstalledAppsViewData = {
   lifecycleReceipts: AppLifecycleReceipt[];
   lifecycleOperations: AppLifecycleOperation[];
   activationApprovals: AppActivationApprovalReceipt[];
+  renewalPlan: AppEvidenceRenewalPlan;
   lock?: AppInstallationLock;
 };
 
@@ -354,7 +356,11 @@ export async function getMarketplaceAppDetailView(
 export async function getInstalledAppsViewData(
   projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<InstalledAppsViewData> {
-  return callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as Promise<InstalledAppsViewData>;
+  const [installed, renewalPlan] = await Promise.all([
+    callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as Promise<Omit<InstalledAppsViewData, "renewalPlan">>,
+    callLoopgraphAppTool("loopgraph_apps_renewal_plan", { projectRoot }) as Promise<AppEvidenceRenewalPlan>
+  ]);
+  return { ...installed, renewalPlan };
 }
 
 export async function getAppInstallPlanViewData(appId: string, presetId?: string): Promise<{

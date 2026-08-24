@@ -4,6 +4,7 @@ import YAML from "yaml";
 import {
   APP_ACTIVATION_GATE_SCHEMA_VERSION,
   APP_ACTIVATION_APPROVAL_SCHEMA_VERSION,
+  APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   APP_INSTALL_SCHEMA_VERSION,
   APP_OPERATION_RESOLUTION_SCHEMA_VERSION,
@@ -12,6 +13,7 @@ import {
   appConfigurationSchema,
   appIdSchema,
   appEvalJudgmentSchema,
+  appEvidenceRenewalPlanSchema,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
   appInstallPlanSchema,
@@ -30,6 +32,7 @@ import {
   type AppConfiguration,
   type AppActivationApprovalReceipt,
   type AppEvalRun,
+  type AppEvidenceRenewalPlan,
   type AppEvalJudgment,
   type AppHistoricalReplayRequest,
   type AppInstallPlan,
@@ -92,9 +95,28 @@ import {
   runAppSyntheticConformance
 } from "./app-quality-engine";
 import { assessAppOperationalMaturity } from "./app-operational-maturity";
+import {
+  APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS,
+  APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS,
+  appEvidenceFreshnessFailure,
+  historicalReplayEvidenceTimestamp,
+  type TimestampedAppEvidence
+} from "./app-evidence-freshness";
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
-import { FileAppVerificationStore, type AppVerificationStore } from "./app-verification-store";
+import {
+  getHermesRouteActivationStatus,
+  type HermesRouteActivationStatus
+} from "./hermes-route-activation";
+import {
+  doctorHermesWebhookRoutes,
+  type HermesWebhookDoctorResult
+} from "./hermes-webhooks";
+import {
+  FileAppVerificationStore,
+  type AppVerificationRegistry,
+  type AppVerificationStore
+} from "./app-verification-store";
 import { assertSecretFree } from "./secret-redaction";
 
 export type PlanAppInstallationInput = {
@@ -178,6 +200,15 @@ type PrepareLifecycleOperationInput = Omit<AppLifecycleOperation, "status" | "st
   now: Date;
 };
 
+type AppOperationalEvidenceSnapshot = {
+  completedRunRefs: string[];
+  observedOutcomeRefs: string[];
+  observedValueRefs: string[];
+  latestCompletedRun?: TimestampedAppEvidence;
+  latestObservedOutcome?: TimestampedAppEvidence;
+  latestObservedValue?: TimestampedAppEvidence;
+};
+
 export class AppInstallationService {
   private readonly installationStore: AppInstallationStore;
   private readonly contextStore: CompanyContextStore;
@@ -187,6 +218,14 @@ export class AppInstallationService {
   private readonly outcomeStore: OutcomeStore;
   private readonly operationsStore: HermesOperationsStore;
   private readonly verificationStore: AppVerificationStore;
+  private readonly routeActivationStatusProvider: (input: {
+    projectRoot?: string;
+    now?: Date;
+  }) => Promise<HermesRouteActivationStatus>;
+  private readonly webhookDoctorProvider: (input: {
+    projectRoot?: string;
+    now?: Date;
+  }) => Promise<HermesWebhookDoctorResult>;
 
   constructor(
     private readonly marketplace: LocalAppMarketplace,
@@ -202,6 +241,14 @@ export class AppInstallationService {
       outcomeStore?: OutcomeStore;
       operationsStore?: HermesOperationsStore;
       verificationStore?: AppVerificationStore;
+      routeActivationStatusProvider?: (input: {
+        projectRoot?: string;
+        now?: Date;
+      }) => Promise<HermesRouteActivationStatus>;
+      webhookDoctorProvider?: (input: {
+        projectRoot?: string;
+        now?: Date;
+      }) => Promise<HermesWebhookDoctorResult>;
     } = {}
   ) {
     const appsRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps");
@@ -213,6 +260,8 @@ export class AppInstallationService {
     this.outcomeStore = dependencies.outcomeStore ?? new FileOutcomeStore(path.join(path.resolve(projectRoot), ".loopgraph"));
     this.operationsStore = dependencies.operationsStore ?? new FileHermesOperationsStore(path.join(path.resolve(projectRoot), ".loopgraph"));
     this.verificationStore = dependencies.verificationStore ?? new FileAppVerificationStore(appsRoot, workspaceId);
+    this.routeActivationStatusProvider = dependencies.routeActivationStatusProvider ?? getHermesRouteActivationStatus;
+    this.webhookDoctorProvider = dependencies.webhookDoctorProvider ?? doctorHermesWebhookRoutes;
   }
 
   private async prepareLifecycleOperation(input: PrepareLifecycleOperationInput): Promise<AppLifecycleOperation> {
@@ -2802,6 +2851,33 @@ export class AppInstallationService {
       latestSynthetic.metrics.providerWrites === 0;
     const connectionsPassed = requiredCapabilities.size > 0 && missingCapabilities.length === 0;
     const mappingsPassed = !mappingsRequired || installation.fieldMappingIds.length > 0;
+    const declaredRoutedLoopIds = compiled.loopSpecs
+      .filter((spec) => (spec.routing?.accepts.length ?? 0) > 0)
+      .map((spec) => spec.metadata.id)
+      .sort();
+    const [webhookDoctor, routeActivation] = declaredRoutedLoopIds.length > 0
+      ? await Promise.all([
+          this.webhookDoctorProvider({ projectRoot: this.projectRoot, now }),
+          this.safeRouteActivationStatus(now)
+        ])
+      : [undefined, undefined];
+    const ownedLoopIdSet = new Set(declaredRoutedLoopIds);
+    const routedLoopIds = [...new Set((webhookDoctor?.plan.routes ?? [])
+      .filter((route) => route.routeKind !== "loopgraph_lifecycle")
+      .flatMap((route) => route.loopIds)
+      .filter((loopId) => ownedLoopIdSet.has(loopId)))].sort();
+    const routedLoopIdSet = new Set(routedLoopIds);
+    const appRouteStates = routeActivation?.routeStates.filter((route) =>
+      route.routeKind !== "loopgraph_lifecycle" && route.loopIds.some((loopId) => routedLoopIdSet.has(loopId))) ?? [];
+    const coveredLoopIds = new Set(appRouteStates.flatMap((route) => route.loopIds).filter((loopId) => routedLoopIdSet.has(loopId)));
+    const missingRouteLoopIds = routedLoopIds.filter((loopId) => !coveredLoopIds.has(loopId));
+    const appRoutesReady = Boolean(
+      routeActivation?.exists &&
+      routeActivation.current &&
+      appRouteStates.length > 0 &&
+      missingRouteLoopIds.length === 0 &&
+      appRouteStates.every((route) => route.ready)
+    );
     const checks: AppReadiness["checks"] = [
       { id: "artifact", category: "artifact", status: "pass", summary: "Pinned artifact version and digest are recorded.", evidenceRefs: [installation.artifactDigest] },
       {
@@ -2833,6 +2909,39 @@ export class AppInstallationService {
       },
       { id: "configuration", category: "configuration", status: installation.configuration.completedAt ? "pass" : "fail", summary: installation.configuration.completedAt ? "Required configuration is complete." : "Configuration is incomplete.", evidenceRefs: [] },
       { id: "simulation", category: "simulation", status: syntheticPassed ? "pass" : latestSynthetic ? "fail" : "warn", summary: syntheticPassed ? "Latest exact-digest synthetic conformance run passed with writes blocked." : "A passing exact-digest synthetic conformance run is required.", evidenceRefs: latestSynthetic ? [latestSynthetic.id] : [] },
+      {
+        id: "hermes-route-manifest",
+        category: "routing",
+        status: declaredRoutedLoopIds.length === 0 ? "not_applicable" : webhookDoctor?.ok ? "pass" : "fail",
+        summary: declaredRoutedLoopIds.length === 0
+          ? "This App declares no event routing contracts."
+          : webhookDoctor?.ok
+            ? `The local Hermes route manifest covers the current catalog for ${declaredRoutedLoopIds.length} routed App loop(s).`
+            : "The local Hermes route manifest is missing or stale for the current runtime catalog.",
+        evidenceRefs: webhookDoctor?.ok ? [webhookDoctor.plan.catalogVersion] : [],
+        ...(declaredRoutedLoopIds.length > 0 && !webhookDoctor?.ok ? { remediation: "Synchronize the current non-secret Hermes route manifest, then rehearse the exact event contracts again." } : {})
+      },
+      {
+        id: "hermes-route-activation",
+        category: "routing",
+        status: routedLoopIds.length === 0 ? "not_applicable" : appRoutesReady ? "pass" : "fail",
+        summary: routedLoopIds.length === 0
+          ? "This App does not require a Hermes event route."
+          : appRoutesReady
+            ? `${appRouteStates.length} exact Hermes event route(s) cover every routed App loop with signature verification and every required provider subscription active.`
+            : !routeActivation?.exists
+              ? "No Hermes Route Controller receipt proves that this App can receive routed business events."
+              : !routeActivation.current
+                ? "The Hermes Route Controller receipt is stale for the current App routing catalog."
+                : missingRouteLoopIds.length > 0
+                  ? `No active Hermes route covers App loop(s): ${missingRouteLoopIds.join(", ")}.`
+                  : `Hermes route(s) for this App are not ready: ${appRouteStates.filter((route) => !route.ready).map((route) => `${route.routeName} (${route.state}/${route.subscriptionState})`).join(", ")}.`,
+        evidenceRefs: routeActivation?.planDigest ? [
+          `hermes-route-plan:${routeActivation.planDigest}`,
+          ...appRouteStates.map((route) => `hermes-route:${route.routeId}`)
+        ] : [],
+        ...(routedLoopIds.length > 0 && !appRoutesReady ? { remediation: "Prepare the exact current Hermes route plan and apply it through the workload-authenticated Route Controller; every required provider subscription must be active before App promotion." } : {})
+      },
       { id: "permissions", category: "permission", status: installation.permissions.some((permission) => permission.decision === "unresolved") ? "fail" : "pass", summary: "Permission decisions are explicit and provider execution was not enabled by install.", evidenceRefs: [] }
     ];
     const failureCount = checks.filter((check) => check.status === "fail").length;
@@ -2850,6 +2959,24 @@ export class AppInstallationService {
     });
   }
 
+  private async safeRouteActivationStatus(now: Date): Promise<HermesRouteActivationStatus> {
+    try {
+      return await this.routeActivationStatusProvider({ projectRoot: this.projectRoot, now });
+    } catch {
+      return {
+        projectRoot: path.resolve(this.projectRoot),
+        recordPath: path.join(path.resolve(this.projectRoot), ".loopgraph", "hermes-route-activation.json"),
+        checkedAt: now.toISOString(),
+        exists: true,
+        current: false,
+        ready: false,
+        routeStates: [],
+        warnings: ["The stored Hermes route activation receipt is invalid."],
+        nextActions: ["Apply the current exact route plan again through the Hermes Route Controller."]
+      };
+    }
+  }
+
   async operationalMaturity(
     installationId: string,
     now = new Date()
@@ -2858,6 +2985,54 @@ export class AppInstallationService {
     const installation = requireInstallation(registry, installationId);
     const readiness = await this.buildReadiness(registry, installation, now);
     return this.buildOperationalMaturity(registry, installation, readiness, now);
+  }
+
+  async evidenceRenewalPlan(input: {
+    statuses?: Array<AppEvidenceRenewalPlan["items"][number]["status"]>;
+    limit?: number;
+  } = {}, now = new Date()): Promise<AppEvidenceRenewalPlan> {
+    const registry = await this.installationStore.read();
+    const installations = registry.installations;
+    const [evidenceByInstallation, verificationRegistry] = await Promise.all([
+      this.loadOperationalEvidenceBatch(installations),
+      this.verificationStore.read()
+    ]);
+    const readiness = await Promise.all(installations.map((installation) =>
+      this.buildReadiness(registry, installation, now)));
+    const assessments = await Promise.all(installations.map((installation, index) =>
+      this.buildOperationalMaturity(
+        registry,
+        installation,
+        readiness[index]!,
+        now,
+        true,
+        evidenceByInstallation.get(installation.id),
+        verificationRegistry
+      )));
+    const allItems = assessments.map((assessment) => renewalPlanItem(assessment));
+    const counts = {
+      notApplicable: allItems.filter((item) => item.status === "not_applicable").length,
+      incomplete: allItems.filter((item) => item.status === "incomplete").length,
+      current: allItems.filter((item) => item.status === "current").length,
+      renewSoon: allItems.filter((item) => item.status === "renew_soon").length,
+      expired: allItems.filter((item) => item.status === "expired").length,
+      invalid: allItems.filter((item) => item.status === "invalid").length
+    };
+    const selectedStatuses = input.statuses ? new Set(input.statuses) : undefined;
+    const matched = allItems
+      .filter((item) => !selectedStatuses || selectedStatuses.has(item.status))
+      .sort(compareRenewalPlanItems);
+    const limit = Math.min(Math.max(input.limit ?? 100, 1), 100);
+    return appEvidenceRenewalPlanSchema.parse({
+      schemaVersion: APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION,
+      workspaceId: this.workspaceId,
+      companyId: this.companyId,
+      generatedAt: now.toISOString(),
+      totalInstallations: installations.length,
+      totalMatched: matched.length,
+      counts,
+      items: matched.slice(0, limit)
+    });
   }
 
   async activationGate(
@@ -2875,10 +3050,43 @@ export class AppInstallationService {
     installation: WorkspaceAppInstallation,
     readiness: AppReadiness,
     now: Date,
-    includeIndependentVerification = true
+    includeIndependentVerification = true,
+    evidenceSnapshot?: AppOperationalEvidenceSnapshot,
+    verificationSnapshot?: AppVerificationRegistry
   ): Promise<AppOperationalMaturityAssessment> {
+    const operatingEvidence = evidenceSnapshot ?? await this.loadOperationalEvidence(installation);
+    const verificationRegistry = includeIndependentVerification
+      ? verificationSnapshot ?? await this.verificationStore.read()
+      : undefined;
+    return assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: registry.evaluations,
+      operatingEvidence: {
+        completedRunRefs: operatingEvidence.completedRunRefs,
+        observedOutcomeRefs: operatingEvidence.observedOutcomeRefs,
+        observedValueRefs: operatingEvidence.observedValueRefs,
+        latestCompletedRun: operatingEvidence.latestCompletedRun,
+        latestObservedOutcome: operatingEvidence.latestObservedOutcome,
+        latestObservedValue: operatingEvidence.latestObservedValue
+      },
+      verificationReceipts: verificationRegistry?.receipts,
+      trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
+      now
+    });
+  }
+
+  private async loadOperationalEvidence(
+    installation: WorkspaceAppInstallation
+  ): Promise<AppOperationalEvidenceSnapshot> {
+    const snapshots = await this.loadOperationalEvidenceBatch([installation]);
+    return snapshots.get(installation.id) ?? emptyOperationalEvidenceSnapshot();
+  }
+
+  private async loadOperationalEvidenceBatch(
+    installations: WorkspaceAppInstallation[]
+  ): Promise<Map<string, AppOperationalEvidenceSnapshot>> {
     const workspace = await this.loopSpecStore.getWorkspace(this.projectRoot);
-    const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
     const [outcomes, valueEntries, completedEvents] = await Promise.all([
       this.outcomeStore.listObservedOutcomes({ workspaceId: this.workspaceId, companyId: this.companyId }),
       this.outcomeStore.listValueLedgerEntries({ workspaceId: this.workspaceId, companyId: this.companyId }),
@@ -2888,26 +3096,32 @@ export class AppInstallationService {
         eventType: "run.completed"
       })
     ]);
-    const verificationRegistry = includeIndependentVerification ? await this.verificationStore.read() : undefined;
-    return assessAppOperationalMaturity({
-      installation,
-      readiness,
-      evaluations: registry.evaluations,
-      operatingEvidence: {
-        completedRunRefs: uniqueStrings(completedEvents
-          .filter((event) => loopIds.has(event.loopId))
-          .map((event) => `run:${event.runId}`)),
-        observedOutcomeRefs: outcomes
-          .filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed")
-          .map((outcome) => `outcome:${outcome.id}`),
-        observedValueRefs: valueEntries
-          .filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed")
-          .map((entry) => `value:${entry.id}`)
-      },
-      verificationReceipts: verificationRegistry?.receipts,
-      trustedVerifierKeys: verificationRegistry?.trustedVerifierKeys,
-      now
-    });
+    return new Map(installations.map((installation) => {
+      const loopIds = new Set(installationLoopIds(workspace.workspace, installation.id));
+      const appRuns = completedEvents.filter((event) => loopIds.has(event.loopId));
+      const appOutcomes = outcomes.filter((outcome) => loopIds.has(outcome.loopId) && outcome.truthStatus === "observed");
+      const appValueEntries = valueEntries.filter((entry) => loopIds.has(entry.loopId) && entry.truthStatus === "observed");
+      return [installation.id, {
+        completedRunRefs: uniqueStrings(appRuns.map((event) => `run:${event.runId}`)),
+        observedOutcomeRefs: uniqueStrings(appOutcomes.map((outcome) => `outcome:${outcome.id}`)),
+        observedValueRefs: uniqueStrings(appValueEntries.map((entry) => `value:${entry.id}`)),
+        latestCompletedRun: latestTimestampedEvidence(
+          appRuns,
+          (event) => `run:${event.runId}`,
+          (event) => event.recordedAt
+        ),
+        latestObservedOutcome: latestTimestampedEvidence(
+          appOutcomes,
+          (outcome) => `outcome:${outcome.id}`,
+          (outcome) => outcome.evaluationWindow.end
+        ),
+        latestObservedValue: latestTimestampedEvidence(
+          appValueEntries,
+          (entry) => `value:${entry.id}`,
+          (entry) => entry.window.end
+        )
+      } satisfies AppOperationalEvidenceSnapshot] as const;
+    }));
   }
 
   private async buildActivationGate(
@@ -2917,12 +3131,16 @@ export class AppInstallationService {
     now: Date
   ): Promise<AppActivationGate> {
     const readiness = await this.buildReadiness(registry, installation, now);
-    const maturity = await this.buildOperationalMaturity(registry, installation, readiness, now, false);
+    const operatingEvidence = await this.loadOperationalEvidence(installation);
+    const maturity = await this.buildOperationalMaturity(registry, installation, readiness, now, false, operatingEvidence);
+    const exactEvaluations = registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest);
     const recommendation = createPromotionRecommendation({
       installationId: installation.id,
-      evaluations: registry.evaluations.filter((evaluation) => evaluation.artifactDigest === installation.artifactDigest),
+      evaluations: exactEvaluations,
       now
     });
+    const latestReplay = [...exactEvaluations].reverse().find((evaluation) =>
+      evaluation.installationId === installation.id && evaluation.level === "historical_replay");
     const requiredMaturity = mode === "execute_with_approval" ? "production_proven" as const : "connected" as const;
     const requiredMaturityGate = maturity.gates.find((gate) => gate.level === requiredMaturity)!;
     let lifecycleError: string | undefined;
@@ -2934,6 +3152,12 @@ export class AppInstallationService {
     const recommendationReady = mode !== "recommend" || recommendation.recommendedMode === "recommend";
     const permissionReady = mode !== "execute_with_approval" || !installation.permissions.some((permission) =>
       permission.authority === "execute" && permission.decision === "allow");
+    const freshnessCheck = activationEvidenceFreshnessCheck({
+      mode,
+      replay: latestReplay,
+      operatingEvidence,
+      now
+    });
     const checks: AppActivationGate["checks"] = [
       {
         id: "ordered-lifecycle",
@@ -2962,6 +3186,7 @@ export class AppInstallationService {
         evidenceRefs: mode === "recommend" ? recommendation.evidenceRefs.slice(-100) : [],
         ...(!recommendationReady ? { remediation: "Run and completely label a bounded historical replay, then resolve every failing promotion gate." } : {})
       },
+      freshnessCheck,
       {
         id: "permission-boundary",
         status: permissionReady ? "pass" : "blocked",
@@ -4330,6 +4555,182 @@ function assertLifecycleTransition(from: WorkspaceAppInstallation["state"], requ
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function activationEvidenceFreshnessCheck(input: {
+  mode: Extract<AppRolloutMode, "shadow" | "recommend" | "execute_with_approval">;
+  replay?: AppEvalRun;
+  operatingEvidence: AppOperationalEvidenceSnapshot;
+  now: Date;
+}): AppActivationGate["checks"][number] {
+  if (input.mode === "shadow") {
+    return {
+      id: "evidence-freshness",
+      status: "not_applicable",
+      summary: "Shadow mode uses current connection readiness and exact-artifact conformance; historical operating evidence is not required.",
+      evidenceRefs: []
+    };
+  }
+  const replayObservedAt = input.replay ? historicalReplayEvidenceTimestamp(input.replay) : undefined;
+  const replayEvidence = input.replay && replayObservedAt ? {
+    reference: input.replay.id,
+    observedAt: replayObservedAt
+  } : undefined;
+  const requiredEvidence: Array<{
+    label: string;
+    evidence?: TimestampedAppEvidence;
+    maxAgeSeconds: number;
+  }> = [
+    {
+      label: "historical replay",
+      evidence: replayEvidence,
+      maxAgeSeconds: APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS
+    },
+    ...(input.mode === "execute_with_approval" ? [
+      {
+        label: "completed App run",
+        evidence: input.operatingEvidence.latestCompletedRun,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      },
+      {
+        label: "observed outcome",
+        evidence: input.operatingEvidence.latestObservedOutcome,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      },
+      {
+        label: "observed value",
+        evidence: input.operatingEvidence.latestObservedValue,
+        maxAgeSeconds: APP_ACTIVATION_PRODUCTION_EVIDENCE_MAX_AGE_SECONDS
+      }
+    ] : [])
+  ];
+  const failures = requiredEvidence.flatMap((requirement) =>
+    appEvidenceFreshnessFailure(requirement, input.now));
+  const evidenceRefs = requiredEvidence.flatMap((requirement) =>
+    requirement.evidence ? [requirement.evidence.reference] : []);
+  const maxAgeDays = APP_ACTIVATION_REPLAY_MAX_AGE_SECONDS / (24 * 60 * 60);
+  return {
+    id: "evidence-freshness",
+    status: failures.length === 0 ? "pass" : "blocked",
+    summary: failures.length === 0
+      ? input.mode === "recommend"
+        ? `The reviewed historical replay is no older than ${maxAgeDays} days.`
+        : `The reviewed replay and latest completed-run, observed-outcome, and observed-value evidence are no older than ${maxAgeDays} days.`
+      : `Activation evidence is not current: ${failures.join("; ")}.`,
+    evidenceRefs,
+    ...(failures.length > 0 ? {
+      remediation: input.mode === "recommend"
+        ? "Run and completely review a new bounded historical replay before requesting recommendation approval."
+        : "Run a fresh reviewed replay and record recent completed work, observed outcomes, and observed net value before requesting execution approval."
+    } : {})
+  };
+}
+
+function latestTimestampedEvidence<T>(
+  values: T[],
+  reference: (value: T) => string,
+  observedAt: (value: T) => string
+): TimestampedAppEvidence | undefined {
+  const latest = [...values].sort((left, right) =>
+    Date.parse(observedAt(right)) - Date.parse(observedAt(left)) || reference(left).localeCompare(reference(right)))[0];
+  return latest ? { reference: reference(latest), observedAt: observedAt(latest) } : undefined;
+}
+
+function emptyOperationalEvidenceSnapshot(): AppOperationalEvidenceSnapshot {
+  return {
+    completedRunRefs: [],
+    observedOutcomeRefs: [],
+    observedValueRefs: []
+  };
+}
+
+function renewalPlanItem(
+  assessment: AppOperationalMaturityAssessment
+): AppEvidenceRenewalPlan["items"][number] {
+  const affectedEvidence: AppEvidenceRenewalPlan["items"][number]["affectedEvidence"] =
+    assessment.freshness.requirements.flatMap((requirement) => requirement.status === "current" ? [] : [{
+      id: requirement.id,
+      status: requirement.status,
+      summary: requirement.summary
+    }]);
+  const firstBlockedGate = assessment.gates.find((gate) => gate.status === "blocked");
+  const status = assessment.freshness.status;
+  const priority: AppEvidenceRenewalPlan["items"][number]["priority"] = ["expired", "invalid"].includes(status)
+    ? "critical"
+    : status === "renew_soon"
+      ? "high"
+      : status === "incomplete"
+        ? "medium"
+        : "none";
+  let nextAction: AppEvidenceRenewalPlan["items"][number]["nextAction"];
+  if (status === "invalid") {
+    nextAction = {
+      kind: "repair_evidence",
+      summary: "Inspect and replace missing, unbound, malformed, or future-dated production evidence before promotion."
+    };
+  } else if (["expired", "renew_soon"].includes(status)) {
+    nextAction = {
+      kind: "renew_proof",
+      summary: status === "expired"
+        ? "Run a new bounded replay and record recent completed work, observed outcomes, and observed net value."
+        : `Renew the affected proof before ${assessment.freshness.validUntil ?? "the current evidence window expires"}.`
+    };
+  } else if (["not_applicable", "incomplete"].includes(status)) {
+    const replayMissing = assessment.freshness.requirements.find((requirement) =>
+      requirement.id === "historical_replay")?.status === "missing";
+    const operatingEvidenceMissing = assessment.freshness.requirements.some((requirement) =>
+      requirement.id !== "historical_replay" && requirement.status === "missing");
+    nextAction = firstBlockedGate?.level === "tested" || firstBlockedGate?.level === "connected"
+      ? {
+          kind: "complete_setup",
+          summary: firstBlockedGate.remediation ?? "Complete conformance, connection, mapping, configuration, and permission readiness."
+        }
+      : replayMissing
+        ? {
+            kind: "run_historical_replay",
+            summary: "Run and completely review a bounded write-blocked historical replay for this exact App artifact."
+          }
+        : operatingEvidenceMissing
+          ? {
+              kind: "record_operating_evidence",
+              summary: "Record recent completed App work, observed outcomes, and observed net value."
+            }
+          : {
+              kind: "complete_setup",
+              summary: firstBlockedGate?.remediation ?? "Complete the remaining evidence-derived maturity gate."
+            };
+  } else {
+    nextAction = {
+      kind: "monitor",
+      summary: assessment.freshness.renewalRecommendedAt
+        ? `Monitor the App and renew production proof by ${assessment.freshness.renewalRecommendedAt}.`
+        : "Monitor routing quality, review burden, outcomes, and value."
+    };
+  }
+  return {
+    installationId: assessment.installationId,
+    appId: assessment.appId,
+    artifactDigest: assessment.artifactDigest,
+    maturity: assessment.maturity,
+    status,
+    priority,
+    ...(assessment.freshness.validUntil ? { validUntil: assessment.freshness.validUntil } : {}),
+    ...(assessment.freshness.renewalRecommendedAt
+      ? { renewalRecommendedAt: assessment.freshness.renewalRecommendedAt }
+      : {}),
+    affectedEvidence,
+    nextAction
+  };
+}
+
+function compareRenewalPlanItems(
+  left: AppEvidenceRenewalPlan["items"][number],
+  right: AppEvidenceRenewalPlan["items"][number]
+): number {
+  const priority = { critical: 0, high: 1, medium: 2, none: 3 } as const;
+  return priority[left.priority] - priority[right.priority] ||
+    (left.validUntil ?? "9999").localeCompare(right.validUntil ?? "9999") ||
+    left.installationId.localeCompare(right.installationId);
 }
 
 function uniqueStrings(values: string[]): string[] {

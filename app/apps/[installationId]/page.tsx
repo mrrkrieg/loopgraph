@@ -46,6 +46,7 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
   }
   const latestSynthetic = data.evaluations.filter((evaluation) => evaluation.level === "synthetic").at(-1);
   const latestReplay = data.evaluations.filter((evaluation) => evaluation.level === "historical_replay").at(-1);
+  const maturityFreshness = data.maturity.freshness;
   const installedLoopByName = new Map(data.installedLoops.map((loop) => [loop.name, loop]));
   const unfinishedOperations = data.lifecycleOperations.filter((operation) => operation.status !== "completed");
   const recovery = unfinishedOperations[0];
@@ -114,7 +115,13 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <ScoreCard label="Maturity" value={data.maturity.maturity.replace(/_/g, " ")} detail="Evidence-derived ceiling" />
+        <ScoreCard
+          label="Maturity"
+          value={data.maturity.maturity.replace(/_/g, " ")}
+          detail={maturityFreshness.validUntil
+            ? `Proof ${maturityFreshness.status.replace(/_/g, " ")} · ${formatUtcDate(maturityFreshness.validUntil)}`
+            : `Proof ${maturityFreshness.status.replace(/_/g, " ")}`}
+        />
         <ScoreCard label="Readiness" value={`${data.readiness.score}%`} detail={data.readiness.state.replace(/_/g, " ")} />
         <ScoreCard label="Configured stack" value={data.detail.manifest.presets.find((preset) => preset.id === data.installation.presetId)?.name ?? data.installation.presetId} detail={`${Object.keys(data.installation.operationBindings).length} executable capability bindings`} />
         <ScoreCard label="Conformance" value={latestSynthetic?.status ?? "not run"} detail={latestSynthetic ? `${latestSynthetic.metrics.passed}/${latestSynthetic.metrics.total} scenarios` : "Provider writes remain blocked"} />
@@ -137,6 +144,33 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="min-w-0 space-y-6">
           <SectionCard title="Operational maturity" description="Maturity cannot skip a gate. Each level is tied to evidence from this exact installed artifact; catalog signatures and publisher claims do not count as production proof.">
+            <div className={`mb-4 rounded-md border p-4 ${maturityFreshness.status === "current" ? "border-emerald-200 bg-emerald-50" : maturityFreshness.status === "renew_soon" ? "border-amber-300 bg-amber-50" : "border-orange-200 bg-orange-50"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">Production-proof freshness</div>
+                  <p className="mt-2 text-sm leading-6 text-ink/70">{maturityFreshness.summary}</p>
+                </div>
+                <span className="rounded-full border border-current/20 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.08em]">{maturityFreshness.status.replace(/_/g, " ")}</span>
+              </div>
+              {maturityFreshness.renewalRecommendedAt ? (
+                <p className="mt-2 text-xs leading-5 text-ink/55">Renew by {formatUtcDate(maturityFreshness.renewalRecommendedAt)} to avoid a maturity downgrade.</p>
+              ) : null}
+              <details className="mt-3 text-xs text-ink/55">
+                <summary className="cursor-pointer font-semibold">Evidence clock ({maturityFreshness.requirements.length})</summary>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {maturityFreshness.requirements.map((requirement) => (
+                    <div className="rounded border border-line bg-white/70 p-3" key={requirement.id}>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold capitalize">{requirement.id.replace(/_/g, " ")}</span>
+                        <span className="font-semibold uppercase">{requirement.status.replace(/_/g, " ")}</span>
+                      </div>
+                      <p className="mt-1 leading-5">{requirement.summary}</p>
+                      {requirement.evidenceRef ? <div className="mt-2 break-all font-mono text-[0.68rem] text-ink/40">{requirement.evidenceRef}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
             <div className="space-y-3">
               {data.maturity.gates.map((gate) => (
                 <div className={`rounded-md border p-4 ${gate.status === "achieved" ? "border-emerald-200 bg-emerald-50" : "border-line bg-paper/40"}`} key={gate.level}>
@@ -400,6 +434,7 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
 }
 
 function ScoreCard({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="rounded-xl border border-line bg-white p-4 shadow-sm"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold capitalize">{value}</div><div className="mt-1 text-xs text-ink/45">{detail}</div></div>; }
+function formatUtcDate(value: string) { return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value)); }
 function Definition({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="border-b border-line py-3 last:border-0"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className={`mt-1 break-all text-xs text-ink/65 ${mono ? "font-mono" : ""}`}>{value}</div></div>; }
 function OperationForm({ action, installationId, label, primary = false, expectedArtifactDigest, expectedUpdatedAt }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean; expectedArtifactDigest?: string; expectedUpdatedAt?: string }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} />{expectedArtifactDigest ? <input name="expectedArtifactDigest" type="hidden" value={expectedArtifactDigest} /> : null}{expectedUpdatedAt ? <input name="expectedUpdatedAt" type="hidden" value={expectedUpdatedAt} /> : null}<button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
 function ActivationRecoveryControl({
