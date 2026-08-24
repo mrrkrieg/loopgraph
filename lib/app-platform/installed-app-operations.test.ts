@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppEvalRun } from "loopgraph/core";
+import { APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION, APP_OPERATION_ACTION_SCHEMA_VERSION, canonicalAppDigest, type AppEvalRun, type AppOperationAction, type AppOperationActionEvent } from "loopgraph/core";
 import type { AgentOperationsActivityRow } from "loopgraph/runtime";
 import { buildInstalledAppOperationsView } from "./installed-app-operations";
 
@@ -7,6 +7,7 @@ describe("installed App operations view", () => {
   it("scopes activity, outcomes, value, failures, and review burden to owned loops", () => {
     const result = buildInstalledAppOperationsView({
       app: {
+        installationId: "installed-sales",
         id: "loopgraph.sales.qualify-route-inbound-leads",
         name: "Qualify and Route Inbound Leads",
         department: "Sales"
@@ -21,6 +22,7 @@ describe("installed App operations view", () => {
         activity({ id: "other", eventId: "event-2", loopId: "another-app", jobStatus: "failed", updatedAt: "2026-08-20T12:03:00.000Z" })
       ],
       evaluations: [historicalEvaluation()],
+      actions: [preparedAction()],
       outcomes: [
         outcome("qualified-meeting-rate", "lead-qualification"),
         { ...outcome("modeled-qualified-meeting-rate", "lead-qualification"), truthStatus: "modeled" },
@@ -29,7 +31,8 @@ describe("installed App operations view", () => {
       valueEntries: [
         valueEntry("lead-value", "lead-routing", 90, 20),
         valueEntry("other-value", "another-app", 1_000, 0)
-      ]
+      ],
+      now: new Date("2026-08-20T12:06:00.000Z")
     });
 
     expect(result.activity.map((row) => row.id)).toEqual(["run-2", "run-1"]);
@@ -42,6 +45,8 @@ describe("installed App operations view", () => {
       expect.objectContaining({ label: "Lead Qualification", kind: "loop" }),
       expect.objectContaining({ label: "HubSpot", kind: "data_source" }),
       expect.objectContaining({ label: "1 approval", kind: "review" }),
+      expect.objectContaining({ label: "Crm contacts update", kind: "action" }),
+      expect.objectContaining({ label: "Approval required", kind: "review" }),
       expect.objectContaining({ label: "Qualified meeting rate", kind: "metric" })
     ]));
     expect(result.topology.edges).toEqual(expect.arrayContaining([
@@ -55,6 +60,9 @@ describe("installed App operations view", () => {
       incomingEvents: 1,
       totalRuns: 2,
       waitingApproval: 1,
+      preparedActions: 1,
+      actionsAwaitingApproval: 1,
+      expiredActions: 0,
       completedRuns: 1,
       failedRuns: 0,
       observedOutcomes: 1,
@@ -72,10 +80,11 @@ describe("installed App operations view", () => {
 
   it("never leaks global operations into an installation with no owned loops", () => {
     const result = buildInstalledAppOperationsView({
-      app: { id: "empty-app", name: "Empty App", department: "Sales" },
+      app: { installationId: "installed-empty", id: "empty-app", name: "Empty App", department: "Sales" },
       loops: [],
       activity: [activity({ id: "global", eventId: "event-global", loopId: "global-loop", jobStatus: "completed", updatedAt: "2026-08-20T12:00:00.000Z" })],
       evaluations: [],
+      actions: [{ ...preparedAction(), installationId: "another-installation" }],
       outcomes: [outcome("global-outcome", "global-loop")],
       valueEntries: [valueEntry("global-value", "global-loop", 50, 5)]
     });
@@ -91,7 +100,78 @@ describe("installed App operations view", () => {
     expect(result.summary.totalRuns).toBe(0);
     expect(result.summary.routingAccuracy).toBeUndefined();
   });
+
+  it("derives an approved action from an unexpired append-only receipt event", () => {
+    const action = preparedAction();
+    const result = buildInstalledAppOperationsView({
+      app: { installationId: action.installationId, id: action.appId, name: "Sales App", department: "Sales" },
+      loops: [{ id: action.loopId, name: "Lead Qualification" }],
+      activity: [],
+      evaluations: [],
+      actions: [action],
+      actionEvents: [approvalEvent(action)],
+      outcomes: [],
+      valueEntries: [],
+      now: new Date("2026-08-20T12:07:00.000Z")
+    });
+
+    expect(result.actions[0]).toMatchObject({ effectiveStatus: "approved" });
+    expect(result.summary.actionsAwaitingApproval).toBe(0);
+    expect(result.topology.nodes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ label: "Approved", kind: "review" })
+    ]));
+  });
+
+  it("keeps terminal revocation visible after the prepared action expiry", () => {
+    const action = preparedAction();
+    const base = {
+      schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+      id: "appactevt_revoked-view",
+      workspaceId: action.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      eventType: "revoked" as const,
+      actor: { type: "user" as const, subject: "reviewer-1" },
+      revocation: { reasonDigest: canonicalAppDigest("withdrawn") },
+      occurredAt: "2026-08-20T12:08:00.000Z"
+    };
+    const result = buildInstalledAppOperationsView({
+      app: { installationId: action.installationId, id: action.appId, name: "Sales App", department: "Sales" },
+      loops: [{ id: action.loopId, name: "Lead Qualification" }],
+      activity: [],
+      evaluations: [],
+      actions: [action],
+      actionEvents: [{ ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) }],
+      outcomes: [],
+      valueEntries: [],
+      now: new Date("2026-08-20T12:30:00.000Z")
+    });
+
+    expect(result.actions[0]).toMatchObject({ effectiveStatus: "revoked" });
+    expect(result.summary.expiredActions).toBe(0);
+  });
 });
+
+function approvalEvent(action: AppOperationAction): AppOperationActionEvent {
+  const base = {
+    schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+    id: "appactevt_12345678",
+    workspaceId: action.workspaceId,
+    installationId: action.installationId,
+    actionId: action.id,
+    actionRecordDigest: action.recordDigest,
+    eventType: "approval_granted" as const,
+    actor: { type: "user" as const, subject: "reviewer-1" },
+    approval: {
+      connectorApprovalReceiptId: "connector-approval-12345678",
+      reasonDigest: canonicalAppDigest("reviewed"),
+      expiresAt: "2026-08-20T12:10:00.000Z"
+    },
+    occurredAt: "2026-08-20T12:06:00.000Z"
+  };
+  return { ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) };
+}
 
 function activity(input: Pick<AgentOperationsActivityRow, "id" | "eventId" | "loopId" | "jobStatus" | "updatedAt">): AgentOperationsActivityRow {
   return {
@@ -167,4 +247,44 @@ function valueEntry(id: string, loopId: string, netSavedMinutes: number, observe
     hiddenCosts: { review: 10, rework: 5, botsitting: 3, escalation: 1, governance: 1 },
     recordedAt: "2026-08-20T12:05:00.000Z"
   };
+}
+
+function preparedAction(): AppOperationAction {
+  const base = {
+    schemaVersion: APP_OPERATION_ACTION_SCHEMA_VERSION,
+    id: "appact_12345678",
+    workspaceId: "acme",
+    companyId: "acme-company",
+    installationId: "installed-sales",
+    appId: "loopgraph.sales.qualify-route-inbound-leads",
+    artifactDigest: canonicalAppDigest("artifact"),
+    loopId: "lead-qualification",
+    loopVersionHash: canonicalAppDigest("loop"),
+    capability: "crm.lead.write",
+    routeJobId: "job-run-1",
+    agentInstanceId: "hermes-sales",
+    callId: "call-1",
+    requestId: "request-12345678",
+    idempotencyKey: "idempotency-12345678",
+    resolutionDigest: canonicalAppDigest("resolution"),
+    executionDigest: canonicalAppDigest("execution"),
+    providerBinding: {
+      providerId: "hubspot",
+      connectionId: "hubspot-production",
+      brokerCapability: "provider.action.execute" as const,
+      operation: "crm.contacts.update"
+    },
+    companyObject: { type: "lead", identityDigest: canonicalAppDigest("lead-42") },
+    environment: "production" as const,
+    brokerPreparedActionId: "broker-action-12345678",
+    brokerPreparedActionFingerprint: "f".repeat(64),
+    brokerPrepareReceiptId: "broker-receipt-12345678",
+    approvalRequired: true,
+    riskClass: "write" as const,
+    status: "prepared" as const,
+    preparedAt: "2026-08-20T12:05:00.000Z",
+    expiresAt: "2026-08-20T12:14:00.000Z",
+    updatedAt: "2026-08-20T12:05:00.000Z"
+  };
+  return { ...base, recordDigest: canonicalAppDigest({ ...base, recordDigest: undefined }) };
 }

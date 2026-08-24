@@ -18,7 +18,7 @@ const UUID_PATTERN =
 const PROJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 export type StagingDeploymentReceipt = {
-  schemaVersion: "staging-validation/v4";
+  schemaVersion: "staging-validation/v5";
   targetOrigin: string;
   organizationId: string;
   projectKey: string;
@@ -31,6 +31,7 @@ export type StagingDeploymentReceipt = {
     name:
       | "readiness"
       | "operational_metrics"
+      | "app_action_reconciliation_health"
       | "audit_integrity"
       | "unauthenticated_user_denial"
       | "cross_tenant_user_denial"
@@ -46,6 +47,15 @@ export type StagingDeploymentReceipt = {
     allowedRequests: number;
     deniedStatus: 429;
     retryAfterSeconds: number;
+  };
+  appActionReconciliationEvidence: {
+    requestedTotal: number;
+    succeededTotal: number;
+    failedTotal: number;
+    pending: 0;
+    stale: 0;
+    oldestAgeSeconds: 0;
+    staleAfterSeconds: number;
   };
 };
 
@@ -127,9 +137,17 @@ export async function validateStagingDeployment(
     4 * 1024 * 1024,
     "Staging operational metrics"
   );
+  const appActionReconciliationEvidence = parseAppActionReconciliationEvidence(metrics);
   for (const requiredMetric of [
     "loopgraph_ready 1",
-    "loopgraph_security_audit_head_sequence"
+    "loopgraph_security_audit_head_sequence",
+    "loopgraph_operational_degraded 0",
+    "loopgraph_app_lifecycle_recovery_pending 0",
+    "loopgraph_app_lifecycle_recovery_stale 0",
+    "loopgraph_app_lifecycle_recovery_oldest_age_seconds",
+    "loopgraph_app_action_reconciliation_pending 0",
+    "loopgraph_app_action_reconciliation_stale 0",
+    "loopgraph_app_action_reconciliation_oldest_age_seconds 0"
   ]) {
     if (!metrics.includes(requiredMetric)) {
       throw new Error(`Staging operational metrics omitted ${requiredMetric}`);
@@ -173,7 +191,7 @@ export async function validateStagingDeployment(
   });
 
   return {
-    schemaVersion: "staging-validation/v4",
+    schemaVersion: "staging-validation/v5",
     targetOrigin: baseUrl.origin,
     organizationId: config.organizationId,
     projectKey: config.projectKey,
@@ -193,6 +211,12 @@ export async function validateStagingDeployment(
         detail: "Protected metrics report deployment readiness and an audit-chain head."
       },
       {
+        name: "app_action_reconciliation_health",
+        status: metricsResponse.status,
+        ok: true,
+        detail: "No App commit request remains nonterminal in the protected tenant/project snapshot."
+      },
+      {
         name: "audit_integrity",
         status: auditResponse.status,
         ok: true,
@@ -200,8 +224,47 @@ export async function validateStagingDeployment(
       },
       ...userBoundary.results
     ],
-    quotaEvidence: userBoundary.quotaEvidence
+    quotaEvidence: userBoundary.quotaEvidence,
+    appActionReconciliationEvidence
   };
+}
+
+function parseAppActionReconciliationEvidence(metrics: string): StagingDeploymentReceipt["appActionReconciliationEvidence"] {
+  const requestedTotal = prometheusInteger(metrics, "loopgraph_app_action_commits_requested_total");
+  const succeededTotal = prometheusInteger(metrics, "loopgraph_app_action_commits_succeeded_total");
+  const failedTotal = prometheusInteger(metrics, "loopgraph_app_action_commits_failed_total");
+  const pending = prometheusInteger(metrics, "loopgraph_app_action_reconciliation_pending");
+  const stale = prometheusInteger(metrics, "loopgraph_app_action_reconciliation_stale");
+  const oldestAgeSeconds = prometheusInteger(metrics, "loopgraph_app_action_reconciliation_oldest_age_seconds");
+  const staleAfterSeconds = prometheusInteger(metrics, "loopgraph_app_action_reconciliation_stale_after_seconds");
+  if (pending !== 0 || stale !== 0 || oldestAgeSeconds !== 0) {
+    throw new Error("Staging has nonterminal App action commits; production promotion is blocked");
+  }
+  if (staleAfterSeconds < 60 || staleAfterSeconds > 86_400) {
+    throw new Error("Staging App action reconciliation threshold is outside the reviewed range");
+  }
+  return {
+    requestedTotal,
+    succeededTotal,
+    failedTotal,
+    pending: 0,
+    stale: 0,
+    oldestAgeSeconds: 0,
+    staleAfterSeconds
+  };
+}
+
+function prometheusInteger(metrics: string, name: string) {
+  const pattern = new RegExp(`^${name} ([0-9]+)$`, "gm");
+  const matches = [...metrics.matchAll(pattern)];
+  if (matches.length !== 1) {
+    throw new Error(`Staging operational metrics omitted or duplicated ${name}`);
+  }
+  const value = Number(matches[0]?.[1]);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Staging operational metric ${name} is invalid`);
+  }
+  return value;
 }
 
 async function validateHostedUserBoundary(input: {

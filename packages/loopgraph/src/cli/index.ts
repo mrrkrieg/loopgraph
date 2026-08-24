@@ -20,6 +20,7 @@ import type { LoopControllerTriggerType } from "../core";
 import { normalizeLoopgraphMcpExposure, runLoopgraphMcpStdioServer } from "../mcp/server";
 import {
   doctorHermesIntegration,
+  deactivateHermesIntegration,
   installHermesIntegration,
   setupHermesIntegration,
   type HermesInstallScope,
@@ -31,6 +32,12 @@ import {
   syncHermesWebhookRoutes,
   testHermesWebhookFixture
 } from "../runtime/hermes-webhooks";
+import {
+  activateHermesRoutes,
+  getHermesRouteActivationStatus,
+  prepareHermesRouteActivation
+} from "../runtime/hermes-route-activation";
+import { ProjectedFileWorkloadTokenProvider } from "../runtime/workload-token-provider";
 import { initLoopgraphWorkspace, inspectLoopgraphWorkspace } from "../runtime/workspace";
 import {
   prepareLoopgraphStudio,
@@ -178,7 +185,7 @@ program
   .description("Prepare an empty local workspace, install the project-local Hermes integration, and synchronize safe routes")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--name <name>", "Workspace display name")
-  .option("--activate", "Register generated MCP servers and the Loopgraph skill with Hermes")
+  .option("--activate", "Register generated MCP servers and the Loopgraph design/router skills with Hermes")
   .option("--host <host>", "Host for the local Studio launch plan", "localhost")
   .option("--port <port>", "Port for the local Studio launch plan", "3000")
   .option("--json", "Print the setup result as JSON")
@@ -528,7 +535,7 @@ apps
   .argument("<app-id>", "Marketplace app ID")
   .option("--preset <preset>", "Provider preset ID")
   .option("--project <root>", "Explicit project root", process.cwd())
-  .option("--version <range>", "Semantic version or range", "latest")
+  .option("--version <range>", "Semantic version or range; omitted calls resume the saved draft")
   .option("--config <path>", "JSON object with confirmed installation answers")
   .option("--mapping <ids...>", "Confirmed field mapping IDs")
   .option("--module <ids...>", "Selected optional module IDs")
@@ -536,8 +543,72 @@ apps
   .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
   .option("--company <id>", "Company ID; defaults to workspace ID")
   .option("--actor <id>", "Accountable planner identity", "cli")
-  .action(async (appId: string, options: { project: string; preset?: string; version: string; config?: string; mapping?: string[]; module?: string[]; installation?: string; workspace?: string; company?: string; actor: string }) => {
+  .action(async (appId: string, options: { project: string; preset?: string; version?: string; config?: string; mapping?: string[]; module?: string[]; installation?: string; workspace?: string; company?: string; actor: string }) => {
     await printAppTool("loopgraph_app_onboarding_get", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      versionRange: options.version,
+      presetId: options.preset,
+      selectedModules: options.module,
+      configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : undefined,
+      fieldMappingIds: options.mapping,
+      installationId: options.installation,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("onboard-reset")
+  .description("Explicitly clear one exact pre-install onboarding draft without changing shared connections, mappings, context, or installed assets")
+  .argument("<app-id>", "Marketplace app ID")
+  .requiredOption("--draft <draft-id>", "Draft ID returned by the latest apps onboard call")
+  .requiredOption("--expected-revision <revision>", "Exact positive draft revision returned by the latest apps onboard call")
+  .requiredOption("--confirm <value>", "Type RESET to confirm clearing this draft")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .option("--actor <id>", "Accountable reset actor", "cli")
+  .action(async (appId: string, options: { draft: string; expectedRevision: string; confirm: string; project: string; workspace?: string; company?: string; actor: string }) => {
+    if (options.confirm !== "RESET") throw new Error("Type RESET exactly to clear the onboarding draft.");
+    const expectedDraftRevision = Number(options.expectedRevision);
+    if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision <= 0) {
+      throw new Error("Expected onboarding draft revision must be a positive integer.");
+    }
+    await printAppTool("loopgraph_app_onboarding_reset", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      appId,
+      expectedDraftId: options.draft,
+      expectedDraftRevision,
+      confirmReset: true,
+      actor: options.actor
+    });
+  });
+
+apps
+  .command("onboard-save")
+  .description("Save a complete secret-free onboarding snapshot and return the exact resumed next step")
+  .argument("<app-id>", "Marketplace app ID")
+  .requiredOption("--preset <preset>", "Provider preset ID")
+  .requiredOption("--expected-revision <revision>", "Draft revision returned by the latest apps onboard call; use 0 for a new draft")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--version <range>", "Semantic version or range", "latest")
+  .option("--config <path>", "JSON object with the complete confirmed answer snapshot")
+  .option("--mapping <ids...>", "Confirmed field mapping IDs")
+  .option("--module <ids...>", "Selected optional module IDs")
+  .option("--confirm-preset-change", "Explicitly replace an existing draft that uses another preset", false)
+  .option("--workspace <id>", "Workspace ID; defaults to the local project identity")
+  .option("--company <id>", "Company ID; defaults to workspace ID")
+  .option("--actor <id>", "Accountable saver identity", "cli")
+  .action(async (appId: string, options: { project: string; preset: string; expectedRevision: string; version: string; config?: string; mapping?: string[]; module?: string[]; confirmPresetChange: boolean; workspace?: string; company?: string; actor: string }) => {
+    const expectedDraftRevision = Number(options.expectedRevision);
+    if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 0) {
+      throw new Error("Expected onboarding draft revision must be a non-negative integer.");
+    }
+    await printAppTool("loopgraph_app_onboarding_save", {
       projectRoot: options.project,
       workspaceId: options.workspace,
       companyId: options.company,
@@ -547,7 +618,8 @@ apps
       selectedModules: options.module,
       configuration: options.config ? await readJsonRecord(path.resolve(options.config)) : {},
       fieldMappingIds: options.mapping,
-      installationId: options.installation,
+      expectedDraftRevision,
+      confirmPresetChange: options.confirmPresetChange,
       actor: options.actor
     });
   });
@@ -622,6 +694,24 @@ apps
       installationId,
       workspaceId: options.workspace,
       companyId: options.company
+    });
+  });
+
+apps
+  .command("renewal-plan")
+  .description("Rank installed Apps by missing, expiring, expired, or invalid operating proof")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .option("--status <statuses...>", "Only return these statuses: not_applicable, incomplete, current, renew_soon, expired, invalid")
+  .option("--limit <count>", "Maximum Apps to return", "100")
+  .action(async (options: { project: string; workspace?: string; company?: string; status?: string[]; limit: string }) => {
+    await printAppTool("loopgraph_apps_renewal_plan", {
+      projectRoot: options.project,
+      workspaceId: options.workspace,
+      companyId: options.company,
+      statuses: options.status,
+      limit: Number(options.limit)
     });
   });
 
@@ -769,6 +859,24 @@ for (const action of ["test", "pause", "resume"] as const) {
 }
 
 apps
+  .command("activation-gate")
+  .description("Explain the current evidence-derived gate for one ordered App mode transition")
+  .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--mode <mode>", "shadow, recommend, or execute_with_approval")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--workspace <id>", "Workspace ID")
+  .option("--company <id>", "Company ID")
+  .action(async (installationId: string, options: { mode: string; project: string; workspace?: string; company?: string }) => {
+    await printAppTool("loopgraph_app_activation_gate_get", {
+      projectRoot: options.project,
+      installationId,
+      mode: options.mode,
+      workspaceId: options.workspace,
+      companyId: options.company
+    });
+  });
+
+apps
   .command("activation-approve")
   .description("Approve one exact, short-lived non-live App mode transition")
   .argument("<installation-id>", "Installed app ID")
@@ -914,10 +1022,18 @@ apps
   .command("repair")
   .description("Recompile the exact pinned app and return it to write-blocked testing")
   .argument("<installation-id>", "Installed app ID")
+  .requiredOption("--expected <digest>", "Source artifact digest from apps status")
+  .requiredOption("--updated-at <timestamp>", "Source installation revision time from apps status")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--actor <id>", "Accountable repair identity", "cli")
-  .action(async (installationId: string, options: { project: string; actor: string }) => {
-    await printAppTool("loopgraph_app_repair", { projectRoot: options.project, installationId, actor: options.actor });
+  .action(async (installationId: string, options: { expected: string; updatedAt: string; project: string; actor: string }) => {
+    await printAppTool("loopgraph_app_repair", {
+      projectRoot: options.project,
+      installationId,
+      expectedArtifactDigest: options.expected,
+      expectedUpdatedAt: options.updatedAt,
+      actor: options.actor
+    });
   });
 
 apps
@@ -925,16 +1041,20 @@ apps
   .description("Create a namespaced private derived app with an optional initial overlay")
   .argument("<installation-id>", "Installed app ID")
   .requiredOption("--id <private-app-id>", "Stable private derived app ID")
+  .requiredOption("--expected <digest>", "Exact source artifact digest from apps status")
+  .requiredOption("--updated-at <timestamp>", "Exact source installation revision time from apps status")
   .option("--overlay <path>", "JSON object containing an operations array")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--actor <id>", "Accountable duplicator identity", "cli")
-  .action(async (installationId: string, options: { id: string; overlay?: string; project: string; actor: string }) => {
+  .action(async (installationId: string, options: { id: string; expected: string; updatedAt: string; overlay?: string; project: string; actor: string }) => {
     const overlay = options.overlay ? await readJsonRecord(path.resolve(options.overlay)) : {};
     await printAppTool("loopgraph_app_duplicate", {
       projectRoot: options.project,
       installationId,
       derivedAppId: options.id,
       overlayOperations: overlay.operations ?? [],
+      expectedArtifactDigest: options.expected,
+      expectedUpdatedAt: options.updatedAt,
       actor: options.actor
     });
   });
@@ -976,21 +1096,23 @@ apps
   });
 
 for (const action of ["rollback", "detach"] as const) {
-  apps
+  const command = apps
     .command(action)
     .description(action === "rollback" ? "Restore the exact prior installation revision" : "Pin a local immutable snapshot and stop upstream updates")
     .argument("<installation-id>", "Installed app ID")
     .requiredOption("--expected <digest>", "Current installed artifact digest")
     .option("--project <root>", "Explicit project root", process.cwd())
-    .option("--actor <id>", "Accountable actor identity", "cli")
-    .action(async (installationId: string, options: { expected: string; project: string; actor: string }) => {
-      await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
-        projectRoot: options.project,
-        installationId,
-        expectedArtifactDigest: options.expected,
-        actor: options.actor
-      });
+    .option("--actor <id>", "Accountable actor identity", "cli");
+  if (action === "detach") command.requiredOption("--updated-at <timestamp>", "Exact current installation revision time");
+  command.action(async (installationId: string, options: { expected: string; updatedAt?: string; project: string; actor: string }) => {
+    await printAppTool(action === "rollback" ? "loopgraph_app_rollback" : "loopgraph_app_detach", {
+      projectRoot: options.project,
+      installationId,
+      expectedArtifactDigest: options.expected,
+      ...(action === "detach" ? { expectedUpdatedAt: options.updatedAt } : {}),
+      actor: options.actor
     });
+  });
 }
 
 apps
@@ -1992,7 +2114,7 @@ hermes
   .description("Initialize, install, and check the project-local Hermes Brain integration")
   .option("--project <root>", "Explicit project root", process.cwd())
   .option("--scope <scope>", "Install scope (project)", "project")
-  .option("--activate", "Register MCP servers and the GitHub-hosted skill with Hermes")
+  .option("--activate", "Register MCP servers and the GitHub-hosted design/router skills with Hermes")
   .option("--json", "Print the setup result as JSON")
   .action(async (options: { project: string; scope: string; json?: boolean; activate?: boolean }) => {
     await runHermesSetup(options);
@@ -2050,6 +2172,19 @@ hermes
     await runHermesDoctor(options);
   });
 
+hermes
+  .command("disconnect")
+  .description("Remove Loopgraph MCP registrations while preserving company data and credentials")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .option("--yes", "Explicitly confirm the disconnect")
+  .action(async (options: { project: string; yes?: boolean }) => {
+    if (!options.yes) throw new Error("hermes disconnect requires --yes");
+    const result = await deactivateHermesIntegration({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
 hermesWebhooks
   .command("plan")
   .description("Plan non-secret Hermes webhook routes from registered Loopgraph routing contracts")
@@ -2072,6 +2207,54 @@ hermesWebhooks
       dryRun: Boolean(options.dryRun)
     });
     console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("prepare")
+  .description("Prepare the exact secret-free route contract a Hermes-owned controller may activate in shadow mode")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    const result = await prepareHermesRouteActivation({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("activate")
+  .description("Apply a confirmed shadow-route plan through a workload-authenticated Hermes route controller")
+  .requiredOption("--controller-url <url>", "Exact Hermes route controller reconcile endpoint")
+  .requiredOption("--token-file <path>", "Absolute 0600 projected workload-token file")
+  .requiredOption("--confirm <digest>", "Exact planDigest returned by hermes webhooks prepare")
+  .option("--audience <audience>", "Workload-token audience", "loopgraph-hermes-route-controller")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: {
+    project: string;
+    controllerUrl: string;
+    tokenFile: string;
+    confirm: string;
+    audience: string;
+  }) => {
+    const result = await activateHermesRoutes({
+      projectRoot: path.resolve(options.project),
+      controllerUrl: options.controllerUrl,
+      audience: options.audience,
+      confirmationDigest: options.confirm,
+      tokenProvider: new ProjectedFileWorkloadTokenProvider(options.tokenFile)
+    });
+    console.log(JSON.stringify(result, null, 2));
+  });
+
+hermesWebhooks
+  .command("activation-status")
+  .description("Verify the last secret-free Hermes route receipt still matches the current Loopgraph plan")
+  .option("--project <root>", "Explicit project root", process.cwd())
+  .action(async (options: { project: string }) => {
+    const result = await getHermesRouteActivationStatus({
+      projectRoot: path.resolve(options.project)
+    });
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ready) process.exitCode = 1;
   });
 
 hermesWebhooks
