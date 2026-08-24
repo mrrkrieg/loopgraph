@@ -33,6 +33,24 @@ describe("operating view data", () => {
     expect(preview.changes.some((change) => change.operation === "Split")).toBe(true);
     expect(preview.controller.runs[0]?.decisions.length).toBeGreaterThan(0);
     expect(preview.learning.bindings.length).toBeGreaterThanOrEqual(4);
+    expect(preview.learning.routing).toMatchObject({
+      attempts: {
+        total: 86,
+        evidenceAcknowledged: 82,
+        staleEvidenceRejected: 3
+      },
+      evaluations: {
+        total: 48,
+        passed: 45
+      },
+      humanFeedback: {
+        corrections: 5
+      }
+    });
+    expect(preview.learning.routing.loops).toEqual(expect.arrayContaining([
+      expect.objectContaining({ loopId: "product_activation_recovery" }),
+      expect.objectContaining({ loopId: "marketing_ads" })
+    ]));
     expect(preview.value.truthCounts).toEqual({
       observed: 2,
       modeled: 1,

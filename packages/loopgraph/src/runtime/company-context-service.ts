@@ -88,6 +88,7 @@ export class FileCompanyContextStore implements CompanyContextStore {
   async attachConsumer(input: AttachCompanyContextConsumerInput): Promise<CompanyContext> {
     const current = await this.get(input.workspaceId, input.companyId);
     const next = attachCompanyContextConsumer(current, input);
+    if (next === current) return current;
     await atomicWriteJson(this.filePath, next);
     return next;
   }
@@ -95,6 +96,7 @@ export class FileCompanyContextStore implements CompanyContextStore {
   async detachConsumer(input: DetachCompanyContextConsumerInput): Promise<CompanyContext> {
     const current = await this.get(input.workspaceId, input.companyId);
     const next = detachCompanyContextConsumer(current, input);
+    if (next === current) return current;
     await atomicWriteJson(this.filePath, next);
     return next;
   }
@@ -153,6 +155,9 @@ export function attachCompanyContextConsumer(current: CompanyContext, input: Att
   const requested = new Set(input.contextKeys);
   const missing = input.contextKeys.filter((key) => !current.values.some((value) => value.key === key));
   if (missing.length > 0) throw new Error(`Cannot attach missing company context keys: ${missing.join(", ")}`);
+  if (current.values.every((value) => !requested.has(value.key) || value.consumerInstallationIds.includes(input.installationId))) {
+    return current;
+  }
   return companyContextSchema.parse({
     ...current,
     revision: current.revision + 1,
@@ -166,6 +171,7 @@ export function attachCompanyContextConsumer(current: CompanyContext, input: Att
 
 export function detachCompanyContextConsumer(current: CompanyContext, input: DetachCompanyContextConsumerInput): CompanyContext {
   assertContextIdentity(current, input.workspaceId, input.companyId);
+  if (current.values.every((value) => !value.consumerInstallationIds.includes(input.installationId))) return current;
   return companyContextSchema.parse({
     ...current,
     revision: current.revision + 1,

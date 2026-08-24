@@ -3,6 +3,7 @@ import type { StorageAdapter } from "loopgraph/sdk";
 import { FileStorageAdapter } from "loopgraph/sdk";
 import {
   FileHermesDesignStore,
+  FileHermesRouteActivationStore,
   FileEntityResolutionStore,
   FileHermesOperationsStore,
   FileDiscoveryDesignStore,
@@ -12,6 +13,8 @@ import {
   FileMeasurementStore,
   FileOutcomeStore,
   FileAppInstallationStore,
+  FileAppSnapshotStore,
+  FileAppOperationActionStore,
   FileAppVerificationStore,
   FileCompanyContextStore,
   FileConnectorFieldMappingStore,
@@ -22,6 +25,7 @@ import {
   type DiscoveryDesignStore,
   type EntityResolutionStore,
   type HermesDesignStore,
+  type HermesRouteActivationStore,
   type HermesOperationsStore,
   type LoopControllerStore,
   type LoopOpportunityStore,
@@ -29,6 +33,8 @@ import {
   type MeasurementStore,
   type OutcomeStore,
   type AppInstallationStore,
+  type AppSnapshotStore,
+  type AppOperationActionStore,
   type AppVerificationStore,
   type CompanyContextStore,
   type ConnectorFieldMappingStore,
@@ -84,6 +90,14 @@ import {
   isSupabaseAppInstallationStoreEnabled
 } from "@/lib/db/adapters/supabase-app-installation-store";
 import {
+  createSupabaseAppSnapshotStore,
+  isSupabaseAppSnapshotStoreEnabled
+} from "@/lib/db/adapters/supabase-app-snapshot-store";
+import {
+  createSupabaseAppOperationActionStore,
+  isSupabaseAppOperationActionStoreEnabled
+} from "@/lib/db/adapters/supabase-app-operation-action-store";
+import {
   createSupabaseConnectorFieldMappingStore,
   createSupabaseProviderSchemaSnapshotStore,
   isSupabaseAppConnectorMetadataStoreEnabled
@@ -92,10 +106,15 @@ import {
   createSupabaseCompanyContextStore,
   isSupabaseCompanyContextStoreEnabled
 } from "@/lib/db/adapters/supabase-company-context-store";
+import {
+  createSupabaseHermesRouteActivationStore,
+  isSupabaseHermesRouteActivationStoreEnabled
+} from "@/lib/db/adapters/supabase-hermes-route-activation-store";
 
 const cachedAdapters = new Map<string, StorageAdapter>();
 const cachedRoutingStores = new Map<string, RoutingStore>();
 const cachedHermesDesignStores = new Map<string, HermesDesignStore>();
+const cachedHermesRouteActivationStores = new Map<string, HermesRouteActivationStore>();
 const cachedHermesOperationsStores = new Map<string, HermesOperationsStore>();
 const cachedDiscoveryDesignStores = new Map<string, DiscoveryDesignStore>();
 const cachedLoopSpecRegistryStores = new Map<string, LoopSpecRegistryStore>();
@@ -106,6 +125,8 @@ const cachedMeasurementStores = new Map<string, MeasurementStore>();
 const cachedOutcomeStores = new Map<string, OutcomeStore>();
 const cachedEntityStores = new Map<string, EntityResolutionStore>();
 const cachedAppInstallationStores = new Map<string, AppInstallationStore>();
+const cachedAppSnapshotStores = new Map<string, AppSnapshotStore>();
+const cachedAppOperationActionStores = new Map<string, AppOperationActionStore>();
 const cachedAppVerificationStores = new Map<string, AppVerificationStore>();
 const cachedCompanyContextStores = new Map<string, CompanyContextStore>();
 const cachedConnectorFieldMappingStores = new Map<string, ConnectorFieldMappingStore>();
@@ -176,19 +197,25 @@ export function getRoutingStore(options?: {
   rootDir?: string;
   forceFile?: boolean;
 }): RoutingStore {
-  const rootDir = path.resolve(options?.rootDir ?? getLoopgraphRoot());
   const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
-  const cacheKey = isSupabaseRoutingStoreEnabled()
+  const useSupabase = !options?.forceFile && isSupabaseRoutingStoreEnabled();
+  if (!options?.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed routing storage is required for the hosted runtime");
+  }
+  const rootDir = useSupabase
+    ? undefined
+    : path.resolve(options?.rootDir ?? getLoopgraphRoot());
+  const cacheKey = useSupabase
     ? `supabase-routing:${organizationId}:${projectKey}`
-    : `file-routing:${rootDir}`;
+    : `file-routing:${rootDir!}`;
   if (!options?.forceFile && cachedRoutingStores.has(cacheKey)) {
     return cachedRoutingStores.get(cacheKey)!;
   }
 
-  const store = !options?.forceFile && isSupabaseRoutingStoreEnabled()
+  const store = useSupabase
     ? createSupabaseRoutingStore()
-    : new FileRoutingStore(rootDir);
+    : new FileRoutingStore(rootDir!);
   if (!options?.forceFile) cachedRoutingStores.set(cacheKey, store);
   return store;
 }
@@ -460,6 +487,28 @@ export function getAppVerificationStore(options: {
   return store;
 }
 
+export function getHermesRouteActivationStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): HermesRouteActivationStore {
+  const useSupabase = !options.forceFile && isSupabaseHermesRouteActivationStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed Hermes route activation storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-hermes-route-activation:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-hermes-route-activation:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedHermesRouteActivationStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseHermesRouteActivationStore(options.workspaceId)
+    : new FileHermesRouteActivationStore(projectRoot);
+  cachedHermesRouteActivationStores.set(cacheKey, store);
+  return store;
+}
+
 export function getAppInstallationStore(options: {
   workspaceId: string;
   projectRoot?: string;
@@ -479,6 +528,50 @@ export function getAppInstallationStore(options: {
     ? createSupabaseAppInstallationStore(options.workspaceId)
     : new FileAppInstallationStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps"), options.workspaceId);
   cachedAppInstallationStores.set(cacheKey, store);
+  return store;
+}
+
+export function getAppSnapshotStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): AppSnapshotStore {
+  const useSupabase = !options.forceFile && isSupabaseAppSnapshotStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App snapshot storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-snapshots:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-snapshots:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedAppSnapshotStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseAppSnapshotStore(options.workspaceId, projectRoot)
+    : new FileAppSnapshotStore(projectRoot);
+  cachedAppSnapshotStores.set(cacheKey, store);
+  return store;
+}
+
+export function getAppOperationActionStore(options: {
+  workspaceId: string;
+  projectRoot?: string;
+  forceFile?: boolean;
+}): AppOperationActionStore {
+  const useSupabase = !options.forceFile && isSupabaseAppOperationActionStoreEnabled();
+  if (!options.forceFile && isHostedAuthRequired() && !useSupabase) {
+    throw new Error("Distributed App operation action storage is required for the hosted runtime");
+  }
+  const projectRoot = path.resolve(options.projectRoot ?? getActiveLoopgraphProjectRoot());
+  const cacheKey = useSupabase
+    ? `supabase-app-operation-actions:${process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID}:${process.env.LOOPGRAPH_HOSTED_PROJECT_KEY ?? "default"}:${options.workspaceId}`
+    : `file-app-operation-actions:${projectRoot}:${options.workspaceId}`;
+  const existing = cachedAppOperationActionStores.get(cacheKey);
+  if (existing) return existing;
+  const store = useSupabase
+    ? createSupabaseAppOperationActionStore(options.workspaceId)
+    : new FileAppOperationActionStore(path.join(getPackageLoopgraphRoot(projectRoot), "apps"), options.workspaceId);
+  cachedAppOperationActionStores.set(cacheKey, store);
   return store;
 }
 
@@ -565,6 +658,7 @@ export function resetStorageAdapterCache() {
   cachedAdapters.clear();
   cachedRoutingStores.clear();
   cachedHermesDesignStores.clear();
+  cachedHermesRouteActivationStores.clear();
   cachedHermesOperationsStores.clear();
   cachedDiscoveryDesignStores.clear();
   cachedLoopSpecRegistryStores.clear();
@@ -575,6 +669,8 @@ export function resetStorageAdapterCache() {
   cachedOutcomeStores.clear();
   cachedEntityStores.clear();
   cachedAppInstallationStores.clear();
+  cachedAppSnapshotStores.clear();
+  cachedAppOperationActionStores.clear();
   cachedAppVerificationStores.clear();
   cachedCompanyContextStores.clear();
   cachedConnectorFieldMappingStores.clear();

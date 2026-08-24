@@ -141,6 +141,13 @@ export class SupabaseConnectorFieldMappingStore implements ConnectorFieldMapping
     const mappingIds = [...new Set(mappingIdsInput.map((id) => appIdSchema.parse(id)))].sort();
     const installationId = appIdSchema.parse(installationIdInput);
     if (mappingIds.length === 0) return this.list();
+    const current = await this.list();
+    const requested = new Set(mappingIds);
+    const missing = mappingIds.filter((id) => !current.some((mapping) => mapping.id === id));
+    if (missing.length > 0) throw new Error(`Field mappings not found: ${missing.join(", ")}`);
+    if (current.every((mapping) => !requested.has(mapping.id) || mapping.dependentInstallationIds.includes(installationId))) {
+      return current;
+    }
     const { error } = await this.supabase.rpc("attach_loopgraph_connector_field_mappings", {
       p_organization_id: this.scope.organizationId,
       p_project_key: this.scope.projectKey,
@@ -154,6 +161,8 @@ export class SupabaseConnectorFieldMappingStore implements ConnectorFieldMapping
 
   async detachInstallation(installationIdInput: string, now = new Date()): Promise<ConnectorFieldMapping[]> {
     const installationId = appIdSchema.parse(installationIdInput);
+    const current = await this.list();
+    if (current.every((mapping) => !mapping.dependentInstallationIds.includes(installationId))) return current;
     const { error } = await this.supabase.rpc("detach_loopgraph_connector_field_mappings", {
       p_organization_id: this.scope.organizationId,
       p_project_key: this.scope.projectKey,
