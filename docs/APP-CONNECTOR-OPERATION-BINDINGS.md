@@ -193,6 +193,25 @@ registry. Shadow and recommend modes remain non-executing routes; execute-with-a
 owned loops eligible to produce governed route jobs. Pause returns all owned LoopSpecs to shadow,
 while resume restores the last approved App mode.
 
+Rollout eligibility is also not a display-only maturity label. Before approval, the shared App
+service derives a canonical activation gate from the exact artifact, current lifecycle state,
+connector/configuration readiness, replay review, completed runs, observed outcomes, net-value
+evidence, and permissions. Shadow requires connected maturity, recommend requires a passing and
+fully labeled replay recommendation, and execute-with-approval requires production-proven maturity.
+The replay source window, completed App work, observed outcome window, and observed value window
+are freshness checked rather than trusting when a receipt happened to be written. Recommendation
+and execution evidence is capped at 30 days, with only five minutes of future clock skew accepted.
+The same source timestamps cap the public operational-maturity assessment: an App cannot remain
+`production_proven` or `loopgraph_verified` after its replay, completed-run, outcome, or value proof
+expires. Timestamped proof must reference one of the exact App-owned evidence records returned by the
+tenant-scoped snapshot; an unrelated fresh timestamp cannot refresh an older record.
+The versioned maturity response includes the status and expiry of replay, completed-run, outcome,
+and value proof, plus the earliest `validUntil` and a seven-day `renewalRecommendedAt`. Hermes, CLI,
+and browser consumers therefore share one proactive renewal clock instead of learning about expired
+proof only after a blocked activation.
+The approval receipt embeds that gate; consumption recomputes it and fails closed if evidence is no
+longer sufficient. Human approval supplies accountability, not a bypass around missing evidence.
+
 The transition verifies that the installation still owns a complete active LoopSpec set. Missing
 specs or routing contracts block the change. Each synchronization is revision-bound and
 content-addressed, so an exact retry is idempotent but a later pause/resume cycle creates a new graph
