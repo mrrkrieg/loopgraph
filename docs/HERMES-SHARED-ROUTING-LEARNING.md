@@ -72,6 +72,8 @@ The local shadow-route simulator follows the same evidence-bound path: it ingest
 
 The `/operate/learning` view presents that routing-quality report beside business outcome evidence. A loop being selected frequently is therefore never presented as proof that it is accurate or valuable. Operators can see whether Hermes used the current packet, whether the route matched evaluated expectations, whether a human corrected it, and separately whether the resulting loop improved a measured outcome.
 
+Local projects compile this report from the project-scoped file routing store. Hosted deployments resolve the same compiler through the tenant/project-scoped distributed routing store used by event ingest and Management. Authenticated hosted mode fails closed when that authority is unavailable; it never substitutes a replica-local file ledger that could show a partial or cross-replica routing history. Outcome and measurement rows on the same page resolve through their distributed evidence stores for the same reason.
+
 ## Interfaces
 
 - Event tool: `loopgraph_events_ingest`
