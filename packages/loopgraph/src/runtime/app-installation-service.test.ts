@@ -35,6 +35,8 @@ import {
 import { readLoopgraphWorkspace } from "./workspace";
 import { FileOutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore } from "./hermes-operations-store";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import type { HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const temporaryDirectories: string[] = [];
 const packsRoot = path.resolve(process.cwd(), "packs");
@@ -43,7 +45,52 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
-async function harness(options: { installationStore?: AppInstallationStore; loopSpecStore?: LoopSpecRegistryStore } = {}) {
+const salesLoopIds = [
+  "sales-inbound-account-research",
+  "sales-inbound-follow-up",
+  "sales-inbound-lead-intake",
+  "sales-inbound-lead-qualification",
+  "sales-inbound-lead-routing",
+  "sales-inbound-qualification-learning"
+];
+
+const readyRouteStatusProvider = async (): Promise<HermesRouteActivationStatus> => ({
+  projectRoot: "/test",
+  recordPath: "/test/.loopgraph/hermes-route-activation.json",
+  checkedAt: "2026-08-08T12:00:00.000Z",
+  exists: true,
+  current: true,
+  ready: true,
+  planDigest: "a1b2c3d4e5f60708",
+  currentPlanDigest: "a1b2c3d4e5f60708",
+  routeStates: [{
+    routeId: "hermes_route_sales",
+    routeName: "loopgraph-hubspot-events",
+    routeKind: "provider_event",
+    loopIds: salesLoopIds,
+    state: "shadow",
+    subscriptionState: "active",
+    signatureVerificationConfigured: true,
+    ready: true
+  }],
+  warnings: [],
+  nextActions: ["Hermes routes are ready."]
+});
+
+const readyWebhookDoctorProvider = async (): Promise<HermesWebhookDoctorResult> => ({
+  ok: true,
+  plan: {
+    catalogVersion: "routing-catalog-test",
+    routes: [{ routeKind: "provider_event", loopIds: salesLoopIds }]
+  }
+} as HermesWebhookDoctorResult);
+
+async function harness(options: {
+  installationStore?: AppInstallationStore;
+  loopSpecStore?: LoopSpecRegistryStore;
+  routeActivationStatusProvider?: () => Promise<HermesRouteActivationStatus>;
+  webhookDoctorProvider?: () => Promise<HermesWebhookDoctorResult>;
+} = {}) {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), "loopgraph-app-install-"));
   temporaryDirectories.push(projectRoot);
   const marketplace = new LocalAppMarketplace(path.join(projectRoot, ".loopgraph", "marketplace"), packsRoot);
@@ -79,7 +126,9 @@ async function harness(options: { installationStore?: AppInstallationStore; loop
     installationStore: options.installationStore,
     loopSpecStore: options.loopSpecStore,
     outcomeStore,
-    operationsStore
+    operationsStore,
+    routeActivationStatusProvider: options.routeActivationStatusProvider ?? readyRouteStatusProvider,
+    webhookDoctorProvider: options.webhookDoctorProvider ?? readyWebhookDoctorProvider
   });
   const connection = connectionInstanceSchema.parse({
     schemaVersion: "connection-instance/v1alpha1",
@@ -908,6 +957,18 @@ describe("atomic app installation lifecycle", () => {
       "operations-activator",
       new Date("2026-08-08T12:04:00.000Z")
     );
+    const preProofPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:04:15.000Z"));
+    expect(preProofPlan).toMatchObject({
+      totalInstallations: 1,
+      totalMatched: 1,
+      counts: { notApplicable: 1 },
+      items: [{
+        installationId: applied.installation.id,
+        status: "not_applicable",
+        priority: "none",
+        nextAction: { kind: "run_historical_replay" }
+      }]
+    });
 
     const blockedRecommend = await input.service.activationGate(
       applied.installation.id,
@@ -987,6 +1048,28 @@ describe("atomic app installation lifecycle", () => {
     })).rejects.toThrow(/production_proven/i);
 
     await recordProductionProof(input, applied.installation.id, new Date("2026-08-08T12:07:30.000Z"));
+    const currentPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:08:00.000Z"));
+    expect(currentPlan.items[0]).toMatchObject({
+      installationId: applied.installation.id,
+      status: "current",
+      priority: "none",
+      affectedEvidence: [],
+      nextAction: { kind: "monitor" }
+    });
+    const renewSoonPlan = await input.service.evidenceRenewalPlan(
+      { statuses: ["renew_soon"] },
+      new Date("2026-09-02T12:08:00.000Z")
+    );
+    expect(renewSoonPlan).toMatchObject({
+      totalMatched: 1,
+      counts: { renewSoon: 1 },
+      items: [{ status: "renew_soon", priority: "high", nextAction: { kind: "renew_proof" } }]
+    });
+    const expiredPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-09-08T12:08:00.000Z"));
+    expect(expiredPlan).toMatchObject({
+      counts: { expired: 1 },
+      items: [{ status: "expired", priority: "critical", nextAction: { kind: "renew_proof" } }]
+    });
     const executeGate = await input.service.activationGate(
       applied.installation.id,
       "execute_with_approval",
@@ -1004,7 +1087,7 @@ describe("atomic app installation lifecycle", () => {
     );
     expect(staleExecuteGate).toMatchObject({
       status: "blocked",
-      observedMaturity: "production_proven",
+      observedMaturity: "connected",
       checks: expect.arrayContaining([
         expect.objectContaining({ id: "evidence-freshness", status: "blocked" })
       ])
@@ -1029,6 +1112,11 @@ describe("atomic app installation lifecycle", () => {
           summary: expect.stringMatching(/future/i)
         })
       ])
+    });
+    const invalidPlan = await input.service.evidenceRenewalPlan({}, new Date("2026-08-08T12:10:00.000Z"));
+    expect(invalidPlan).toMatchObject({
+      counts: { invalid: 1 },
+      items: [{ status: "invalid", priority: "critical", nextAction: { kind: "repair_evidence" } }]
     });
   }, 20_000);
 
@@ -1283,7 +1371,7 @@ describe("atomic app installation lifecycle", () => {
     const resumed = await input.service.resume(applied.installation.id, "admin-1");
     expect(resumed).toMatchObject({ state: "execute_with_approval", mode: "execute_with_approval" });
     expect(new Set(await routingModes())).toEqual(new Set(["execute_with_approval"]));
-  });
+  }, 20_000);
 
   it("recovers interrupted pause and resume without leaving App and LoopSpec state split", async () => {
     const store = new AuditCapturingInstallationStore("acme");
@@ -1460,6 +1548,76 @@ describe("atomic app installation lifecycle", () => {
     );
     expect(replayed).toEqual(activated);
     expect((await new FileAppInstallationStore(path.join(input.projectRoot, ".loopgraph", "apps"), "acme").read()).revision).toBe(completedRevision);
+  });
+
+  it("blocks App promotion until Hermes proves the exact owned provider routes", async () => {
+    const input = await harness({
+      routeActivationStatusProvider: async () => ({
+        projectRoot: "/test",
+        recordPath: "/test/.loopgraph/hermes-route-activation.json",
+        checkedAt: "2026-08-08T12:03:00.000Z",
+        exists: false,
+        current: false,
+        ready: false,
+        routeStates: [],
+        warnings: ["No Hermes route activation receipt exists for this project."],
+        nextActions: ["Prepare and apply the current Hermes route plan."]
+      })
+    });
+    const applied = await installSalesApp(input);
+    await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const readiness = await input.service.readiness(applied.installation.id, new Date("2026-08-08T12:03:00.000Z"));
+    expect(readiness.checks).toContainEqual(expect.objectContaining({
+      id: "hermes-route-activation",
+      status: "fail",
+      summary: expect.stringContaining("No Hermes Route Controller receipt")
+    }));
+    const gate = await input.service.activationGate(applied.installation.id, "shadow", new Date("2026-08-08T12:03:00.000Z"));
+    expect(gate.status).toBe("blocked");
+    await expect(input.service.approveActivation({
+      installationId: applied.installation.id,
+      mode: "shadow",
+      approvedBy: "admin-1",
+      reason: "This must not bypass missing Hermes route evidence.",
+      now: new Date("2026-08-08T12:03:00.000Z")
+    })).rejects.toThrow(/Hermes route/i);
+  });
+
+  it("does not block one App on an unrelated pending Hermes route", async () => {
+    const ready = await readyRouteStatusProvider();
+    const input = await harness({
+      routeActivationStatusProvider: async () => ({
+        ...ready,
+        ready: false,
+        routeStates: [
+          ...ready.routeStates,
+          {
+            routeId: "hermes_route_unrelated",
+            routeName: "loopgraph-zendesk-events",
+            routeKind: "provider_event",
+            loopIds: ["customer-success-ticket-triage"],
+            state: "pending_connection",
+            subscriptionState: "pending_connection",
+            signatureVerificationConfigured: false,
+            ready: false
+          }
+        ]
+      })
+    });
+    const applied = await installSalesApp(input);
+    await input.service.test(applied.installation.id, "admin-1", new Date("2026-08-08T12:02:00.000Z"));
+
+    const readiness = await input.service.readiness(applied.installation.id, new Date("2026-08-08T12:03:00.000Z"));
+    expect(readiness.checks).toContainEqual(expect.objectContaining({
+      id: "hermes-route-activation",
+      status: "pass"
+    }));
+    expect((await input.service.activationGate(
+      applied.installation.id,
+      "shadow",
+      new Date("2026-08-08T12:03:00.000Z")
+    )).status).toBe("ready");
   });
 
   it("loads legacy activation receipts for audit history but refuses to consume them as authority", async () => {

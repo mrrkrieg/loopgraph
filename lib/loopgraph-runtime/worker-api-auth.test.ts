@@ -3,12 +3,14 @@ import {
   authorizeCronApiRequest,
   authorizeObservabilityApiRequest,
   authorizeWorkerApiRequest,
+  machineCapabilityRequiresDurableGrant,
   resolveDurableWorkloadGrantScope
 } from "./worker-api-auth";
 
 const originalToken = process.env.LOOPGRAPH_WORKER_API_TOKEN;
 const originalCronSecret = process.env.CRON_SECRET;
 const originalObservabilityToken = process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN;
+const originalDurableGrantRequirement = process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS;
 
 afterEach(() => {
   if (originalToken === undefined) {
@@ -25,6 +27,11 @@ afterEach(() => {
     delete process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN;
   } else {
     process.env.LOOPGRAPH_OBSERVABILITY_API_TOKEN = originalObservabilityToken;
+  }
+  if (originalDurableGrantRequirement === undefined) {
+    delete process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS;
+  } else {
+    process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS = originalDurableGrantRequirement;
   }
 });
 
@@ -69,6 +76,13 @@ describe("route-job HTTP API authorization", () => {
       capability: "provider.github.issues.read",
       connectionId: "github-prod"
     });
+  });
+
+  it("requires a durable grant for hosted Hermes route activation", () => {
+    process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS = "true";
+    expect(machineCapabilityRequiresDurableGrant("hermes.route_activation")).toBe(true);
+    expect(machineCapabilityRequiresDurableGrant("hermes.app_operations")).toBe(true);
+    expect(machineCapabilityRequiresDurableGrant("routing.worker")).toBe(false);
   });
 
   it("fails closed without a configured token even for a localhost URL", async () => {
