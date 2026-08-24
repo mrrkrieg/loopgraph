@@ -103,6 +103,33 @@ describe("interactive CLI device authorization", () => {
     expect(JSON.stringify(persisted)).not.toContain(original.refreshToken);
   });
 
+  it("removes the local credential family when the server detects refresh-token reuse", async () => {
+    const directory = await temporaryDirectory();
+    const filePath = path.join(directory, "credentials.json");
+    const store = new LocalCliCredentialStore(filePath);
+    const original = profileFromTokens({
+      baseUrl: "https://loopgraph.example",
+      audience: "https://loopgraph.example/marketplace",
+      tokens: tokenResponse({ expires_in: 1 }),
+      now: Date.parse("2026-08-17T00:00:00.000Z")
+    });
+    await store.saveProfile(original);
+    const provider = new CliSessionTokenProvider({
+      profile: original,
+      store,
+      client: new CliDeviceAuthorizationClient(original.baseUrl, {
+        fetcher: vi.fn(async () => errorResponse("refresh_token_reused", 400))
+      }),
+      now: () => Date.parse("2026-08-17T00:01:00.000Z")
+    });
+
+    await expect(provider.getToken({ audience: original.audience })).rejects.toMatchObject({
+      code: "refresh_token_reused"
+    });
+    expect(await store.getActiveProfile()).toBeUndefined();
+    expect(await readFile(filePath, "utf8")).not.toContain(original.refreshToken);
+  });
+
   it("discovers the active hosted profile without requiring marketplace environment variables", async () => {
     const directory = await temporaryDirectory();
     const filePath = path.join(directory, "credentials.json");
