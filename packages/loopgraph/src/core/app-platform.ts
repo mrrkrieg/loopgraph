@@ -242,6 +242,26 @@ const appEvidenceRenewalStatusSchema = z.enum([
   "invalid"
 ]);
 
+export const appEvidenceRenewalCountsSchema = z.object({
+  notApplicable: z.number().int().nonnegative(),
+  incomplete: z.number().int().nonnegative(),
+  current: z.number().int().nonnegative(),
+  renewSoon: z.number().int().nonnegative(),
+  expired: z.number().int().nonnegative(),
+  invalid: z.number().int().nonnegative()
+}).strict();
+
+export function deriveAppEvidenceFleetHealth(
+  countsInput: z.input<typeof appEvidenceRenewalCountsSchema>
+): "healthy" | "degraded" | "blocked" {
+  const counts = appEvidenceRenewalCountsSchema.parse(countsInput);
+  return counts.invalid > 0
+    ? "blocked"
+    : counts.expired > 0 || counts.renewSoon > 0
+      ? "degraded"
+      : "healthy";
+}
+
 export const appEvidenceRenewalPlanSchema = z.object({
   schemaVersion: z.literal(APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION),
   workspaceId: appIdSchema,
@@ -249,14 +269,7 @@ export const appEvidenceRenewalPlanSchema = z.object({
   generatedAt: isoDateTimeSchema,
   totalInstallations: z.number().int().nonnegative(),
   totalMatched: z.number().int().nonnegative(),
-  counts: z.object({
-    notApplicable: z.number().int().nonnegative(),
-    incomplete: z.number().int().nonnegative(),
-    current: z.number().int().nonnegative(),
-    renewSoon: z.number().int().nonnegative(),
-    expired: z.number().int().nonnegative(),
-    invalid: z.number().int().nonnegative()
-  }).strict(),
+  counts: appEvidenceRenewalCountsSchema,
   items: z.array(z.object({
     installationId: appIdSchema,
     appId: appIdSchema,

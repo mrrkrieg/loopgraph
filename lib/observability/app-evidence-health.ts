@@ -2,6 +2,7 @@ import "server-only";
 
 import {
   appEvidenceRenewalPlanSchema,
+  deriveAppEvidenceFleetHealth,
   type AppEvidenceRenewalPlan
 } from "loopgraph/core";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
@@ -48,11 +49,7 @@ export async function getHostedAppEvidenceHealth(input: {
   if (Math.abs(now.getTime() - Date.parse(plan.generatedAt)) > MAX_PLAN_CLOCK_SKEW_MS) {
     throw new Error("App evidence health returned a stale or future-dated projection");
   }
-  const health = plan.counts.invalid > 0
-    ? "blocked"
-    : plan.counts.expired > 0 || plan.counts.renewSoon > 0
-      ? "degraded"
-      : "healthy";
+  const health = deriveAppEvidenceFleetHealth(plan.counts);
   return {
     schemaVersion: HOSTED_APP_EVIDENCE_HEALTH_SCHEMA_VERSION,
     workspaceId,

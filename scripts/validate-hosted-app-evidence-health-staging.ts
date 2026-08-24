@@ -1,17 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
+import { deriveAppEvidenceFleetHealth } from "loopgraph/core";
 import { readBoundedResponseJson, readBoundedResponseText } from "./bounded-response";
 import {
   readProjectedWorkloadTokenFile,
   validateProjectedWorkloadToken
 } from "./projected-workload-token";
+import {
+  findAuthorizedMachineRequestAuditEvidence,
+  readStagingAuditCheckpoint
+} from "./staging-machine-audit-proof";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROJECT_KEY_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const FOREIGN_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 const HEALTH_SCHEMA_VERSION = "loopgraph-hosted-app-evidence-health/v1alpha1";
-const RECEIPT_SCHEMA_VERSION = "hosted-app-evidence-health-staging-validation/v1";
+const RECEIPT_SCHEMA_VERSION = "hosted-app-evidence-health-staging-validation/v3";
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const COUNT_NAMES = [
@@ -21,6 +26,15 @@ const COUNT_NAMES = [
   "incomplete",
   "current",
   "notApplicable"
+] as const;
+
+const CLASSIFICATION_FIXTURES = [
+  { status: "invalid", count: "invalid", expectedHealth: "blocked" },
+  { status: "expired", count: "expired", expectedHealth: "degraded" },
+  { status: "renew_soon", count: "renewSoon", expectedHealth: "degraded" },
+  { status: "incomplete", count: "incomplete", expectedHealth: "healthy" },
+  { status: "current", count: "current", expectedHealth: "healthy" },
+  { status: "not_applicable", count: "notApplicable", expectedHealth: "healthy" }
 ] as const;
 
 const METRIC_NAMES = {
@@ -56,6 +70,20 @@ export type HostedAppEvidenceHealthStagingReceipt = {
   projectKey: string;
   checkedAt: string;
   durationMs: number;
+  auditEvidence: {
+    afterSequence: number;
+    throughSequence: number;
+    headHash: string;
+    requestId: string;
+  };
+  classificationEvidence: {
+    cases: Array<{
+      status: (typeof CLASSIFICATION_FIXTURES)[number]["status"];
+      expectedHealth: "healthy" | "degraded" | "blocked";
+      observedHealth: "healthy" | "degraded" | "blocked";
+      ok: true;
+    }>;
+  };
   projection: {
     generatedAt: string;
     health: "healthy" | "degraded" | "blocked";
@@ -79,7 +107,9 @@ export type HostedAppEvidenceHealthStagingReceipt = {
       | "authorized_health_projection"
       | "replay_denial"
       | "aggregate_only_contract"
-      | "metrics_projection_parity";
+      | "metrics_projection_parity"
+      | "classification_fixture_rehearsal"
+      | "independent_audit_evidence";
     ok: true;
     status?: number;
     detail: string;
@@ -109,6 +139,16 @@ export async function validateHostedAppEvidenceHealthStaging(
     "api/cron/app-evidence-health",
     ensureTrailingSlash(baseUrl)
   );
+  const auditAfter = await readStagingAuditCheckpoint({
+    baseUrl,
+    fetcher,
+    token: tokens.observability,
+    organizationId: config.organizationId,
+    projectKey: config.projectKey,
+    requestId: `app_evidence_checkpoint_${requestId()}`,
+    timestamp: now().toISOString(),
+    label: "App evidence health staging"
+  });
 
   const unauthenticated = await fetcher(scheduleUrl, {
     redirect: "error",
@@ -232,6 +272,34 @@ export async function validateHostedAppEvidenceHealthStaging(
     detail: "Protected Prometheus gauges exactly match the accepted schedule projection."
   });
 
+  const classificationEvidence = rehearseEvidenceClassifications();
+  checks.push({
+    name: "classification_fixture_rehearsal",
+    ok: true,
+    detail: "The shared fleet-health classifier mapped all six isolated evidence states to their exact fail-closed health outcomes."
+  });
+
+  const auditEvidence = await findAuthorizedMachineRequestAuditEvidence({
+    baseUrl,
+    fetcher,
+    token: tokens.observability,
+    organizationId: config.organizationId,
+    projectKey: config.projectKey,
+    targetRequestId: acceptedRequestId,
+    capability: "schedule.app_evidence_health",
+    afterSequence: auditAfter,
+    requestId,
+    now,
+    requestIdPrefix: "app_evidence_audit",
+    label: "App evidence health staging"
+  });
+  checks.push({
+    name: "independent_audit_evidence",
+    ok: true,
+    status: auditEvidence.status,
+    detail: "The verified tenant audit chain contains the accepted schedule.app_evidence_health request."
+  });
+
   const checkedAt = now().toISOString();
   return {
     schemaVersion: RECEIPT_SCHEMA_VERSION,
@@ -240,10 +308,37 @@ export async function validateHostedAppEvidenceHealthStaging(
     projectKey: config.projectKey,
     checkedAt,
     durationMs: Math.max(0, (dependencies.nowMs ?? Date.now)() - startedAt),
+    auditEvidence: {
+      afterSequence: auditEvidence.afterSequence,
+      throughSequence: auditEvidence.throughSequence,
+      headHash: auditEvidence.headHash,
+      requestId: auditEvidence.requestId
+    },
+    classificationEvidence,
     projection,
     metrics,
     checks
   };
+}
+
+function rehearseEvidenceClassifications(): HostedAppEvidenceHealthStagingReceipt["classificationEvidence"] {
+  const emptyCounts = Object.fromEntries(COUNT_NAMES.map((name) => [name, 0])) as AppEvidenceCounts;
+  const cases = CLASSIFICATION_FIXTURES.map((fixture) => {
+    const observedHealth = deriveAppEvidenceFleetHealth({
+      ...emptyCounts,
+      [fixture.count]: 1
+    });
+    if (observedHealth !== fixture.expectedHealth) {
+      throw new Error(`App evidence ${fixture.status} classification drifted from ${fixture.expectedHealth}`);
+    }
+    return {
+      status: fixture.status,
+      expectedHealth: fixture.expectedHealth,
+      observedHealth,
+      ok: true as const
+    };
+  });
+  return { cases };
 }
 
 function parseProjection(
