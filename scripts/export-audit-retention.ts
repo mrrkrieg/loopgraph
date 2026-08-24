@@ -222,7 +222,7 @@ export async function drainAuditRetention(
       }
       const completedAt = now();
       return auditDrainReceiptSchema.parse({
-        schemaVersion: "audit-drain/v4",
+        schemaVersion: "audit-drain/v8",
         organizationId: config.organizationId,
         projectKey: config.projectKey,
         sourceOrigin: source.origin,
@@ -383,6 +383,14 @@ async function main() {
     stagingFile: required("LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE"),
     marketplaceFile: required("LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE"),
     appEvidenceHealthFile: required("LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE"),
+    cliSessionsFile: required("LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE"),
+    cliAdminFile: required("LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE"),
+    marketplaceReleaseRevocationFile: required(
+      "LOOPGRAPH_AUDIT_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE"
+    ),
+    workloadIssuerRotationFile: required(
+      "LOOPGRAPH_AUDIT_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE"
+    ),
     sourceOrigin: source.origin,
     organizationId,
     projectKey
@@ -457,10 +465,62 @@ const appEvidenceHealthCheckpointReceiptSchema = z.object({
   }).passthrough()
 }).passthrough();
 
+const cliSessionCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-cli-session-staging-validation/v1"),
+  primaryOrigin: z.string().url(),
+  replicaOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
+const cliAdminCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-cli-admin-staging-validation/v1"),
+  targetOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
+const marketplaceReleaseRevocationCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal(
+    "hosted-marketplace-release-revocation-staging-validation/v1"
+  ),
+  targetOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
+const workloadIssuerRotationCheckpointReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-workload-issuer-rotation-staging-validation/v1"),
+  primaryOrigin: z.string().url(),
+  replicaOrigin: z.string().url(),
+  organizationId: z.string().uuid(),
+  projectKey: z.string(),
+  auditEvidence: z.object({
+    throughSequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    headHash: z.string().regex(/^[a-f0-9]{64}$/)
+  }).passthrough()
+}).passthrough();
+
 async function readReleaseCheckpoints(input: {
   stagingFile: string;
   marketplaceFile: string;
   appEvidenceHealthFile: string;
+  cliSessionsFile: string;
+  cliAdminFile: string;
+  marketplaceReleaseRevocationFile: string;
+  workloadIssuerRotationFile: string;
   sourceOrigin: string;
   organizationId: string;
   projectKey: string;
@@ -482,6 +542,35 @@ async function readReleaseCheckpoints(input: {
       1024 * 1024
     )
   ));
+  const cliSessions = cliSessionCheckpointReceiptSchema.parse(JSON.parse(
+    await readBoundedIntegrityFile(
+      input.cliSessionsFile,
+      "LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE",
+      1024 * 1024
+    )
+  ));
+  const cliAdmin = cliAdminCheckpointReceiptSchema.parse(JSON.parse(
+    await readBoundedIntegrityFile(
+      input.cliAdminFile,
+      "LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE",
+      1024 * 1024
+    )
+  ));
+  const marketplaceReleaseRevocation =
+    marketplaceReleaseRevocationCheckpointReceiptSchema.parse(JSON.parse(
+      await readBoundedIntegrityFile(
+        input.marketplaceReleaseRevocationFile,
+        "LOOPGRAPH_AUDIT_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE",
+        1024 * 1024
+      )
+    ));
+  const workloadIssuerRotation = workloadIssuerRotationCheckpointReceiptSchema.parse(JSON.parse(
+    await readBoundedIntegrityFile(
+      input.workloadIssuerRotationFile,
+      "LOOPGRAPH_AUDIT_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE",
+      1024 * 1024
+    )
+  ));
   for (const receipt of [staging, marketplace, appEvidenceHealth]) {
     if (
       trustedEndpoint(receipt.targetOrigin, "Release checkpoint origin", true).origin !== input.sourceOrigin ||
@@ -490,6 +579,51 @@ async function readReleaseCheckpoints(input: {
     ) {
       throw new Error("Release audit checkpoint receipt belongs to a different source or tenant scope");
     }
+  }
+  if (
+    trustedEndpoint(cliSessions.primaryOrigin, "CLI session release checkpoint origin", true).origin !==
+      input.sourceOrigin ||
+    trustedEndpoint(cliSessions.replicaOrigin, "CLI session replica checkpoint origin", true).origin ===
+      input.sourceOrigin ||
+    cliSessions.organizationId !== input.organizationId ||
+    cliSessions.projectKey !== input.projectKey
+  ) {
+    throw new Error("CLI session release audit checkpoint belongs to a different source, replica, or tenant scope");
+  }
+  if (
+    trustedEndpoint(cliAdmin.targetOrigin, "CLI administrator release checkpoint origin", true).origin !==
+      input.sourceOrigin ||
+    cliAdmin.organizationId !== input.organizationId ||
+    cliAdmin.projectKey !== input.projectKey
+  ) {
+    throw new Error("CLI administrator release audit checkpoint belongs to a different source or tenant scope");
+  }
+  if (
+    trustedEndpoint(
+      marketplaceReleaseRevocation.targetOrigin,
+      "Marketplace release revocation checkpoint origin",
+      true
+    ).origin !== input.sourceOrigin ||
+    marketplaceReleaseRevocation.organizationId !== input.organizationId ||
+    marketplaceReleaseRevocation.projectKey !== input.projectKey
+  ) {
+    throw new Error("Marketplace release revocation audit checkpoint belongs to a different source or tenant scope");
+  }
+  if (
+    trustedEndpoint(
+      workloadIssuerRotation.primaryOrigin,
+      "Workload issuer rotation checkpoint origin",
+      true
+    ).origin !== input.sourceOrigin ||
+    trustedEndpoint(
+      workloadIssuerRotation.replicaOrigin,
+      "Workload issuer rotation replica checkpoint origin",
+      true
+    ).origin === input.sourceOrigin ||
+    workloadIssuerRotation.organizationId !== input.organizationId ||
+    workloadIssuerRotation.projectKey !== input.projectKey
+  ) {
+    throw new Error("Workload issuer rotation audit checkpoint belongs to a different source, replica, or tenant scope");
   }
   return releaseAuditCheckpointSetSchema.parse([
     {
@@ -506,6 +640,26 @@ async function readReleaseCheckpoints(input: {
       name: "app_evidence_health",
       sequence: appEvidenceHealth.auditEvidence.throughSequence,
       hash: appEvidenceHealth.auditEvidence.headHash
+    },
+    {
+      name: "cli_sessions",
+      sequence: cliSessions.auditEvidence.throughSequence,
+      hash: cliSessions.auditEvidence.headHash
+    },
+    {
+      name: "cli_admin",
+      sequence: cliAdmin.auditEvidence.throughSequence,
+      hash: cliAdmin.auditEvidence.headHash
+    },
+    {
+      name: "marketplace_release_revocation",
+      sequence: marketplaceReleaseRevocation.auditEvidence.throughSequence,
+      hash: marketplaceReleaseRevocation.auditEvidence.headHash
+    },
+    {
+      name: "workload_issuer_rotation",
+      sequence: workloadIssuerRotation.auditEvidence.throughSequence,
+      hash: workloadIssuerRotation.auditEvidence.headHash
     }
   ]);
 }

@@ -16,6 +16,10 @@ users, organizations, and machine workers must not share an implicit administrat
   new key ID or cached-key signature mismatch. Concurrent refreshes within one runtime share one
   fetch, malformed or oversized key sets fail closed, redirects are rejected, and unknown key IDs
   are refresh-throttled.
+- Browser-authorized CLI refresh tokens rotate as one database-owned family. Prior generations are
+  retained only as private expiry-bounded digests; reuse atomically revokes the current family,
+  appends one digest-free tenant audit event, and is visible to an administrator without exposing
+  token hashes.
 - Organization access comes from `organization_memberships`, never editable user metadata.
 - Roles are monotonic: `viewer`, `operator`, `admin`, and `owner`.
 - Request-bound Design Studio reads and writes use the user's cookie-bound Supabase client.
@@ -138,7 +142,7 @@ The protected production release chain first actively rehearses the exact deploy
 Storage mutation fence and the distributed learning/entity stores in random reserved staging
 scopes, then repeats reconciliation for the exact Storage origin and tenant/project proven earlier
 in the same run. All fresh, healthy aggregate receipts are mandatory inputs to
-`loopgraph-production-promotion-evidence/v12`; a missing, stale,
+`loopgraph-production-promotion-evidence/v16`; a missing, stale,
 cross-scope, incomplete,
 retention-drifted, or unhealthy receipt blocks promotion. The retention digest is independently
 pinned in reconciliation, release-evidence, and production environments. The credential-bearing

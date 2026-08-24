@@ -137,13 +137,13 @@ const releaseAuditCheckpointSetV3Schema = z.array(releaseAuditCheckpointV3Schema
     }
   });
 
-export const releaseAuditCheckpointSchema = z.object({
+const releaseAuditCheckpointV4Schema = z.object({
   name: z.enum(["staging", "marketplace", "app_evidence_health"]),
   sequence: safeInteger,
   hash: hashSchema
 }).strict();
 
-export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSchema)
+const releaseAuditCheckpointSetV4Schema = z.array(releaseAuditCheckpointV4Schema)
   .length(3)
   .superRefine((checkpoints, context) => {
     const names = checkpoints.map((checkpoint) => checkpoint.name);
@@ -156,6 +156,129 @@ export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSch
       context.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Release audit checkpoints must contain staging, marketplace, and App evidence health exactly once"
+      });
+    }
+  });
+
+const releaseAuditCheckpointV5Schema = z.object({
+  name: z.enum(["staging", "marketplace", "app_evidence_health", "cli_sessions"]),
+  sequence: safeInteger,
+  hash: hashSchema
+}).strict();
+
+const releaseAuditCheckpointSetV5Schema = z.array(releaseAuditCheckpointV5Schema)
+  .length(4)
+  .superRefine((checkpoints, context) => {
+    const names = checkpoints.map((checkpoint) => checkpoint.name);
+    if (
+      new Set(names).size !== names.length ||
+      !names.includes("staging") ||
+      !names.includes("marketplace") ||
+      !names.includes("app_evidence_health") ||
+      !names.includes("cli_sessions")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Release audit checkpoints must contain staging, marketplace, App evidence health, and CLI sessions exactly once"
+      });
+    }
+  });
+
+const releaseAuditCheckpointV6Schema = z.object({
+  name: z.enum([
+    "staging",
+    "marketplace",
+    "app_evidence_health",
+    "cli_sessions",
+    "cli_admin"
+  ]),
+  sequence: safeInteger,
+  hash: hashSchema
+}).strict();
+
+const releaseAuditCheckpointSetV6Schema = z.array(releaseAuditCheckpointV6Schema)
+  .length(5)
+  .superRefine((checkpoints, context) => {
+    const names = checkpoints.map((checkpoint) => checkpoint.name);
+    if (
+      new Set(names).size !== names.length ||
+      !names.includes("staging") ||
+      !names.includes("marketplace") ||
+      !names.includes("app_evidence_health") ||
+      !names.includes("cli_sessions") ||
+      !names.includes("cli_admin")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Release audit checkpoints must contain staging, marketplace, App evidence health, CLI sessions, and CLI administrator MFA exactly once"
+      });
+    }
+  });
+
+const releaseAuditCheckpointV7Schema = z.object({
+  name: z.enum([
+    "staging",
+    "marketplace",
+    "app_evidence_health",
+    "cli_sessions",
+    "cli_admin",
+    "marketplace_release_revocation"
+  ]),
+  sequence: safeInteger,
+  hash: hashSchema
+}).strict();
+
+const releaseAuditCheckpointSetV7Schema = z.array(releaseAuditCheckpointV7Schema)
+  .length(6)
+  .superRefine((checkpoints, context) => {
+    const names = checkpoints.map((checkpoint) => checkpoint.name);
+    if (
+      new Set(names).size !== names.length ||
+      !names.includes("staging") ||
+      !names.includes("marketplace") ||
+      !names.includes("app_evidence_health") ||
+      !names.includes("cli_sessions") ||
+      !names.includes("cli_admin") ||
+      !names.includes("marketplace_release_revocation")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Release audit checkpoints must contain staging, marketplace, App evidence health, CLI sessions, CLI administrator MFA, and marketplace release revocation exactly once"
+      });
+    }
+  });
+
+export const releaseAuditCheckpointSchema = z.object({
+  name: z.enum([
+    "staging",
+    "marketplace",
+    "app_evidence_health",
+    "cli_sessions",
+    "cli_admin",
+    "marketplace_release_revocation",
+    "workload_issuer_rotation"
+  ]),
+  sequence: safeInteger,
+  hash: hashSchema
+}).strict();
+
+export const releaseAuditCheckpointSetSchema = z.array(releaseAuditCheckpointSchema)
+  .length(7)
+  .superRefine((checkpoints, context) => {
+    const names = checkpoints.map((checkpoint) => checkpoint.name);
+    if (
+      new Set(names).size !== names.length ||
+      !names.includes("staging") ||
+      !names.includes("marketplace") ||
+      !names.includes("app_evidence_health") ||
+      !names.includes("cli_sessions") ||
+      !names.includes("cli_admin") ||
+      !names.includes("marketplace_release_revocation") ||
+      !names.includes("workload_issuer_rotation")
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Release audit checkpoints must contain staging, marketplace, App evidence health, CLI sessions, CLI administrator MFA, marketplace release revocation, and workload issuer rotation exactly once"
       });
     }
   });
@@ -174,13 +297,41 @@ export const auditDrainReceiptV3Schema = z.object({
 export const auditDrainReceiptV4Schema = z.object({
   schemaVersion: z.literal("audit-drain/v4"),
   ...auditDrainReceiptFields,
+  verifiedReleaseCheckpoints: releaseAuditCheckpointSetV4Schema
+}).strict();
+
+export const auditDrainReceiptV5Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v5"),
+  ...auditDrainReceiptFields,
+  verifiedReleaseCheckpoints: releaseAuditCheckpointSetV5Schema
+}).strict();
+
+export const auditDrainReceiptV6Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v6"),
+  ...auditDrainReceiptFields,
+  verifiedReleaseCheckpoints: releaseAuditCheckpointSetV6Schema
+}).strict();
+
+export const auditDrainReceiptV7Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v7"),
+  ...auditDrainReceiptFields,
+  verifiedReleaseCheckpoints: releaseAuditCheckpointSetV7Schema
+}).strict();
+
+export const auditDrainReceiptV8Schema = z.object({
+  schemaVersion: z.literal("audit-drain/v8"),
+  ...auditDrainReceiptFields,
   verifiedReleaseCheckpoints: releaseAuditCheckpointSetSchema
 }).strict();
 
 export const auditDrainReceiptSchema = z.discriminatedUnion("schemaVersion", [
   auditDrainReceiptV2Schema,
   auditDrainReceiptV3Schema,
-  auditDrainReceiptV4Schema
+  auditDrainReceiptV4Schema,
+  auditDrainReceiptV5Schema,
+  auditDrainReceiptV6Schema,
+  auditDrainReceiptV7Schema,
+  auditDrainReceiptV8Schema
 ]);
 
 export type AuditEvent = z.infer<typeof auditEventSchema>;

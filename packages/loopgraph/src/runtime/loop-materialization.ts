@@ -56,7 +56,7 @@ export type LoopListInput = {
 export type HermesGraphProjectionNode = {
   id: string;
   label: string;
-  type: "company_brain" | "department" | "loop" | "connector" | "metric" | "event" | "problem" | "route_commit" | "route_job" | "opportunity" | "graph_change";
+  type: "company_brain" | "department" | "loop" | "connector" | "metric" | "event" | "problem" | "learning_context" | "route_commit" | "route_job" | "opportunity" | "graph_change";
 };
 
 export type HermesGraphProjectionEdge = {

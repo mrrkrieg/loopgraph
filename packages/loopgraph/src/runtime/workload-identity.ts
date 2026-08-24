@@ -313,5 +313,7 @@ function wildcardMatch(value: string, pattern: string) {
 function cacheMaxAge(header: string | null) {
   const match = /(?:^|,)\s*max-age=(\d+)/i.exec(header ?? "");
   const seconds = match ? Number(match[1]) : 300;
-  return Math.min(Math.max(seconds, 30), 3_600) * 1_000;
+  // A provider may advertise a long cache lifetime, but a retired signing key must stop being
+  // accepted within one bounded operational window. New-key misses still refresh immediately.
+  return Math.min(Math.max(seconds, 30), 300) * 1_000;
 }
