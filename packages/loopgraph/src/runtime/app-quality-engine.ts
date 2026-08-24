@@ -81,6 +81,7 @@ export function createSyntheticValidationInstallation(
       completedAt: new Date(0).toISOString()
     },
     connectionBindings: {},
+    operationBindings: {},
     fieldMappingIds: [],
     permissions: manifest.permissions.map((permission) => ({
       capability: permission.capability,
@@ -237,6 +238,7 @@ export function runAppHistoricalReplay(input: {
     writeBlocked: true,
     startedAt,
     completedAt: startedAt,
+    sourceWindow: { from: request.from, to: request.to },
     scenarios,
     metrics: {
       eventCount: scenarios.length,
@@ -291,6 +293,11 @@ export function createPromotionRecommendation(input: {
       id: "false-positive-rate",
       status: falsePositiveRate === undefined ? "warn" : falsePositiveRate <= 0.05 ? "pass" : "fail",
       summary: falsePositiveRate === undefined ? "False-positive rate needs reviewer labels." : `Observed false-positive rate is ${(falsePositiveRate * 100).toFixed(1)}%.`
+    },
+    {
+      id: "incomplete-rate",
+      status: incompleteRate === undefined ? "warn" : incompleteRate <= 0.05 ? "pass" : "fail",
+      summary: incompleteRate === undefined ? "Incomplete-decision rate needs reviewer labels." : `Observed incomplete-decision rate is ${(incompleteRate * 100).toFixed(1)}%.`
     },
     {
       id: "review-burden",

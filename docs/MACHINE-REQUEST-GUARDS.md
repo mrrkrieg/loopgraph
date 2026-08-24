@@ -42,6 +42,7 @@ Requests are recorded under the narrow route capability:
 - `controller.operate`
 - `graph.transact`
 - `hermes.design_callback`
+- `hermes.route_activation`
 - `measurements.collect`
 - `observability.read`
 - `provider.github_forward`
@@ -53,14 +54,22 @@ Requests are recorded under the narrow route capability:
 - `schedule.connector_revocations`
 - `schedule.measurements`
 - `schedule.management`
+- `schedule.app_evidence_health`
+- `schedule.app_action_reconciliation`
 
 Workload issuers should mint a different short-lived subject/audience/capability set for each worker
 class. The issuer JSON is public verification policy; it does not contain private keys or tokens.
+
+`hermes.route_activation` is a deployment/admin workload capability, never a webhook-router capability. Its API accepts only a versioned current-plan digest; the controller target, outbound workload identity, tenant scope, and receipt store are deployment configuration. Do not grant it to provider event turns or lifecycle turns.
 
 ```dotenv
 LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS=[{"issuer":"https://issuer.example","jwksUri":"https://issuer.example/.well-known/jwks.json","audiences":["loopgraph"],"allowedSubjectPatterns":["spiffe://company/*"],"capabilityClaim":"capabilities","organizationClaim":"organization_id","projectClaim":"project_key"}]
 LOOPGRAPH_WORKLOAD_IDENTITY_TOKEN_FILE=/var/run/secrets/loopgraph/broker.jwt
 LOOPGRAPH_WORKER_RATE_LIMIT_PER_MINUTE=120
+
+LOOPGRAPH_HERMES_ROUTE_ACTIVATION_CREDENTIAL_ID=hermes_route_deployer
+# Local compatibility only; production uses the signed workload identity above.
+LOOPGRAPH_HERMES_ROUTE_ACTIVATION_API_TOKEN=
 
 LOOPGRAPH_CRON_RATE_LIMIT_PER_MINUTE=20
 
@@ -84,7 +93,8 @@ adapter must temporarily set `LOOPGRAPH_ALLOW_LEGACY_MACHINE_TOKENS=true` until 
 Loopgraph through a workload-identity gateway. For those scheduled calls, Loopgraph
 derives the durable request ID from Vercel's request identity and uses the configured cron
 credential ID. The controller schedule is registered every 15 minutes, measurement reconciliation
-hourly, and the management review weekly.
+hourly, management review weekly, and App action receipt reconciliation every five minutes. Each
+schedule still needs only its own narrow `schedule.*` capability.
 
 Vercel schedules run only on production deployments. Private durable company work must still use
 the persistent runtime topology described in

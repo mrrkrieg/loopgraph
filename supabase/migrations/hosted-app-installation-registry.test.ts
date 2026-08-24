@@ -30,4 +30,18 @@ describe("hosted App installation registry migration", () => {
     expect(sql).toContain("client[_-]?secret");
     expect(sql).toContain("revoke all on function public.commit_loopgraph_app_installation_registry");
   });
+
+  it("exposes aggregate lifecycle recovery health without leaking installation metadata", async () => {
+    const sql = await readFile("supabase/migrations/202608210006_app_lifecycle_observability.sql", "utf8");
+    expect(sql).toContain("get_app_lifecycle_recovery_snapshot");
+    expect(sql).toContain("app_lifecycle_recovery_pending");
+    expect(sql).toContain("app_lifecycle_recovery_stale");
+    expect(sql).toContain("app_lifecycle_recovery_oldest_age_seconds");
+    expect(sql).toContain("p_stale_after_seconds not between 60 and 86400");
+    expect(sql).toContain("security invoker");
+    expect(sql).toContain("grant execute on function public.get_app_lifecycle_recovery_snapshot");
+    expect(sql).not.toContain("app_id'");
+    expect(sql).not.toContain("installation_id'");
+    expect(sql).not.toContain("actor'");
+  });
 });
