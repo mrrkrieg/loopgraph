@@ -72,10 +72,10 @@ import { initLoopgraphWorkspace } from "./workspace";
 import { LOOPGRAPH_WORKSPACE_TOOL_NAMES } from "./workspace-tools";
 import { LOOPGRAPH_APP_TOOL_NAMES } from "./app-tools";
 
-export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha14" as const;
+export const HERMES_LOOPGRAPH_INTEGRATION_VERSION = "hermes-loopgraph/v1alpha16" as const;
 export const HERMES_ACTIVATION_RECEIPT_SCHEMA_VERSION = "hermes-loopgraph-activation/v1alpha2" as const;
-export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.13.0" as const;
-export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha11" as const;
+export const HERMES_LOOPGRAPH_SKILL_VERSION = "0.14.0" as const;
+export const HERMES_LOOPGRAPH_MCP_PROTOCOL_VERSION = "loopgraph-mcp/v1alpha13" as const;
 export const HERMES_LOOPGRAPH_DESIGN_SKILL_PROTOCOL_VERSION = "loopgraph-design-skill/v1alpha8" as const;
 export const HERMES_LOOPGRAPH_EVENT_ROUTER_SKILL_PROTOCOL_VERSION = "loopgraph-event-router-skill/v1alpha3" as const;
 export const HERMES_LOOPGRAPH_MCP_SERVER_NAMES = [

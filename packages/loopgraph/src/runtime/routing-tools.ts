@@ -105,6 +105,10 @@ export const routingDecisionSubmitInputSchema = z.object({
   hermesMetadata: z.record(z.string(), z.unknown()).default({})
 });
 
+export const evidenceBoundRoutingDecisionSubmitInputSchema = routingDecisionSubmitInputSchema.extend({
+  learningContextDigest: z.string().regex(/^[a-f0-9]{64}$/)
+});
+
 export const eventsReplayInputSchema = z.object({
   projectRoot: z.string().optional(),
   eventId: z.string().min(1),
