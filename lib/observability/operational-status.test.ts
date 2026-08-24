@@ -64,6 +64,23 @@ describe("operational status", () => {
   it("loads a tenant-bound hosted snapshot and formats scrape metrics", async () => {
     hostedEnvironment();
     rpc.mockImplementation(async (name: string) => {
+      if (name === "get_cli_session_security_snapshot") {
+        return {
+          data: {
+            cli_sessions_total: 12,
+            cli_sessions_active: 4,
+            cli_sessions_refresh_required: 2,
+            cli_sessions_expired: 1,
+            cli_sessions_revoked: 5,
+            cli_refresh_reuse_detected_total: 3,
+            cli_refresh_reuse_detected_24h: 0,
+            cli_refresh_reuse_unrevoked: 0,
+            cli_device_authorizations_pending: 2,
+            cli_device_authorizations_oldest_pending_seconds: 45
+          },
+          error: null
+        };
+      }
       if (name === "get_hermes_callback_queue_snapshot") {
         return {
           data: {
@@ -200,6 +217,7 @@ describe("operational status", () => {
         configuration: true,
         database: true,
         audit: true,
+        cliSessionSecurity: true,
         runtimeNamespace: true,
         appEvidenceFreshness: true,
         appLifecycleRecovery: true,
@@ -211,6 +229,16 @@ describe("operational status", () => {
         machineDenied5m: 3,
         auditEventsTotal: 90,
         auditHeadSequence: 105,
+        cliSessionsTotal: 12,
+        cliSessionsActive: 4,
+        cliSessionsRefreshRequired: 2,
+        cliSessionsExpired: 1,
+        cliSessionsRevoked: 5,
+        cliRefreshReuseDetectedTotal: 3,
+        cliRefreshReuseDetected24h: 0,
+        cliRefreshReuseUnrevoked: 0,
+        cliDeviceAuthorizationsPending: 2,
+        cliDeviceAuthorizationOldestPendingSeconds: 45,
         routeJobsQueued: 7,
         routeJobsRunning: 2,
         routeJobsWaitingReview: 1,
@@ -283,6 +311,12 @@ describe("operational status", () => {
       "loopgraph_machine_rate_limited_5m 2"
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_cli_refresh_reuse_detected_total 3"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_cli_device_authorizations_pending 2"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_route_jobs_dead_letter 4"
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
@@ -330,6 +364,14 @@ describe("operational status", () => {
       p_stale_after_seconds: 900
     });
     expect(rpc).toHaveBeenCalledWith(
+      "get_cli_session_security_snapshot",
+      {
+        p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
+        p_project_key: "main",
+        p_now: expect.any(String)
+      }
+    );
+    expect(rpc).toHaveBeenCalledWith(
       "get_loopgraph_app_action_reconciliation_snapshot",
       {
         p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
@@ -337,6 +379,68 @@ describe("operational status", () => {
         p_stale_after_seconds: 300
       }
     );
+  });
+
+  it("reports recent CLI refresh replay as contained but operationally degraded", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_cli_session_security_snapshot"
+          ? {
+              cli_sessions_total: 5,
+              cli_sessions_revoked: 1,
+              cli_refresh_reuse_detected_total: 1,
+              cli_refresh_reuse_detected_24h: 1,
+              cli_refresh_reuse_unrevoked: 0
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { cliSessionSecurity: false },
+      metrics: {
+        cliSessionsTotal: 5,
+        cliSessionsRevoked: 1,
+        cliRefreshReuseDetectedTotal: 1,
+        cliRefreshReuseDetected24h: 1,
+        cliRefreshReuseUnrevoked: 0
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_cli_refresh_reuse_detected_24h 1"
+    );
+  });
+
+  it("fails readiness when a replayed CLI refresh family remains unrevoked", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_cli_session_security_snapshot"
+          ? {
+              cli_refresh_reuse_detected_total: 1,
+              cli_refresh_reuse_detected_24h: 1,
+              cli_refresh_reuse_unrevoked: 1
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      degraded: true,
+      checks: { cliSessionSecurity: false },
+      metrics: { cliRefreshReuseUnrevoked: 1 }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 0");
   });
 
   it("reports stale or interrupted App lifecycle work as degraded without failing traffic readiness", async () => {

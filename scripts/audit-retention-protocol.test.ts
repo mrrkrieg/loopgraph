@@ -20,6 +20,104 @@ const projectKey = "main";
 const zeroHash = "0".repeat(64);
 
 describe("audit retention protocol", () => {
+  it("keeps historical receipts readable while v8 requires workload issuer rotation", () => {
+    const fields = {
+      organizationId,
+      projectKey,
+      sourceOrigin: "https://loopgraph.example",
+      destinationOrigin: "https://retention.example",
+      startedAt: "2026-08-17T00:00:00.000Z",
+      completedAt: "2026-08-17T00:01:00.000Z",
+      fromSequence: 0,
+      throughSequence: 4,
+      eventCount: 4,
+      batchCount: 1,
+      headHash: "4".repeat(64),
+      lastDestinationReceiptDigest: null,
+      lastDestinationAcknowledgement: null
+    };
+    const v4Checkpoints = [
+      { name: "staging", sequence: 1, hash: "1".repeat(64) },
+      { name: "marketplace", sequence: 2, hash: "2".repeat(64) },
+      { name: "app_evidence_health", sequence: 3, hash: "3".repeat(64) }
+    ];
+    expect(auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v4",
+      ...fields,
+      verifiedReleaseCheckpoints: v4Checkpoints
+    }).schemaVersion).toBe("audit-drain/v4");
+    expect(() => auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v5",
+      ...fields,
+      verifiedReleaseCheckpoints: v4Checkpoints
+    })).toThrow();
+    expect(auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v5",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) }
+      ]
+    }).schemaVersion).toBe("audit-drain/v5");
+    expect(() => auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v6",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) }
+      ]
+    })).toThrow();
+    expect(auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v6",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) },
+        { name: "cli_admin", sequence: 4, hash: "4".repeat(64) }
+      ]
+    }).schemaVersion).toBe("audit-drain/v6");
+    expect(() => auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v7",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) },
+        { name: "cli_admin", sequence: 4, hash: "4".repeat(64) }
+      ]
+    })).toThrow();
+    expect(auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v7",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) },
+        { name: "cli_admin", sequence: 4, hash: "4".repeat(64) },
+        { name: "marketplace_release_revocation", sequence: 4, hash: "4".repeat(64) }
+      ]
+    }).schemaVersion).toBe("audit-drain/v7");
+    expect(() => auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v8",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) },
+        { name: "cli_admin", sequence: 4, hash: "4".repeat(64) },
+        { name: "marketplace_release_revocation", sequence: 4, hash: "4".repeat(64) }
+      ]
+    })).toThrow();
+    expect(auditDrainReceiptSchema.parse({
+      schemaVersion: "audit-drain/v8",
+      ...fields,
+      verifiedReleaseCheckpoints: [
+        ...v4Checkpoints,
+        { name: "cli_sessions", sequence: 4, hash: "4".repeat(64) },
+        { name: "cli_admin", sequence: 4, hash: "4".repeat(64) },
+        { name: "marketplace_release_revocation", sequence: 4, hash: "4".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 4, hash: "4".repeat(64) }
+      ]
+    }).schemaVersion).toBe("audit-drain/v8");
+  });
+
   it("validates tenant event links against one verified export checkpoint", () => {
     const first = event(4, zeroHash, "a".repeat(64));
     const second = event(7, first.event_hash, "b".repeat(64));

@@ -10,6 +10,8 @@ export type StagingMachineAuditEvidence = {
   requestId: string;
 };
 
+export type StagingAuditEventEvidence = Omit<StagingMachineAuditEvidence, "requestId">;
+
 export async function readStagingAuditCheckpoint(input: {
   baseUrl: URL;
   fetcher: typeof fetch;
@@ -58,6 +60,31 @@ export async function findAuthorizedMachineRequestAuditEvidence(input: {
   requestIdPrefix: string;
   label: string;
 }): Promise<StagingMachineAuditEvidence> {
+  const evidence = await findStagingAuditEventEvidence({
+    ...input,
+    matches: (event) =>
+      event.event_type === "machine.request.authorized" &&
+      event.capability === input.capability &&
+      event.request_id === input.targetRequestId,
+    omittedEventLabel: "accepted machine request"
+  });
+  return { ...evidence, requestId: input.targetRequestId };
+}
+
+export async function findStagingAuditEventEvidence(input: {
+  baseUrl: URL;
+  fetcher: typeof fetch;
+  token: string;
+  organizationId: string;
+  projectKey: string;
+  afterSequence: number;
+  requestId: () => string;
+  now: () => Date;
+  requestIdPrefix: string;
+  label: string;
+  matches: (event: Record<string, unknown>) => boolean;
+  omittedEventLabel: string;
+}): Promise<StagingAuditEventEvidence> {
   let after = input.afterSequence;
   let through: number | undefined;
   let checkpointHash: string | undefined;
@@ -107,18 +134,12 @@ export async function findAuthorizedMachineRequestAuditEvidence(input: {
     through ??= pageThrough;
     checkpointHash ??= pageHeadHash;
     const events = Array.isArray(audit.events) ? audit.events : [];
-    if (events.some((event) =>
-      isRecord(event) &&
-      event.event_type === "machine.request.authorized" &&
-      event.capability === input.capability &&
-      event.request_id === input.targetRequestId
-    )) {
+    if (events.some((event) => isRecord(event) && input.matches(event))) {
       return {
         status: response.status,
         afterSequence: input.afterSequence,
         throughSequence: through,
-        headHash: checkpointHash,
-        requestId: input.targetRequestId
+        headHash: checkpointHash
       };
     }
     if (audit.hasMore !== true) break;
@@ -128,7 +149,7 @@ export async function findAuthorizedMachineRequestAuditEvidence(input: {
     }
     after = nextCursor;
   }
-  throw new Error(`${input.label} audit export omitted the accepted machine request`);
+  throw new Error(`${input.label} audit export omitted the ${input.omittedEventLabel}`);
 }
 
 function machineHeaders(input: {

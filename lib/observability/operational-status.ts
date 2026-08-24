@@ -12,6 +12,16 @@ export type OperationalMetrics = {
   machineDenied5m: number;
   auditEventsTotal: number;
   auditHeadSequence: number;
+  cliSessionsTotal: number;
+  cliSessionsActive: number;
+  cliSessionsRefreshRequired: number;
+  cliSessionsExpired: number;
+  cliSessionsRevoked: number;
+  cliRefreshReuseDetectedTotal: number;
+  cliRefreshReuseDetected24h: number;
+  cliRefreshReuseUnrevoked: number;
+  cliDeviceAuthorizationsPending: number;
+  cliDeviceAuthorizationOldestPendingSeconds: number;
   routeJobsQueued: number;
   routeJobsRunning: number;
   routeJobsWaitingReview: number;
@@ -97,6 +107,7 @@ export type OperationalReadiness = {
     configuration: boolean;
     database: boolean | null;
     audit: boolean | null;
+    cliSessionSecurity: boolean | null;
     runtimeNamespace: boolean | null;
     appEvidenceFreshness: boolean | null;
     appLifecycleRecovery: boolean | null;
@@ -144,6 +155,16 @@ const EMPTY_METRICS: OperationalMetrics = {
   machineDenied5m: 0,
   auditEventsTotal: 0,
   auditHeadSequence: 0,
+  cliSessionsTotal: 0,
+  cliSessionsActive: 0,
+  cliSessionsRefreshRequired: 0,
+  cliSessionsExpired: 0,
+  cliSessionsRevoked: 0,
+  cliRefreshReuseDetectedTotal: 0,
+  cliRefreshReuseDetected24h: 0,
+  cliRefreshReuseUnrevoked: 0,
+  cliDeviceAuthorizationsPending: 0,
+  cliDeviceAuthorizationOldestPendingSeconds: 0,
   routeJobsQueued: 0,
   routeJobsRunning: 0,
   routeJobsWaitingReview: 0,
@@ -231,6 +252,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         configuration: true,
         database: null,
         audit: null,
+        cliSessionSecurity: null,
         runtimeNamespace: null,
         appEvidenceFreshness: null,
         appLifecycleRecovery: null,
@@ -285,6 +307,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         configuration,
         database: Boolean(supabase),
         audit: false,
+        cliSessionSecurity: false,
         runtimeNamespace,
         appEvidenceFreshness: false,
         appLifecycleRecovery: false,
@@ -296,6 +319,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
 
   const [
     operational,
+    cliSessionSecurity,
     callbacks,
     discoveryDesign,
     loopSpecRegistry,
@@ -309,6 +333,11 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       supabase.rpc("get_loopgraph_operational_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      supabase.rpc("get_cli_session_security_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_now: checkedAt
       }),
       supabase.rpc("get_hermes_callback_queue_snapshot", {
         p_organization_id: organizationId,
@@ -346,6 +375,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     ]);
   if (
     operational.error ||
+    cliSessionSecurity.error ||
     callbacks.error ||
     discoveryDesign.error ||
     loopSpecRegistry.error ||
@@ -355,6 +385,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     appLifecycleRecovery.error ||
     appActionReconciliation.error ||
     !isRecord(operational.data) ||
+    !isRecord(cliSessionSecurity.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
     !isRecord(loopSpecRegistry.data) ||
@@ -382,6 +413,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
         configuration: true,
         database: false,
         audit: false,
+        cliSessionSecurity: false,
         runtimeNamespace: true,
         appEvidenceFreshness: false,
         appLifecycleRecovery: false,
@@ -394,6 +426,7 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
   const metrics = {
     ...parseMetrics({
       ...operational.data,
+      ...cliSessionSecurity.data,
       ...callbacks.data,
       ...discoveryDesign.data,
       ...loopSpecRegistry.data,
@@ -418,16 +451,21 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     metrics.appLifecycleRecoveryRequiresReconciliation === 0 &&
     metrics.appLifecycleRecoveryStale === 0;
   const actionReconciliationHealthy = metrics.appActionReconciliationStale === 0;
+  const cliSessionIntegrityHealthy = metrics.cliRefreshReuseUnrevoked === 0;
+  const cliSessionSecurityHealthy =
+    metrics.cliRefreshReuseDetected24h === 0 && cliSessionIntegrityHealthy;
 
   return {
-    ready: true,
-    degraded: !appEvidenceFreshnessHealthy || !lifecycleRecoveryHealthy || !actionReconciliationHealthy,
+    ready: cliSessionIntegrityHealthy,
+    degraded: !appEvidenceFreshnessHealthy || !lifecycleRecoveryHealthy ||
+      !actionReconciliationHealthy || !cliSessionSecurityHealthy,
     mode: "hosted",
     checkedAt,
     checks: {
       configuration: true,
       database: true,
       audit: true,
+      cliSessionSecurity: cliSessionSecurityHealthy,
       runtimeNamespace: true,
       appEvidenceFreshness: appEvidenceFreshnessHealthy,
       appLifecycleRecovery: lifecycleRecoveryHealthy,
@@ -580,6 +618,36 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_security_audit_head_sequence Current audit-chain sequence.",
     "# TYPE loopgraph_security_audit_head_sequence gauge",
     `loopgraph_security_audit_head_sequence ${metrics.auditHeadSequence}`,
+    "# HELP loopgraph_cli_sessions_total Human CLI sessions in the tenant project.",
+    "# TYPE loopgraph_cli_sessions_total gauge",
+    `loopgraph_cli_sessions_total ${metrics.cliSessionsTotal}`,
+    "# HELP loopgraph_cli_sessions_active Human CLI sessions with current access and refresh authority.",
+    "# TYPE loopgraph_cli_sessions_active gauge",
+    `loopgraph_cli_sessions_active ${metrics.cliSessionsActive}`,
+    "# HELP loopgraph_cli_sessions_refresh_required Human CLI sessions whose access token expired while refresh authority remains.",
+    "# TYPE loopgraph_cli_sessions_refresh_required gauge",
+    `loopgraph_cli_sessions_refresh_required ${metrics.cliSessionsRefreshRequired}`,
+    "# HELP loopgraph_cli_sessions_expired Human CLI sessions whose refresh authority expired without explicit revocation.",
+    "# TYPE loopgraph_cli_sessions_expired gauge",
+    `loopgraph_cli_sessions_expired ${metrics.cliSessionsExpired}`,
+    "# HELP loopgraph_cli_sessions_revoked Human CLI sessions explicitly revoked or revoked by policy.",
+    "# TYPE loopgraph_cli_sessions_revoked gauge",
+    `loopgraph_cli_sessions_revoked ${metrics.cliSessionsRevoked}`,
+    "# HELP loopgraph_cli_refresh_reuse_detected_total CLI session families with detected prior-generation refresh replay.",
+    "# TYPE loopgraph_cli_refresh_reuse_detected_total gauge",
+    `loopgraph_cli_refresh_reuse_detected_total ${metrics.cliRefreshReuseDetectedTotal}`,
+    "# HELP loopgraph_cli_refresh_reuse_detected_24h CLI session families with refresh replay detected in the last 24 hours.",
+    "# TYPE loopgraph_cli_refresh_reuse_detected_24h gauge",
+    `loopgraph_cli_refresh_reuse_detected_24h ${metrics.cliRefreshReuseDetected24h}`,
+    "# HELP loopgraph_cli_refresh_reuse_unrevoked CLI session families where replay was detected without family revocation.",
+    "# TYPE loopgraph_cli_refresh_reuse_unrevoked gauge",
+    `loopgraph_cli_refresh_reuse_unrevoked ${metrics.cliRefreshReuseUnrevoked}`,
+    "# HELP loopgraph_cli_device_authorizations_pending Unexpired pending CLI device authorizations.",
+    "# TYPE loopgraph_cli_device_authorizations_pending gauge",
+    `loopgraph_cli_device_authorizations_pending ${metrics.cliDeviceAuthorizationsPending}`,
+    "# HELP loopgraph_cli_device_authorization_oldest_pending_seconds Age of the oldest unexpired pending CLI device authorization.",
+    "# TYPE loopgraph_cli_device_authorization_oldest_pending_seconds gauge",
+    `loopgraph_cli_device_authorization_oldest_pending_seconds ${metrics.cliDeviceAuthorizationOldestPendingSeconds}`,
     "# HELP loopgraph_route_jobs_queued Route jobs queued or waiting for retry.",
     "# TYPE loopgraph_route_jobs_queued gauge",
     `loopgraph_route_jobs_queued ${metrics.routeJobsQueued}`,
@@ -818,6 +886,18 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     machineDenied5m: nonnegative(data.machine_denied_5m),
     auditEventsTotal: nonnegative(data.audit_events_total),
     auditHeadSequence: nonnegative(data.audit_head_sequence),
+    cliSessionsTotal: nonnegative(data.cli_sessions_total),
+    cliSessionsActive: nonnegative(data.cli_sessions_active),
+    cliSessionsRefreshRequired: nonnegative(data.cli_sessions_refresh_required),
+    cliSessionsExpired: nonnegative(data.cli_sessions_expired),
+    cliSessionsRevoked: nonnegative(data.cli_sessions_revoked),
+    cliRefreshReuseDetectedTotal: nonnegative(data.cli_refresh_reuse_detected_total),
+    cliRefreshReuseDetected24h: nonnegative(data.cli_refresh_reuse_detected_24h),
+    cliRefreshReuseUnrevoked: nonnegative(data.cli_refresh_reuse_unrevoked),
+    cliDeviceAuthorizationsPending: nonnegative(data.cli_device_authorizations_pending),
+    cliDeviceAuthorizationOldestPendingSeconds: nonnegative(
+      data.cli_device_authorizations_oldest_pending_seconds
+    ),
     routeJobsQueued: nonnegative(data.route_jobs_queued),
     routeJobsRunning: nonnegative(data.route_jobs_running),
     routeJobsWaitingReview: nonnegative(data.route_jobs_waiting_review),
