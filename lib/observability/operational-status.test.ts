@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => vi.fn());
 const resolveHostedRuntimeProjectRoot = vi.hoisted(() => vi.fn(() => "/runtime/org/main"));
+const getHostedAppEvidenceHealth = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/db/supabase-admin", () => ({
   createSupabaseAdminClient: () => ({ rpc })
@@ -9,6 +10,7 @@ vi.mock("@/lib/db/supabase-admin", () => ({
 vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   resolveHostedRuntimeProjectRoot
 }));
+vi.mock("./app-evidence-health", () => ({ getHostedAppEvidenceHealth }));
 
 import {
   exportSecurityAuditEvents,
@@ -21,6 +23,25 @@ describe("operational status", () => {
   beforeEach(() => {
     rpc.mockReset();
     resolveHostedRuntimeProjectRoot.mockClear();
+    getHostedAppEvidenceHealth.mockReset();
+    getHostedAppEvidenceHealth.mockResolvedValue({
+      schemaVersion: "loopgraph-hosted-app-evidence-health/v1alpha1",
+      workspaceId: "main",
+      generatedAt: "2026-08-23T08:00:00.000Z",
+      health: "healthy",
+      totalInstallations: 5,
+      totalMatched: 5,
+      itemsReturned: 5,
+      truncated: false,
+      counts: {
+        notApplicable: 1,
+        incomplete: 1,
+        current: 3,
+        renewSoon: 0,
+        expired: 0,
+        invalid: 0
+      }
+    });
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -34,7 +55,8 @@ describe("operational status", () => {
         configuration: true,
         database: null,
         audit: null,
-        runtimeNamespace: null
+        runtimeNamespace: null,
+        appEvidenceFreshness: null
       }
     });
   });
@@ -42,6 +64,23 @@ describe("operational status", () => {
   it("loads a tenant-bound hosted snapshot and formats scrape metrics", async () => {
     hostedEnvironment();
     rpc.mockImplementation(async (name: string) => {
+      if (name === "get_cli_session_security_snapshot") {
+        return {
+          data: {
+            cli_sessions_total: 12,
+            cli_sessions_active: 4,
+            cli_sessions_refresh_required: 2,
+            cli_sessions_expired: 1,
+            cli_sessions_revoked: 5,
+            cli_refresh_reuse_detected_total: 3,
+            cli_refresh_reuse_detected_24h: 0,
+            cli_refresh_reuse_unrevoked: 0,
+            cli_device_authorizations_pending: 2,
+            cli_device_authorizations_oldest_pending_seconds: 45
+          },
+          error: null
+        };
+      }
       if (name === "get_hermes_callback_queue_snapshot") {
         return {
           data: {
@@ -112,6 +151,36 @@ describe("operational status", () => {
           error: null
         };
       }
+      if (name === "get_app_lifecycle_recovery_snapshot") {
+        return {
+          data: {
+            app_installations_total: 5,
+            app_lifecycle_recovery_pending: 1,
+            app_lifecycle_recovery_prepared: 1,
+            app_lifecycle_recovery_requires_reconciliation: 0,
+            app_lifecycle_recovery_stale: 0,
+            app_lifecycle_recovery_workspaces_affected: 1,
+            app_lifecycle_recovery_oldest_age_seconds: 30,
+            app_lifecycle_recovery_stale_after_seconds: 900
+          },
+          error: null
+        };
+      }
+      if (name === "get_loopgraph_app_action_reconciliation_snapshot") {
+        return {
+          data: {
+            app_action_commits_requested_total: 40,
+            app_action_commits_succeeded_total: 36,
+            app_action_commits_failed_total: 3,
+            app_action_reconciliation_pending: 1,
+            app_action_reconciliation_stale: 0,
+            app_action_reconciliation_workspaces_affected: 1,
+            app_action_reconciliation_oldest_age_seconds: 45,
+            app_action_reconciliation_stale_after_seconds: 300
+          },
+          error: null
+        };
+      }
       return {
           data: {
             database_ready: true,
@@ -142,12 +211,17 @@ describe("operational status", () => {
 
     expect(readiness).toMatchObject({
       ready: true,
+      degraded: false,
       mode: "hosted",
       checks: {
         configuration: true,
         database: true,
         audit: true,
-        runtimeNamespace: true
+        cliSessionSecurity: true,
+        runtimeNamespace: true,
+        appEvidenceFreshness: true,
+        appLifecycleRecovery: true,
+        appActionReconciliation: true
       },
       metrics: {
         machineRequests5m: 8,
@@ -155,6 +229,16 @@ describe("operational status", () => {
         machineDenied5m: 3,
         auditEventsTotal: 90,
         auditHeadSequence: 105,
+        cliSessionsTotal: 12,
+        cliSessionsActive: 4,
+        cliSessionsRefreshRequired: 2,
+        cliSessionsExpired: 1,
+        cliSessionsRevoked: 5,
+        cliRefreshReuseDetectedTotal: 3,
+        cliRefreshReuseDetected24h: 0,
+        cliRefreshReuseUnrevoked: 0,
+        cliDeviceAuthorizationsPending: 2,
+        cliDeviceAuthorizationOldestPendingSeconds: 45,
         routeJobsQueued: 7,
         routeJobsRunning: 2,
         routeJobsWaitingReview: 1,
@@ -193,12 +277,44 @@ describe("operational status", () => {
         controllerTriggersFailed: 1,
         controllerTriggerExpiredLeases: 1,
         controllerOldestPendingSeconds: 80,
-        controllerActiveLeases: 1
+        controllerActiveLeases: 1,
+        appInstallationsTotal: 5,
+        appEvidenceHealth: 1,
+        appEvidenceInstallationsTotal: 5,
+        appEvidenceInvalid: 0,
+        appEvidenceExpired: 0,
+        appEvidenceRenewSoon: 0,
+        appEvidenceIncomplete: 1,
+        appEvidenceCurrent: 3,
+        appEvidenceNotApplicable: 1,
+        appEvidenceItemsReturned: 5,
+        appEvidencePlanTruncated: 0,
+        appLifecycleRecoveryPending: 1,
+        appLifecycleRecoveryPrepared: 1,
+        appLifecycleRecoveryRequiresReconciliation: 0,
+        appLifecycleRecoveryStale: 0,
+        appLifecycleRecoveryWorkspacesAffected: 1,
+        appLifecycleRecoveryOldestAgeSeconds: 30,
+        appLifecycleRecoveryStaleAfterSeconds: 900,
+        appActionCommitsRequestedTotal: 40,
+        appActionCommitsSucceededTotal: 36,
+        appActionCommitsFailedTotal: 3,
+        appActionReconciliationPending: 1,
+        appActionReconciliationStale: 0,
+        appActionReconciliationWorkspacesAffected: 1,
+        appActionReconciliationOldestAgeSeconds: 45,
+        appActionReconciliationStaleAfterSeconds: 300
       }
     });
     expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 1");
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_machine_rate_limited_5m 2"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_cli_refresh_reuse_detected_total 3"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_cli_device_authorizations_pending 2"
     );
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_route_jobs_dead_letter 4"
@@ -224,6 +340,266 @@ describe("operational status", () => {
     expect(formatPrometheusMetrics(readiness)).toContain(
       "loopgraph_graph_commits_total 4"
     );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_evidence_health 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_evidence_incomplete 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_lifecycle_recovery_pending 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_lifecycle_recovery_stale 0"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_action_reconciliation_pending 1"
+    );
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_action_reconciliation_stale 0"
+    );
+    expect(rpc).toHaveBeenCalledWith("get_app_lifecycle_recovery_snapshot", {
+      p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
+      p_project_key: "main",
+      p_stale_after_seconds: 900
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "get_cli_session_security_snapshot",
+      {
+        p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
+        p_project_key: "main",
+        p_now: expect.any(String)
+      }
+    );
+    expect(rpc).toHaveBeenCalledWith(
+      "get_loopgraph_app_action_reconciliation_snapshot",
+      {
+        p_organization_id: "123e4567-e89b-12d3-a456-426614174000",
+        p_project_key: "main",
+        p_stale_after_seconds: 300
+      }
+    );
+  });
+
+  it("reports recent CLI refresh replay as contained but operationally degraded", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_cli_session_security_snapshot"
+          ? {
+              cli_sessions_total: 5,
+              cli_sessions_revoked: 1,
+              cli_refresh_reuse_detected_total: 1,
+              cli_refresh_reuse_detected_24h: 1,
+              cli_refresh_reuse_unrevoked: 0
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { cliSessionSecurity: false },
+      metrics: {
+        cliSessionsTotal: 5,
+        cliSessionsRevoked: 1,
+        cliRefreshReuseDetectedTotal: 1,
+        cliRefreshReuseDetected24h: 1,
+        cliRefreshReuseUnrevoked: 0
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_cli_refresh_reuse_detected_24h 1"
+    );
+  });
+
+  it("fails readiness when a replayed CLI refresh family remains unrevoked", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_cli_session_security_snapshot"
+          ? {
+              cli_refresh_reuse_detected_total: 1,
+              cli_refresh_reuse_detected_24h: 1,
+              cli_refresh_reuse_unrevoked: 1
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      degraded: true,
+      checks: { cliSessionSecurity: false },
+      metrics: { cliRefreshReuseUnrevoked: 1 }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain("loopgraph_ready 0");
+  });
+
+  it("reports stale or interrupted App lifecycle work as degraded without failing traffic readiness", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_app_lifecycle_recovery_snapshot"
+          ? {
+              app_lifecycle_recovery_pending: 2,
+              app_lifecycle_recovery_prepared: 1,
+              app_lifecycle_recovery_requires_reconciliation: 1,
+              app_lifecycle_recovery_stale: 1,
+              app_lifecycle_recovery_workspaces_affected: 1,
+              app_lifecycle_recovery_oldest_age_seconds: 1_200,
+              app_lifecycle_recovery_stale_after_seconds: 900
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { appLifecycleRecovery: false },
+      metrics: {
+        appLifecycleRecoveryPending: 2,
+        appLifecycleRecoveryRequiresReconciliation: 1,
+        appLifecycleRecoveryStale: 1,
+        appLifecycleRecoveryOldestAgeSeconds: 1_200
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_operational_degraded 1"
+    );
+  });
+
+  it("reports expiring App evidence as degraded without failing traffic readiness", async () => {
+    hostedEnvironment();
+    getHostedAppEvidenceHealth.mockResolvedValue({
+      schemaVersion: "loopgraph-hosted-app-evidence-health/v1alpha1",
+      workspaceId: "main",
+      generatedAt: "2026-08-23T08:00:00.000Z",
+      health: "degraded",
+      totalInstallations: 2,
+      totalMatched: 2,
+      itemsReturned: 2,
+      truncated: false,
+      counts: {
+        notApplicable: 0,
+        incomplete: 0,
+        current: 1,
+        renewSoon: 1,
+        expired: 0,
+        invalid: 0
+      }
+    });
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { appEvidenceFreshness: false },
+      metrics: {
+        appEvidenceHealth: 0,
+        appEvidenceRenewSoon: 1,
+        appEvidenceCurrent: 1
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_evidence_renew_soon 1"
+    );
+  });
+
+  it("fails hosted readiness when the tenant App evidence projection is unavailable", async () => {
+    hostedEnvironment();
+    getHostedAppEvidenceHealth.mockRejectedValue(new Error("unavailable"));
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      checks: { appEvidenceFreshness: false }
+    });
+  });
+
+  it("fails hosted readiness when the lifecycle recovery threshold is invalid", async () => {
+    hostedEnvironment();
+    vi.stubEnv("LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS", "not-a-number");
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      checks: { configuration: false, appLifecycleRecovery: false }
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("reports stale App action commit receipts as degraded without failing traffic readiness", async () => {
+    hostedEnvironment();
+    rpc.mockImplementation(async (name: string) => ({
+      data: name === "get_loopgraph_operational_snapshot"
+        ? { database_ready: true }
+        : name === "get_loopgraph_app_action_reconciliation_snapshot"
+          ? {
+              app_action_reconciliation_pending: 2,
+              app_action_reconciliation_stale: 1,
+              app_action_reconciliation_workspaces_affected: 1,
+              app_action_reconciliation_oldest_age_seconds: 480,
+              app_action_reconciliation_stale_after_seconds: 300
+            }
+          : {},
+      error: null
+    }));
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: true,
+      degraded: true,
+      checks: { appActionReconciliation: false },
+      metrics: {
+        appActionReconciliationPending: 2,
+        appActionReconciliationStale: 1,
+        appActionReconciliationOldestAgeSeconds: 480
+      }
+    });
+    expect(formatPrometheusMetrics(readiness)).toContain(
+      "loopgraph_app_action_reconciliation_stale 1"
+    );
+  });
+
+  it("fails hosted readiness when the App action reconciliation threshold is invalid", async () => {
+    hostedEnvironment();
+    vi.stubEnv("LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS", "30");
+
+    const readiness = await getOperationalReadiness();
+
+    expect(readiness).toMatchObject({
+      ready: false,
+      checks: { configuration: false, appActionReconciliation: false }
+    });
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("exports bounded audit pages and verifies their hash chain", async () => {

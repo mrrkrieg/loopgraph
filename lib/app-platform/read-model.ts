@@ -1,13 +1,18 @@
 import "server-only";
 
 import type {
+  AppActivationGate,
+  AppActivationApprovalReceipt,
   AppEvalRun,
   AppFieldMappingPlan,
   AppInstallPlan,
   AppOnboardingJourney,
   AppInstallationLock,
   AppLifecycleReceipt,
+  AppEvidenceRenewalPlan,
   AppOperationalMaturityAssessment,
+  AppOperationAction,
+  AppOperationActionEvent,
   AppPromotionRecommendation,
   AppReadiness,
   AppUpdatePlan,
@@ -20,7 +25,7 @@ import type {
   MarketplaceAppVersion,
   WorkspaceAppInstallation
 } from "loopgraph/core";
-import { assessAppOperationalMaturity } from "loopgraph/runtime";
+import type { AppLifecycleOperation } from "loopgraph/runtime";
 import { callLoopgraphAppTool } from "@/lib/app-platform/tool-bridge";
 import { getInstalledAppEvidenceData } from "@/lib/app-platform/installed-app-evidence-data";
 import {
@@ -211,6 +216,9 @@ export type InstalledAppsViewData = {
   installedLoops: Array<{ installationId: string; loops: Array<{ id: string; name: string; path: string }> }>;
   evaluations: AppEvalRun[];
   lifecycleReceipts: AppLifecycleReceipt[];
+  lifecycleOperations: AppLifecycleOperation[];
+  activationApprovals: AppActivationApprovalReceipt[];
+  renewalPlan: AppEvidenceRenewalPlan;
   lock?: AppInstallationLock;
 };
 
@@ -348,14 +356,18 @@ export async function getMarketplaceAppDetailView(
 export async function getInstalledAppsViewData(
   projectRoot = getActiveLoopgraphProjectRoot()
 ): Promise<InstalledAppsViewData> {
-  return callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as Promise<InstalledAppsViewData>;
+  const [installed, renewalPlan] = await Promise.all([
+    callLoopgraphAppTool("loopgraph_app_install_status", { projectRoot }) as Promise<Omit<InstalledAppsViewData, "renewalPlan">>,
+    callLoopgraphAppTool("loopgraph_apps_renewal_plan", { projectRoot }) as Promise<AppEvidenceRenewalPlan>
+  ]);
+  return { ...installed, renewalPlan };
 }
 
-export async function getAppInstallPlanViewData(appId: string, presetId: string): Promise<{
+export async function getAppInstallPlanViewData(appId: string, presetId?: string): Promise<{
   detail: MarketplaceAppDetail;
-  plan: AppInstallPlan;
-  impact: AppInstallImpactView;
-  mappingPlan: AppFieldMappingPlan;
+  plan?: AppInstallPlan;
+  impact?: AppInstallImpactView;
+  mappingPlan?: AppFieldMappingPlan;
   journey: AppOnboardingJourney;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
@@ -364,18 +376,17 @@ export async function getAppInstallPlanViewData(appId: string, presetId: string)
     callLoopgraphAppTool("loopgraph_app_onboarding_get", {
       projectRoot,
       appId,
-      versionRange: "latest",
       presetId,
-      configuration: {},
       actor: "loopgraph-browser"
     }) as Promise<AppOnboardingJourney>
   ]);
-  if (!journey.plan || !journey.mappingPlan) throw new Error("App onboarding journey did not return its exact plan and mapping requirements");
   return {
     detail,
-    plan: journey.plan,
-    impact: buildAppInstallImpactView(journey.plan, detail),
-    mappingPlan: journey.mappingPlan,
+    ...(journey.plan ? {
+      plan: journey.plan,
+      impact: buildAppInstallImpactView(journey.plan, detail)
+    } : {}),
+    ...(journey.mappingPlan ? { mappingPlan: journey.mappingPlan } : {}),
     journey
   };
 }
@@ -389,10 +400,13 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   diff: InstalledAppDiff;
   updatePlan?: AppUpdatePlan;
   lifecycleReceipts: AppLifecycleReceipt[];
+  lifecycleOperations: AppLifecycleOperation[];
+  activationApprovals: AppActivationApprovalReceipt[];
   installedLoops: Array<{ id: string; name: string; path: string }>;
   onboardingJourney: AppOnboardingJourney;
   operations: InstalledAppOperationsView;
   maturity: AppOperationalMaturityAssessment;
+  activationGate?: AppActivationGate;
 }> {
   const projectRoot = getActiveLoopgraphProjectRoot();
   const installed = await callLoopgraphAppTool("loopgraph_app_install_status", {
@@ -404,7 +418,8 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
   if (!installation || !readiness) throw new Error(`Installed app not found: ${installationId}`);
   const installedLoops = installed.installedLoops.find((entry) => entry.installationId === installationId)?.loops ?? [];
   const evaluations = installed.evaluations.filter((evaluation) => evaluation.installationId === installationId);
-  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence] = await Promise.all([
+  const nextActivationMode = activationModeAfter(installation.state);
+  const [detail, promotionRecommendation, diff, onboardingJourney, agentOperations, evidence, maturity, actions, activationGate] = await Promise.all([
     callLoopgraphAppTool("loopgraph_app_get", {
       projectRoot,
       appId: installation.appId,
@@ -424,7 +439,23 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
       installationId
     }) as Promise<AppOnboardingJourney>,
     getAgentOperationsViewData(),
-    getInstalledAppEvidenceData(installedLoops.map((loop) => loop.id))
+    getInstalledAppEvidenceData(installedLoops.map((loop) => loop.id)),
+    callLoopgraphAppTool("loopgraph_app_maturity_get", {
+      projectRoot,
+      installationId
+    }) as Promise<AppOperationalMaturityAssessment>,
+    callLoopgraphAppTool("loopgraph_app_operation_actions_get", {
+      projectRoot,
+      installationId,
+      limit: 100
+    }) as Promise<{ actions: AppOperationAction[]; events: AppOperationActionEvent[] }>,
+    nextActivationMode
+      ? callLoopgraphAppTool("loopgraph_app_activation_gate_get", {
+          projectRoot,
+          installationId,
+          mode: nextActivationMode
+        }) as Promise<AppActivationGate>
+      : Promise.resolve(undefined)
   ]);
   const updatePlan = diff.updateAvailable
     ? await callLoopgraphAppTool("loopgraph_app_update_plan", {
@@ -436,25 +467,18 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     : undefined;
   const operations = buildInstalledAppOperationsView({
     app: {
+      installationId: installation.id,
       id: detail.app.id,
       name: detail.app.name,
       department: detail.app.department
     },
     loops: installedLoops,
     activity: agentOperations.data.activity,
+    actions: actions.actions,
+    actionEvents: actions.events,
     evaluations,
     outcomes: evidence.outcomes,
     valueEntries: evidence.valueEntries
-  });
-  const maturity = assessAppOperationalMaturity({
-    installation,
-    readiness,
-    evaluations,
-    operatingEvidence: {
-      completedRunRefs: operations.activity.filter((row) => row.jobStatus === "completed").map((row) => `run:${row.runId}`),
-      observedOutcomeRefs: operations.outcomes.filter((outcome) => outcome.truthStatus === "observed").map((outcome) => `outcome:${outcome.id}`),
-      observedValueRefs: operations.valueEntries.filter((entry) => entry.truthStatus === "observed").map((entry) => `value:${entry.id}`)
-    }
   });
   return {
     installation,
@@ -465,9 +489,19 @@ export async function getInstalledAppViewData(installationId: string): Promise<{
     diff,
     updatePlan,
     lifecycleReceipts: installed.lifecycleReceipts.filter((receipt) => receipt.installationId === installationId),
+    lifecycleOperations: installed.lifecycleOperations.filter((operation) => operation.installationId === installationId),
+    activationApprovals: installed.activationApprovals.filter((approval) => approval.installationId === installationId),
     installedLoops,
     onboardingJourney,
     operations,
-    maturity
+    maturity,
+    activationGate
   };
+}
+
+function activationModeAfter(state: WorkspaceAppInstallation["state"]): "shadow" | "recommend" | "execute_with_approval" | undefined {
+  if (state === "simulation_passed") return "shadow";
+  if (state === "shadow") return "recommend";
+  if (state === "recommend") return "execute_with_approval";
+  return undefined;
 }

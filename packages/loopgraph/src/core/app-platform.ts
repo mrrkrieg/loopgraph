@@ -2,6 +2,13 @@ import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import { DepartmentTypeSchema } from "./department-skills";
 import { contentDigest } from "./hash";
+import {
+  brokerCapabilitySchema,
+  connectorActionReconcileResponseSchema,
+  connectorActionPrepareResponseSchema,
+  connectorBrokerResponseSchema,
+  connectorOperationSchema
+} from "./connector-broker";
 
 /**
  * Public, versioned contracts for the Loopgraph App Platform.
@@ -21,10 +28,22 @@ export const FIELD_MAPPING_PLAN_SCHEMA_VERSION = "loopgraph-field-mapping-plan/v
 export const APP_CONFIGURATION_SCHEMA_VERSION = "loopgraph-app-configuration/v1alpha1" as const;
 export const APP_EVAL_SCHEMA_VERSION = "loopgraph-app-eval/v1alpha1" as const;
 export const APP_ONBOARDING_SCHEMA_VERSION = "loopgraph-app-onboarding/v1alpha1" as const;
-export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
+export const APP_ONBOARDING_DRAFT_SCHEMA_VERSION = "loopgraph-app-onboarding-draft/v1alpha1" as const;
+export const APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION = "loopgraph-app-onboarding-reset-result/v1alpha1" as const;
+export const APP_ACTIVATION_GATE_SCHEMA_VERSION = "loopgraph-app-activation-gate/v1alpha1" as const;
+export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha2" as const;
+export const LEGACY_APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
-export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
+export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha2" as const;
+export const APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION = "loopgraph-app-evidence-renewal-plan/v1alpha1" as const;
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
+export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
+export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
+export const APP_OPERATION_ACTION_SCHEMA_VERSION = "loopgraph-app-operation-action/v1alpha1" as const;
+export const APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION = "loopgraph-app-operation-action-event/v1alpha1" as const;
+export const APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION = "loopgraph-app-operation-action-commit/v1alpha1" as const;
+export const APP_OPERATION_ACTION_RECONCILIATION_SCHEMA_VERSION = "loopgraph-app-operation-action-reconciliation/v1alpha1" as const;
+export const APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION = "loopgraph-app-runtime-operation-response/v1alpha1" as const;
 
 export const APP_PLATFORM_INVARIANTS = [
   "LoopPacks are immutable and addressed by a canonical SHA-256 digest.",
@@ -42,7 +61,9 @@ export const APP_PLATFORM_INVARIANTS = [
   "Provider schema samples are connection-bound, short-lived, redacted-only, and never trusted as field mappings without confirmation.",
   "Workspace customization is stored as an overlay and never mutates the pinned artifact.",
   "Quality and maturity labels are derived from recorded evidence.",
+  "App activation approvals embed a machine-derived gate and cannot override missing maturity, replay, lifecycle, or permission evidence.",
   "App mode activation requires a content-bound, unexpired, single-use human approval receipt.",
+  "Prepared provider actions receive a secret-free App ownership record before they can enter a separate approval or commit lifecycle.",
   "Low-level implementation details are hidden behind an explicit Advanced surface."
 ] as const;
 
@@ -138,9 +159,20 @@ export const appVerifierTrustKeySchema = z.object({
   verifierId: z.string().min(1).max(300),
   keyId: appIdSchema,
   algorithm: z.literal("ed25519"),
-  publicKey: z.string().min(32),
-  revokedAt: isoDateTimeSchema.optional()
-}).strict();
+  publicKey: z.string().min(32).refine((value) => !/-----BEGIN (?:(?:ENCRYPTED|RSA|EC|OPENSSH) )?PRIVATE KEY-----/.test(value), {
+    message: "Verifier trust accepts public keys only"
+  }),
+  approvedBy: z.string().min(1).max(300),
+  approvalRef: z.string().min(1).max(1000),
+  approvedAt: isoDateTimeSchema,
+  revokedAt: isoDateTimeSchema.optional(),
+  revokedBy: z.string().min(1).max(300).optional(),
+  revocationRef: z.string().min(1).max(1000).optional()
+}).strict().superRefine((key, ctx) => {
+  if (new Set([Boolean(key.revokedAt), Boolean(key.revokedBy), Boolean(key.revocationRef)]).size > 1) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["revokedAt"], message: "Verifier key revocation requires timestamp, actor, and reference together" });
+  }
+});
 
 const appOperationalMaturityGateSchema = z.object({
   level: appMaturitySchema.exclude(["concept"]),
@@ -150,6 +182,31 @@ const appOperationalMaturityGateSchema = z.object({
   remediation: z.string().min(1).max(1000).optional()
 }).strict();
 
+const appOperationalEvidenceFreshnessRequirementSchema = z.object({
+  id: z.enum(["historical_replay", "completed_run", "observed_outcome", "observed_value"]),
+  status: z.enum(["current", "renew_soon", "expired", "missing", "invalid", "future"]),
+  summary: z.string().min(1).max(1000),
+  evidenceRef: z.string().min(1).max(1000).optional(),
+  observedAt: isoDateTimeSchema.optional(),
+  expiresAt: isoDateTimeSchema.optional()
+}).strict();
+
+const appOperationalEvidenceFreshnessSchema = z.object({
+  status: z.enum(["not_applicable", "incomplete", "current", "renew_soon", "expired", "invalid"]),
+  summary: z.string().min(1).max(1000),
+  validUntil: isoDateTimeSchema.optional(),
+  renewalRecommendedAt: isoDateTimeSchema.optional(),
+  requirements: z.array(appOperationalEvidenceFreshnessRequirementSchema).length(4)
+}).strict().superRefine((freshness, ctx) => {
+  const ids = ["historical_replay", "completed_run", "observed_outcome", "observed_value"] as const;
+  if (freshness.requirements.some((requirement, index) => requirement.id !== ids[index])) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requirements"], message: "Operational evidence freshness requirements must be complete and ordered" });
+  }
+  if (freshness.validUntil && freshness.renewalRecommendedAt && Date.parse(freshness.renewalRecommendedAt) >= Date.parse(freshness.validUntil)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["renewalRecommendedAt"], message: "Evidence renewal must be recommended before proof expires" });
+  }
+});
+
 export const appOperationalMaturityAssessmentSchema = z.object({
   schemaVersion: z.literal(APP_OPERATIONAL_MATURITY_SCHEMA_VERSION),
   installationId: appIdSchema,
@@ -157,6 +214,7 @@ export const appOperationalMaturityAssessmentSchema = z.object({
   artifactDigest: artifactDigestSchema,
   maturity: appMaturitySchema,
   gates: z.array(appOperationalMaturityGateSchema).length(4),
+  freshness: appOperationalEvidenceFreshnessSchema,
   evaluatedAt: isoDateTimeSchema,
   evidenceDerived: z.literal(true)
 }).strict().superRefine((assessment, ctx) => {
@@ -172,6 +230,72 @@ export const appOperationalMaturityAssessmentSchema = z.object({
   }
   if (assessment.maturity !== expected) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maturity"], message: `Operational maturity must equal the highest consecutively achieved gate (${expected})` });
+  }
+});
+
+const appEvidenceRenewalStatusSchema = z.enum([
+  "not_applicable",
+  "incomplete",
+  "current",
+  "renew_soon",
+  "expired",
+  "invalid"
+]);
+
+export const appEvidenceRenewalCountsSchema = z.object({
+  notApplicable: z.number().int().nonnegative(),
+  incomplete: z.number().int().nonnegative(),
+  current: z.number().int().nonnegative(),
+  renewSoon: z.number().int().nonnegative(),
+  expired: z.number().int().nonnegative(),
+  invalid: z.number().int().nonnegative()
+}).strict();
+
+export function deriveAppEvidenceFleetHealth(
+  countsInput: z.input<typeof appEvidenceRenewalCountsSchema>
+): "healthy" | "degraded" | "blocked" {
+  const counts = appEvidenceRenewalCountsSchema.parse(countsInput);
+  return counts.invalid > 0
+    ? "blocked"
+    : counts.expired > 0 || counts.renewSoon > 0
+      ? "degraded"
+      : "healthy";
+}
+
+export const appEvidenceRenewalPlanSchema = z.object({
+  schemaVersion: z.literal(APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  companyId: appIdSchema,
+  generatedAt: isoDateTimeSchema,
+  totalInstallations: z.number().int().nonnegative(),
+  totalMatched: z.number().int().nonnegative(),
+  counts: appEvidenceRenewalCountsSchema,
+  items: z.array(z.object({
+    installationId: appIdSchema,
+    appId: appIdSchema,
+    artifactDigest: artifactDigestSchema,
+    maturity: appMaturitySchema,
+    status: appEvidenceRenewalStatusSchema,
+    priority: z.enum(["critical", "high", "medium", "none"]),
+    validUntil: isoDateTimeSchema.optional(),
+    renewalRecommendedAt: isoDateTimeSchema.optional(),
+    affectedEvidence: z.array(z.object({
+      id: z.enum(["historical_replay", "completed_run", "observed_outcome", "observed_value"]),
+      status: z.enum(["renew_soon", "expired", "missing", "invalid", "future"]),
+      summary: z.string().min(1).max(1000)
+    }).strict()).max(4),
+    nextAction: z.object({
+      kind: z.enum(["complete_setup", "run_historical_replay", "record_operating_evidence", "repair_evidence", "renew_proof", "monitor"]),
+      summary: z.string().min(1).max(1000)
+    }).strict()
+  }).strict()).max(100)
+}).strict().superRefine((plan, ctx) => {
+  const countTotal = Object.values(plan.counts).reduce((total, count) => total + count, 0);
+  if (countTotal !== plan.totalInstallations) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["counts"], message: "Renewal-plan counts must equal the installation total" });
+  }
+  if (plan.totalMatched > plan.totalInstallations || plan.items.length > plan.totalMatched) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["totalMatched"], message: "Renewal-plan matches and returned items must remain within the installation total" });
   }
 });
 export const appRolloutModeSchema = z.enum([
@@ -538,31 +662,44 @@ export const marketplaceCatalogSourceSchema = z.object({
 }).strict();
 
 export const companyContextValueSchema = z.object({
-  key: z.string().min(1),
+  key: z.string().min(1).max(500),
   type: z.enum(["string", "number", "boolean", "string_list", "object", "reference"]),
   value: jsonValueSchema,
   provenance: z.object({
     source: z.enum(["user", "hermes_inference", "provider", "import", "policy"]),
-    sourceRef: z.string().min(1).optional(),
+    sourceRef: z.string().min(1).max(1000).optional(),
     observedAt: isoDateTimeSchema
   }).strict(),
   verified: z.boolean(),
   confidence: z.number().min(0).max(1),
-  owner: z.string().min(1),
+  owner: z.string().min(1).max(300),
   visibility: z.enum(["workspace", "department", "installation", "private"]),
   confirmedAt: isoDateTimeSchema.optional(),
-  confirmedBy: z.string().min(1).optional(),
-  consumerInstallationIds: z.array(appIdSchema).default([])
-}).strict();
+  confirmedBy: z.string().min(1).max(300).optional(),
+  consumerInstallationIds: z.array(appIdSchema).max(1000).default([])
+}).strict().superRefine((entry, ctx) => {
+  const valid = entry.type === "string" || entry.type === "reference"
+    ? typeof entry.value === "string"
+    : entry.type === "number"
+      ? typeof entry.value === "number" && Number.isFinite(entry.value)
+      : entry.type === "boolean"
+        ? typeof entry.value === "boolean"
+        : entry.type === "string_list"
+          ? Array.isArray(entry.value) && entry.value.every((value) => typeof value === "string")
+          : Boolean(entry.value) && typeof entry.value === "object" && !Array.isArray(entry.value);
+  if (!valid) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["value"], message: `Company context value does not match declared type ${entry.type}` });
+  }
+});
 
 export const companyContextSchema = z.object({
   schemaVersion: z.literal(COMPANY_CONTEXT_SCHEMA_VERSION),
   workspaceId: appIdSchema,
   companyId: appIdSchema,
   revision: z.number().int().nonnegative(),
-  values: z.array(companyContextValueSchema).default([]),
+  values: z.array(companyContextValueSchema).max(500).default([]),
   updatedAt: isoDateTimeSchema,
-  updatedBy: z.string().min(1)
+  updatedBy: z.string().min(1).max(300)
 }).strict().superRefine((context, ctx) => {
   const keys = context.values.map((value) => value.key);
   if (new Set(keys).size !== keys.length) {
@@ -775,6 +912,312 @@ const permissionDecisionSchema = z.object({
   changedFromInstalled: z.boolean().default(false)
 }).strict();
 
+export const appConnectorExecutorSchema = z.enum(["connector_broker", "loopgraph_runtime", "unavailable"]);
+const executableAppConnectorSchema = z.enum(["connector_broker", "loopgraph_runtime"]);
+
+export const appConnectorOperationBindingSchema = z.object({
+  providerId: appIdSchema,
+  providerOperation: z.string().min(3).max(240),
+  operation: z.string().min(3).max(240),
+  executor: executableAppConnectorSchema,
+  connectionId: appIdSchema.optional(),
+  brokerCapability: z.string().min(3).max(160).optional(),
+  minimumScopes: z.array(z.string().min(1).max(300)).max(100).default([])
+}).strict().superRefine((binding, ctx) => {
+  if (binding.executor === "connector_broker" && !binding.connectionId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["connectionId"], message: "Connector Broker operation bindings require a connection" });
+  }
+  if (binding.executor === "connector_broker" && !binding.brokerCapability) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerCapability"], message: "Connector Broker operation bindings require an allowlisted broker capability" });
+  }
+  if (binding.executor === "loopgraph_runtime" && binding.connectionId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["connectionId"], message: "Loopgraph runtime operation bindings cannot reference a provider connection" });
+  }
+  if (binding.executor === "loopgraph_runtime" && binding.providerId !== "loopgraph") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["providerId"], message: "Loopgraph runtime operation bindings must use the Loopgraph provider" });
+  }
+});
+
+export const appOperationDispositionSchema = z.enum([
+  "invoke_read",
+  "prepare_action",
+  "invoke_loopgraph_runtime",
+  "blocked"
+]);
+
+export const appOperationResolutionSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_RESOLUTION_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  loopId: appIdSchema,
+  loopVersionHash: artifactDigestSchema,
+  capability: logicalCapabilitySchema,
+  state: appInstallationStateSchema,
+  mode: appRolloutModeSchema,
+  binding: appConnectorOperationBindingSchema.optional(),
+  permission: permissionDecisionSchema.optional(),
+  disposition: appOperationDispositionSchema,
+  blockers: z.array(z.string().min(1).max(1_000)).max(20).default([]),
+  resolvedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  resolutionDigest: artifactDigestSchema
+}).strict().superRefine((resolution, ctx) => {
+  if (resolution.disposition === "blocked" && resolution.blockers.length === 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["blockers"], message: "Blocked operation resolutions require an explanation" });
+  }
+  if (resolution.disposition !== "blocked" && !resolution.binding) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["binding"], message: "Executable operation resolutions require an exact binding" });
+  }
+  if (Date.parse(resolution.expiresAt) <= Date.parse(resolution.resolvedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Operation resolution expiry must follow resolution time" });
+  }
+  if (canonicalAppDigest({ ...resolution, resolutionDigest: undefined }) !== resolution.resolutionDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resolutionDigest"], message: "Operation resolution digest does not match its content" });
+  }
+});
+
+export const appRuntimeOperationResponseSchema = z.object({
+  schemaVersion: z.literal(APP_RUNTIME_OPERATION_RESPONSE_SCHEMA_VERSION),
+  requestId: z.string().min(8).max(128),
+  operation: z.string().min(3).max(240),
+  status: z.literal("succeeded"),
+  result: z.record(z.string(), z.unknown()),
+  completedAt: isoDateTimeSchema,
+  resultDigest: artifactDigestSchema
+}).strict().superRefine((response, ctx) => {
+  if (canonicalAppDigest({ ...response, resultDigest: undefined }) !== response.resultDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["resultDigest"], message: "Runtime operation result digest does not match its content" });
+  }
+});
+
+export const appOperationExecutionResultSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_EXECUTION_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  loopId: appIdSchema,
+  loopVersionHash: artifactDigestSchema,
+  capability: logicalCapabilitySchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160),
+  disposition: z.enum(["invoke_read", "prepare_action", "invoke_loopgraph_runtime"]),
+  resolutionDigest: artifactDigestSchema,
+  requestId: z.string().min(8).max(128),
+  idempotencyKey: z.string().min(8).max(192),
+  brokerResponse: z.union([
+    connectorBrokerResponseSchema,
+    connectorActionPrepareResponseSchema
+  ]).optional(),
+  runtimeResponse: appRuntimeOperationResponseSchema.optional(),
+  completedAt: isoDateTimeSchema,
+  executionDigest: artifactDigestSchema
+}).strict().superRefine((execution, ctx) => {
+  if (execution.disposition === "invoke_loopgraph_runtime") {
+    if (!execution.runtimeResponse || execution.brokerResponse) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["runtimeResponse"], message: "Loopgraph runtime execution requires only a runtime response" });
+    } else if (execution.runtimeResponse.requestId !== execution.requestId) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requestId"], message: "Runtime response request identity does not match the execution result" });
+    }
+  } else if (!execution.brokerResponse || execution.runtimeResponse) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Connector Broker execution requires only a broker response" });
+  }
+  if (execution.disposition === "invoke_read" && execution.brokerResponse?.status === "prepared") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Read operation execution cannot return a prepared action" });
+  }
+  if (execution.disposition === "prepare_action" && execution.brokerResponse?.status !== "prepared") {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Action preparation must return a prepared action" });
+  }
+  if (execution.brokerResponse && execution.brokerResponse.requestId !== execution.requestId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requestId"], message: "Broker response request identity does not match the execution result" });
+  }
+  if (canonicalAppDigest({ ...execution, executionDigest: undefined }) !== execution.executionDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["executionDigest"], message: "Operation execution digest does not match its content" });
+  }
+});
+
+/**
+ * Secret-free App ownership record for a prepared provider action.
+ *
+ * Connector Broker remains the source of truth for canonical input and the
+ * provider-side prepared action. This record deliberately stores only the
+ * immutable App, route, agent, object-digest, and broker-binding identities
+ * needed to prove that a later approval or commit still belongs to the exact
+ * routed App operation that created it.
+ */
+export const appOperationActionSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  companyId: z.string().min(1).max(160),
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  loopId: appIdSchema,
+  loopVersionHash: artifactDigestSchema,
+  capability: logicalCapabilitySchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160),
+  requestId: z.string().min(8).max(128),
+  idempotencyKey: z.string().min(8).max(192),
+  resolutionDigest: artifactDigestSchema,
+  executionDigest: artifactDigestSchema,
+  providerBinding: z.object({
+    providerId: appIdSchema,
+    connectionId: appIdSchema,
+    brokerCapability: brokerCapabilitySchema,
+    operation: connectorOperationSchema
+  }).strict(),
+  companyObject: z.object({
+    type: z.string().min(1).max(96).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/),
+    identityDigest: artifactDigestSchema
+  }).strict(),
+  environment: z.enum(["development", "staging", "production"]),
+  brokerPreparedActionId: z.string().min(8).max(160),
+  brokerPreparedActionFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  brokerPrepareReceiptId: z.string().min(8).max(512),
+  approvalRequired: z.boolean(),
+  riskClass: z.enum(["read", "draft", "write", "privileged"]),
+  status: z.literal("prepared"),
+  preparedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+  recordDigest: artifactDigestSchema
+}).strict().superRefine((action, ctx) => {
+  if (Date.parse(action.expiresAt) <= Date.parse(action.preparedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Prepared App action expiry must follow preparation time" });
+  }
+  if (Date.parse(action.updatedAt) < Date.parse(action.preparedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["updatedAt"], message: "Prepared App action update time cannot precede preparation" });
+  }
+  if (canonicalAppDigest({ ...action, recordDigest: undefined }) !== action.recordDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["recordDigest"], message: "Prepared App action digest does not match its content" });
+  }
+});
+
+/**
+ * Append-only lifecycle evidence for an immutable App operation action.
+ *
+ * Human review text and provider payloads stay in their authoritative
+ * systems. Loopgraph records only content digests and receipt identities so
+ * an approval or commit can be proven without copying sensitive business
+ * data into the App action ledger.
+ */
+export const appOperationActionEventSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  actionId: appIdSchema,
+  actionRecordDigest: artifactDigestSchema,
+  eventType: z.enum(["approval_granted", "commit_requested", "commit_succeeded", "commit_failed", "revoked"]),
+  actor: z.object({
+    type: z.enum(["user", "workload", "system"]),
+    subject: z.string().min(1).max(512)
+  }).strict(),
+  approval: z.object({
+    connectorApprovalReceiptId: z.string().min(8).max(512),
+    reasonDigest: artifactDigestSchema,
+    expiresAt: isoDateTimeSchema
+  }).strict().optional(),
+  commit: z.object({
+    requestId: z.string().min(8).max(128),
+    idempotencyKey: z.string().min(8).max(192),
+    connectorReceiptId: z.string().min(8).max(512).optional(),
+    outcome: z.enum(["requested", "succeeded", "failed"]),
+    reasonCode: z.string().min(1).max(128).optional()
+  }).strict().optional(),
+  revocation: z.object({
+    reasonDigest: artifactDigestSchema
+  }).strict().optional(),
+  occurredAt: isoDateTimeSchema,
+  eventDigest: artifactDigestSchema
+}).strict().superRefine((event, ctx) => {
+  if ((event.eventType === "approval_granted") !== Boolean(event.approval)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approval"], message: "Only approval events contain an approval receipt" });
+  }
+  if (event.approval && Date.parse(event.approval.expiresAt) <= Date.parse(event.occurredAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approval", "expiresAt"], message: "Approval receipt must expire after the lifecycle event" });
+  }
+  if (event.eventType.startsWith("commit_") !== Boolean(event.commit)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit"], message: "Commit lifecycle events require commit evidence" });
+  }
+  if ((event.eventType === "revoked") !== Boolean(event.revocation)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["revocation"], message: "Only revocation events contain revocation evidence" });
+  }
+  const expectedOutcome = event.eventType === "commit_requested" ? "requested"
+    : event.eventType === "commit_succeeded" ? "succeeded"
+      : event.eventType === "commit_failed" ? "failed" : undefined;
+  if (expectedOutcome && event.commit?.outcome !== expectedOutcome) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit", "outcome"], message: "Commit outcome does not match the lifecycle event" });
+  }
+  if (event.eventType === "commit_succeeded" && !event.commit?.connectorReceiptId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit", "connectorReceiptId"], message: "A successful commit requires its Connector Broker receipt" });
+  }
+  if (event.eventType === "commit_failed" && !event.commit?.reasonCode) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commit", "reasonCode"], message: "A failed commit requires a bounded reason code" });
+  }
+  if (canonicalAppDigest({ ...event, eventDigest: undefined }) !== event.eventDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["eventDigest"], message: "App action event digest does not match its content" });
+  }
+});
+
+export const appOperationActionCommitResultSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  actionId: appIdSchema,
+  loopId: appIdSchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  callId: z.string().min(1).max(160),
+  requestId: z.string().min(8).max(128),
+  idempotencyKey: z.string().min(8).max(192),
+  status: z.enum(["succeeded", "denied", "failed"]),
+  brokerResponse: connectorBrokerResponseSchema,
+  completedAt: isoDateTimeSchema,
+  commitDigest: artifactDigestSchema
+}).strict().superRefine((commit, ctx) => {
+  if (commit.status !== commit.brokerResponse.status || commit.requestId !== commit.brokerResponse.requestId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Broker response does not match the App action commit result" });
+  }
+  if (canonicalAppDigest({ ...commit, commitDigest: undefined }) !== commit.commitDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["commitDigest"], message: "App action commit digest does not match its content" });
+  }
+});
+
+export const appOperationActionReconciliationResultSchema = z.object({
+  schemaVersion: z.literal(APP_OPERATION_ACTION_RECONCILIATION_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  actionId: appIdSchema,
+  loopId: appIdSchema,
+  routeJobId: z.string().min(1).max(256),
+  agentInstanceId: z.string().min(1).max(256),
+  reconciliationCallId: z.string().min(1).max(160),
+  originalRequestId: z.string().min(8).max(128),
+  originalIdempotencyKey: z.string().min(8).max(192),
+  status: z.enum(["resolved_succeeded", "resolved_failed", "pending", "unresolved"]),
+  brokerReconciliation: connectorActionReconcileResponseSchema,
+  completedAt: isoDateTimeSchema,
+  reconciliationDigest: artifactDigestSchema
+}).strict().superRefine((result, ctx) => {
+  const brokerStatus = result.brokerReconciliation.status;
+  if ((brokerStatus === "resolved") !== result.status.startsWith("resolved_")) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: "App and Broker reconciliation status do not match" });
+  }
+  if (result.originalRequestId !== result.brokerReconciliation.originalRequestId) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerReconciliation", "originalRequestId"], message: "Broker reconciliation does not belong to the interrupted App commit" });
+  }
+  if (canonicalAppDigest({ ...result, reconciliationDigest: undefined }) !== result.reconciliationDigest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["reconciliationDigest"], message: "App action reconciliation digest does not match its content" });
+  }
+});
+
 export const appInstallPlanSchema = z.object({
   schemaVersion: z.literal(APP_INSTALL_SCHEMA_VERSION),
   id: appIdSchema,
@@ -796,7 +1239,14 @@ export const appInstallPlanSchema = z.object({
     required: z.boolean(),
     connectionId: appIdSchema.optional(),
     recipeId: appIdSchema.optional(),
-    status: z.enum(["connected", "reusable", "missing", "degraded"])
+    providerId: appIdSchema.optional(),
+    providerOperation: z.string().min(3).max(240).optional(),
+    operation: z.string().min(3).max(240).optional(),
+    executor: appConnectorExecutorSchema.optional(),
+    brokerCapability: z.string().min(3).max(160).optional(),
+    minimumScopes: z.array(z.string().min(1).max(300)).max(100).optional(),
+    status: z.enum(["connected", "reusable", "missing", "degraded"]),
+    reason: z.string().min(1).max(1_000).optional()
   }).strict()).default([]),
   missingConfigurationKeys: z.array(z.string().min(1)).default([]),
   configuration: appConfigurationSchema,
@@ -859,6 +1309,7 @@ export const appInstallationRevisionSchema = z.object({
   configuration: appConfigurationSchema,
   overlay: appOverlaySchema.optional(),
   connectionBindings: z.record(appIdSchema).default({}),
+  operationBindings: z.record(appConnectorOperationBindingSchema).default({}),
   fieldMappingIds: z.array(appIdSchema).default([]),
   permissions: z.array(permissionDecisionSchema),
   ownedAssets: z.array(appAssetOwnershipSchema),
@@ -881,6 +1332,7 @@ export const workspaceAppInstallationSchema = z.object({
   configuration: appConfigurationSchema,
   overlay: appOverlaySchema.optional(),
   connectionBindings: z.record(appIdSchema).default({}),
+  operationBindings: z.record(appConnectorOperationBindingSchema).default({}),
   fieldMappingIds: z.array(appIdSchema).default([]),
   permissions: z.array(permissionDecisionSchema),
   ownedAssets: z.array(appAssetOwnershipSchema),
@@ -894,7 +1346,8 @@ export const workspaceAppInstallationSchema = z.object({
     createdBy: z.string().min(1),
     detachedAt: isoDateTimeSchema.optional(),
     detachedBy: z.string().min(1).optional(),
-    snapshotPath: packRelativePathSchema.optional()
+    snapshotPath: packRelativePathSchema.optional(),
+    snapshotFilesDigest: artifactDigestSchema.optional()
   }).strict().optional(),
   history: z.array(appInstallationRevisionSchema).max(20).default([]),
   installedAt: isoDateTimeSchema,
@@ -943,6 +1396,10 @@ export const appEvalRunSchema = z.object({
   writeBlocked: z.boolean(),
   startedAt: isoDateTimeSchema,
   completedAt: isoDateTimeSchema.optional(),
+  sourceWindow: z.object({
+    from: isoDateTimeSchema,
+    to: isoDateTimeSchema
+  }).strict().optional(),
   scenarios: z.array(z.object({
     id: appIdSchema,
     status: z.enum(["passed", "failed", "skipped"]),
@@ -962,6 +1419,9 @@ export const appEvalRunSchema = z.object({
 }).strict().superRefine((run, ctx) => {
   if (run.level === "historical_replay" && (!run.replay || !run.writeBlocked)) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["writeBlocked"], message: "Historical replay must be marked replay and block all writes" });
+  }
+  if (run.sourceWindow && Date.parse(run.sourceWindow.from) >= Date.parse(run.sourceWindow.to)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["sourceWindow", "to"], message: "Evaluation source window end must follow its start" });
   }
 });
 
@@ -1064,6 +1524,7 @@ export const appOnboardingStageSchema = z.enum([
   "connect_systems",
   "confirm_mappings",
   "review_install",
+  "recover_lifecycle",
   "run_conformance",
   "resolve_test_failures",
   "activate_shadow",
@@ -1071,6 +1532,54 @@ export const appOnboardingStageSchema = z.enum([
   "resume",
   "unavailable"
 ]);
+
+/**
+ * A pre-install, workspace-scoped snapshot of the choices a human has already
+ * confirmed. Drafts intentionally contain no provider credentials, raw
+ * provider payloads, permission grants, or activation authority.
+ */
+export const appOnboardingDraftSchema = z.object({
+  schemaVersion: z.literal(APP_ONBOARDING_DRAFT_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  companyId: appIdSchema,
+  appId: appIdSchema,
+  versionRange: appVersionRangeSchema,
+  presetId: appIdSchema,
+  selectedModules: z.array(appIdSchema).max(50).default([]),
+  configuration: z.record(jsonValueSchema)
+    .refine((value) => Object.keys(value).length <= 20, "Onboarding drafts support at most 20 declared answers")
+    .refine((value) => new TextEncoder().encode(JSON.stringify(value)).byteLength <= 64 * 1024, "Onboarding draft answers exceed 64 KiB")
+    .default({}),
+  fieldMappingIds: z.array(appIdSchema).max(200).default([]),
+  revision: z.number().int().positive(),
+  createdAt: isoDateTimeSchema,
+  createdBy: z.string().min(1).max(300),
+  updatedAt: isoDateTimeSchema,
+  updatedBy: z.string().min(1).max(300)
+}).strict().superRefine((draft, ctx) => {
+  if (new Set(draft.selectedModules).size !== draft.selectedModules.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["selectedModules"], message: "Selected onboarding modules must be unique" });
+  }
+  if (new Set(draft.fieldMappingIds).size !== draft.fieldMappingIds.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["fieldMappingIds"], message: "Onboarding field mappings must be unique" });
+  }
+  if (Date.parse(draft.updatedAt) < Date.parse(draft.createdAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["updatedAt"], message: "Onboarding draft update time cannot precede creation" });
+  }
+});
+
+export const appOnboardingResetResultSchema = z.object({
+  schemaVersion: z.literal(APP_ONBOARDING_RESET_RESULT_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  companyId: appIdSchema,
+  appId: appIdSchema,
+  draftId: appIdSchema,
+  draftRevision: z.number().int().positive(),
+  result: z.enum(["cleared", "already_cleared"]),
+  processedAt: isoDateTimeSchema,
+  actor: z.string().min(1).max(300)
+}).strict();
 
 export const appOnboardingJourneySchema = z.object({
   schemaVersion: z.literal(APP_ONBOARDING_SCHEMA_VERSION),
@@ -1088,6 +1597,16 @@ export const appOnboardingJourneySchema = z.object({
     presetId: appIdSchema.optional()
   }).strict(),
   installationId: appIdSchema.optional(),
+  draft: z.object({
+    id: appIdSchema,
+    revision: z.number().int().positive(),
+    presetId: appIdSchema,
+    savedAt: isoDateTimeSchema,
+    savedBy: z.string().min(1).max(300),
+    answerKeys: z.array(z.string().min(1).max(160)).max(20),
+    applied: z.boolean(),
+    resumed: z.boolean()
+  }).strict().optional(),
   stage: appOnboardingStageSchema,
   headline: z.string().min(1).max(500),
   progress: z.object({
@@ -1123,13 +1642,26 @@ export const appOnboardingJourneySchema = z.object({
   mappingPlan: appFieldMappingPlanSchema.optional(),
   installation: workspaceAppInstallationSchema.optional(),
   readiness: appReadinessSchema.optional(),
+  recovery: z.object({
+    operationId: z.string().min(1).max(160),
+    action: z.enum(["install", "uninstall", "activate", "pause", "resume", "configure", "overlay", "repair", "duplicate", "detach", "update", "rollback"]),
+    status: z.enum(["prepared", "requires_reconciliation"]),
+    targetArtifactDigest: artifactDigestSchema,
+    startedAt: isoDateTimeSchema,
+    updatedAt: isoDateTimeSchema,
+    affected: z.object({
+      loops: z.number().int().nonnegative().max(100),
+      fieldMappings: z.number().int().nonnegative().max(200),
+      companyContextValues: z.number().int().nonnegative().max(100)
+    }).strict()
+  }).strict().optional(),
   evidence: z.object({
     syntheticStatus: z.enum(["not_run", "passed", "failed"]),
     historicalReplayStatus: z.enum(["not_run", "passed", "failed"]),
     providerWritesBlocked: z.boolean()
   }).strict(),
   nextAction: z.object({
-    kind: z.enum(["choose_preset", "answer_questions", "connect_providers", "confirm_mappings", "review_plan", "call_tool", "inspect_failures", "monitor", "none"]),
+    kind: z.enum(["choose_preset", "answer_questions", "connect_providers", "confirm_mappings", "review_plan", "retry_exact_request", "call_tool", "inspect_failures", "monitor", "none"]),
     summary: z.string().min(1).max(1000),
     toolName: z.string().min(1).max(160).optional(),
     requiresHumanConfirmation: z.boolean(),
@@ -1219,8 +1751,85 @@ export const appLifecycleReceiptSchema = z.object({
 
 const appActivatableModeSchema = z.enum(["shadow", "recommend", "execute_with_approval"]);
 
-export const appActivationApprovalReceiptSchema = z.object({
+const appActivationGateCheckSchema = z.object({
+  id: appIdSchema,
+  status: z.enum(["pass", "blocked", "not_applicable"]),
+  summary: z.string().min(1).max(1000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  remediation: z.string().min(1).max(1000).optional()
+}).strict();
+
+export const appActivationGateSchema = z.object({
+  schemaVersion: z.literal(APP_ACTIVATION_GATE_SCHEMA_VERSION),
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  fromState: appInstallationStateSchema,
+  requestedMode: appActivatableModeSchema,
+  status: z.enum(["ready", "blocked"]),
+  requiredMaturity: z.enum(["connected", "production_proven"]),
+  observedMaturity: appMaturitySchema,
+  checks: z.array(appActivationGateCheckSchema).min(4).max(8),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  evaluatedAt: isoDateTimeSchema,
+  gateDigest: artifactDigestSchema
+}).strict().superRefine((gate, ctx) => {
+  const expectedStatus = gate.checks.some((check) => check.status === "blocked") ? "blocked" : "ready";
+  if (gate.status !== expectedStatus) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["status"], message: `Activation gate status must be ${expectedStatus}` });
+  }
+  if (gate.gateDigest !== canonicalAppDigest({ ...gate, gateDigest: undefined })) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["gateDigest"], message: "Activation gate digest does not match the evaluated content" });
+  }
+});
+
+const appActivationApprovalReceiptV2Schema = z.object({
   schemaVersion: z.literal(APP_ACTIVATION_APPROVAL_SCHEMA_VERSION),
+  id: appIdSchema,
+  workspaceId: appIdSchema,
+  installationId: appIdSchema,
+  appId: appIdSchema,
+  artifactDigest: artifactDigestSchema,
+  fromState: appInstallationStateSchema,
+  requestedMode: appActivatableModeSchema,
+  approvedBy: z.string().min(1).max(300),
+  reason: z.string().min(1).max(2000),
+  evidenceRefs: z.array(z.string().min(1).max(1000)).max(100).default([]),
+  activationGate: appActivationGateSchema,
+  approvedAt: isoDateTimeSchema,
+  expiresAt: isoDateTimeSchema,
+  approvalDigest: artifactDigestSchema,
+  consumedAt: isoDateTimeSchema.optional(),
+  consumedBy: z.string().min(1).max(300).optional()
+}).strict().superRefine((receipt, ctx) => {
+  if (Date.parse(receipt.expiresAt) <= Date.parse(receipt.approvedAt)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "Activation approval expiry must follow approval" });
+  }
+  if (receipt.approvalDigest !== canonicalAppDigest({
+    schemaVersion: receipt.schemaVersion,
+    id: receipt.id,
+    workspaceId: receipt.workspaceId,
+    installationId: receipt.installationId,
+    appId: receipt.appId,
+    artifactDigest: receipt.artifactDigest,
+    fromState: receipt.fromState,
+    requestedMode: receipt.requestedMode,
+    approvedBy: receipt.approvedBy,
+    reason: receipt.reason,
+    evidenceRefs: receipt.evidenceRefs,
+    activationGate: receipt.activationGate,
+    approvedAt: receipt.approvedAt,
+    expiresAt: receipt.expiresAt
+  })) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["approvalDigest"], message: "Activation approval digest does not match the approved content" });
+  }
+  if (Boolean(receipt.consumedAt) !== Boolean(receipt.consumedBy)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["consumedAt"], message: "Consumed activation approvals require both timestamp and actor" });
+  }
+});
+
+const legacyAppActivationApprovalReceiptSchema = z.object({
+  schemaVersion: z.literal(LEGACY_APP_ACTIVATION_APPROVAL_SCHEMA_VERSION),
   id: appIdSchema,
   workspaceId: appIdSchema,
   installationId: appIdSchema,
@@ -1262,6 +1871,11 @@ export const appActivationApprovalReceiptSchema = z.object({
   }
 });
 
+export const appActivationApprovalReceiptSchema = z.union([
+  appActivationApprovalReceiptV2Schema,
+  legacyAppActivationApprovalReceiptSchema
+]);
+
 export type LoopPackManifest = z.infer<typeof loopPackManifestSchema>;
 export type LoopPackArtifact = z.infer<typeof loopPackArtifactSchema>;
 export type LoopPackSignature = z.infer<typeof loopPackSignatureSchema>;
@@ -1272,9 +1886,18 @@ export type AppMaturityEvidence = z.infer<typeof appMaturityEvidenceSchema>;
 export type AppIndependentVerificationReceipt = z.infer<typeof appIndependentVerificationReceiptSchema>;
 export type AppVerifierTrustKey = z.infer<typeof appVerifierTrustKeySchema>;
 export type AppOperationalMaturityAssessment = z.infer<typeof appOperationalMaturityAssessmentSchema>;
+export type AppEvidenceRenewalPlan = z.infer<typeof appEvidenceRenewalPlanSchema>;
 export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSourceSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
+export type AppConnectorOperationBinding = z.infer<typeof appConnectorOperationBindingSchema>;
+export type AppOperationResolution = z.infer<typeof appOperationResolutionSchema>;
+export type AppRuntimeOperationResponse = z.infer<typeof appRuntimeOperationResponseSchema>;
+export type AppOperationExecutionResult = z.infer<typeof appOperationExecutionResultSchema>;
+export type AppOperationAction = z.infer<typeof appOperationActionSchema>;
+export type AppOperationActionEvent = z.infer<typeof appOperationActionEventSchema>;
+export type AppOperationActionCommitResult = z.infer<typeof appOperationActionCommitResultSchema>;
+export type AppOperationActionReconciliationResult = z.infer<typeof appOperationActionReconciliationResultSchema>;
 export type WorkspaceAppInstallation = z.infer<typeof workspaceAppInstallationSchema>;
 export type AppInstallationLock = z.infer<typeof appInstallationLockSchema>;
 export type CompanyContext = z.infer<typeof companyContextSchema>;
@@ -1294,9 +1917,12 @@ export type AppEvalJudgment = z.infer<typeof appEvalJudgmentSchema>;
 export type AppPromotionRecommendation = z.infer<typeof appPromotionRecommendationSchema>;
 export type AppReadiness = z.infer<typeof appReadinessSchema>;
 export type AppOnboardingStage = z.infer<typeof appOnboardingStageSchema>;
+export type AppOnboardingDraft = z.infer<typeof appOnboardingDraftSchema>;
+export type AppOnboardingResetResult = z.infer<typeof appOnboardingResetResultSchema>;
 export type AppOnboardingJourney = z.infer<typeof appOnboardingJourneySchema>;
 export type AppUpdatePlan = z.infer<typeof appUpdatePlanSchema>;
 export type AppLifecycleReceipt = z.infer<typeof appLifecycleReceiptSchema>;
+export type AppActivationGate = z.infer<typeof appActivationGateSchema>;
 export type AppActivationApprovalReceipt = z.infer<typeof appActivationApprovalReceiptSchema>;
 export type AppInstallationState = z.infer<typeof appInstallationStateSchema>;
 export type AppRolloutMode = z.infer<typeof appRolloutModeSchema>;
@@ -1316,8 +1942,17 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppIndependentVerificationReceipt: zodToJsonSchema(appIndependentVerificationReceiptSchema, "AppIndependentVerificationReceipt") as Record<string, unknown>,
     AppVerifierTrustKey: zodToJsonSchema(appVerifierTrustKeySchema, "AppVerifierTrustKey") as Record<string, unknown>,
     AppOperationalMaturityAssessment: zodToJsonSchema(appOperationalMaturityAssessmentSchema, "AppOperationalMaturityAssessment") as Record<string, unknown>,
+    AppEvidenceRenewalPlan: zodToJsonSchema(appEvidenceRenewalPlanSchema, "AppEvidenceRenewalPlan") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
+    AppConnectorOperationBinding: zodToJsonSchema(appConnectorOperationBindingSchema, "AppConnectorOperationBinding") as Record<string, unknown>,
+    AppOperationResolution: zodToJsonSchema(appOperationResolutionSchema, "AppOperationResolution") as Record<string, unknown>,
+    AppRuntimeOperationResponse: zodToJsonSchema(appRuntimeOperationResponseSchema, "AppRuntimeOperationResponse") as Record<string, unknown>,
+    AppOperationExecutionResult: zodToJsonSchema(appOperationExecutionResultSchema, "AppOperationExecutionResult") as Record<string, unknown>,
+    AppOperationAction: zodToJsonSchema(appOperationActionSchema, "AppOperationAction") as Record<string, unknown>,
+    AppOperationActionEvent: zodToJsonSchema(appOperationActionEventSchema, "AppOperationActionEvent") as Record<string, unknown>,
+    AppOperationActionCommitResult: zodToJsonSchema(appOperationActionCommitResultSchema, "AppOperationActionCommitResult") as Record<string, unknown>,
+    AppOperationActionReconciliationResult: zodToJsonSchema(appOperationActionReconciliationResultSchema, "AppOperationActionReconciliationResult") as Record<string, unknown>,
     WorkspaceAppInstallation: zodToJsonSchema(workspaceAppInstallationSchema, "WorkspaceAppInstallation") as Record<string, unknown>,
     AppInstallationLock: zodToJsonSchema(appInstallationLockSchema, "AppInstallationLock") as Record<string, unknown>,
     CompanyContext: zodToJsonSchema(companyContextSchema, "CompanyContext") as Record<string, unknown>,
@@ -1332,6 +1967,9 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppEvalJudgment: zodToJsonSchema(appEvalJudgmentSchema, "AppEvalJudgment") as Record<string, unknown>,
     AppPromotionRecommendation: zodToJsonSchema(appPromotionRecommendationSchema, "AppPromotionRecommendation") as Record<string, unknown>,
     AppReadiness: zodToJsonSchema(appReadinessSchema, "AppReadiness") as Record<string, unknown>,
+    AppActivationGate: zodToJsonSchema(appActivationGateSchema, "AppActivationGate") as Record<string, unknown>,
+    AppOnboardingDraft: zodToJsonSchema(appOnboardingDraftSchema, "AppOnboardingDraft") as Record<string, unknown>,
+    AppOnboardingResetResult: zodToJsonSchema(appOnboardingResetResultSchema, "AppOnboardingResetResult") as Record<string, unknown>,
     AppOnboardingJourney: zodToJsonSchema(appOnboardingJourneySchema, "AppOnboardingJourney") as Record<string, unknown>,
     AppUpdatePlan: zodToJsonSchema(appUpdatePlanSchema, "AppUpdatePlan") as Record<string, unknown>,
     AppLifecycleReceipt: zodToJsonSchema(appLifecycleReceiptSchema, "AppLifecycleReceipt") as Record<string, unknown>,
