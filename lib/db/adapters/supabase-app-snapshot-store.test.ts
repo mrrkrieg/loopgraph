@@ -9,7 +9,8 @@ import {
 import { afterEach, describe, expect, it } from "vitest";
 import {
   HOSTED_APP_SNAPSHOT_BUCKET,
-  SupabaseAppSnapshotStore
+  SupabaseAppSnapshotStore,
+  inventoryHostedAppSnapshotObjects
 } from "./supabase-app-snapshot-store";
 
 const temporaryDirectories: string[] = [];
@@ -132,6 +133,40 @@ describe("Supabase App snapshot store", () => {
     expect(recovered.artifact.digest).toBe(source.artifact.digest);
     expect(appSnapshotFilesDigest(recovered)).toBe(descriptor.filesDigest);
   });
+
+  it("inventories only exact tenant objects and projects paths to opaque digests", async () => {
+    const storage = new FakeSnapshotStorage();
+    const projectRoot = await temporaryRoot("loopgraph-snapshot-inventory-");
+    const source = await loadLoopPackDirectory(path.resolve(
+      process.cwd(),
+      "packs/official/product/turn-feedback-into-product-problems"
+    ));
+    const descriptor = {
+      snapshotPath: ".loopgraph/apps/private-snapshots/private.product-feedback/1.0.0",
+      artifactDigest: source.artifact.digest,
+      filesDigest: appSnapshotFilesDigest(source)
+    };
+    await new SupabaseAppSnapshotStore(storage.client, scope, projectRoot)
+      .materialize({ ...descriptor, operationId: "detach-inventory", source });
+    storage.objects.set(
+      `${scope.organizationId}/${scope.projectKey}/acme/unexpected/archive.json`,
+      { bytes: Buffer.from("unexpected"), mediaType: "application/json" }
+    );
+    storage.objects.set(
+      `123e4567-e89b-12d3-a456-426614174001/${scope.projectKey}/acme/unexpected/archive.json`,
+      { bytes: Buffer.from("foreign"), mediaType: "application/json" }
+    );
+
+    const inventory = await inventoryHostedAppSnapshotObjects(storage.client, scope);
+
+    expect(inventory).toEqual({
+      objectKeyDigests: [expect.stringMatching(/^sha256:[a-f0-9]{64}$/)],
+      malformedObjects: 1
+    });
+    expect(JSON.stringify(inventory)).not.toContain(scope.organizationId);
+    expect(JSON.stringify(inventory)).not.toContain(scope.projectKey);
+    expect(JSON.stringify(inventory)).not.toContain("acme");
+  });
 });
 
 async function temporaryRoot(prefix: string): Promise<string> {
@@ -148,12 +183,23 @@ class FakeSnapshotStorage {
       from: (bucket: string) => {
         if (bucket !== HOSTED_APP_SNAPSHOT_BUCKET) throw new Error(`unexpected bucket ${bucket}`);
         return {
-          list: async (prefix: string) => ({
-            data: [...this.objects.keys()]
-              .filter((key) => key.startsWith(`${prefix}/`))
-              .map((key) => ({ name: key.slice(key.lastIndexOf("/") + 1) })),
-            error: null
-          }),
+          list: async (
+            prefix: string,
+            options?: { limit?: number; offset?: number }
+          ) => {
+            const entries = new Map<string, { id: string | null; name: string }>();
+            for (const key of this.objects.keys()) {
+              if (!key.startsWith(`${prefix}/`)) continue;
+              const suffix = key.slice(prefix.length + 1);
+              const [name, ...remaining] = suffix.split("/");
+              if (!name) continue;
+              entries.set(name, { id: remaining.length === 0 ? key : null, name });
+            }
+            const sorted = [...entries.values()].sort((left, right) => left.name.localeCompare(right.name));
+            const offset = options?.offset ?? 0;
+            const limit = options?.limit ?? sorted.length;
+            return { data: sorted.slice(offset, offset + limit), error: null };
+          },
           upload: async (key: string, body: Buffer, options: { contentType: string; upsert: boolean }) => {
             if (options.upsert) throw new Error("snapshot uploads must not upsert");
             if (this.objects.has(key)) {
