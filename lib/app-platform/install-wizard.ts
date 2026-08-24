@@ -45,7 +45,7 @@ type InstallImpactSource = {
   sampleOutputs: Array<{ id: string; loopName: string; metric?: string; description?: string; direction?: string }>;
 };
 
-export type AppOnboardingProgressView = Pick<AppOnboardingJourney, "stage" | "headline" | "progress" | "steps" | "nextAction">;
+export type AppOnboardingProgressView = Pick<AppOnboardingJourney, "stage" | "headline" | "progress" | "steps" | "nextAction" | "draft">;
 
 export function appOnboardingProgressForView(journey: AppOnboardingJourney): AppOnboardingProgressView {
   return {
@@ -53,7 +53,8 @@ export function appOnboardingProgressForView(journey: AppOnboardingJourney): App
     headline: journey.headline,
     progress: journey.progress,
     steps: journey.steps,
-    nextAction: journey.nextAction
+    nextAction: journey.nextAction,
+    draft: journey.draft
   };
 }
 
@@ -118,7 +119,7 @@ export function installPlanBlockersForView(plan: AppInstallPlan): string[] {
     ...plan.missingConfigurationKeys.map((key) => `Resolve ${readableBlocker(key)}.`),
     ...plan.capabilityResolutions
       .filter((resolution) => resolution.required && !["connected", "reusable"].includes(resolution.status))
-      .map((resolution) => `Connect ${resolution.capability} (${resolution.status}).`),
+      .map((resolution) => resolution.reason ?? `Connect ${resolution.capability} (${resolution.status}).`),
     ...plan.permissions
       .filter((permission) => permission.decision === "unresolved")
       .map((permission) => `Review permission ${permission.capability}.`),

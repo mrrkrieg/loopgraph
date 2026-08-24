@@ -199,6 +199,22 @@ describe("EventRoutingTable", () => {
           routeCount: 1,
           eventFamilyCount: 1,
           warnings: [],
+          activation: {
+            exists: true,
+            current: true,
+            ready: true,
+            planDigest: "activation_plan_1",
+            routes: [{
+              routeId: "hermes_route_google_ads",
+              routeName: "loopgraph-google-ads-events",
+              routeKind: "provider_event",
+              loopIds: ["marketing_ads"],
+              state: "shadow",
+              subscriptionState: "active",
+              signatureVerificationConfigured: true,
+              ready: true
+            }]
+          },
           routes: [{
             routeName: "loopgraph-google-ads-events",
             sourcePattern: "google_ads*",
@@ -216,6 +232,8 @@ describe("EventRoutingTable", () => {
     expect(html).toContain("92%");
     expect(html).toContain("Problem inbox");
     expect(html).toContain("Routing catalog");
+    expect(html).toContain("Hermes ready");
+    expect(html).toContain("shadow · active");
     expect(html).toContain("confidence ≥ 80%");
     expect(html).toContain("ambiguity request human");
     expect(html).toContain("fan-out independent only");
@@ -269,6 +287,12 @@ function baseModel(): EventRoutingOperationsReadModel {
       routeCount: 0,
       eventFamilyCount: 0,
       warnings: [],
+      activation: {
+        exists: false,
+        current: false,
+        ready: false,
+        routes: []
+      },
       routes: []
     }
   };

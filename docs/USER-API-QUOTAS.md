@@ -81,7 +81,7 @@ set rate_limit = excluded.rate_limit,
 that no session receives `401`, an active foreign member receives `403`, a suspended member receives
 `403`, and the active target member receives exactly three allowed responses followed by `429` with
 bounded rate headers. If the runner encounters a partially consumed window it waits once, for at
-most the configured bound, and retries from a fresh window. The `staging-validation/v4` receipt
+most the configured bound, and retries from a fresh window. The `staging-validation/v5` receipt
 records only the bucket, configured limit, allowed count, denial status, and retry delay; session
 cookies and response bodies are deliberately excluded.
 

@@ -55,6 +55,7 @@ short-lived download API for authorized clients.
 | `GET /api/marketplace/apps/:appId` | `workspace.read` | Read all visible active/deprecated versions of one app |
 | `POST /api/marketplace/artifacts/uploads` | `marketplace.publish` + MFA | Mint a non-upsert upload URL inside the caller's tenant namespace |
 | `POST /api/marketplace/releases` | `marketplace.publish` + MFA | Confirm the uploaded object and stage immutable signed release metadata |
+| `PATCH /api/marketplace/releases` | `marketplace.publish` + MFA | Deprecate or revoke one exact owned release through the atomic audited administrator boundary |
 | `POST /api/marketplace/artifacts/downloads` | `workspace.read` | Mint a 60-second URL for one RLS-visible, verified digest |
 | `GET /api/marketplace/client/catalog` | workload identity + `marketplace.consume` | Search or resolve tenant-visible metadata for Hermes/CLI without artifact prefetch |
 | `POST /api/marketplace/client/artifacts` | workload identity + `marketplace.consume` | Stream one exact organization-visible verified archive to the workload client |
@@ -81,8 +82,9 @@ release has reached a final `active` or `rejected` verification state.
 
 ## Deploy
 
-1. Apply `20260816110321_hosted_marketplace_registry.sql`, then
-   `20260816225117_hosted_marketplace_delivery.sql`.
+1. Apply `20260816110321_hosted_marketplace_registry.sql`,
+   `20260816225117_hosted_marketplace_delivery.sql`, and
+   `20260823140000_marketplace_release_revocation_audit.sql`.
 2. Configure the existing hosted Supabase variables, `CRON_SECRET`, and either
    workload identity or the documented temporary legacy cron compatibility.
 3. Grant the cron workload only `schedule.marketplace_verifier`.
@@ -113,3 +115,10 @@ See [hosted marketplace workload access](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md
 
 Live staging must still validate issuer rotation, cross-replica cache policy,
 revocation latency, multi-user behavior, and interactive human CLI login.
+
+Release lifecycle changes no longer have a direct authenticated database path. The application
+requires `marketplace.publish` plus MFA, then the service-role RPC rechecks an active administrator
+or owner in the exact owning tenant. The release transition and append-only
+`marketplace.release.status_changed` event commit together. The response contains only bounded
+release identity, prior/new status, changed flag, and correlation ID; the operator explanation is
+stored as lifecycle context while the audit ledger receives only its SHA-256 digest.
