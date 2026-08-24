@@ -45,6 +45,12 @@ owner must invite the account.
 - included in backup and restore procedures;
 - mounted consistently for every process that is allowed to operate the project.
 
+Detached private App artifacts are the exception to this filesystem authority. In hosted mode,
+their immutable archives live in the private `loopgraph-app-snapshots` Supabase Storage bucket.
+The runtime root holds only a verified, disposable read-through cache. A new replica can recover
+the exact detached artifact from the shared lifecycle receipt and object store without sharing a
+volume with the worker that performed the detach.
+
 Do not point this variable at `/tmp`, a Vercel function filesystem, or another ephemeral serverless
 directory. The public Vercel preview is illustrative and does not run private durable company work.
 
@@ -70,16 +76,28 @@ rollback state, immutable versions, and the active graph now share one tenant-sc
 PostgreSQL commit. Hosted automatic shadow mutation is allowed only when all required controller,
 design, registry, opportunity, and graph stores are distributed.
 
-Measurement jobs, outcomes, and value records still have file-backed paths. Until those remaining
-records move, do not treat the learning/value plane as multi-writer. The remaining stores need:
+Measurement bindings and jobs, reconciliation reports, metric samples, observed outcomes, and
+value-ledger records use the tenant/project-scoped Supabase evidence store in authenticated hosted
+mode. Job claims are database-atomic across replicas, carry bounded leases and hashed fencing
+tokens, and fail finalization when the active lease no longer matches. Metric samples, outcomes,
+and value entries are immutable by tenant-scoped identity; a conflicting replay fails at the
+database boundary. Canonical company entities and provider aliases use a separate distributed
+entity-resolution store whose uniqueness boundary prevents one provider object from mapping to
+multiple company objects.
 
-- atomic claim/update operations;
-- leases and fencing tokens;
-- organization and project keys on every row;
-- idempotency constraints scoped to the tenant;
-- retry/dead-letter state;
-- append-only mutation receipts;
-- transactionally consistent outcome and value receipts.
+Hosted resolution for the learning/value and entity planes is fail-closed. If Supabase authority or
+the deployment organization binding is unavailable, the runtime rejects the request instead of
+using the local file adapters. File stores remain an explicit local-project implementation only and
+are cached by resolved project namespace so two local projects do not share evidence or identity.
+
+The executable [hosted learning and entity staging gate](./HOSTED-LEARNING-ENTITY-STAGING-GATE.md)
+actively exercises cross-client claims, stale-lease rejection, finalization visibility, all three
+immutable evidence types, provider-alias uniqueness, and nonce-authorized exact cleanup against a
+deployed staging database. The protected release workflow makes its exact nine-control receipt a
+mandatory, scope-bound input to both signed evidence compilation and production verification.
+Applying the migrations, configuring the protected environment, and producing that
+environment-specific receipt remain operator actions. Database restore behavior stays part of the separate isolated recovery rehearsal;
+neither missing receipt is a reason to fall back to replica-local files.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md),
@@ -89,3 +107,5 @@ See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Hermes design callback inbox](./HERMES-DESIGN-CALLBACK-INBOX.md), and
 [Distributed discovery and design artifacts](./DISTRIBUTED-DISCOVERY-DESIGN-STORE.md) for the
 implemented protocols and exact remaining boundary.
+See [Hosted App snapshots](./HOSTED-APP-SNAPSHOTS.md) for the detach authority, bucket, recovery,
+and backup contract.

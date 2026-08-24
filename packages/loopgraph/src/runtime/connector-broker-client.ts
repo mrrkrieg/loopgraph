@@ -1,9 +1,12 @@
 import {
   connectorActionPrepareResponseSchema,
+  connectorActionReconcileResponseSchema,
   connectorBrokerResponseSchema,
   type ConnectorActionCommitRequest,
   type ConnectorActionPrepareRequest,
   type ConnectorActionPrepareResponse,
+  type ConnectorActionReconcileRequest,
+  type ConnectorActionReconcileResponse,
   type ConnectorBrokerRequest,
   type ConnectorBrokerResponse
 } from "../core";
@@ -39,6 +42,10 @@ export class ConnectorBrokerClient {
 
   async commitAction(request: ConnectorActionCommitRequest): Promise<ConnectorBrokerResponse> {
     return this.call("v1/actions/commit", request, connectorBrokerResponseSchema);
+  }
+
+  async reconcileAction(request: ConnectorActionReconcileRequest): Promise<ConnectorActionReconcileResponse> {
+    return this.call("v1/actions/reconcile", request, connectorActionReconcileResponseSchema);
   }
 
   async capabilities() {
