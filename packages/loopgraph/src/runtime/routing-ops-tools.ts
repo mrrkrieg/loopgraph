@@ -22,12 +22,17 @@ import {
   listLoopOpportunities
 } from "./loop-opportunity-engine";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
+import {
+  compileRoutingLearningEffectiveness,
+  type RoutingLearningEffectiveness
+} from "./routing-learning-effectiveness";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const LOOPGRAPH_ROUTING_OPS_TOOL_NAMES = [
   "loopgraph_events_get",
   "loopgraph_problems_get",
   "loopgraph_routing_decision_get",
+  "loopgraph_routing_learning_effectiveness_get",
   "loopgraph_route_jobs_get",
   "loopgraph_routing_evaluations_get",
   "loopgraph_lifecycle_events_get",
@@ -83,6 +88,10 @@ export const routingDecisionGetInputSchema = z.object({
   limit: limitSchema
 }).default({});
 
+export const routingLearningEffectivenessGetInputSchema = z.object({
+  projectRoot: z.string().optional()
+}).default({});
+
 export const routeJobsGetInputSchema = z.object({
   projectRoot: z.string().optional(),
   jobId: z.string().optional(),
@@ -125,6 +134,7 @@ export const graphGetInputSchema = z.object({
 export type EventsGetInput = z.input<typeof eventsGetInputSchema>;
 export type ProblemsGetInput = z.input<typeof problemsGetInputSchema>;
 export type RoutingDecisionGetInput = z.input<typeof routingDecisionGetInputSchema>;
+export type RoutingLearningEffectivenessGetInput = z.input<typeof routingLearningEffectivenessGetInputSchema>;
 export type RouteJobsGetInput = z.input<typeof routeJobsGetInputSchema>;
 export type RoutingEvaluationsGetInput = z.input<typeof routingEvaluationsGetInputSchema>;
 export type LifecycleEventsGetInput = z.input<typeof lifecycleEventsGetInputSchema>;
@@ -157,6 +167,11 @@ export type RoutingDecisionGetResult = {
   }>;
 };
 
+export type RoutingLearningEffectivenessGetResult = {
+  projectRoot: string;
+  report: RoutingLearningEffectiveness;
+};
+
 export type RouteJobsGetResult = {
   projectRoot: string;
   count: number;
@@ -186,6 +201,7 @@ export type GraphProjectionResult = {
     loopCount?: number;
     eventCount?: number;
     problemCount?: number;
+    learningContextCount?: number;
     routeCommitCount?: number;
     routeJobCount?: number;
   };
@@ -208,6 +224,12 @@ export const loopgraphRoutingOpsToolDefinitions = [
   {
     name: "loopgraph_routing_decision_get",
     description: "Return Hermes routing attempts, validation state, related receipts, problems, and route commits.",
+    readOnly: true,
+    idempotent: true
+  },
+  {
+    name: "loopgraph_routing_learning_effectiveness_get",
+    description: "Return bounded Hermes evidence-binding coverage, corrections, evaluations, and per-loop routing quality without provider payloads.",
     readOnly: true,
     idempotent: true
   },
@@ -255,6 +277,9 @@ export async function callLoopgraphRoutingOpsTool(
   }
   if (name === "loopgraph_routing_decision_get") {
     return loopgraph_routing_decision_get(input as RoutingDecisionGetInput, options);
+  }
+  if (name === "loopgraph_routing_learning_effectiveness_get") {
+    return loopgraph_routing_learning_effectiveness_get(input as RoutingLearningEffectivenessGetInput, options);
   }
   if (name === "loopgraph_route_jobs_get") {
     return loopgraph_route_jobs_get(input as RouteJobsGetInput, options);
@@ -366,6 +391,18 @@ export async function loopgraph_routing_decision_get(
   };
 }
 
+export async function loopgraph_routing_learning_effectiveness_get(
+  input: RoutingLearningEffectivenessGetInput = {},
+  options: LoopgraphRoutingOpsToolRuntimeOptions = {}
+): Promise<RoutingLearningEffectivenessGetResult> {
+  const parsed = routingLearningEffectivenessGetInputSchema.parse(input);
+  const projectRoot = resolveProjectRoot(parsed.projectRoot, options.projectRoot);
+  return {
+    projectRoot,
+    report: await compileRoutingLearningEffectiveness(storeFor(projectRoot, options), { now: options.now })
+  };
+}
+
 export async function loopgraph_route_jobs_get(
   input: RouteJobsGetInput = {},
   options: LoopgraphRoutingOpsToolRuntimeOptions = {}
@@ -459,6 +496,7 @@ export async function loopgraph_graph_get(
       ...(parsed.projection === "event_routing" ? {
         eventCount: graphProjection.nodes.filter((node) => node.type === "event").length,
         problemCount: graphProjection.nodes.filter((node) => node.type === "problem").length,
+        learningContextCount: graphProjection.nodes.filter((node) => node.type === "learning_context").length,
         routeCommitCount: graphProjection.nodes.filter((node) => node.type === "route_commit").length,
         routeJobCount: graphProjection.nodes.filter((node) => node.type === "route_job").length
       } : {})
@@ -621,17 +659,39 @@ async function eventRoutingGraphProjection(input: {
 
   for (const attempt of attempts) {
     const attemptNodeId = `attempt:${attempt.id}`;
+    const learningContextNodeId = `learning:${attempt.id}`;
     projection.nodes.push({
       id: attemptNodeId,
       label: `${attempt.action ?? "received"} · ${attempt.status}`,
       type: "loop"
     });
+    if (attempt.learningContextBinding) {
+      projection.nodes.push({
+        id: learningContextNodeId,
+        label: `Cross-loop evidence · ${attempt.learningContextBinding.acknowledged ? "acknowledged" : "unacknowledged"}`,
+        type: "learning_context"
+      });
+      projection.edges.push({
+        source: `event:${attempt.eventId}`,
+        target: learningContextNodeId,
+        label: "bounded learning evidence",
+        executable: false
+      });
+    }
     projection.edges.push({
       source: `event:${attempt.eventId}`,
       target: attemptNodeId,
       label: "Hermes decision",
       executable: attempt.status === "committed"
     });
+    if (attempt.learningContextBinding) {
+      projection.edges.push({
+        source: learningContextNodeId,
+        target: attemptNodeId,
+        label: "advisory evidence used",
+        executable: false
+      });
+    }
     for (const alternative of attempt.decision?.alternatives ?? []) {
       const loopNodeId = `loop:${alternative.loopId}`;
       projection.nodes.push({ id: loopNodeId, label: alternative.loopId, type: "loop" });
