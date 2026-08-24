@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "loopgraph-hermes-plugin-runtime/v1alpha1",
+  "repository": "https://github.com/mrrkrieg/loopgraph.git",
+  "pluginVersion": "0.2.0",
+  "packageVersion": "0.2.0",
+  "packageLockSha256": "a61f1afe99b67115a5c87c05fdf091e488720a399a8918b16821e6b8e6fb8876",
+  "sourceRevisionPolicy": "hermes-install-revision"
+}
+

@@ -70,11 +70,11 @@ access and refresh values remain process-local and are never serialized.
 The protected `cli-session-staging` release job validates the exact ten names and statuses before it
 uploads this receipt. `audit:drain` then proves the receipt's accepted-request checkpoint in the
 pinned tenant chain, and `release:evidence:build` binds the complete receipt and the resulting
-`audit-drain/v7` proof into `loopgraph-production-promotion-evidence/v15`. Production re-reads the
+`audit-drain/v8` proof into `loopgraph-production-promotion-evidence/v16`. Production re-reads the
 same immutable artifacts; omitting, aging, changing scope, collapsing the two origins, or changing a
 control blocks promotion.
 
 This receipt proves the deployed human-session path. Live identity-provider JWKS rotation and
 hosted App release revocation remain separate deployment drills. MFA administrator revocation is
 proved by the separate `cli-admin-staging` protected job, while exact disposable marketplace-release
-revocation is proved by its own protected job; both are bound into the same v15 manifest.
+revocation is proved by its own protected job; both are bound into the same v16 manifest.

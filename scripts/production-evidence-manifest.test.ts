@@ -39,6 +39,14 @@ const marketplaceReleaseRevocationApp = {
   version: "1.0.0",
   artifactDigest: `sha256:${"c".repeat(64)}`
 };
+const workloadIssuerRotation = {
+  issuer: "https://identity.staging.test",
+  jwksUri: "https://identity.staging.test/.well-known/jwks.json",
+  rotationId: "staging-rotation-2026-08-23",
+  previousKid: "issuer-key-a",
+  nextKid: "issuer-key-b"
+};
+const workloadIssuerRotationScopeDigest = canonicalAppDigest(workloadIssuerRotation);
 
 const config: ProductionEvidenceConfig = {
   repository: "mrrkrieg/loopgraph",
@@ -55,6 +63,7 @@ const config: ProductionEvidenceConfig = {
   expectedAppSnapshotUnreferencedInventoryDigest: unreferencedInventoryDigest,
   expectedMarketplaceReleaseRevocationArtifactDigest:
     marketplaceReleaseRevocationApp.artifactDigest,
+  expectedWorkloadIssuerRotationScopeDigest: workloadIssuerRotationScopeDigest,
   auditRetentionKeyId,
   auditRetentionPublicKeyPem,
   generatedAt,
@@ -67,7 +76,7 @@ describe("production promotion evidence manifest", () => {
     const manifest = buildProductionEvidenceManifest(receipts, config);
 
     expect(manifest).toMatchObject({
-      schemaVersion: "loopgraph-production-promotion-evidence/v15",
+      schemaVersion: "loopgraph-production-promotion-evidence/v16",
       release: {
         repository: config.repository,
         commitSha: config.commitSha,
@@ -160,6 +169,19 @@ describe("production promotion evidence manifest", () => {
               "marketplace_release_status_123e4567-e89b-42d3-a456-426614174098",
             auditThroughSequence: 47,
             auditHeadHash: "a".repeat(64)
+          }
+        },
+        workloadIssuerRotation: {
+          summary: {
+            primaryOrigin: deploymentOrigin,
+            replicaOrigin: "https://staging-replica.loopgraph.test",
+            scopeDigest: workloadIssuerRotationScopeDigest,
+            checks: 8,
+            overlapReceiptDigest: `sha256:${"6".repeat(64)}`,
+            retirementReceiptDigest: `sha256:${"7".repeat(64)}`,
+            auditRequestId: "issuer_final_primary_12345678",
+            auditThroughSequence: 48,
+            auditHeadHash: "b".repeat(64)
           }
         },
         appEvidenceHealth: {
@@ -270,7 +292,7 @@ describe("production promotion evidence manifest", () => {
         auditRetention: { summary: { throughSequence: 50 } }
       }
     });
-    expect(Object.keys(manifest.evidence)).toHaveLength(14);
+    expect(Object.keys(manifest.evidence)).toHaveLength(15);
     expect(manifest.evidenceSetDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
 
     expect(verifyProductionEvidenceManifest({
@@ -373,6 +395,46 @@ describe("production promotion evidence manifest", () => {
       auditEvidence: {
         ...(auditedReceipt.auditEvidence as Record<string, unknown>),
         throughSequence: 48
+      }
+    };
+    expect(() => buildProductionEvidenceManifest(unretainedAudit, config))
+      .toThrow(/exact release checkpoints/i);
+  });
+
+  it("requires the independently pinned workload issuer rotation proof", () => {
+    const wrongStatus = releaseReceipts();
+    const receipt = wrongStatus.workloadIssuerRotation as {
+      checks: Array<Record<string, unknown>>;
+    };
+    wrongStatus.workloadIssuerRotation = {
+      ...receipt,
+      checks: receipt.checks.map((check) =>
+        check.name === "previous_key_cross_replica_denial"
+          ? { ...check, status: 200 }
+          : check)
+    };
+    expect(() => buildProductionEvidenceManifest(wrongStatus, config))
+      .toThrow(/unexpected control status/i);
+
+    const substitutedScope = releaseReceipts();
+    const substitutedReceipt = substitutedScope.workloadIssuerRotation as
+      Record<string, unknown>;
+    substitutedScope.workloadIssuerRotation = {
+      ...substitutedReceipt,
+      issuer: "https://other-identity.staging.test",
+      jwksUri: "https://other-identity.staging.test/.well-known/jwks.json"
+    };
+    expect(() => buildProductionEvidenceManifest(substitutedScope, config))
+      .toThrow(/independently pinned rotation scope/i);
+
+    const unretainedAudit = releaseReceipts();
+    const auditedReceipt = unretainedAudit.workloadIssuerRotation as
+      Record<string, unknown>;
+    unretainedAudit.workloadIssuerRotation = {
+      ...auditedReceipt,
+      auditEvidence: {
+        ...(auditedReceipt.auditEvidence as Record<string, unknown>),
+        throughSequence: 49
       }
     };
     expect(() => buildProductionEvidenceManifest(unretainedAudit, config))
@@ -702,7 +764,8 @@ describe("production promotion evidence manifest", () => {
         { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
         { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) },
         { name: "cli_admin", sequence: 46, hash: "9".repeat(64) },
-        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) }
+        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 48, hash: "b".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(alteredCheckpoint, config))
@@ -771,7 +834,8 @@ describe("production promotion evidence manifest", () => {
         { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
         { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) },
         { name: "cli_admin", sequence: 46, hash: "9".repeat(64) },
-        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) }
+        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 48, hash: "b".repeat(64) }
       ]
     };
     expect(() => buildProductionEvidenceManifest(aboveSignedHead, config))
@@ -819,6 +883,19 @@ describe("production promotion evidence manifest", () => {
       config: withoutGeneratedAt(revocationConfig),
       now: new Date("2026-08-17T07:01:00.000Z")
     })).toThrow(/marketplace release revocation validation.*evidence window/i);
+
+    const rotationReceipts = releaseReceipts();
+    rotationReceipts.workloadIssuerRotation = {
+      ...(rotationReceipts.workloadIssuerRotation as Record<string, unknown>),
+      checkedAt: "2026-08-17T01:00:00.000Z"
+    };
+    const rotationManifest = buildProductionEvidenceManifest(rotationReceipts, revocationConfig);
+    expect(() => verifyProductionEvidenceManifest({
+      manifest: rotationManifest,
+      receipts: rotationReceipts,
+      config: withoutGeneratedAt(revocationConfig),
+      now: new Date("2026-08-17T07:01:00.000Z")
+    })).toThrow(/workload issuer rotation validation.*evidence window/i);
   });
 
   it("rejects a retention acknowledgement outside the protected trust anchor", () => {
@@ -850,6 +927,8 @@ function withoutGeneratedAt(value: ProductionEvidenceConfig) {
       value.expectedAppSnapshotUnreferencedInventoryDigest,
     expectedMarketplaceReleaseRevocationArtifactDigest:
       value.expectedMarketplaceReleaseRevocationArtifactDigest,
+    expectedWorkloadIssuerRotationScopeDigest:
+      value.expectedWorkloadIssuerRotationScopeDigest,
     auditRetentionKeyId: value.auditRetentionKeyId,
     auditRetentionPublicKeyPem: value.auditRetentionPublicKeyPem,
     maximumEvidenceAgeMinutes: value.maximumEvidenceAgeMinutes
@@ -1039,6 +1118,40 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         { name: "denied_request_preserves_release", status: 200 },
         { name: "aal2_exact_release_revocation", status: 200 },
         { name: "workload_revocation_and_cache_eviction", status: 404 },
+        { name: "independent_audit_evidence", status: 200 }
+      ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
+    },
+    workloadIssuerRotation: {
+      schemaVersion: "hosted-workload-issuer-rotation-staging-validation/v1",
+      primaryOrigin: deploymentOrigin,
+      replicaOrigin: "https://staging-replica.loopgraph.test",
+      organizationId,
+      projectKey: "main",
+      checkedAt,
+      durationMs: 310_000,
+      issuer: workloadIssuerRotation.issuer,
+      jwksUri: workloadIssuerRotation.jwksUri,
+      rotation: {
+        rotationId: workloadIssuerRotation.rotationId,
+        previousKid: workloadIssuerRotation.previousKid,
+        nextKid: workloadIssuerRotation.nextKid,
+        overlapReceiptDigest: `sha256:${"6".repeat(64)}`,
+        retirementReceiptDigest: `sha256:${"7".repeat(64)}`
+      },
+      auditEvidence: {
+        afterSequence: 47,
+        throughSequence: 48,
+        headHash: "b".repeat(64),
+        requestId: "issuer_final_primary_12345678"
+      },
+      checks: [
+        { name: "pre_rotation_jwks", status: 200 },
+        { name: "previous_key_cross_replica_acceptance", status: 200 },
+        { name: "overlap_published", status: 200 },
+        { name: "next_key_cross_replica_acceptance", status: 200 },
+        { name: "previous_key_retired", status: 200 },
+        { name: "previous_key_cross_replica_denial", status: 401 },
+        { name: "next_key_post_retirement_acceptance", status: 200 },
         { name: "independent_audit_evidence", status: 200 }
       ].map(({ name, status }) => ({ name, status, ok: true, detail: `${name} passed` }))
     },
@@ -1286,7 +1399,7 @@ function releaseReceipts(): ProductionEvidenceReceipts {
       }
     },
     auditRetention: {
-      schemaVersion: "audit-drain/v7",
+      schemaVersion: "audit-drain/v8",
       organizationId,
       projectKey: "main",
       sourceOrigin: deploymentOrigin,
@@ -1306,7 +1419,8 @@ function releaseReceipts(): ProductionEvidenceReceipts {
         { name: "app_evidence_health", sequence: 44, hash: "7".repeat(64) },
         { name: "cli_sessions", sequence: 45, hash: "8".repeat(64) },
         { name: "cli_admin", sequence: 46, hash: "9".repeat(64) },
-        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) }
+        { name: "marketplace_release_revocation", sequence: 47, hash: "a".repeat(64) },
+        { name: "workload_issuer_rotation", sequence: 48, hash: "b".repeat(64) }
       ]
     }
   };

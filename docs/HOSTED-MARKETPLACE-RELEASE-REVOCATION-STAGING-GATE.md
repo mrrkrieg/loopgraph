@@ -60,6 +60,6 @@ The `hosted-marketplace-release-revocation-staging-validation/v1` receipt contai
 origin, tenant/project, exact non-secret release identity, six named control results, changed flag,
 correlation ID, and audit checkpoint. It excludes cookies, JWTs, users, provider data, archive bytes,
 and reason text. The protected release workflow validates and retains this receipt, the independent
-audit drain proves its exact checkpoint, and the v15 production manifest rejects a missing, stale,
+audit drain proves its exact checkpoint, and the v16 production manifest rejects a missing, stale,
 cross-scope, digest-substituted, status-altered, or audit-unbound receipt. The first
 environment-specific execution remains external operational evidence.
