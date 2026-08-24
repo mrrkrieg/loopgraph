@@ -247,6 +247,18 @@ export class LocalAppMarketplace {
         ? path.join(sourceRoot, path.relative(prepared.root, entry.location))
         : entry.location;
       const loadedArtifact = entry.artifact;
+      const release = releases.get(publishedReleaseKey(
+        loadedArtifact.manifest.metadata.id,
+        loadedArtifact.manifest.metadata.version,
+        loadedArtifact.digest
+      ));
+      const maturityEvidence = release?.validation?.artifactDigest === loadedArtifact.digest &&
+        release.validation.status === "passed" &&
+        release.validation.writeBlocked &&
+        release.validation.providerWrites === 0 &&
+        release.validation.passedScenarioCount === release.validation.scenarioCount
+        ? release.validation
+        : undefined;
       const marketplaceVersion = marketplaceVersionFromArtifact(
         {
           ...loadedArtifact,
@@ -258,7 +270,7 @@ export class LocalAppMarketplace {
           }
         },
         `file://${location}`,
-        "tested",
+        maturityEvidence ? "tested" : "concept",
         {
           sourceId: source.id,
           sourceType: source.type,
@@ -269,14 +281,10 @@ export class LocalAppMarketplace {
           synchronizedAt
         }
       );
+      marketplaceVersion.maturityEvidence = maturityEvidence;
       marketplaceVersion.provenanceVerified = source.trustPolicy === "signed"
         ? Boolean(loadedArtifact.provenance.signature)
         : source.trustPolicy === "official_only" && loadedArtifact.manifest.metadata.publisher.id === "loopgraph" && loadedArtifact.manifest.metadata.publisher.verified;
-      const release = releases.get(publishedReleaseKey(
-        loadedArtifact.manifest.metadata.id,
-        loadedArtifact.manifest.metadata.version,
-        loadedArtifact.digest
-      ));
       versions.push({
         artifact: loadedArtifact,
         location,
