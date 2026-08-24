@@ -125,6 +125,11 @@ export function InstalledAppActionsPanel({ operations, canApproveActions = false
                   Approval is bound to this exact action fingerprint and expires {formatActivityDate(action.lifecycleEvents.find((event) => event.eventType === "approval_granted")?.approval?.expiresAt ?? action.expiresAt)}. Only the assigned Hermes route may request the later commit.
                 </div>
               ) : null}
+              {action.effectiveStatus === "committing" ? (
+                <div className="mt-4 rounded-md border border-orange-200 bg-orange-50 p-3 text-xs leading-5 text-orange-950">
+                  The provider outcome is not yet recorded in Loopgraph. Hermes must reconcile this action against the Connector Broker receipt before it retries or prepares replacement work. Reconciliation never repeats the provider write.
+                </div>
+              ) : null}
               {["prepared", "approved", "failed"].includes(action.effectiveStatus) && canApproveActions ? (
                 <details className="mt-3 rounded-md border border-red-200 bg-red-50 p-3">
                   <summary className="cursor-pointer text-xs font-semibold text-red-950">Revoke this exact action</summary>

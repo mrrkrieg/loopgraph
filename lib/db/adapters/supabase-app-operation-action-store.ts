@@ -11,6 +11,7 @@ import {
   assertActionEventBoundary,
   assertPreparedActionBoundary,
   type AppOperationActionEventQuery,
+  type AppOperationActionReconciliationCandidate,
   type AppOperationActionQuery,
   type AppOperationActionStore
 } from "loopgraph/runtime";
@@ -93,6 +94,38 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
     const { data, error } = await query.order("occurred_at", { ascending: false }).limit(limit);
     if (error) throw new Error(`Failed to list App action lifecycle events: ${error.message}`);
     return (data ?? []).map((row) => parseEventRow(row, this.scope.workspaceId));
+  }
+
+  async listReconciliationCandidates(query: {
+    workspaceId: string;
+    requestedBefore: string;
+    limit: number;
+  }): Promise<AppOperationActionReconciliationCandidate[]> {
+    if (query.workspaceId !== this.scope.workspaceId) return [];
+    const limit = boundedLimit(query.limit);
+    if (!Number.isFinite(Date.parse(query.requestedBefore))) throw new Error("App action reconciliation cutoff is invalid");
+    const { data, error } = await this.supabase.rpc("list_loopgraph_app_action_reconciliation_candidates", {
+      p_organization_id: this.scope.organizationId,
+      p_project_key: this.scope.projectKey,
+      p_workspace_id: this.scope.workspaceId,
+      p_requested_before: query.requestedBefore,
+      p_limit: limit
+    });
+    if (error) throw new Error(`Failed to list App action reconciliation candidates: ${error.message}`);
+    if (!Array.isArray(data)) throw new Error("Hosted App action reconciliation query returned an invalid result");
+    return data.map((row) => {
+      if (!row || typeof row !== "object" || !("action_payload" in row) || !("request_event_payload" in row)) {
+        throw new Error("Hosted App action reconciliation query returned an invalid row");
+      }
+      const action = appOperationActionSchema.parse((row as { action_payload: unknown }).action_payload);
+      const requestEvent = appOperationActionEventSchema.parse((row as { request_event_payload: unknown }).request_event_payload);
+      if (action.workspaceId !== this.scope.workspaceId || requestEvent.workspaceId !== this.scope.workspaceId ||
+        requestEvent.eventType !== "commit_requested" || !requestEvent.commit ||
+        action.id !== requestEvent.actionId || action.installationId !== requestEvent.installationId) {
+        throw new Error("Hosted App action reconciliation candidate is out of scope or malformed");
+      }
+      return { action, requestEvent } as AppOperationActionReconciliationCandidate;
+    });
   }
 
   private scopedQuery() {

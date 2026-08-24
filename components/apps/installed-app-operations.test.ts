@@ -69,6 +69,20 @@ describe("Installed App operations panels", () => {
     expect(html).toContain("never mixed into this view");
     expect(html).not.toContain("Google Ads");
   });
+
+  it("tells operators to reconcile an interrupted commit instead of retrying the provider write", () => {
+    const operations = populatedOperations();
+    operations.actions[0] = {
+      ...operations.actions[0]!,
+      effectiveStatus: "committing"
+    };
+
+    const html = renderToStaticMarkup(React.createElement(InstalledAppActionsPanel, { operations }));
+
+    expect(html).toContain("Hermes must reconcile this action");
+    expect(html).toContain("never repeats the provider write");
+    expect(html).not.toContain("Approve exact action");
+  });
 });
 
 function populatedOperations(): InstalledAppOperationsView {

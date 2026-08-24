@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { appInstallationLockSchema, type AppInstallationLock } from "loopgraph/core";
 import {
+  appInstallationMutationAuditContextSchema,
   appInstallationRegistrySchema,
   assertAppInstallationRegistryRevision,
   emptyAppInstallationRegistry,
@@ -70,15 +71,22 @@ export class SupabaseAppInstallationStore implements AppInstallationStore {
       const next = this.parseRegistry(result.registry);
       assertAppInstallationRegistryRevision(current, next);
       const lock = result.lock ? appInstallationLockSchema.parse(result.lock) : currentLock;
-      const commit = await this.supabase.rpc("commit_loopgraph_app_installation_registry", {
-        p_organization_id: this.scope.organizationId,
-        p_project_key: this.scope.projectKey,
-        p_workspace_id: this.scope.workspaceId,
-        p_expected_revision: current.revision,
-        p_lease_token: leaseToken,
-        p_registry: next,
-        p_lock: lock ?? null
-      });
+      const audit = result.audit ? appInstallationMutationAuditContextSchema.parse(result.audit) : undefined;
+      const commit = await this.supabase.rpc(
+        audit
+          ? "commit_loopgraph_app_installation_registry_with_audit"
+          : "commit_loopgraph_app_installation_registry",
+        {
+          p_organization_id: this.scope.organizationId,
+          p_project_key: this.scope.projectKey,
+          p_workspace_id: this.scope.workspaceId,
+          p_expected_revision: current.revision,
+          p_lease_token: leaseToken,
+          p_registry: next,
+          p_lock: lock ?? null,
+          ...(audit ? { p_audit_context: audit } : {})
+        }
+      );
       if (commit.error) throw new Error(`Failed to commit App installation registry: ${commit.error.message}`);
       committed = true;
       return result.value;

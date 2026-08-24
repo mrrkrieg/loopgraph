@@ -3,12 +3,15 @@ import {
   APP_OPERATION_ACTION_SCHEMA_VERSION,
   APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
   APP_OPERATION_ACTION_COMMIT_SCHEMA_VERSION,
+  APP_OPERATION_ACTION_RECONCILIATION_SCHEMA_VERSION,
   CONNECTOR_BROKER_PROTOCOL_VERSION,
   appOperationActionCommitResultSchema,
+  appOperationActionReconciliationResultSchema,
   appOperationActionEventSchema,
   appOperationExecutionResultSchema,
   canonicalAppDigest,
   connectorActionCommitRequestSchema,
+  connectorActionReconcileRequestSchema,
   connectorActionPrepareRequestSchema,
   connectorBrokerRequestSchema,
   contentHash,
@@ -16,8 +19,11 @@ import {
   type AppOperationAction,
   type AppOperationExecutionResult,
   type AppOperationActionCommitResult,
+  type AppOperationActionReconciliationResult,
   type ConnectionInstance,
   type ConnectorActionCommitRequest,
+  type ConnectorActionReconcileRequest,
+  type ConnectorActionReconcileResponse,
   type ConnectorActionPrepareRequest,
   type ConnectorActionPrepareResponse,
   type ConnectorBrokerRequest,
@@ -39,6 +45,7 @@ export type AppOperationTransport = {
   execute(request: ConnectorBrokerRequest): Promise<ConnectorBrokerResponse>;
   prepareAction(request: ConnectorActionPrepareRequest): Promise<ConnectorActionPrepareResponse>;
   commitAction(request: ConnectorActionCommitRequest): Promise<ConnectorBrokerResponse>;
+  reconcileAction(request: ConnectorActionReconcileRequest): Promise<ConnectorActionReconcileResponse>;
 };
 
 export type InvokeAppOperationInput = {
@@ -53,6 +60,15 @@ export type InvokeAppOperationInput = {
 };
 
 export type CommitAppOperationActionInput = {
+  installationId: string;
+  actionId: string;
+  routeJobId: string;
+  agentInstanceId: string;
+  callId: string;
+  now?: Date;
+};
+
+export type ReconcileAppOperationActionInput = {
   installationId: string;
   actionId: string;
   routeJobId: string;
@@ -586,6 +602,169 @@ export class AppOperationExecutionService {
     return appOperationActionCommitResultSchema.parse({
       ...base,
       commitDigest: canonicalAppDigest({ ...base, commitDigest: undefined })
+    });
+  }
+
+  async reconcileAction(input: ReconcileAppOperationActionInput): Promise<AppOperationActionReconciliationResult> {
+    const now = input.now ?? new Date();
+    const action = await this.dependencies.actionStore.get(this.dependencies.workspaceId, input.actionId);
+    if (!action || action.installationId !== input.installationId) {
+      throw new Error("Prepared App action is unavailable for this installation");
+    }
+    if (action.routeJobId !== input.routeJobId || action.agentInstanceId !== input.agentInstanceId) {
+      throw new Error("App action reconciliation does not match the routed Hermes assignment");
+    }
+    const events = await this.dependencies.actionStore.listEvents({
+      workspaceId: this.dependencies.workspaceId,
+      actionId: action.id,
+      limit: 100
+    });
+    if (events.some((event) => event.eventType === "revoked")) throw new Error("Revoked App actions cannot be reconciled as executable work");
+    if (events.some((event) => ["commit_succeeded", "commit_failed"].includes(event.eventType))) {
+      throw new Error("App action already has terminal commit evidence");
+    }
+    const interrupted = events.find((event) =>
+      event.eventType === "commit_requested" && event.commit &&
+      !events.some((candidate) =>
+        ["commit_succeeded", "commit_failed"].includes(candidate.eventType) &&
+        candidate.commit?.requestId === event.commit?.requestId
+      )
+    );
+    if (!interrupted?.commit) throw new Error("App action has no interrupted commit to reconcile");
+
+    const job = await this.dependencies.routingStore.getRouteJob(action.routeJobId);
+    if (!job || job.id !== input.routeJobId || job.loopId !== action.loopId || job.executionTarget.runtime !== "hermes") {
+      throw new Error("App action route job is unavailable or does not belong to Hermes");
+    }
+    const expectedShortHash = action.loopVersionHash.slice("sha256:".length, "sha256:".length + 16);
+    if (job.loopSpecHash !== expectedShortHash) throw new Error("App action route job is bound to a stale LoopSpec version");
+    if (job.executionTarget.preferredAgentInstanceId && job.executionTarget.preferredAgentInstanceId !== action.agentInstanceId) {
+      throw new Error("App action route job is assigned to another Hermes agent");
+    }
+    const [problem, receipt] = await Promise.all([
+      this.dependencies.routingStore.getBusinessProblem(job.problemId),
+      this.dependencies.routingStore.getEventReceipt(job.eventId)
+    ]);
+    if (!problem || !receipt || problem.workspaceId !== this.dependencies.workspaceId ||
+      problem.companyId !== this.dependencies.companyId || receipt.event.workspaceId !== this.dependencies.workspaceId ||
+      receipt.event.companyId !== this.dependencies.companyId || problem.subject.type !== receipt.event.subject.type ||
+      problem.subject.id !== receipt.event.subject.id || receipt.event.source === "loopgraph" ||
+      receipt.event.normalizedPayload.notificationOnly === true) {
+      throw new Error("App action company problem or source event is unavailable or out of scope");
+    }
+    if (action.companyId !== this.dependencies.companyId || action.companyObject.type !== problem.subject.type ||
+      action.companyObject.identityDigest !== canonicalAppDigest({ type: problem.subject.type, id: problem.subject.id })) {
+      throw new Error("App action company object no longer matches the routed business problem");
+    }
+    if (this.dependencies.tenant && this.dependencies.tenant.projectKey !== this.dependencies.workspaceId) {
+      throw new Error("Connector tenant project does not match the App workspace");
+    }
+    const tenant = requireConnectorTenant(this.dependencies.tenant);
+    await requireDurableHermesAssignment({
+      store: this.dependencies.operationsStore,
+      workspaceId: this.dependencies.workspaceId,
+      companyId: this.dependencies.companyId,
+      organizationId: tenant.organizationId,
+      agentInstanceId: action.agentInstanceId,
+      job
+    });
+
+    const environment = brokerEnvironmentForRoute(job.executionTarget.environment);
+    if (environment !== action.environment) throw new Error("App action environment no longer matches the routed job");
+    const requestIdentity = contentHash({
+      workspaceId: this.dependencies.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      originalRequestId: interrupted.commit.requestId,
+      originalIdempotencyKey: interrupted.commit.idempotencyKey,
+      callId: input.callId
+    });
+    const requestId = `appreconcile_${requestIdentity}`;
+    const context = {
+      workspaceId: this.dependencies.workspaceId,
+      environment,
+      agentInstanceId: action.agentInstanceId,
+      companyObject: { type: problem.subject.type, id: problem.subject.id },
+      loopId: action.loopId,
+      loopSpecHash: action.loopVersionHash.slice("sha256:".length),
+      routeJobId: job.id,
+      activationMode: "execute" as const
+    };
+    const reconcileRequest = connectorActionReconcileRequestSchema.parse({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId,
+      idempotencyKey: `appreconcile_call_${requestIdentity}`,
+      tenant,
+      actor: { type: "workload", subject: `hermes-agent:${action.agentInstanceId}` },
+      providerId: action.providerBinding.providerId,
+      installationId: action.providerBinding.connectionId,
+      capability: action.providerBinding.brokerCapability,
+      operation: action.providerBinding.operation,
+      context,
+      issuedAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 2 * 60_000).toISOString(),
+      correlationId: boundedCorrelationId(job.correlationId, requestIdentity),
+      preparedActionId: action.brokerPreparedActionId,
+      preparedActionFingerprint: action.brokerPreparedActionFingerprint,
+      originalRequestId: interrupted.commit.requestId,
+      originalIdempotencyKey: interrupted.commit.idempotencyKey
+    });
+    const brokerReconciliation = await requireBroker(this.dependencies.broker).reconcileAction(reconcileRequest);
+    if (brokerReconciliation.requestId !== requestId ||
+      brokerReconciliation.originalRequestId !== interrupted.commit.requestId) {
+      throw new Error("Connector Broker reconciliation response does not match the interrupted App commit");
+    }
+    if (brokerReconciliation.status === "resolved") {
+      const brokerResponse = brokerReconciliation.brokerResponse;
+      if (!brokerResponse) throw new Error("Resolved Connector Broker reconciliation is missing its durable response");
+      assertBrokerResponseMatchesRequest({
+        response: brokerResponse,
+        requestId: interrupted.commit.requestId,
+        tenant,
+        envelope: {
+          correlationId: brokerResponse.receipt.correlationId,
+          providerId: action.providerBinding.providerId,
+          installationId: action.providerBinding.connectionId,
+          capability: action.providerBinding.brokerCapability,
+          operation: action.providerBinding.operation,
+          actor: { type: "workload", subject: `hermes-agent:${action.agentInstanceId}` },
+          context
+        },
+        disposition: "commit_action"
+      });
+      await this.dependencies.actionStore.recordEvent(commitLifecycleEvent({
+        action,
+        eventType: brokerResponse.status === "succeeded" ? "commit_succeeded" : "commit_failed",
+        actorSubject: action.agentInstanceId,
+        requestId: interrupted.commit.requestId,
+        idempotencyKey: interrupted.commit.idempotencyKey,
+        connectorReceiptId: brokerResponse.receipt.receiptId,
+        reasonCode: brokerResponse.status === "succeeded" ? undefined : brokerResponse.error?.code ?? "broker_commit_failed",
+        occurredAt: brokerResponse.receipt.occurredAt
+      }));
+    }
+    const status = brokerReconciliation.status === "resolved"
+      ? brokerReconciliation.brokerResponse?.status === "succeeded" ? "resolved_succeeded" as const : "resolved_failed" as const
+      : brokerReconciliation.status;
+    const base = {
+      schemaVersion: APP_OPERATION_ACTION_RECONCILIATION_SCHEMA_VERSION,
+      workspaceId: this.dependencies.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      loopId: action.loopId,
+      routeJobId: action.routeJobId,
+      agentInstanceId: action.agentInstanceId,
+      reconciliationCallId: input.callId,
+      originalRequestId: interrupted.commit.requestId,
+      originalIdempotencyKey: interrupted.commit.idempotencyKey,
+      status,
+      brokerReconciliation,
+      completedAt: now.toISOString()
+    };
+    return appOperationActionReconciliationResultSchema.parse({
+      ...base,
+      reconciliationDigest: canonicalAppDigest({ ...base, reconciliationDigest: undefined })
     });
   }
 
