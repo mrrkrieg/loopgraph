@@ -5,6 +5,7 @@ import {
   formatOperatingDate
 } from "@/components/operate/format";
 import { OperateNav } from "@/components/operate/operate-nav";
+import { OperationsAutoRefresh } from "@/components/operate/operations-auto-refresh";
 import { OperatingModeNote } from "@/components/operate/operating-mode-note";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -17,13 +18,15 @@ export default async function LearningPage() {
   const observed = data.learning.outcomes.filter((outcome) => outcome.truthStatus === "observed").length;
   const incomplete = data.learning.outcomes.filter((outcome) => outcome.truthStatus === "incomplete").length;
   const failedJobs = data.learning.bindings.reduce((sum, binding) => sum + binding.failedJobs, 0);
+  const routing = data.learning.routing;
 
   return (
     <>
+      <OperationsAutoRefresh />
       <PageHeader
         eyebrow="Operate"
         title="Learning evidence"
-        description="Trace each loop from a concrete connector binding through scheduled measurement jobs to an observed outcome. Missing, stale, modeled, and verified evidence remain visibly different."
+        description="See whether Hermes is making better routing decisions, which evidence packet each decision acknowledged, where humans corrected it, and whether the selected loops produced observed outcomes."
         action={
           <Link className="rounded-md border border-line bg-white px-4 py-2 text-sm font-semibold text-ink" href="/loops">
             Open loop definitions
@@ -33,8 +36,19 @@ export default async function LearningPage() {
       <OperateNav />
       <OperatingModeNote mode={data.mode} />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <MetricCard label="Metric bindings" value={data.learning.bindings.length} note="Connector-specific contracts" />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard label="Route decisions" value={routing.attempts.total} note={`${routing.attempts.committed} committed`} />
+        <MetricCard
+          label="Evidence bound"
+          value={formatRate(routing.attempts.evidenceCoverageRate)}
+          note={`${routing.attempts.evidenceAcknowledged} acknowledged · ${routing.attempts.staleEvidenceRejected} stale rejected`}
+        />
+        <MetricCard
+          label="Routing evaluation"
+          value={formatRate(routing.evaluations.passRate)}
+          note={`${routing.evaluations.passed} passed · ${routing.evaluations.failed} failed`}
+        />
+        <MetricCard label="Human corrections" value={routing.humanFeedback.corrections} note="Accountable route feedback" />
         <MetricCard label="Outcomes" value={data.learning.outcomes.length} note="Completed evaluations" />
         <MetricCard label="Observed" value={observed} note="Sufficient real evidence" />
         <MetricCard label="Incomplete" value={incomplete} note="Hermes needs more evidence" />
@@ -42,9 +56,87 @@ export default async function LearningPage() {
       </div>
 
       <div className="mt-6">
+        {routing.attempts.total === 0 && routing.evaluations.total === 0 && routing.humanFeedback.corrections === 0 ? (
+          <EmptyOperatingState
+            title="No Hermes routing evidence exists yet"
+            description="Ingest and rehearse a normalized event through the isolated Hermes router. Loopgraph will show the acknowledged evidence packet, decision, selected loop, evaluation result, and any human correction here."
+            command="loopgraph hermes events test --help"
+            actionHref="/management"
+            actionLabel="Open routing operations"
+          />
+        ) : (
+          <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+            <SectionCard
+              title="Recent Hermes decisions"
+              description="Every row distinguishes evidence-bound decisions from legacy or stale submissions. A stale acknowledgement is rejected before it can create loop work."
+            >
+              <div className="overflow-x-auto">
+                <table className="min-w-[760px] w-full border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-xs uppercase tracking-[0.12em] text-ink/45">
+                      <th className="px-3 py-3 font-medium">Received</th>
+                      <th className="px-3 py-3 font-medium">Event</th>
+                      <th className="px-3 py-3 font-medium">Decision</th>
+                      <th className="px-3 py-3 font-medium">Selected loops</th>
+                      <th className="px-3 py-3 font-medium">Evidence</th>
+                      <th className="px-3 py-3 font-medium">Result</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {routing.recentDecisions.map((decision) => (
+                      <tr className="border-b border-line/70 align-top" key={decision.attemptId}>
+                        <td className="px-3 py-4 text-ink/60">{formatOperatingDate(decision.createdAt)}</td>
+                        <td className="max-w-[220px] break-all px-3 py-4 font-medium text-ink/75">{decision.eventId}</td>
+                        <td className="px-3 py-4"><StatusPill>{formatRoutingValue(decision.action ?? "unknown")}</StatusPill></td>
+                        <td className="px-3 py-4 text-ink/65">{decision.selectedLoopIds.length > 0 ? decision.selectedLoopIds.join(", ") : "No loop selected"}</td>
+                        <td className="px-3 py-4"><StatusPill>{formatRoutingValue(decision.evidenceState)}</StatusPill></td>
+                        <td className="px-3 py-4">
+                          <StatusPill>{decision.staleEvidenceRejected ? "Stale evidence rejected" : formatRoutingValue(decision.status)}</StatusPill>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+
+            <SectionCard
+              title="Learning by loop"
+              description="Selection volume is shown beside golden-event quality and accountable corrections, so frequently chosen loops are not mistaken for accurate loops."
+            >
+              <div className="overflow-x-auto">
+                <table className="min-w-[560px] w-full border-collapse text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-xs uppercase tracking-[0.12em] text-ink/45">
+                      <th className="px-3 py-3 font-medium">Loop</th>
+                      <th className="px-3 py-3 font-medium">Selected</th>
+                      <th className="px-3 py-3 font-medium">Evaluated</th>
+                      <th className="px-3 py-3 font-medium">Pass rate</th>
+                      <th className="px-3 py-3 font-medium">Corrections</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {routing.loops.map((loop) => (
+                      <tr className="border-b border-line/70" key={loop.loopId}>
+                        <td className="px-3 py-4 font-semibold text-ink">{loop.loopId}</td>
+                        <td className="px-3 py-4 text-ink/65">{loop.selected}</td>
+                        <td className="px-3 py-4 text-ink/65">{loop.evaluated}</td>
+                        <td className="px-3 py-4 text-ink/65">{loop.evaluated > 0 ? `${Math.round((loop.passed / loop.evaluated) * 100)}%` : "—"}</td>
+                        <td className="px-3 py-4 text-ink/65">{loop.correctedSelections}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </SectionCard>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-6">
         {data.learning.bindings.length === 0 && data.learning.outcomes.length === 0 ? (
           <EmptyOperatingState
-            title="No learning evidence exists yet"
+            title="No outcome measurement evidence exists yet"
             description="A clean install does not show sample metrics. Bind a loop metric to a Hermes-managed connector, schedule a measurement window, and the evidence chain will appear here."
             command="loopgraph measurements bindings set --help"
             actionHref="/loops"
@@ -170,4 +262,14 @@ function EvidenceNumber({ label, value }: { label: string; value: string | numbe
       <div className="mt-1 text-lg font-semibold text-ink">{value}</div>
     </div>
   );
+}
+
+function formatRate(value: number | undefined): string {
+  return value === undefined ? "—" : `${Math.round(value * 100)}%`;
+}
+
+function formatRoutingValue(value: string): string {
+  return value
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
 }

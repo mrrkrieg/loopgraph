@@ -272,7 +272,9 @@ function oauthDecision(row: DeviceRpcRow) {
   return new CliAuthorizationError(
     code,
     status,
-    code,
+    code === "refresh_token_reused"
+      ? "Refresh token reuse detected; this CLI session was revoked. Sign in again."
+      : code,
     code === "slow_down" ? boundedInterval(row.interval_seconds) : code === "rate_limited" ? 60 : undefined
   );
 }
