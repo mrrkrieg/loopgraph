@@ -10,6 +10,8 @@ import {
   type RoutingDecision,
   type RoutingCard
 } from "../core";
+import type { ConnectionInstance } from "../core";
+import type { LoopSpecRegistryStore } from "./loop-spec-store";
 import { LOOPGRAPH_ROUTING_OPS_TOOL_NAMES } from "./routing-ops-tools";
 import { LOOPGRAPH_ROUTING_TOOL_NAMES, loopgraph_routing_catalog_get } from "./routing-tools";
 import {
@@ -85,7 +87,7 @@ export type HermesWebhooksDoctorInput = z.input<typeof hermesWebhooksDoctorInput
 export type HermesWebhookFixtureTestInput = z.input<typeof hermesWebhookFixtureTestInputSchema>;
 
 export type HermesWebhookRoutePlanItem = {
-  routeKind: "provider_event" | "loopgraph_lifecycle";
+  routeKind: "provider_event" | "internal_business_event" | "loopgraph_lifecycle";
   routeName: string;
   routeId: string;
   sourcePattern: string;
@@ -94,6 +96,8 @@ export type HermesWebhookRoutePlanItem = {
   loopIds: string[];
   departments: DepartmentType[];
   requiredFields: string[];
+  requiredConnections: string[];
+  requiredConnectionsByLoopId?: Record<string, string[]>;
   skills: ["loopgraph-event-router"];
   restrictedMcpTools: Array<
     | "loopgraph_routing_catalog_get"
@@ -145,7 +149,7 @@ export type HermesWebhookPlanResult = {
 
 export type HermesRoutesManifestRoute = {
   managedBy: "loopgraph" | "external";
-  routeKind?: "provider_event" | "loopgraph_lifecycle";
+  routeKind?: "provider_event" | "internal_business_event" | "loopgraph_lifecycle";
   routeName: string;
   routeId?: string;
   sourcePattern?: string;
@@ -154,6 +158,7 @@ export type HermesRoutesManifestRoute = {
   loopIds?: string[];
   departments?: DepartmentType[];
   requiredFields?: string[];
+  requiredConnections?: string[];
   skills?: string[];
   restrictedMcpTools?: string[];
   deliveryMode?: "log";
@@ -328,12 +333,23 @@ export async function callLoopgraphHermesWebhookTool(
 }
 
 export async function planHermesWebhookRoutes(
-  input: HermesWebhooksPlanInput & { now?: Date } = {}
+  input: HermesWebhooksPlanInput & { now?: Date } = {},
+  options: {
+    loopSpecStore?: LoopSpecRegistryStore;
+    trustedConnections?: ConnectionInstance[];
+  } = {}
 ): Promise<HermesWebhookPlanResult> {
   const parsed = hermesWebhooksPlanInputSchema.parse(input);
   const projectRoot = path.resolve(parsed.projectRoot ?? process.cwd());
   const generatedAt = (input.now ?? new Date()).toISOString();
-  const catalog = await loopgraph_routing_catalog_get({ projectRoot });
+  const catalog = await loopgraph_routing_catalog_get(
+    { projectRoot },
+    {
+      projectRoot,
+      loopSpecStore: options.loopSpecStore,
+      trustedConnections: options.trustedConnections
+    }
+  );
   const routeGroups = new Map<string, MutableRouteGroup>();
   const warnings: string[] = [];
 
@@ -352,10 +368,10 @@ export async function planHermesWebhookRoutes(
     }
   }
 
-  const providerRoutes = Array.from(routeGroups.values())
+  const eventRoutes = Array.from(routeGroups.values())
     .map(finalizeRouteGroup)
     .sort((left, right) => left.routeName.localeCompare(right.routeName));
-  const routes = [createLifecycleRoutePlanItem(), ...providerRoutes]
+  const routes = [createLifecycleRoutePlanItem(), ...eventRoutes]
     .sort((left, right) => left.routeName.localeCompare(right.routeName));
   const nextActions = nextActionsForRoutes(routes);
 
@@ -384,7 +400,7 @@ export async function syncHermesWebhookRoutes(
   const generatedAt = (input.now ?? new Date()).toISOString();
   const manifestPath = path.join(getLoopgraphRoot(projectRoot), "hermes-routes.json");
   const plan = await planHermesWebhookRoutes({ projectRoot, now: input.now });
-  const existingManifest = await readExistingManifest(manifestPath);
+  const existingManifest = await readHermesRoutesManifest(manifestPath);
   const existingRoutes = existingManifest?.routes ?? [];
   const existingManaged = existingRoutes.filter((route) => route.managedBy === "loopgraph");
   const preservedExternalRoutes = existingRoutes
@@ -437,7 +453,7 @@ export async function doctorHermesWebhookRoutes(
   const checkedAt = (input.now ?? new Date()).toISOString();
   const manifestPath = path.join(getLoopgraphRoot(projectRoot), "hermes-routes.json");
   const plan = await planHermesWebhookRoutes({ projectRoot, now: input.now });
-  const manifest = await readExistingManifest(manifestPath);
+  const manifest = await readHermesRoutesManifest(manifestPath);
   const manifestRoutes = manifest?.routes ?? [];
   const managedRoutes = manifestRoutes.filter((route) => route.managedBy === "loopgraph");
   const externalRoutes = manifestRoutes.filter((route) => route.managedBy !== "loopgraph");
@@ -594,9 +610,12 @@ function finalizeRouteGroup(group: MutableRouteGroup): HermesWebhookRoutePlanIte
   const eventTypePatterns = [...group.eventTypePatterns].sort();
   const routeName = `loopgraph-${group.sourceKey}-events`;
   const restrictedMcpTools = restrictedWebhookToolset();
+  const routeKind = ["hermes", "loopgraph"].includes(group.sourcePattern)
+    ? "internal_business_event" as const
+    : "provider_event" as const;
 
   return {
-    routeKind: "provider_event",
+    routeKind,
     routeName,
     routeId: `hermes_route_${contentHash({
       sourcePattern: group.sourcePattern,
@@ -609,6 +628,11 @@ function finalizeRouteGroup(group: MutableRouteGroup): HermesWebhookRoutePlanIte
     loopIds: cards.map((card) => card.loopId),
     departments: [...new Set(cards.flatMap((card) => card.department ? [card.department] : []))].sort(),
     requiredFields: [...group.requiredFields].sort(),
+    requiredConnections: [...new Set(cards.flatMap((card) => card.requiredConnections))].sort(),
+    requiredConnectionsByLoopId: Object.fromEntries(cards.map((card) => [
+      card.loopId,
+      [...card.requiredConnections].sort()
+    ])),
     skills: ["loopgraph-event-router"],
     restrictedMcpTools,
     deliveryMode: "log",
@@ -660,6 +684,8 @@ function createLifecycleRoutePlanItem(): HermesWebhookRoutePlanItem {
     loopIds: [],
     departments: [],
     requiredFields: ["normalizedPayload.notificationOnly", "normalizedPayload.sourceEventId"],
+    requiredConnections: [],
+    requiredConnectionsByLoopId: {},
     skills: ["loopgraph-event-router"],
     restrictedMcpTools,
     deliveryMode: "log",
@@ -735,23 +761,29 @@ function escapeRegExp(value: string): string {
 }
 
 function nextActionsForRoutes(routes: HermesWebhookRoutePlanItem[]): string[] {
+  const businessRoutes = routes.filter((route) => route.routeKind !== "loopgraph_lifecycle");
   const providerRoutes = routes.filter((route) => route.routeKind === "provider_event");
-  if (providerRoutes.length === 0) {
+  if (businessRoutes.length === 0) {
     return [
       "Create or update the dedicated Hermes route named loopgraph-lifecycle-events for signed Loopgraph lifecycle callbacks and keep it notification-only.",
-      "Materialize at least one LoopSpec with a routing contract before planning external provider Hermes webhook routes."
+      "Materialize at least one LoopSpec with a routing contract before planning Hermes business-event routes."
     ];
   }
   return [
-    "Create or update one Hermes webhook gateway route for each planned source pattern; do not point providers directly at Loopgraph.",
+    ...(providerRoutes.length > 0
+      ? ["Create or update one Hermes webhook gateway route for each planned provider source pattern; do not point providers directly at Loopgraph."]
+      : []),
+    ...(businessRoutes.some((route) => route.routeKind === "internal_business_event")
+      ? ["Create authenticated internal Hermes routes for business events emitted by Hermes or Loopgraph; do not create provider subscriptions for them."]
+      : []),
     "Create a dedicated Hermes route named loopgraph-lifecycle-events for signed Loopgraph lifecycle callbacks and keep it notification-only.",
-    "Configure provider-specific signature verification and secrets inside Hermes.",
+    ...(providerRoutes.length > 0 ? ["Configure provider-specific signature verification and secrets inside Hermes."] : []),
     "Install the loopgraph-event-router skill on each route and restrict the route profile to the listed Loopgraph routing tools.",
     "Keep delivery in log/shadow mode until synthetic and shadow routing checks pass."
   ];
 }
 
-async function readExistingManifest(manifestPath: string): Promise<HermesRoutesManifest | null> {
+export async function readHermesRoutesManifest(manifestPath: string): Promise<HermesRoutesManifest | null> {
   try {
     const raw = await readFile(manifestPath, "utf8");
     const parsed = JSON.parse(raw) as unknown;
@@ -787,6 +819,7 @@ function routePlanToManifestRoute(
     loopIds: route.loopIds,
     departments: route.departments,
     requiredFields: route.requiredFields,
+    requiredConnections: route.requiredConnections,
     skills: route.skills,
     restrictedMcpTools: route.restrictedMcpTools,
     deliveryMode: route.deliveryMode,
@@ -812,7 +845,9 @@ function sanitizeManifestRoute(value: unknown): HermesRoutesManifestRoute | null
   if (!routeName) return null;
   return {
     managedBy,
-    ...(value.routeKind === "provider_event" || value.routeKind === "loopgraph_lifecycle" ? { routeKind: value.routeKind } : {}),
+    ...(["provider_event", "internal_business_event", "loopgraph_lifecycle"].includes(String(value.routeKind))
+      ? { routeKind: value.routeKind as HermesWebhookRoutePlanItem["routeKind"] }
+      : {}),
     routeName,
     ...optionalStringField(value, "routeId"),
     ...optionalStringField(value, "sourcePattern"),
@@ -821,6 +856,7 @@ function sanitizeManifestRoute(value: unknown): HermesRoutesManifestRoute | null
     ...optionalStringArrayField(value, "loopIds"),
     ...optionalDepartmentArrayField(value, "departments"),
     ...optionalStringArrayField(value, "requiredFields"),
+    ...optionalStringArrayField(value, "requiredConnections"),
     ...optionalStringArrayField(value, "skills"),
     ...optionalStringArrayField(value, "restrictedMcpTools"),
     ...(value.deliveryMode === "log" ? { deliveryMode: "log" as const } : {}),

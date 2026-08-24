@@ -9,7 +9,8 @@ import {
   createCliDeviceAuthorization,
   decideCliDeviceAuthorization,
   exchangeCliDeviceAuthorization,
-  normalizeUserCode
+  normalizeUserCode,
+  rotateCliDeviceSession
 } from "./cli-device-authorization";
 
 afterEach(() => {
@@ -111,6 +112,29 @@ describe("hosted CLI device authorization service", () => {
       p_user_id: "123e4567-e89b-12d3-a456-426614174002",
       p_approve: true
     }));
+  });
+
+  it("submits only refresh digests and surfaces family replay without returning replacement credentials", async () => {
+    hostedEnvironment();
+    rpc.mockResolvedValue({
+      data: [{ rotated: false, reason: "refresh_token_reused" }],
+      error: null
+    });
+    const refreshToken = `lgcli_refresh_${"r".repeat(43)}`;
+
+    await expect(rotateCliDeviceSession(refreshToken)).rejects.toMatchObject({
+      code: "refresh_token_reused",
+      status: 400
+    });
+    const params = rpc.mock.calls[0]?.[1];
+    expect(params).toMatchObject({
+      p_refresh_token_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      p_new_access_token_hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      p_new_refresh_token_hash: expect.stringMatching(/^[a-f0-9]{64}$/)
+    });
+    expect(JSON.stringify(params)).not.toContain(refreshToken);
+    expect(JSON.stringify(params)).not.toContain("lgcli_access_");
+    expect(JSON.stringify(params)).not.toContain("lgcli_refresh_");
   });
 });
 

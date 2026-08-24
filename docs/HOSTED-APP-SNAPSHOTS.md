@@ -107,6 +107,17 @@ same generation. The gate allows at most four passes
 and fails closed under continuous mutation; a single offset-paginated traversal is never release
 evidence.
 
+Before reading any inventory, reconciliation calls a service-role-only live attestation RPC. The
+RPC inspects PostgreSQL catalogs and returns only bounded booleans plus opaque SHA-256 function-body
+fingerprints. Both triggers must be enabled, row-level, unconditional, non-column-restricted `AFTER
+INSERT OR UPDATE OR DELETE` triggers bound to the expected functions. The generation reader, four mutation functions,
+and attestation RPC must match independently pinned function-body fingerprints, remain owned by
+`postgres`, preserve their empty search paths, and expose exactly the expected effective execute
+capabilities. A missing, disabled, predicate-restricted, event-reduced, replaced, re-owned, or
+overexposed fence aborts reconciliation before it can produce a healthy receipt. The receipt binds
+that exact status to the protected scope as one opaque digest; it does not expose catalog rows,
+function definitions, role grants, tenant identifiers, or object paths.
+
 The scheduled `Hosted App snapshot reconciliation` workflow runs on the protected self-hosted
 runner. Its service-role credential is supplied only as an absolute, non-symlink, mode-`0600`
 projected file. It is schedule-only, runs only from the protected `loopgraph/canvas-first` ref,
@@ -166,6 +177,12 @@ promotion. It uses a unique workspace namespace and two empty runtime roots to p
 - repeating the same upload preserves one first-writer object;
 - a second replica recovers the exact artifact and full signed file-inventory digests; and
 - the service-only probe is removed after validation.
+
+Before that archive exercise, `npm run probe:app-snapshot-fence` actively proves the deployed
+mutation path. It uses a random `fence_probe_…` project beneath the reviewed staging organization,
+requires every registry insert/update/delete and Storage upload/replace/delete to advance the
+generation, then removes the synthetic registry, object, and generation row. The probe receipt
+contains no random project, workspace, object path, absolute generation, credential, or payload.
 
 The protected runner receives the Supabase service-role key only through
 `LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE`, an absolute non-symlink regular file with mode

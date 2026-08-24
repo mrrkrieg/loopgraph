@@ -109,6 +109,206 @@ jobs:
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("marketplace-validation-receipt.json","utf8"));const fields={organization_id:value.organizationId,project_key:value.projectKey,app_id:value.app?.id,app_version:value.app?.version,artifact_digest:value.app?.artifactDigest};const patterns={organization_id:/^[0-9a-f-]{36}$/i,project_key:/^[a-z0-9][a-z0-9_-]{0,63}$/,app_id:/^[A-Za-z0-9._:-]{1,256}$/,app_version:/^[A-Za-z0-9._+-]{1,128}$/,artifact_digest:/^sha256:[a-f0-9]{64}$/};for(const [name,field] of Object.entries(fields)){if(typeof field!=="string"||!patterns[name].test(field))process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`${name}=${field}\n`);}'
 
+  app-evidence-health:
+    needs: [staging, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: app-evidence-health-staging
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:app-evidence-health-staging > app-evidence-health-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_APP_EVIDENCE_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_APP_EVIDENCE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_APP_EVIDENCE_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_APP_EVIDENCE_SCHEDULE_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-evidence-health-staging-receipt.json","utf8"));const names=["unauthenticated_denial","cross_tenant_denial","authorized_health_projection","replay_denial","aggregate_only_contract","metrics_projection_parity","classification_fixture_rehearsal","independent_audit_evidence"];if(value.schemaVersion!=="hosted-app-evidence-health-staging-validation/v3"||value.checks?.length!==names.length||value.classificationEvidence?.cases?.length!==6||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: app-evidence-health-staging-evidence
+          path: app-evidence-health-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  cli-sessions:
+    needs: [staging, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: cli-session-staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:cli-session-staging > cli-session-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_CLI_PRIMARY_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_CLI_REPLICA_URL: "${{ vars.LOOPGRAPH_STAGING_CLI_REPLICA_URL }}"
+          LOOPGRAPH_STAGING_CLI_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_CLI_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_CLI_REQUEST_RATE_LIMIT: "${{ vars.LOOPGRAPH_STAGING_CLI_REQUEST_RATE_LIMIT }}"
+          LOOPGRAPH_STAGING_CLI_DISPOSABLE_REFRESH_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_DISPOSABLE_REFRESH_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_CLI_SUSPENDED_ACCESS_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_SUSPENDED_ACCESS_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_CLI_REVOKED_ACCESS_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_REVOKED_ACCESS_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("cli-session-staging-receipt.json","utf8"));const names=["device_issuance_saturation","polling_slow_down","primary_refresh_rotation","cross_replica_refresh_rotation","stale_request_metadata_denial","suspended_membership_denial","revoked_session_denial","request_rate_saturation","refresh_replay_family_revocation","independent_audit_evidence"];const statuses=[429,429,200,200,400,403,401,429,400,200];if(value.schemaVersion!=="hosted-cli-session-staging-validation/v1"||value.primaryOrigin!==new URL(process.env.PRIMARY_ORIGIN).origin||value.replicaOrigin!==new URL(process.env.REPLICA_ORIGIN).origin||value.replicaOrigin===value.primaryOrigin||value.organizationId!==process.env.ORGANIZATION_ID||value.projectKey!==process.env.PROJECT_KEY||value.controls?.deviceFingerprintLimit!==5||value.controls?.requestRateLimit!==Number(process.env.RATE_LIMIT)||value.controls?.crossReplica!==true||value.controls?.disposableSessionRevoked!==true||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true||value.checks[index]?.status!==statuses[index]))process.exit(1);'
+        env:
+          PRIMARY_ORIGIN: "${{ needs.staging.outputs.deployment_url }}"
+          REPLICA_ORIGIN: "${{ vars.LOOPGRAPH_STAGING_CLI_REPLICA_URL }}"
+          ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          RATE_LIMIT: "${{ vars.LOOPGRAPH_STAGING_CLI_REQUEST_RATE_LIMIT }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-session-staging-evidence
+          path: cli-session-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  cli-admin:
+    needs: [staging, marketplace]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: cli-admin-staging
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:cli-admin-staging > cli-admin-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_CLI_ADMIN_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_SESSION_ID: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_SESSION_ID }}"
+          LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
+          LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_AAL1_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_AAL1_SESSION_FILE }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_AAL2_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_AAL2_SESSION_FILE }}"
+          LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_ACCESS_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_CLI_ADMIN_TARGET_ACCESS_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("cli-admin-staging-receipt.json","utf8"));const names=["aal1_step_up_denial","aal2_exact_session_revocation","post_revocation_inventory","revoked_cli_access_denial","independent_audit_evidence"];const statuses=[403,200,200,401,200];const controls=value.controls;const audit=value.auditEvidence;const correlation=/^cli_session_revoke_[0-9a-f-]{36}$/i;const head=/^[a-f0-9]{64}$/;if(value.schemaVersion!=="hosted-cli-admin-staging-validation/v1"||value.targetOrigin!==new URL(process.env.TARGET_ORIGIN).origin||value.organizationId!==process.env.ORGANIZATION_ID||value.projectKey!==process.env.PROJECT_KEY||controls?.aal1Denied!==true||controls?.aal2Required!==true||controls?.exactSessionScope!==true||controls?.atomicAuditReceipt!==true||controls?.disposableSessionRevoked!==true||value.revocation?.revokedCount!==1||!correlation.test(value.revocation?.correlationId)||value.revocation?.correlationId!==audit?.correlationId||!Number.isSafeInteger(audit?.afterSequence)||!Number.isSafeInteger(audit?.throughSequence)||audit.afterSequence>audit.throughSequence||!head.test(audit?.headHash)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true||value.checks[index]?.status!==statuses[index]))process.exit(1);'
+        env:
+          TARGET_ORIGIN: "${{ needs.staging.outputs.deployment_url }}"
+          ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-admin-staging-evidence
+          path: cli-admin-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  marketplace-release-revocation:
+    needs: [staging, marketplace, cli-admin]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: marketplace-release-revocation-staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:marketplace-release-revocation-staging > marketplace-release-revocation-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_AUDIENCE: "${{ vars.LOOPGRAPH_STAGING_MARKETPLACE_AUDIENCE }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_APP_ID: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_APP_ID }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_APP_VERSION: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_APP_VERSION }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_ARTIFACT_DIGEST: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_ARTIFACT_DIGEST }}"
+          LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
+          LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_PUBLISHABLE_KEY }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_AAL1_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_AAL1_SESSION_FILE }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_AAL2_SESSION_FILE: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_AAL2_SESSION_FILE }}"
+          LOOPGRAPH_STAGING_RELEASE_REVOCATION_WORKLOAD_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_WORKLOAD_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("marketplace-release-revocation-staging-receipt.json","utf8"));const names=["verified_release_cached","aal1_step_up_denial","denied_request_preserves_release","aal2_exact_release_revocation","workload_revocation_and_cache_eviction","independent_audit_evidence"];const statuses=[200,403,200,200,404,200];const release=value.release;const audit=value.auditEvidence;const correlation=/^marketplace_release_status_[0-9a-f-]{36}$/i;const digest=/^sha256:[a-f0-9]{64}$/;const head=/^[a-f0-9]{64}$/;if(value.schemaVersion!=="hosted-marketplace-release-revocation-staging-validation/v1"||value.targetOrigin!==new URL(process.env.TARGET_ORIGIN).origin||value.organizationId!==process.env.ORGANIZATION_ID||value.projectKey!==process.env.PROJECT_KEY||release?.appId!==process.env.APP_ID||release?.version!==process.env.APP_VERSION||release?.artifactDigest!==process.env.ARTIFACT_DIGEST||!digest.test(release?.artifactDigest)||value.revocation?.changed!==true||!correlation.test(value.revocation?.correlationId)||value.revocation?.correlationId!==audit?.correlationId||!Number.isSafeInteger(audit?.afterSequence)||!Number.isSafeInteger(audit?.throughSequence)||audit.afterSequence>audit.throughSequence||!head.test(audit?.headHash)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true||value.checks[index]?.status!==statuses[index]))process.exit(1);'
+        env:
+          TARGET_ORIGIN: "${{ needs.staging.outputs.deployment_url }}"
+          ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          APP_ID: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_APP_ID }}"
+          APP_VERSION: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_APP_VERSION }}"
+          ARTIFACT_DIGEST: "${{ vars.LOOPGRAPH_STAGING_RELEASE_REVOCATION_ARTIFACT_DIGEST }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: marketplace-release-revocation-staging-evidence
+          path: marketplace-release-revocation-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
+  workload-issuer-rotation:
+    needs: [staging, marketplace, app-evidence-health, cli-sessions, marketplace-release-revocation]
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: workload-issuer-rotation-staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:workload-issuer-rotation-staging > workload-issuer-rotation-staging-receipt.json
+        env:
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_PRIMARY_URL: "${{ needs.staging.outputs.deployment_url }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_REPLICA_URL: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_REPLICA_URL }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_AUDIENCE: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_AUDIENCE }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_ISSUER: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_ISSUER }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_JWKS_URI: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_JWKS_URI }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_CONTROLLER_URL: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_CONTROLLER_URL }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_ID: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_ID }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_PREVIOUS_KID: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_PREVIOUS_KID }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_NEXT_KID: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_NEXT_KID }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_MAX_PROPAGATION_SECONDS: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_MAX_PROPAGATION_SECONDS }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_RETIREMENT_GRACE_SECONDS: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_RETIREMENT_GRACE_SECONDS }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_PREVIOUS_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_PREVIOUS_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_NEXT_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_NEXT_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_ISSUER_ROTATION_CONTROLLER_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_CONTROLLER_TOKEN_FILE }}"
+          LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE: "${{ vars.LOOPGRAPH_STAGING_OBSERVABILITY_TOKEN_FILE }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("workload-issuer-rotation-staging-receipt.json","utf8"));const names=["pre_rotation_jwks","previous_key_cross_replica_acceptance","overlap_published","next_key_cross_replica_acceptance","previous_key_retired","previous_key_cross_replica_denial","next_key_post_retirement_acceptance","independent_audit_evidence"];const statuses=[200,200,200,200,200,401,200,200];const rotation=value.rotation;const audit=value.auditEvidence;const digest=/^sha256:[a-f0-9]{64}$/;const head=/^[a-f0-9]{64}$/;if(value.schemaVersion!=="hosted-workload-issuer-rotation-staging-validation/v1"||value.primaryOrigin!==new URL(process.env.PRIMARY_ORIGIN).origin||value.replicaOrigin!==new URL(process.env.REPLICA_ORIGIN).origin||value.replicaOrigin===value.primaryOrigin||value.organizationId!==process.env.ORGANIZATION_ID||value.projectKey!==process.env.PROJECT_KEY||value.issuer!==new URL(process.env.ISSUER).origin||value.jwksUri!==new URL(process.env.JWKS_URI).href||rotation?.rotationId!==process.env.ROTATION_ID||rotation?.previousKid!==process.env.PREVIOUS_KID||rotation?.nextKid!==process.env.NEXT_KID||rotation?.previousKid===rotation?.nextKid||!digest.test(rotation?.overlapReceiptDigest)||!digest.test(rotation?.retirementReceiptDigest)||!Number.isSafeInteger(audit?.afterSequence)||!Number.isSafeInteger(audit?.throughSequence)||audit.afterSequence>audit.throughSequence||!head.test(audit?.headHash)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true||value.checks[index]?.status!==statuses[index]))process.exit(1);'
+        env:
+          PRIMARY_ORIGIN: "${{ needs.staging.outputs.deployment_url }}"
+          REPLICA_ORIGIN: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_REPLICA_URL }}"
+          ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          PROJECT_KEY: "${{ needs.marketplace.outputs.project_key }}"
+          ISSUER: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_ISSUER }}"
+          JWKS_URI: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_JWKS_URI }}"
+          ROTATION_ID: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_ID }}"
+          PREVIOUS_KID: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_PREVIOUS_KID }}"
+          NEXT_KID: "${{ vars.LOOPGRAPH_STAGING_ISSUER_ROTATION_NEXT_KID }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: workload-issuer-rotation-staging-evidence
+          path: workload-issuer-rotation-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
+
   app-snapshots:
     needs: [staging, marketplace]
     runs-on: [self-hosted, loopgraph-staging]
@@ -123,6 +323,15 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
+      - run: npm run --silent probe:app-snapshot-fence > app-snapshot-fence-probe-receipt.json
+        env:
+          LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_ALLOW_MUTATION: "yes"
+          LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
+          LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_EXPECTED_APP_SNAPSHOT_FENCE_PROBE_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_FENCE_PROBE_SCOPE_DIGEST }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-fence-probe-receipt.json","utf8"));const names=["registry_insert_advanced","registry_update_advanced","registry_delete_advanced","storage_upload_advanced","storage_replace_advanced","storage_delete_advanced","probe_authority_clean","probe_generation_clean"];if(value.schemaVersion!=="hosted-app-snapshot-fence-probe/v1"||value.healthy!==true||!/^sha256:[a-f0-9]{64}$/.test(value.scopeDigest)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
       - run: npm run --silent validate:app-snapshots-staging > app-snapshot-staging-receipt.json
         env:
           LOOPGRAPH_STAGING_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
@@ -134,12 +343,43 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-snapshot-staging-evidence
-          path: app-snapshot-staging-receipt.json
+          path: |
+            app-snapshot-fence-probe-receipt.json
+            app-snapshot-staging-receipt.json
           if-no-files-found: error
           retention-days: 90
       - id: receipt
         run: >-
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-staging-receipt.json","utf8"));const origin=new URL(value.targetOrigin);if(value.schemaVersion!=="hosted-app-snapshot-staging-validation/v1"||origin.protocol!=="https:"||origin.pathname!=="/"||origin.username||origin.password||origin.search||origin.hash||value.checks?.length!==8)process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`storage_origin=${origin.origin}\n`);'
+
+  learning-entities:
+    needs: marketplace
+    runs-on: [self-hosted, loopgraph-staging]
+    environment: learning-entity-staging
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: "${{ github.sha }}"
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run --silent validate:learning-entities-staging > learning-entity-staging-receipt.json
+        env:
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_ALLOW_MUTATION: "yes"
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_SUPABASE_URL: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_URL }}"
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_SERVICE_ROLE_KEY_FILE: "${{ vars.LOOPGRAPH_STAGING_SUPABASE_SERVICE_ROLE_KEY_FILE }}"
+          LOOPGRAPH_LEARNING_ENTITY_PROBE_ORGANIZATION_ID: "${{ needs.marketplace.outputs.organization_id }}"
+          LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_LEARNING_ENTITY_PROBE_SCOPE_DIGEST }}"
+      - run: >-
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("learning-entity-staging-receipt.json","utf8"));const names=["distributed_measurement_claim","stale_lease_rejected","cross_replica_job_finalization","metric_sample_immutable","observed_outcome_immutable","value_ledger_immutable","cross_replica_entity_visibility","provider_alias_single_owner","probe_scope_clean"];if(value.schemaVersion!=="hosted-learning-entity-staging-validation/v1"||value.healthy!==true||!/^sha256:[a-f0-9]{64}$/.test(value.scopeDigest)||value.checks?.length!==names.length||names.some((name,index)=>value.checks[index]?.name!==name||value.checks[index]?.ok!==true))process.exit(1);'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: learning-entity-staging-evidence
+          path: learning-entity-staging-receipt.json
+          if-no-files-found: error
+          retention-days: 90
 
   app-snapshot-recovery:
     needs: [app-snapshots, marketplace]
@@ -198,7 +438,7 @@ jobs:
           LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST: "${{ vars.LOOPGRAPH_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST }}"
           LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY: "${{ vars.LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_ALLOW_EMPTY }}"
       - run: >-
-          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-reconciliation-receipt.json","utf8"));if(value.schemaVersion!=="hosted-app-snapshot-reconciliation/v2"||value.healthy!==true||value.checks?.length!==9||value.inventoryPasses<2||value.inventoryPasses>4||!Number.isSafeInteger(value.inventoryGeneration)||value.inventoryGeneration<0||value.verifiedSnapshots!==value.detachedInstallations||value.missingSnapshots!==0||value.corruptSnapshots!==0||value.untrackedSnapshots!==0||value.unavailableSnapshots!==0||value.malformedStorageObjects!==0||!/^sha256:[a-f0-9]{64}$/.test(value.scopeDigest)||!/^sha256:[a-f0-9]{64}$/.test(value.inventoryGenerationDigest)||!/^sha256:[a-f0-9]{64}$/.test(value.unreferencedInventoryDigest))process.exit(1);'
+          node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("app-snapshot-reconciliation-receipt.json","utf8"));if(value.schemaVersion!=="hosted-app-snapshot-reconciliation/v3"||value.healthy!==true||value.checks?.length!==10||value.inventoryPasses<2||value.inventoryPasses>4||!Number.isSafeInteger(value.inventoryGeneration)||value.inventoryGeneration<0||value.verifiedSnapshots!==value.detachedInstallations||value.missingSnapshots!==0||value.corruptSnapshots!==0||value.untrackedSnapshots!==0||value.unavailableSnapshots!==0||value.malformedStorageObjects!==0||!/^sha256:[a-f0-9]{64}$/.test(value.scopeDigest)||!/^sha256:[a-f0-9]{64}$/.test(value.inventoryFenceDigest)||!/^sha256:[a-f0-9]{64}$/.test(value.inventoryGenerationDigest)||!/^sha256:[a-f0-9]{64}$/.test(value.unreferencedInventoryDigest))process.exit(1);'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: app-snapshot-reconciliation-evidence
@@ -238,7 +478,7 @@ jobs:
           node -e 'const fs=require("fs");const value=JSON.parse(fs.readFileSync("recovery-rehearsal-receipt.json","utf8"));if(!/^sha256:[a-f0-9]{64}$/.test(value.sourceIdentityDigest))process.exit(1);fs.appendFileSync(process.env.GITHUB_OUTPUT,`source_identity_digest=${value.sourceIdentityDigest}\n`);'
 
   audit-retention:
-    needs: [staging, marketplace]
+    needs: [staging, marketplace, app-evidence-health, cli-sessions, cli-admin, marketplace-release-revocation, workload-issuer-rotation]
     runs-on: [self-hosted, loopgraph-staging]
     environment: audit-retention-staging
     steps:
@@ -252,6 +492,26 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: marketplace-staging-evidence
+          path: release-checkpoints
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: app-evidence-health-staging-evidence
+          path: release-checkpoints
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-session-staging-evidence
+          path: release-checkpoints
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-admin-staging-evidence
+          path: release-checkpoints
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: marketplace-release-revocation-staging-evidence
+          path: release-checkpoints
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: workload-issuer-rotation-staging-evidence
           path: release-checkpoints
       - run: npm run --silent audit:drain > audit-retention-receipt.json
         env:
@@ -270,6 +530,11 @@ jobs:
           LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE: "${{ vars.LOOPGRAPH_AUDIT_RECEIPT_STATE_FILE }}"
           LOOPGRAPH_AUDIT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/staging-validation-receipt.json"
           LOOPGRAPH_AUDIT_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/marketplace-validation-receipt.json"
+          LOOPGRAPH_AUDIT_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/app-evidence-health-staging-receipt.json"
+          LOOPGRAPH_AUDIT_CLI_SESSION_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/cli-session-staging-receipt.json"
+          LOOPGRAPH_AUDIT_CLI_ADMIN_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/cli-admin-staging-receipt.json"
+          LOOPGRAPH_AUDIT_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/marketplace-release-revocation-staging-receipt.json"
+          LOOPGRAPH_AUDIT_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE: "${{ github.workspace }}/release-checkpoints/workload-issuer-rotation-staging-receipt.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: audit-retention-receipt
@@ -278,7 +543,7 @@ jobs:
           retention-days: 90
 
   evidence:
-    needs: [staging, marketplace, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
+    needs: [staging, marketplace, app-evidence-health, cli-sessions, cli-admin, marketplace-release-revocation, workload-issuer-rotation, learning-entities, app-snapshots, app-snapshot-recovery, app-snapshot-reconciliation, recovery, audit-retention]
     runs-on: ubuntu-latest
     environment: release-evidence
     permissions:
@@ -309,11 +574,35 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: app-evidence-health-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-session-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-admin-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: marketplace-release-revocation-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: workload-issuer-rotation-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: recovery-rehearsal-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: learning-entity-staging-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -332,6 +621,13 @@ jobs:
           LOOPGRAPH_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/staging-validation-receipt.json"
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
+          LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-evidence-health-staging-receipt.json"
+          LOOPGRAPH_CLI_SESSION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-session-staging-receipt.json"
+          LOOPGRAPH_CLI_ADMIN_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-admin-staging-receipt.json"
+          LOOPGRAPH_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-release-revocation-staging-receipt.json"
+          LOOPGRAPH_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/workload-issuer-rotation-staging-receipt.json"
+          LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
+          LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-reconciliation-receipt.json"
@@ -347,6 +643,8 @@ jobs:
           LOOPGRAPH_RELEASE_MARKETPLACE_APP_VERSION: "${{ needs.marketplace.outputs.app_version }}"
           LOOPGRAPH_RELEASE_MARKETPLACE_ARTIFACT_DIGEST: "${{ needs.marketplace.outputs.artifact_digest }}"
           LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST: "${{ vars.LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST }}"
+          LOOPGRAPH_RELEASE_EXPECTED_MARKETPLACE_RELEASE_REVOCATION_ARTIFACT_DIGEST: "${{ vars.LOOPGRAPH_RELEASE_EXPECTED_MARKETPLACE_RELEASE_REVOCATION_ARTIFACT_DIGEST }}"
+          LOOPGRAPH_RELEASE_EXPECTED_WORKLOAD_ISSUER_ROTATION_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_RELEASE_EXPECTED_WORKLOAD_ISSUER_ROTATION_SCOPE_DIGEST }}"
           LOOPGRAPH_RELEASE_AUDIT_RETENTION_KEY_ID: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_KEY_ID }}"
           LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_PUBLIC_KEY_PEM }}"
           LOOPGRAPH_RELEASE_EVIDENCE_MAX_AGE_MINUTES: "${{ vars.LOOPGRAPH_RELEASE_EVIDENCE_MAX_AGE_MINUTES }}"
@@ -385,11 +683,35 @@ jobs:
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: app-evidence-health-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-session-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: cli-admin-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: marketplace-release-revocation-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: workload-issuer-rotation-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
           name: recovery-rehearsal-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: app-snapshot-staging-evidence
+          path: release-evidence
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: learning-entity-staging-evidence
           path: release-evidence
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -412,6 +734,13 @@ jobs:
           LOOPGRAPH_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/staging-validation-receipt.json"
           LOOPGRAPH_APP_ACTION_EXACTLY_ONCE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-action-exactly-once-receipt.json"
           LOOPGRAPH_MARKETPLACE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-validation-receipt.json"
+          LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-evidence-health-staging-receipt.json"
+          LOOPGRAPH_CLI_SESSION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-session-staging-receipt.json"
+          LOOPGRAPH_CLI_ADMIN_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/cli-admin-staging-receipt.json"
+          LOOPGRAPH_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/marketplace-release-revocation-staging-receipt.json"
+          LOOPGRAPH_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/workload-issuer-rotation-staging-receipt.json"
+          LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-fence-probe-receipt.json"
+          LOOPGRAPH_LEARNING_ENTITY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/learning-entity-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_STAGING_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-staging-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECOVERY_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-recovery-receipt.json"
           LOOPGRAPH_APP_SNAPSHOT_RECONCILIATION_RECEIPT_FILE: "${{ github.workspace }}/release-evidence/app-snapshot-reconciliation-receipt.json"
@@ -427,6 +756,8 @@ jobs:
           LOOPGRAPH_RELEASE_MARKETPLACE_APP_VERSION: "${{ needs.evidence.outputs.app_version }}"
           LOOPGRAPH_RELEASE_MARKETPLACE_ARTIFACT_DIGEST: "${{ needs.evidence.outputs.artifact_digest }}"
           LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST: "${{ vars.LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST }}"
+          LOOPGRAPH_RELEASE_EXPECTED_MARKETPLACE_RELEASE_REVOCATION_ARTIFACT_DIGEST: "${{ vars.LOOPGRAPH_RELEASE_EXPECTED_MARKETPLACE_RELEASE_REVOCATION_ARTIFACT_DIGEST }}"
+          LOOPGRAPH_RELEASE_EXPECTED_WORKLOAD_ISSUER_ROTATION_SCOPE_DIGEST: "${{ vars.LOOPGRAPH_RELEASE_EXPECTED_WORKLOAD_ISSUER_ROTATION_SCOPE_DIGEST }}"
           LOOPGRAPH_RELEASE_AUDIT_RETENTION_KEY_ID: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_KEY_ID }}"
           LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM: "${{ vars.LOOPGRAPH_AUDIT_RETENTION_PUBLIC_KEY_PEM }}"
           LOOPGRAPH_RELEASE_EVIDENCE_MAX_AGE_MINUTES: "${{ vars.LOOPGRAPH_RELEASE_EVIDENCE_MAX_AGE_MINUTES }}"
