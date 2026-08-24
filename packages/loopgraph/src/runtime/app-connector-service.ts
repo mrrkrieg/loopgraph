@@ -19,6 +19,7 @@ import {
   PROVIDER_OPERATION_CATALOG,
   type ProviderOperationDescriptor
 } from "./connector-capabilities";
+import { LOOPGRAPH_RUNTIME_OPERATION_CATALOG } from "./app-runtime-operation-catalog";
 
 export type FieldMappingSuggestion = {
   logicalField: string;
@@ -56,13 +57,6 @@ export type ConnectorRecipeOperationResolution = {
   descriptor?: ProviderOperationDescriptor;
   reason: string;
 };
-
-const LOOPGRAPH_RUNTIME_OPERATIONS = new Set([
-  "loopgraph.graph.read",
-  "loopgraph.routing-decisions.read",
-  "loopgraph.outcomes-value.read",
-  "loopgraph.graph-change.propose"
-]);
 
 const PROVIDER_OPERATION_ALIASES: Record<string, { providerId: string; operation: string }> = {
   "hubspot.companies.read": { providerId: "hubspot", operation: "crm.companies.read" },
@@ -217,11 +211,14 @@ export function resolveConnectorRecipeOperation(
   binding: ConnectorRecipe["capabilities"][number]
 ): ConnectorRecipeOperationResolution {
   const providerOperation = binding.providerOperation;
-  if (LOOPGRAPH_RUNTIME_OPERATIONS.has(providerOperation)) {
+  const runtimeOperation = LOOPGRAPH_RUNTIME_OPERATION_CATALOG.find((candidate) =>
+    candidate.providerOperation === providerOperation
+  );
+  if (runtimeOperation) {
     return {
       providerId: "loopgraph",
       providerOperation,
-      operation: providerOperation.slice("loopgraph.".length),
+      operation: runtimeOperation.operation,
       executor: "loopgraph_runtime",
       minimumScopes: [],
       reason: `${providerOperation} is supplied by the governed Loopgraph runtime and does not require a provider credential.`
