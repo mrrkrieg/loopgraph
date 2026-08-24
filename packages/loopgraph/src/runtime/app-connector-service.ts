@@ -15,6 +15,11 @@ import {
   type ProviderSchemaSnapshot
 } from "../core";
 import type { LoopPackLoadResult } from "./app-pack-loader";
+import {
+  PROVIDER_OPERATION_CATALOG,
+  type ProviderOperationDescriptor
+} from "./connector-capabilities";
+import { LOOPGRAPH_RUNTIME_OPERATION_CATALOG } from "./app-runtime-operation-catalog";
 
 export type FieldMappingSuggestion = {
   logicalField: string;
@@ -32,8 +37,55 @@ export type CapabilityResolution = {
   required: boolean;
   connectionId?: string;
   recipeId?: string;
+  providerId?: string;
+  providerOperation?: string;
+  operation?: string;
+  executor: "connector_broker" | "loopgraph_runtime" | "unavailable";
+  brokerCapability?: string;
+  minimumScopes: string[];
   status: "connected" | "reusable" | "missing" | "degraded";
   reason: string;
+};
+
+export type ConnectorRecipeOperationResolution = {
+  providerId: string;
+  providerOperation: string;
+  operation?: string;
+  executor: CapabilityResolution["executor"];
+  brokerCapability?: string;
+  minimumScopes: string[];
+  descriptor?: ProviderOperationDescriptor;
+  reason: string;
+};
+
+const PROVIDER_OPERATION_ALIASES: Record<string, { providerId: string; operation: string }> = {
+  "hubspot.companies.read": { providerId: "hubspot", operation: "crm.companies.read" },
+  "hubspot.contacts.read": { providerId: "hubspot", operation: "crm.contacts.read" },
+  "hubspot.deals.read": { providerId: "hubspot", operation: "crm.deals.read" },
+  "google-ads.campaigns.read": { providerId: "google_ads", operation: "ads.campaign_performance.read" },
+  "slack.chat.postMessage": { providerId: "slack", operation: "message.send.execute" },
+  "slack.messages.draft": { providerId: "slack", operation: "message.draft.create" },
+  "salesforce.account.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.accounts.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.accounts-opportunities.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.contacts.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.lead.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.leads.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.opportunities.read": { providerId: "salesforce", operation: "sobject.read" },
+  "salesforce.accounts.update": { providerId: "salesforce", operation: "sobject.update.execute" },
+  "salesforce.lead.update": { providerId: "salesforce", operation: "sobject.update.execute" },
+  "salesforce.opportunities.update": { providerId: "salesforce", operation: "sobject.update.execute" },
+  "stripe.subscriptions.read": { providerId: "stripe", operation: "subscription.read" },
+  "zendesk.tickets.read": { providerId: "zendesk", operation: "ticket.read" },
+  "zendesk.comments.draft": { providerId: "zendesk", operation: "ticket.reply.draft" },
+  "intercom.conversations.read": { providerId: "intercom", operation: "conversation.read" },
+  "intercom.messages.draft": { providerId: "intercom", operation: "conversation.reply.draft" },
+  "workday.workers.read-bounded": { providerId: "workday", operation: "worker.read" },
+  "greenhouse.candidates.read": { providerId: "greenhouse", operation: "candidate.read" },
+  "github.issues.get": { providerId: "github", operation: "issue.read" },
+  "github.issues.read": { providerId: "github", operation: "issue.read" },
+  "microsoft-graph.calendar.read-bounded": { providerId: "outlook", operation: "events.read" },
+  "microsoft-graph.teams-message.draft": { providerId: "teams", operation: "messages.draft" }
 };
 
 export interface ProviderSchemaSnapshotStore {
@@ -98,43 +150,120 @@ export function resolveConnectorCapabilities(input: {
   return [...input.requiredCapabilities, ...input.optionalCapabilities].map((capability) => {
     const recipe = selectedRecipes.find((candidate) => candidate.capabilities.some((binding) => binding.logicalCapability === capability));
     if (!recipe) {
-      return { capability, required: required.has(capability), status: "missing", reason: "No selected provider recipe implements this logical capability." };
+      return { capability, required: required.has(capability), executor: "unavailable", minimumScopes: [], status: "missing", reason: "No selected provider recipe implements this logical capability." };
     }
     const binding = recipe.capabilities.find((candidate) => candidate.logicalCapability === capability)!;
-    const providerId = providerIdForCapability(recipe, binding);
+    const operation = resolveConnectorRecipeOperation(recipe, binding);
+    const base = {
+      capability,
+      required: required.has(capability),
+      recipeId: recipe.id,
+      providerId: operation.providerId,
+      providerOperation: operation.providerOperation,
+      operation: operation.operation,
+      executor: operation.executor,
+      brokerCapability: operation.brokerCapability,
+      minimumScopes: operation.minimumScopes
+    };
+    if (operation.executor === "unavailable") {
+      return { ...base, status: "missing" as const, reason: operation.reason };
+    }
+    if (operation.executor === "loopgraph_runtime") {
+      return { ...base, status: "reusable" as const, reason: operation.reason };
+    }
+    const providerId = operation.providerId;
     const compatible = input.connections.find((connection) => {
       const manifestId = normalizeConnectorProviderId(connection.manifestId);
       const providerMatch = manifestId === providerId || manifestId.startsWith(`${providerId}.`) || manifestId.startsWith(`${providerId}-`);
       const capabilityMatch = connection.capabilityKeys.includes(capability)
         || connection.capabilityKeys.includes(binding.providerOperation)
-        || connection.capabilityKeys.includes(broadCapability(capability));
+        || connection.capabilityKeys.includes(broadCapability(capability))
+        || Boolean(operation.brokerCapability && connection.brokerCapabilities.includes(operation.brokerCapability));
       return providerMatch && capabilityMatch;
     });
     if (!compatible) {
-      return { capability, required: required.has(capability), recipeId: recipe.id, status: "missing", reason: `${providerId} is selected through ${recipe.displayName}, but no connection grants ${capability}.` };
+      return { ...base, status: "missing", reason: `${providerId} is selected through ${recipe.displayName}, but no connection grants ${capability}.` };
     }
-    const missingScopes = binding.minimumScopes.filter((scope) => !connectionGrantsScope(compatible, providerId, scope));
+    const missingScopes = operation.minimumScopes.filter((scope) => !connectionGrantsScope(compatible, providerId, scope));
     if (missingScopes.length > 0) {
-      return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "missing", reason: `Connection ${compatible.id} is missing required scopes: ${missingScopes.join(", ")}.` };
+      return { ...base, connectionId: compatible.id, status: "missing", reason: `Connection ${compatible.id} is missing required scopes: ${missingScopes.join(", ")}.` };
     }
     if (!connectionPolicyAllows(compatible, binding.authority)) {
-      return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "missing", reason: `Connection ${compatible.id} policy does not permit ${binding.authority} authority.` };
+      return { ...base, connectionId: compatible.id, status: "missing", reason: `Connection ${compatible.id} policy does not permit ${binding.authority} authority.` };
     }
     if (compatible.status === "degraded") {
-      return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "degraded", reason: "A compatible connection exists but its health is degraded." };
+      return { ...base, connectionId: compatible.id, status: "degraded", reason: "A compatible connection exists but its health is degraded." };
     }
     if (compatible.status !== "connected") {
-      return { capability, required: required.has(capability), connectionId: compatible.id, recipeId: recipe.id, status: "missing", reason: `Connection ${compatible.id} is ${compatible.status}.` };
+      return { ...base, connectionId: compatible.id, status: "missing", reason: `Connection ${compatible.id} is ${compatible.status}.` };
     }
     return {
-      capability,
-      required: required.has(capability),
+      ...base,
       connectionId: compatible.id,
-      recipeId: recipe.id,
       status: "reusable",
-      reason: `Reuse connected ${recipe.displayName} connection ${compatible.id}.`
+      reason: `Reuse connected ${recipe.displayName} connection ${compatible.id} through bounded ${providerId}:${operation.operation}.`
     };
   });
+}
+
+export function resolveConnectorRecipeOperation(
+  recipe: ConnectorRecipe,
+  binding: ConnectorRecipe["capabilities"][number]
+): ConnectorRecipeOperationResolution {
+  const providerOperation = binding.providerOperation;
+  const runtimeOperation = LOOPGRAPH_RUNTIME_OPERATION_CATALOG.find((candidate) =>
+    candidate.providerOperation === providerOperation
+  );
+  if (runtimeOperation) {
+    return {
+      providerId: "loopgraph",
+      providerOperation,
+      operation: runtimeOperation.operation,
+      executor: "loopgraph_runtime",
+      minimumScopes: [],
+      reason: `${providerOperation} is supplied by the governed Loopgraph runtime and does not require a provider credential.`
+    };
+  }
+  const alias = PROVIDER_OPERATION_ALIASES[providerOperation];
+  const declaredPrefix = providerOperation.split(".", 1)[0] ?? "";
+  const providerId = alias?.providerId ?? providerIdForCapability(recipe, binding);
+  const operation = alias?.operation ?? providerOperation.slice(declaredPrefix.length + 1);
+  const descriptor = PROVIDER_OPERATION_CATALOG.find((candidate) =>
+    candidate.providerId === providerId && candidate.operation === operation
+  );
+  if (!descriptor) {
+    return {
+      providerId,
+      providerOperation,
+      executor: "unavailable",
+      minimumScopes: [...binding.minimumScopes],
+      reason: `No bounded Hermes Connector Broker operation is registered for ${providerOperation}. Choose a supported preset or install a reviewed adapter before this capability can become ready.`
+    };
+  }
+  const authorityMismatch = descriptor.write && (
+    binding.authority === "read" ||
+    (descriptor.capability === "provider.action.execute" && binding.authority === "draft")
+  );
+  if (authorityMismatch) {
+    return {
+      providerId,
+      providerOperation,
+      executor: "unavailable",
+      minimumScopes: [...new Set([...binding.minimumScopes, ...descriptor.minimumScopes])].sort(),
+      descriptor,
+      reason: `${providerOperation} understates the authority required by the bounded ${providerId}:${operation} operation. Review the Connector Recipe before installation.`
+    };
+  }
+  return {
+    providerId,
+    providerOperation,
+    operation,
+    executor: "connector_broker",
+    brokerCapability: descriptor.capability,
+    minimumScopes: [...new Set([...binding.minimumScopes, ...descriptor.minimumScopes])].sort(),
+    descriptor,
+    reason: `${providerOperation} resolves to the allowlisted ${providerId}:${operation} broker operation.`
+  };
 }
 
 export function providerIdForCapability(
