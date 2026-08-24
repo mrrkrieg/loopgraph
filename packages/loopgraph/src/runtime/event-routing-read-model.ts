@@ -12,6 +12,8 @@ import type {
 import { planHermesWebhookRoutes, type HermesWebhookPlanResult } from "./hermes-webhooks";
 import {
   getHermesRouteActivationStatus,
+  validateHermesRouteActivationAuthority,
+  type HermesRouteActivationAuthorityProvider,
   type HermesRouteActivationStatus,
   type HermesRouteActivationStore
 } from "./hermes-route-activation";
@@ -50,6 +52,7 @@ export type EventRoutingOperationsInput = EventRoutingOperationsFilters & {
   store?: RoutingStore;
   loopSpecStore?: LoopSpecRegistryStore;
   routeActivationStore?: HermesRouteActivationStore;
+  routeActivationAuthorityProvider?: HermesRouteActivationAuthorityProvider;
 };
 
 export type EventRoutingOperationsRow = {
@@ -249,9 +252,20 @@ export async function loadEventRoutingOperations(
 ): Promise<EventRoutingOperationsReadModel> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const limit = input.limit ?? 100;
-  const generatedAt = (input.now ?? new Date()).toISOString();
+  const now = input.now ?? new Date();
+  const generatedAt = now.toISOString();
   const store = input.store ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
   const filters = normalizeFilters(input);
+  const authorityPromise = input.routeActivationAuthorityProvider
+    ? input.routeActivationAuthorityProvider({ projectRoot, now })
+        .then(validateHermesRouteActivationAuthority)
+    : undefined;
+  const routeAuthority = authorityPromise
+    ? await authorityPromise.catch(() => undefined)
+    : undefined;
+  const routeActivationAuthorityProvider = authorityPromise
+    ? async () => authorityPromise
+    : undefined;
   const [
     catalog,
     events,
@@ -266,7 +280,10 @@ export async function loadEventRoutingOperations(
   ] = await Promise.all([
     loopgraph_routing_catalog_get(
       { projectRoot },
-      { loopSpecStore: input.loopSpecStore }
+      {
+        loopSpecStore: input.loopSpecStore,
+        trustedConnections: routeAuthority?.connections
+      }
     ),
     loopgraph_events_get({
       projectRoot,
@@ -288,8 +305,13 @@ export async function loadEventRoutingOperations(
     loopgraph_routing_evaluations_get({ projectRoot, limit }, { store }),
     store.listRoutingCorrections(),
     listLoopgraphLifecycleDeliveries(projectRoot),
-    safeWebhookPlan(projectRoot, input.now),
-    safeWebhookActivation(projectRoot, input.now, input.routeActivationStore)
+    safeWebhookPlan(projectRoot, now, routeActivationAuthorityProvider),
+    safeWebhookActivation(
+      projectRoot,
+      now,
+      input.routeActivationStore,
+      routeActivationAuthorityProvider
+    )
   ]);
 
   const catalogByLoopId = new Map(catalog.routingCards.map((card) => [card.loopId, card]));
@@ -801,8 +823,16 @@ function lifecycleDeliveryDetail(delivery: LoopgraphLifecycleDelivery): string {
   return `${delivery.event.eventType} · ${readString(delivery.event.normalizedPayload, "runId") ?? delivery.event.subject.id}`;
 }
 
-async function safeWebhookPlan(projectRoot: string, now?: Date): Promise<HermesWebhookPlanResult> {
+async function safeWebhookPlan(
+  projectRoot: string,
+  now?: Date,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
+): Promise<HermesWebhookPlanResult> {
   try {
+    if (authorityProvider) return (await authorityProvider({
+      projectRoot,
+      now: now ?? new Date()
+    })).webhookPlan;
     return await planHermesWebhookRoutes({ projectRoot, now });
   } catch {
     return {
@@ -826,10 +856,16 @@ async function safeWebhookPlan(projectRoot: string, now?: Date): Promise<HermesW
 async function safeWebhookActivation(
   projectRoot: string,
   now?: Date,
-  recordStore?: HermesRouteActivationStore
+  recordStore?: HermesRouteActivationStore,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
 ): Promise<HermesRouteActivationStatus> {
   try {
-    return await getHermesRouteActivationStatus({ projectRoot, now, recordStore });
+    return await getHermesRouteActivationStatus({
+      projectRoot,
+      now,
+      recordStore,
+      authorityProvider
+    });
   } catch {
     return {
       projectRoot,

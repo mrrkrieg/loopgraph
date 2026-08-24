@@ -9,6 +9,10 @@ const routeActivationStore = vi.hoisted(() => ({
   write: vi.fn()
 }));
 const getHermesRouteActivationStore = vi.hoisted(() => vi.fn(() => routeActivationStore));
+const authorityProvider = vi.hoisted(() => vi.fn());
+const createHostedHermesRouteActivationAuthorityProvider = vi.hoisted(() =>
+  vi.fn(() => authorityProvider)
+);
 const prepareHermesRouteActivation = vi.hoisted(() => vi.fn(async () => ({
   schemaVersion: "hermes-route-activation-plan/v1alpha1",
   planDigest: "1234567890abcdef",
@@ -43,6 +47,9 @@ vi.mock("@/lib/loopgraph-runtime/storage-resolver", () => ({
   getActiveLoopgraphProjectRoot,
   getHermesRouteActivationStore
 }));
+vi.mock("@/lib/loopgraph-runtime/hosted-hermes-route-authority", () => ({
+  createHostedHermesRouteActivationAuthorityProvider
+}));
 vi.mock("loopgraph/runtime", async (importOriginal) => ({
   ...await importOriginal<typeof import("loopgraph/runtime")>(),
   activateHermesRoutes,
@@ -75,7 +82,8 @@ describe("hosted Hermes route activation API", () => {
       rateLimit: 10
     });
     expect(prepareHermesRouteActivation).toHaveBeenCalledWith(expect.objectContaining({
-      projectRoot: "/srv/loopgraph/acme/main"
+      projectRoot: "/srv/loopgraph/acme/main",
+      authorityProvider
     }));
     await expect(response.json()).resolves.toEqual({
       plan: expect.objectContaining({ planDigest: "1234567890abcdef" })
@@ -93,9 +101,14 @@ describe("hosted Hermes route activation API", () => {
       projectRoot: "/srv/loopgraph/acme/main",
       workspaceId: "main"
     });
+    expect(createHostedHermesRouteActivationAuthorityProvider).toHaveBeenCalledWith({
+      projectRoot: "/srv/loopgraph/acme/main",
+      workspaceId: "main"
+    });
     expect(activateHermesRoutes).toHaveBeenCalledWith(expect.objectContaining({
       projectRoot: "/srv/loopgraph/acme/main",
       recordStore: routeActivationStore,
+      authorityProvider,
       confirmationDigest: "1234567890abcdef",
       controllerUrl: "https://hermes.example.test/v1/routes/reconcile",
       audience: "hermes-route-controller",
@@ -131,6 +144,7 @@ describe("hosted Hermes route activation API", () => {
     });
     expect(activateHermesRoutes).not.toHaveBeenCalled();
     expect(getHermesRouteActivationStore).not.toHaveBeenCalled();
+    expect(createHostedHermesRouteActivationAuthorityProvider).not.toHaveBeenCalled();
   });
 
   it("fails closed when the deployment did not bind a controller target and audience", async () => {
@@ -155,6 +169,7 @@ describe("hosted Hermes route activation API", () => {
     expect(response.status).toBe(401);
     expect(getActiveLoopgraphProjectRoot).not.toHaveBeenCalled();
     expect(getHermesRouteActivationStore).not.toHaveBeenCalled();
+    expect(createHostedHermesRouteActivationAuthorityProvider).not.toHaveBeenCalled();
     expect(prepareHermesRouteActivation).not.toHaveBeenCalled();
   });
 });

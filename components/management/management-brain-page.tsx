@@ -7,7 +7,9 @@ import { SectionCard } from "../section-card";
 import { StatusPill } from "../status-pill";
 import { getDemoWorkspace } from "@/lib/loop-engineering-builder/demo-data";
 import { getWorkspace } from "@/lib/loop-engineering-builder/workspace";
+import { isHostedAuthRequired } from "@/lib/auth/hosted-config";
 import { loadLatestManagementRollup } from "@/lib/loopgraph-runtime/management-rollup";
+import { createHostedHermesRouteActivationAuthorityProvider } from "@/lib/loopgraph-runtime/hosted-hermes-route-authority";
 import {
   getActiveLoopgraphProjectRoot,
   getHermesRouteActivationStore,
@@ -32,12 +34,16 @@ export async function ManagementBrainPage({ previewMode = false, routingQuery = 
   const cases = await storage.listCases();
   const rollup = await loadLatestManagementRollup();
   const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const routeActivationAuthorityProvider = isHostedAuthRequired()
+    ? createHostedHermesRouteActivationAuthorityProvider({ projectRoot, workspaceId })
+    : undefined;
   const routingOperations = await loadEventRoutingOperations({
     projectRoot,
     ...routingQuery,
     store: getRoutingStore(),
     loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
-    routeActivationStore: getHermesRouteActivationStore({ projectRoot, workspaceId })
+    routeActivationStore: getHermesRouteActivationStore({ projectRoot, workspaceId }),
+    routeActivationAuthorityProvider
   });
   const departments = Array.from(new Set(workspace.loops.map((loop) => loop.department))).filter(
     (department) => department !== "management"

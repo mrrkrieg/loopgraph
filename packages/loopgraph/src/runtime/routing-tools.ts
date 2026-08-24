@@ -12,6 +12,7 @@ import {
   routingCardSchema,
   routingDecisionSchema,
   type BusinessProblem,
+  type ConnectionInstance,
   type ConnectionPlanItem,
   type EventEnvelope,
   type EventReceipt,
@@ -74,6 +75,7 @@ export type LoopgraphRoutingToolRuntimeOptions = {
   trustedSpecPaths?: string[];
   trustedRoutingCards?: RoutingCard[];
   trustedCatalogVersion?: string;
+  trustedConnections?: ConnectionInstance[];
   entityStore?: EntityResolutionStore;
 };
 
@@ -205,7 +207,8 @@ export async function loopgraph_routing_catalog_get(
     projectRoot,
     specPaths: options.trustedSpecPaths,
     catalogVersion: options.trustedCatalogVersion,
-    loopSpecStore: options.loopSpecStore
+    loopSpecStore: options.loopSpecStore,
+    trustedConnections: options.trustedConnections
   });
   const catalogVersion = options.trustedCatalogVersion ?? deriveCatalogVersion(routingCards);
   const normalizedCards = routingCards.map((card) => routingCardSchema.parse({
@@ -791,8 +794,11 @@ export async function loadRoutingCardsFromProject(input: {
   specPaths?: string[];
   catalogVersion?: string;
   loopSpecStore?: LoopSpecRegistryStore;
+  trustedConnections?: ConnectionInstance[];
 }): Promise<RoutingCard[]> {
-  const connectionReadinessByCapability = await buildConnectionReadinessIndex(input.projectRoot);
+  const connectionReadinessByCapability = input.trustedConnections
+    ? undefined
+    : await buildConnectionReadinessIndex(input.projectRoot);
   const compiledCards: RoutingCard[] = [];
 
   const specs = input.loopSpecStore
@@ -806,10 +812,15 @@ export async function loadRoutingCardsFromProject(input: {
   for (const spec of specs) {
     const card = compileRoutingCardFromLoopSpec(spec, {
       catalogVersion: input.catalogVersion ?? "catalog_pending",
-      currentReadiness: readinessForRequiredConnections(
-        spec.routing?.requiredConnections ?? [],
-        connectionReadinessByCapability
-      )
+      currentReadiness: input.trustedConnections
+        ? readinessForTrustedConnections(
+            spec.routing?.requiredConnections ?? [],
+            input.trustedConnections
+          )
+        : readinessForRequiredConnections(
+            spec.routing?.requiredConnections ?? [],
+            connectionReadinessByCapability!
+          )
     });
     if (card) compiledCards.push(card);
   }
@@ -819,6 +830,22 @@ export async function loadRoutingCardsFromProject(input: {
     ...card,
     catalogVersion
   }));
+}
+
+function readinessForTrustedConnections(
+  requiredConnections: string[],
+  connections: ConnectionInstance[]
+): RoutingCard["currentReadiness"] {
+  if (requiredConnections.length === 0) return "ready";
+  const statuses = requiredConnections.map((capability) => {
+    const matches = connections.filter((connection) =>
+      connection.capabilityKeys.includes(capability) && connection.status !== "missing");
+    if (matches.some((connection) => connection.status === "connected")) return "ready";
+    if (matches.length > 0) return "degraded";
+    return "blocked";
+  });
+  if (statuses.includes("blocked")) return "blocked";
+  return statuses.includes("degraded") ? "degraded" : "ready";
 }
 
 async function loadRoutingSpecsFromPaths(

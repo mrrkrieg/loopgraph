@@ -33,12 +33,23 @@ The controller must:
 - return a secret-free receipt proving the applied contract;
 - leave removals unapplied because the v1 protocol never authorizes destructive reconciliation.
 
+## Desired-state authority
+
+Local and hosted runtimes deliberately compile the same controller contract from different storage authorities:
+
+- A local CLI project uses its registered LoopSpecs, local connection projection, App installation registry, and current `.loopgraph/hermes-routes.json` manifest. This keeps the project portable and reviewable before any controller call.
+- A hosted project does not trust a deployment replica's filesystem or route manifest. It loads the active LoopSpecs from the distributed LoopSpec registry, Installed App ownership and exact connection bindings from the distributed App registry, and secret-free connection authority from the tenant/project-scoped Hermes Connector Broker projection.
+
+The hosted compiler reads the LoopSpec revision, complete App registry digest, and route-relevant Broker connection identity both before and after compilation. Any concurrent change aborts the request and requires a retry. Its tenant-derived project hash and content-derived manifest digest bind the exact registry revision, catalog, route contracts, connection capabilities/status, and App bindings without including credentials or volatile health-check timestamps. Hosted plan, activation, status, App maturity, onboarding doctor, Management routing view, and scheduled reconciliation all receive this authority provider; they cannot silently compare a distributed receipt to a replica-local desired plan.
+
+An App-owned wildcard route is narrowed to the provider connection selected by that installation. An unknown binding, missing distributed store, mismatched server workspace/project, changed registry snapshot, or secret-shaped authority payload fails closed before a controller credential is requested.
+
 ## Protocol
 
 Loopgraph sends `hermes-route-controller-request/v1alpha1` to one configured reconcile endpoint. The request is content-bound to:
 
 - the current project and routing catalog;
-- `.loopgraph/hermes-routes.json`;
+- the current local route manifest or hosted distributed desired-state digest;
 - every route ID, source pattern, and event allowlist;
 - the Hermes profile, skill, and restricted MCP tools;
 - the reviewed transformer version;
