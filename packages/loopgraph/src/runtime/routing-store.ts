@@ -25,7 +25,8 @@ import {
   type RoutingCard,
   type RoutingCorrection,
   type RoutingDecision,
-  type RoutingEligibilityResult
+  type RoutingEligibilityResult,
+  type RoutingLearningContextBinding
 } from "../core";
 import { getLoopgraphRoot } from "./storage-resolver";
 
@@ -45,6 +46,9 @@ export type RoutingDecisionSubmissionResult = {
   routeJobs: RouteJob[];
   humanChoiceAlternatives: RoutingDecision["alternatives"];
 };
+
+export const STALE_ROUTING_LEARNING_CONTEXT_ERROR =
+  "Hermes learning-context digest is stale; re-ingest the event before routing" as const;
 
 export type RouteJobListFilters = {
   eventId?: string;
@@ -386,6 +390,7 @@ export async function submitRoutingDecision(input: {
   catalogVersion: string;
   now?: Date;
   hermesMetadata?: Record<string, unknown>;
+  learningContextBinding?: RoutingLearningContextBinding;
 }): Promise<RoutingDecisionSubmissionResult> {
   const nowIso = (input.now ?? new Date()).toISOString();
   const decision = routingDecisionSchema.parse(input.decision);
@@ -397,6 +402,7 @@ export async function submitRoutingDecision(input: {
     action: decision.action,
     decision,
     hermesMetadata: input.hermesMetadata ?? {},
+    ...(input.learningContextBinding ? { learningContextBinding: input.learningContextBinding } : {}),
     createdAt: nowIso
   };
 
@@ -424,7 +430,13 @@ export async function submitRoutingDecision(input: {
     catalogVersion: input.catalogVersion
   });
   const additionalErrors = await collectSubmissionErrors(input.store, receipt.event, decision, validation.selectedCards);
-  const validationErrors = [...validation.errors, ...additionalErrors];
+  const validationErrors = [
+    ...validation.errors,
+    ...additionalErrors,
+    ...(input.learningContextBinding?.acknowledgedDigest && !input.learningContextBinding.acknowledged
+      ? [STALE_ROUTING_LEARNING_CONTEXT_ERROR]
+      : [])
+  ];
 
   if (validationErrors.length > 0) {
     const attempt = routingAttemptSchema.parse({

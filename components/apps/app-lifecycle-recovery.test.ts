@@ -126,4 +126,234 @@ describe("AppLifecycleRecoveryNotice", () => {
       uninstall: { ...operation.uninstall!, remainingLoopIds: ["another-installation-loop"] }
     })).toThrow(/subset of the recorded source inventory/);
   });
+
+  it("explains exact rollback recovery and exposes only bounded source and target identity", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.rollback123",
+      idempotencyKey: "rollback12345678",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "rollback",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: ["mapping.lead"], companyContextKeys: ["sales.icp"] },
+      rollback: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"b".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"c".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"d".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"e".repeat(64)}`,
+        sourceLoopIds: ["sales.qualify"],
+        targetInstallationDigest: `sha256:${"f".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"1".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"2".repeat(64)}`,
+        targetLoopIds: ["sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("exact source or target LoopSpec topology");
+    expect(html).toContain(operation.rollback?.sourceArtifactDigest ?? "missing");
+    expect(html).toContain(operation.targetArtifactDigest);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      rollback: { ...operation.rollback!, targetLoopIds: ["different-loop"] }
+    })).toThrow(/must match the desired inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
+
+  it("explains exact update recovery without persisting the reviewed plan body", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.update123",
+      idempotencyKey: "update1234567890",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "update",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: ["mapping.lead"], companyContextKeys: ["sales.icp"] },
+      update: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"b".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"c".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"d".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"e".repeat(64)}`,
+        sourceLoopIds: ["sales.qualify"],
+        planDigest: `sha256:${"f".repeat(64)}`,
+        approvedPermissionCapabilities: ["crm.lead.update"],
+        targetInstallationDigest: `sha256:${"1".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"2".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"3".repeat(64)}`,
+        targetLoopIds: ["sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("recorded permission approvals");
+    expect(html).toContain("original approval window expires");
+    expect(html).toContain(operation.update?.planDigest ?? "missing");
+    expect(html).toContain(operation.update?.sourceArtifactDigest ?? "missing");
+    expect(html).not.toContain("configuration");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      update: { ...operation.update!, targetLoopIds: ["different-loop"] }
+    })).toThrow(/must be unique and match the desired inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
+
+  it("explains exact configure recovery without rendering confirmed values", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.configure123",
+      idempotencyKey: "configure12345678",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "configure",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: [], fieldMappingIds: [], companyContextKeys: [] },
+      configure: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceConfigurationDigest: `sha256:${"b".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"c".repeat(64)}`,
+        valuesDigest: `sha256:${"d".repeat(64)}`,
+        targetConfigurationDigest: `sha256:${"e".repeat(64)}`,
+        targetInstallationDigest: `sha256:${"f".repeat(64)}`
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("stores only their digest");
+    expect(html).toContain(operation.configure?.valuesDigest ?? "missing");
+    expect(html).toContain(operation.configure?.sourceConfigurationDigest ?? "missing");
+    expect(html).not.toContain("followUpSlaMinutes");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: [], companyContextKeys: [] }
+    })).toThrow(/may change only the installation configuration/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
+
+  it("explains exact overlay recovery without rendering the customization body", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.overlay123",
+      idempotencyKey: "overlay1234567890",
+      installationId: "install.acme.sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "overlay",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["sales.qualify"], fieldMappingIds: [], companyContextKeys: [] },
+      overlay: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"a".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"b".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"c".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"d".repeat(64)}`,
+        sourceLoopIds: ["sales.qualify", "sales.follow-up"],
+        expectedOverlayRevision: 0,
+        operationsDigest: `sha256:${"e".repeat(64)}`,
+        targetInstallationDigest: `sha256:${"f".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"1".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"2".repeat(64)}`,
+        targetLoopIds: ["sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("source or target owned LoopSpec topology");
+    expect(html).toContain(operation.overlay?.operationsDigest ?? "missing");
+    expect(html).toContain("Source overlay revision");
+    expect(html).not.toContain("qualificationThreshold");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      desired: { loopIds: ["different-loop"], fieldMappingIds: [], companyContextKeys: [] }
+    })).toThrow(/must be unique and match the desired inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
+
+  it("explains exact detach snapshot recovery", () => {
+    const operation = appLifecycleOperationSchema.parse({
+      id: "lifecycle.detach123",
+      idempotencyKey: "detach1234567890",
+      installationId: "install.acme.private-sales",
+      appId: "loopgraph.sales.qualify-route-inbound-leads",
+      action: "detach",
+      targetArtifactDigest: `sha256:${"a".repeat(64)}`,
+      status: "requires_reconciliation",
+      desired: { loopIds: ["private.sales.qualify"], fieldMappingIds: ["mapping.lead.id"], companyContextKeys: ["company.icp"] },
+      detach: {
+        fromUpdatedAt: "2026-08-21T09:59:00.000Z",
+        sourceArtifactDigest: `sha256:${"a".repeat(64)}`,
+        sourceInstallationDigest: `sha256:${"b".repeat(64)}`,
+        sourceOwnershipDigest: `sha256:${"c".repeat(64)}`,
+        sourceWorkspaceRevision: 9,
+        sourceLoopInventoryDigest: `sha256:${"d".repeat(64)}`,
+        sourceLoopIds: ["private.sales.qualify"],
+        snapshotPath: ".loopgraph/apps/private-snapshots/private.sales.qualify/1.0.0",
+        snapshotArtifactDigest: `sha256:${"a".repeat(64)}`,
+        snapshotFilesDigest: `sha256:${"f".repeat(64)}`,
+        targetInstallationDigest: `sha256:${"e".repeat(64)}`,
+        targetOwnershipDigest: `sha256:${"c".repeat(64)}`,
+        targetLoopInventoryDigest: `sha256:${"d".repeat(64)}`,
+        targetLoopIds: ["private.sales.qualify"]
+      },
+      actor: "admin-1",
+      startedAt: "2026-08-21T10:00:00.000Z",
+      updatedAt: "2026-08-21T10:01:00.000Z",
+      failureCode: "operation_interrupted"
+    });
+    const html = renderToStaticMarkup(React.createElement(AppLifecycleRecoveryNotice, { operations: [operation] }));
+    expect(html).toContain("same actor");
+    expect(html).toContain("confined immutable snapshot");
+    expect(html).toContain(operation.detach?.snapshotPath ?? "missing");
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      detach: { ...operation.detach, targetLoopIds: ["private.sales.other"] }
+    })).toThrow(/preserve one unique owned LoopSpec inventory/);
+    expect(() => appLifecycleOperationSchema.parse({
+      ...operation,
+      status: "completed",
+      failureCode: undefined,
+      completedAt: "2026-08-21T10:02:00.000Z"
+    })).toThrow(/require their exact lifecycle receipt/);
+  });
 });
