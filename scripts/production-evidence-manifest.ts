@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { canonicalAppDigest } from "loopgraph/core";
 import {
-  auditDrainReceiptV6Schema,
+  auditDrainReceiptV8Schema,
   canonicalJson,
   readBoundedIntegrityFile,
   retentionAcknowledgementSigningPayload,
@@ -186,6 +186,121 @@ const cliAdminReceiptSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["auditEvidence"],
       message: "CLI administrator audit evidence must bind the exact revocation receipt"
+    });
+  }
+});
+
+const marketplaceReleaseRevocationCheckNames = [
+  "verified_release_cached",
+  "aal1_step_up_denial",
+  "denied_request_preserves_release",
+  "aal2_exact_release_revocation",
+  "workload_revocation_and_cache_eviction",
+  "independent_audit_evidence"
+] as const;
+
+const marketplaceReleaseRevocationReceiptSchema = z.object({
+  schemaVersion: z.literal(
+    "hosted-marketplace-release-revocation-staging-validation/v1"
+  ),
+  targetOrigin: originSchema,
+  organizationId: z.string().uuid(),
+  projectKey: projectKeySchema,
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  release: z.object({
+    appId: z.string().min(3).max(160),
+    version: z.string().min(1).max(100),
+    artifactDigest: digestSchema
+  }).strict(),
+  revocation: z.object({
+    changed: z.literal(true),
+    correlationId: z.string().regex(
+      /^marketplace_release_status_[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    )
+  }).strict(),
+  auditEvidence: z.object({
+    afterSequence: safeInteger,
+    throughSequence: safeInteger,
+    headHash: hashSchema,
+    correlationId: z.string().min(1).max(128)
+  }).strict(),
+  checks: z.array(z.object({
+    name: z.enum(marketplaceReleaseRevocationCheckNames),
+    ok: z.literal(true),
+    status: z.number().int().min(100).max(599),
+    detail: z.string().min(1).max(2048)
+  }).strict()).length(marketplaceReleaseRevocationCheckNames.length)
+}).strict().superRefine((receipt, context) => {
+  if (
+    receipt.auditEvidence.afterSequence > receipt.auditEvidence.throughSequence ||
+    receipt.auditEvidence.correlationId !== receipt.revocation.correlationId
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["auditEvidence"],
+      message: "Marketplace release revocation evidence must bind the exact audit receipt"
+    });
+  }
+});
+
+const workloadIssuerRotationCheckNames = [
+  "pre_rotation_jwks",
+  "previous_key_cross_replica_acceptance",
+  "overlap_published",
+  "next_key_cross_replica_acceptance",
+  "previous_key_retired",
+  "previous_key_cross_replica_denial",
+  "next_key_post_retirement_acceptance",
+  "independent_audit_evidence"
+] as const;
+
+const workloadIssuerRotationReceiptSchema = z.object({
+  schemaVersion: z.literal("hosted-workload-issuer-rotation-staging-validation/v1"),
+  primaryOrigin: originSchema,
+  replicaOrigin: originSchema,
+  organizationId: z.string().uuid(),
+  projectKey: projectKeySchema,
+  checkedAt: z.string().datetime({ offset: true }),
+  durationMs: safeInteger,
+  issuer: originSchema,
+  jwksUri: z.string().url(),
+  rotation: z.object({
+    rotationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$/),
+    previousKid: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+    nextKid: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/),
+    overlapReceiptDigest: digestSchema,
+    retirementReceiptDigest: digestSchema
+  }).strict(),
+  auditEvidence: z.object({
+    afterSequence: safeInteger,
+    throughSequence: safeInteger,
+    headHash: hashSchema,
+    requestId: z.string().min(8).max(256)
+  }).strict(),
+  checks: z.array(z.object({
+    name: z.enum(workloadIssuerRotationCheckNames),
+    ok: z.literal(true),
+    status: z.number().int().min(100).max(599),
+    detail: z.string().min(1).max(2048)
+  }).strict()).length(workloadIssuerRotationCheckNames.length)
+}).strict().superRefine((receipt, context) => {
+  let jwks: URL;
+  try {
+    jwks = new URL(receipt.jwksUri);
+  } catch {
+    return;
+  }
+  if (
+    receipt.primaryOrigin === receipt.replicaOrigin ||
+    receipt.rotation.previousKid === receipt.rotation.nextKid ||
+    jwks.protocol !== "https:" || jwks.username || jwks.password || jwks.search || jwks.hash ||
+    jwks.origin !== receipt.issuer ||
+    receipt.auditEvidence.afterSequence > receipt.auditEvidence.throughSequence
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Workload issuer rotation evidence has an invalid origin, key, JWKS, or audit boundary"
     });
   }
 });
@@ -576,7 +691,7 @@ const evidenceDescriptorSchema = z.object({
 }).strict();
 
 export const productionEvidenceManifestSchema = z.object({
-  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v14"),
+  schemaVersion: z.literal("loopgraph-production-promotion-evidence/v16"),
   release: z.object({
     repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
     commitSha: z.string().regex(/^[a-f0-9]{40}$/),
@@ -614,6 +729,8 @@ export const productionEvidenceManifestSchema = z.object({
     marketplace: evidenceDescriptorSchema,
     cliSessions: evidenceDescriptorSchema,
     cliAdmin: evidenceDescriptorSchema,
+    marketplaceReleaseRevocation: evidenceDescriptorSchema,
+    workloadIssuerRotation: evidenceDescriptorSchema,
     appEvidenceHealth: evidenceDescriptorSchema,
     appSnapshotFenceProbe: evidenceDescriptorSchema,
     learningEntities: evidenceDescriptorSchema,
@@ -634,6 +751,8 @@ export type ProductionEvidenceReceipts = {
   marketplace: unknown;
   cliSessions: unknown;
   cliAdmin: unknown;
+  marketplaceReleaseRevocation: unknown;
+  workloadIssuerRotation: unknown;
   appEvidenceHealth: unknown;
   appSnapshotFenceProbe: unknown;
   learningEntities: unknown;
@@ -657,6 +776,8 @@ export type ProductionEvidenceConfig = {
   databaseIdentityDigest: string;
   marketplaceApp: { id: string; version: string; artifactDigest: string };
   expectedAppSnapshotUnreferencedInventoryDigest: string;
+  expectedMarketplaceReleaseRevocationArtifactDigest: string;
+  expectedWorkloadIssuerRotationScopeDigest: string;
   auditRetentionKeyId: string;
   auditRetentionPublicKeyPem: string;
   generatedAt: Date;
@@ -673,6 +794,12 @@ export function buildProductionEvidenceManifest(
   const marketplace = marketplaceReceiptSchema.parse(receipts.marketplace);
   const cliSessions = cliSessionReceiptSchema.parse(receipts.cliSessions);
   const cliAdmin = cliAdminReceiptSchema.parse(receipts.cliAdmin);
+  const marketplaceReleaseRevocation = marketplaceReleaseRevocationReceiptSchema.parse(
+    receipts.marketplaceReleaseRevocation
+  );
+  const workloadIssuerRotation = workloadIssuerRotationReceiptSchema.parse(
+    receipts.workloadIssuerRotation
+  );
   const appEvidenceHealth = appEvidenceHealthReceiptSchema.parse(receipts.appEvidenceHealth);
   const appSnapshotFenceProbe = appSnapshotFenceProbeReceiptSchema.parse(
     receipts.appSnapshotFenceProbe
@@ -684,7 +811,7 @@ export function buildProductionEvidenceManifest(
     receipts.appSnapshotReconciliation
   );
   const recovery = recoveryReceiptSchema.parse(receipts.recovery);
-  const auditRetention = auditDrainReceiptV6Schema.parse(receipts.auditRetention);
+  const auditRetention = auditDrainReceiptV8Schema.parse(receipts.auditRetention);
   validateConfig(config);
   const auditRetentionPublicKey = createPublicKey(config.auditRetentionPublicKeyPem);
   if (auditRetentionPublicKey.asymmetricKeyType !== "ed25519") {
@@ -697,6 +824,8 @@ export function buildProductionEvidenceManifest(
     ["marketplace validation", marketplace.checkedAt],
     ["CLI session validation", cliSessions.checkedAt],
     ["CLI administrator MFA validation", cliAdmin.checkedAt],
+    ["marketplace release revocation validation", marketplaceReleaseRevocation.checkedAt],
+    ["workload issuer rotation validation", workloadIssuerRotation.checkedAt],
     ["App evidence health validation", appEvidenceHealth.checkedAt],
     ["App snapshot mutation fence probe", appSnapshotFenceProbe.checkedAt],
     ["hosted learning and entity validation", learningEntities.checkedAt],
@@ -714,6 +843,12 @@ export function buildProductionEvidenceManifest(
     marketplace.targetOrigin !== deploymentOrigin ||
     trustedOrigin(cliSessions.primaryOrigin, "CLI session primary origin") !== deploymentOrigin ||
     trustedOrigin(cliAdmin.targetOrigin, "CLI administrator origin") !== deploymentOrigin ||
+    trustedOrigin(
+      marketplaceReleaseRevocation.targetOrigin,
+      "Marketplace release revocation origin"
+    ) !== deploymentOrigin ||
+    trustedOrigin(workloadIssuerRotation.primaryOrigin, "Workload issuer rotation primary origin") !==
+      deploymentOrigin ||
     appEvidenceHealth.targetOrigin !== deploymentOrigin ||
     auditRetention.sourceOrigin !== deploymentOrigin
   ) {
@@ -723,6 +858,12 @@ export function buildProductionEvidenceManifest(
     trustedOrigin(cliSessions.replicaOrigin, "CLI session replica origin") === deploymentOrigin
   ) {
     throw new Error("CLI session evidence must exercise a distinct replica origin");
+  }
+  if (
+    trustedOrigin(workloadIssuerRotation.replicaOrigin, "Workload issuer rotation replica origin") ===
+      deploymentOrigin
+  ) {
+    throw new Error("Workload issuer rotation evidence must exercise a distinct replica origin");
   }
   if (appSnapshots.targetOrigin !== trustedOrigin(config.storageOrigin, "Release Storage origin")) {
     throw new Error("App snapshot evidence does not belong to the exact protected Storage origin");
@@ -785,6 +926,8 @@ export function buildProductionEvidenceManifest(
     marketplace.organizationId !== config.organizationId ||
     cliSessions.organizationId !== config.organizationId ||
     cliAdmin.organizationId !== config.organizationId ||
+    marketplaceReleaseRevocation.organizationId !== config.organizationId ||
+    workloadIssuerRotation.organizationId !== config.organizationId ||
     appEvidenceHealth.organizationId !== config.organizationId ||
     appSnapshots.organizationId !== config.organizationId ||
     appSnapshotRecovery.organizationId !== config.organizationId ||
@@ -793,6 +936,8 @@ export function buildProductionEvidenceManifest(
     marketplace.projectKey !== config.projectKey ||
     cliSessions.projectKey !== config.projectKey ||
     cliAdmin.projectKey !== config.projectKey ||
+    marketplaceReleaseRevocation.projectKey !== config.projectKey ||
+    workloadIssuerRotation.projectKey !== config.projectKey ||
     appEvidenceHealth.projectKey !== config.projectKey ||
     appSnapshots.projectKey !== config.projectKey ||
     appSnapshotRecovery.projectKey !== config.projectKey ||
@@ -806,6 +951,24 @@ export function buildProductionEvidenceManifest(
     marketplace.app.artifactDigest !== config.marketplaceApp.artifactDigest
   ) {
     throw new Error("Marketplace evidence does not match the selected release artifact");
+  }
+  if (
+    marketplaceReleaseRevocation.release.artifactDigest !==
+    config.expectedMarketplaceReleaseRevocationArtifactDigest
+  ) {
+    throw new Error("Marketplace release revocation does not match the independently pinned disposable artifact");
+  }
+  const workloadIssuerRotationScopeDigest = canonicalAppDigest({
+    issuer: workloadIssuerRotation.issuer,
+    jwksUri: workloadIssuerRotation.jwksUri,
+    rotationId: workloadIssuerRotation.rotation.rotationId,
+    previousKid: workloadIssuerRotation.rotation.previousKid,
+    nextKid: workloadIssuerRotation.rotation.nextKid
+  });
+  if (
+    workloadIssuerRotationScopeDigest !== config.expectedWorkloadIssuerRotationScopeDigest
+  ) {
+    throw new Error("Workload issuer rotation does not match the independently pinned rotation scope");
   }
   if (recovery.sourceIdentityDigest !== config.databaseIdentityDigest) {
     throw new Error("Recovery evidence does not match the protected production database identity");
@@ -900,6 +1063,50 @@ export function buildProductionEvidenceManifest(
     throw new Error("CLI administrator MFA validation returned an unexpected control status");
   }
   requireExactNames(
+    marketplaceReleaseRevocation.checks.map((check) => check.name),
+    [...marketplaceReleaseRevocationCheckNames],
+    "Marketplace release revocation validation"
+  );
+  const marketplaceReleaseRevocationStatuses = new Map<string, number>(
+    marketplaceReleaseRevocation.checks.map((check) => [check.name, check.status])
+  );
+  const expectedMarketplaceReleaseRevocationStatuses = new Map<string, number>([
+    ["verified_release_cached", 200],
+    ["aal1_step_up_denial", 403],
+    ["denied_request_preserves_release", 200],
+    ["aal2_exact_release_revocation", 200],
+    ["workload_revocation_and_cache_eviction", 404],
+    ["independent_audit_evidence", 200]
+  ]);
+  if ([...expectedMarketplaceReleaseRevocationStatuses].some(
+    ([name, status]) => marketplaceReleaseRevocationStatuses.get(name) !== status
+  )) {
+    throw new Error("Marketplace release revocation validation returned an unexpected control status");
+  }
+  requireExactNames(
+    workloadIssuerRotation.checks.map((check) => check.name),
+    [...workloadIssuerRotationCheckNames],
+    "Workload issuer rotation validation"
+  );
+  const workloadIssuerRotationStatuses = new Map<string, number>(
+    workloadIssuerRotation.checks.map((check) => [check.name, check.status])
+  );
+  const expectedWorkloadIssuerRotationStatuses = new Map<string, number>([
+    ["pre_rotation_jwks", 200],
+    ["previous_key_cross_replica_acceptance", 200],
+    ["overlap_published", 200],
+    ["next_key_cross_replica_acceptance", 200],
+    ["previous_key_retired", 200],
+    ["previous_key_cross_replica_denial", 401],
+    ["next_key_post_retirement_acceptance", 200],
+    ["independent_audit_evidence", 200]
+  ]);
+  if ([...expectedWorkloadIssuerRotationStatuses].some(
+    ([name, status]) => workloadIssuerRotationStatuses.get(name) !== status
+  )) {
+    throw new Error("Workload issuer rotation validation returned an unexpected control status");
+  }
+  requireExactNames(
     appEvidenceHealth.checks.map((check) => check.name),
     [...appEvidenceCheckNames],
     "App evidence health validation"
@@ -978,7 +1185,15 @@ export function buildProductionEvidenceManifest(
   );
   requireExactNames(
     auditRetention.verifiedReleaseCheckpoints.map((checkpoint) => checkpoint.name),
-    ["staging", "marketplace", "app_evidence_health", "cli_sessions", "cli_admin"],
+    [
+      "staging",
+      "marketplace",
+      "app_evidence_health",
+      "cli_sessions",
+      "cli_admin",
+      "marketplace_release_revocation",
+      "workload_issuer_rotation"
+    ],
     "Audit retention checkpoint proof"
   );
   const retainedStaging = auditRetention.verifiedReleaseCheckpoints.find(
@@ -996,6 +1211,12 @@ export function buildProductionEvidenceManifest(
   const retainedCliAdmin = auditRetention.verifiedReleaseCheckpoints.find(
     (checkpoint) => checkpoint.name === "cli_admin"
   );
+  const retainedMarketplaceReleaseRevocation = auditRetention.verifiedReleaseCheckpoints.find(
+    (checkpoint) => checkpoint.name === "marketplace_release_revocation"
+  );
+  const retainedWorkloadIssuerRotation = auditRetention.verifiedReleaseCheckpoints.find(
+    (checkpoint) => checkpoint.name === "workload_issuer_rotation"
+  );
   if (
     retainedStaging?.sequence !== staging.auditCheckpoint.headSequence ||
     retainedStaging?.hash !== staging.auditCheckpoint.headHash ||
@@ -1007,6 +1228,13 @@ export function buildProductionEvidenceManifest(
     retainedCliSessions?.hash !== cliSessions.auditEvidence.headHash ||
     retainedCliAdmin?.sequence !== cliAdmin.auditEvidence.throughSequence ||
     retainedCliAdmin?.hash !== cliAdmin.auditEvidence.headHash ||
+    retainedMarketplaceReleaseRevocation?.sequence !==
+      marketplaceReleaseRevocation.auditEvidence.throughSequence ||
+    retainedMarketplaceReleaseRevocation?.hash !==
+      marketplaceReleaseRevocation.auditEvidence.headHash ||
+    retainedWorkloadIssuerRotation?.sequence !==
+      workloadIssuerRotation.auditEvidence.throughSequence ||
+    retainedWorkloadIssuerRotation?.hash !== workloadIssuerRotation.auditEvidence.headHash ||
     auditRetention.verifiedReleaseCheckpoints.some((checkpoint) =>
       checkpoint.sequence < auditRetention.fromSequence ||
       checkpoint.sequence > auditRetention.throughSequence
@@ -1127,6 +1355,35 @@ export function buildProductionEvidenceManifest(
       atomicAuditReceipt: cliAdmin.controls.atomicAuditReceipt,
       disposableSessionRevoked: cliAdmin.controls.disposableSessionRevoked
     }),
+    marketplaceReleaseRevocation: descriptor(
+      marketplaceReleaseRevocation,
+      marketplaceReleaseRevocation.checkedAt,
+      {
+        appId: marketplaceReleaseRevocation.release.appId,
+        version: marketplaceReleaseRevocation.release.version,
+        artifactDigest: marketplaceReleaseRevocation.release.artifactDigest,
+        checks: marketplaceReleaseRevocation.checks.length,
+        changed: marketplaceReleaseRevocation.revocation.changed,
+        auditCorrelationId: marketplaceReleaseRevocation.auditEvidence.correlationId,
+        auditThroughSequence: marketplaceReleaseRevocation.auditEvidence.throughSequence,
+        auditHeadHash: marketplaceReleaseRevocation.auditEvidence.headHash
+      }
+    ),
+    workloadIssuerRotation: descriptor(
+      workloadIssuerRotation,
+      workloadIssuerRotation.checkedAt,
+      {
+        primaryOrigin: workloadIssuerRotation.primaryOrigin,
+        replicaOrigin: workloadIssuerRotation.replicaOrigin,
+        scopeDigest: workloadIssuerRotationScopeDigest,
+        checks: workloadIssuerRotation.checks.length,
+        overlapReceiptDigest: workloadIssuerRotation.rotation.overlapReceiptDigest,
+        retirementReceiptDigest: workloadIssuerRotation.rotation.retirementReceiptDigest,
+        auditRequestId: workloadIssuerRotation.auditEvidence.requestId,
+        auditThroughSequence: workloadIssuerRotation.auditEvidence.throughSequence,
+        auditHeadHash: workloadIssuerRotation.auditEvidence.headHash
+      }
+    ),
     appEvidenceHealth: descriptor(appEvidenceHealth, appEvidenceHealth.checkedAt, {
       checks: appEvidenceHealth.checks.length,
       auditedRequestId: appEvidenceHealth.auditEvidence.requestId,
@@ -1217,7 +1474,7 @@ export function buildProductionEvidenceManifest(
     })
   };
   return productionEvidenceManifestSchema.parse({
-    schemaVersion: "loopgraph-production-promotion-evidence/v14",
+    schemaVersion: "loopgraph-production-promotion-evidence/v16",
     release,
     scope,
     evidence,
@@ -1245,6 +1502,12 @@ export function verifyProductionEvidenceManifest(input: {
     marketplace: marketplaceReceiptSchema.parse(input.receipts.marketplace),
     cliSessions: cliSessionReceiptSchema.parse(input.receipts.cliSessions),
     cliAdmin: cliAdminReceiptSchema.parse(input.receipts.cliAdmin),
+    marketplaceReleaseRevocation: marketplaceReleaseRevocationReceiptSchema.parse(
+      input.receipts.marketplaceReleaseRevocation
+    ),
+    workloadIssuerRotation: workloadIssuerRotationReceiptSchema.parse(
+      input.receipts.workloadIssuerRotation
+    ),
     appEvidenceHealth: appEvidenceHealthReceiptSchema.parse(input.receipts.appEvidenceHealth),
     appSnapshotFenceProbe: appSnapshotFenceProbeReceiptSchema.parse(
       input.receipts.appSnapshotFenceProbe
@@ -1256,7 +1519,7 @@ export function verifyProductionEvidenceManifest(input: {
       input.receipts.appSnapshotReconciliation
     ),
     recovery: recoveryReceiptSchema.parse(input.receipts.recovery),
-    auditRetention: auditDrainReceiptV6Schema.parse(input.receipts.auditRetention)
+    auditRetention: auditDrainReceiptV8Schema.parse(input.receipts.auditRetention)
   };
   for (const [label, timestamp] of [
     ["staging validation", receiptsAtPromotion.staging.checkedAt],
@@ -1264,6 +1527,11 @@ export function verifyProductionEvidenceManifest(input: {
     ["marketplace validation", receiptsAtPromotion.marketplace.checkedAt],
     ["CLI session validation", receiptsAtPromotion.cliSessions.checkedAt],
     ["CLI administrator MFA validation", receiptsAtPromotion.cliAdmin.checkedAt],
+    [
+      "marketplace release revocation validation",
+      receiptsAtPromotion.marketplaceReleaseRevocation.checkedAt
+    ],
+    ["workload issuer rotation validation", receiptsAtPromotion.workloadIssuerRotation.checkedAt],
     ["App evidence health validation", receiptsAtPromotion.appEvidenceHealth.checkedAt],
     ["App snapshot mutation fence probe", receiptsAtPromotion.appSnapshotFenceProbe.checkedAt],
     ["hosted learning and entity validation", receiptsAtPromotion.learningEntities.checkedAt],
@@ -1343,6 +1611,8 @@ function validateConfig(config: ProductionEvidenceConfig) {
       publicKeyDigest: publicKeyDigest(config.auditRetentionPublicKeyPem)
     }
   });
+  digestSchema.parse(config.expectedMarketplaceReleaseRevocationArtifactDigest);
+  digestSchema.parse(config.expectedWorkloadIssuerRotationScopeDigest);
   if (!Number.isInteger(config.maximumEvidenceAgeMinutes) ||
       config.maximumEvidenceAgeMinutes < 5 || config.maximumEvidenceAgeMinutes > 1_440) {
     throw new Error("Maximum evidence age must be an integer from 5 to 1440 minutes");
@@ -1405,6 +1675,12 @@ async function main() {
     marketplace: await readJsonReceipt("LOOPGRAPH_MARKETPLACE_RECEIPT_FILE"),
     cliSessions: await readJsonReceipt("LOOPGRAPH_CLI_SESSION_RECEIPT_FILE"),
     cliAdmin: await readJsonReceipt("LOOPGRAPH_CLI_ADMIN_RECEIPT_FILE"),
+    marketplaceReleaseRevocation: await readJsonReceipt(
+      "LOOPGRAPH_MARKETPLACE_RELEASE_REVOCATION_RECEIPT_FILE"
+    ),
+    workloadIssuerRotation: await readJsonReceipt(
+      "LOOPGRAPH_WORKLOAD_ISSUER_ROTATION_RECEIPT_FILE"
+    ),
     appEvidenceHealth: await readJsonReceipt("LOOPGRAPH_APP_EVIDENCE_HEALTH_RECEIPT_FILE"),
     appSnapshotFenceProbe: await readJsonReceipt(
       "LOOPGRAPH_APP_SNAPSHOT_FENCE_PROBE_RECEIPT_FILE"
@@ -1434,6 +1710,12 @@ async function main() {
     },
     expectedAppSnapshotUnreferencedInventoryDigest: required(
       "LOOPGRAPH_RELEASE_EXPECTED_APP_SNAPSHOT_UNREFERENCED_INVENTORY_DIGEST"
+    ),
+    expectedMarketplaceReleaseRevocationArtifactDigest: required(
+      "LOOPGRAPH_RELEASE_EXPECTED_MARKETPLACE_RELEASE_REVOCATION_ARTIFACT_DIGEST"
+    ),
+    expectedWorkloadIssuerRotationScopeDigest: required(
+      "LOOPGRAPH_RELEASE_EXPECTED_WORKLOAD_ISSUER_ROTATION_SCOPE_DIGEST"
     ),
     auditRetentionKeyId: required("LOOPGRAPH_RELEASE_AUDIT_RETENTION_KEY_ID"),
     auditRetentionPublicKeyPem: required("LOOPGRAPH_RELEASE_AUDIT_RETENTION_PUBLIC_KEY_PEM"),

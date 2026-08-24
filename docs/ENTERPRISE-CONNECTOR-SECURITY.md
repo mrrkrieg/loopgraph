@@ -114,7 +114,7 @@ Set `LOOPGRAPH_WORKLOAD_IDENTITY_ISSUERS` to a JSON array of trusted issuer poli
 - refreshes once when a previously unseen key ID appears or a cached same-ID key no longer verifies,
   so an issuer can rotate signing keys before the prior cache TTL expires;
 - deduplicates concurrent JWKS loads, caps a JWKS at 100 keys, rejects redirects and malformed key
-  documents, and permits at most one rotation-triggered refresh per issuer every 30 seconds so an
+  documents, caps even a provider-advertised long cache lifetime at five minutes, and permits at most one rotation-triggered refresh per issuer every 30 seconds so an
   attacker-controlled key ID cannot become an outbound request amplifier;
 - checks issuer, audience, expiry/not-before, allowed subject patterns, tenant claims, and the exact
   machine capability;
