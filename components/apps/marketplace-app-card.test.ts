@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { marketplaceAppSchema } from "loopgraph/core";
 import type { MarketplaceSearchEntry } from "@/lib/app-platform/read-model";
-import { MarketplaceAppCard, historicalPreviewLabel } from "./marketplace-app-card";
+import { MarketplaceAppCard, historicalPreviewLabel, maturityEvidenceLabel } from "./marketplace-app-card";
 
 describe("MarketplaceAppCard", () => {
   it("shows the buyer contract and opens an existing installation directly", () => {
@@ -70,6 +70,18 @@ describe("MarketplaceAppCard", () => {
     expect(html).toContain("Historical preview");
     expect(html).toContain("available now");
     expect(html).toContain('href="/apps/installed-sales-app"');
+    expect(html).toContain("tested · no recorded test");
+  });
+
+  it("explains maturity from recorded evidence instead of a publisher claim", () => {
+    const evidence = {
+      passedScenarioCount: 13,
+      scenarioCount: 13
+    } as Parameters<typeof maturityEvidenceLabel>[0]["maturityEvidence"];
+    expect(maturityEvidenceLabel({ maturity: "tested", maturityEvidence: evidence } as Parameters<typeof maturityEvidenceLabel>[0]))
+      .toBe("tested · 13/13 synthetic");
+    expect(maturityEvidenceLabel({ maturity: "concept" } as Parameters<typeof maturityEvidenceLabel>[0]))
+      .toBe("concept · no recorded test");
   });
 
   it("uses honest historical preview labels", () => {

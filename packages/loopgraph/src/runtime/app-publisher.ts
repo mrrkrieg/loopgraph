@@ -21,7 +21,6 @@ import path from "node:path";
 import YAML from "yaml";
 import { z } from "zod";
 import {
-  APP_INSTALL_SCHEMA_VERSION,
   LOOP_PACK_SIGNATURE_SCHEMA_VERSION,
   MARKETPLACE_SCHEMA_VERSION,
   DepartmentTypeSchema,
@@ -32,8 +31,7 @@ import {
   loopPackSignatureSchema,
   type DepartmentType,
   type LoopPackSignature,
-  type PublisherTrustKey,
-  type WorkspaceAppInstallation
+  type PublisherTrustKey
 } from "../core";
 import { loadConnectorRecipes } from "./app-connector-service";
 import { compileLoopPack } from "./app-pack-compiler";
@@ -51,10 +49,11 @@ import {
   publishedCatalogSchema,
   publishedReleaseKey,
   readPublishedCatalog,
+  createSyntheticMaturityEvidence,
   type PublishedCatalog,
   type PublishedCatalogRelease
 } from "./app-publisher-catalog";
-import { runAppSyntheticConformance } from "./app-quality-engine";
+import { createSyntheticValidationInstallation, runAppSyntheticConformance } from "./app-quality-engine";
 
 const PUBLISHER_KEY_SCHEMA_VERSION = "loopgraph-publisher-key/v1alpha1" as const;
 const PUBLISHER_REGISTRY_SCHEMA_VERSION = "loopgraph-publisher-registry/v1alpha1" as const;
@@ -96,6 +95,7 @@ export type AppPublisherValidationReport = {
   checks: Array<{ id: string; status: "passed" | "failed"; summary: string }>;
   issues: LoopPackValidationIssue[];
   failedScenarios: Array<{ id: string; reason?: string }>;
+  scenarioCount: number;
 };
 
 export type AppDeveloperReport = {
@@ -353,6 +353,7 @@ export class LoopgraphAppPublisher {
     const checks: AppPublisherValidationReport["checks"] = [];
     const issues: LoopPackValidationIssue[] = [];
     const failedScenarios: AppPublisherValidationReport["failedScenarios"] = [];
+    let scenarioCount = 0;
     try {
       const loaded = await loadLoopPackDirectory(packRoot);
       checks.push({ id: "pack-contract", status: "passed", summary: "Manifest, declared content, path confinement, digest, and secret scanning passed." });
@@ -385,8 +386,9 @@ export class LoopgraphAppPublisher {
         appEvalSuiteSchema.parse(await readDocument(packRoot, entry))));
       await loadConnectorRecipes(loaded);
       checks.push({ id: "supporting-assets", status: "passed", summary: "Setup, connector, and evaluation documents passed their contracts." });
-      const installation = validationInstallation(loaded.manifest.metadata.id, loaded.manifest.metadata.version, loaded.artifact.digest, loaded.manifest.permissions);
+      const installation = createSyntheticValidationInstallation(loaded, "app-publisher");
       const evaluation = await runAppSyntheticConformance({ loaded, compiled, installation, actor: "app-publisher", now: new Date(0) });
+      scenarioCount = evaluation.scenarios.length;
       failedScenarios.push(...evaluation.scenarios.filter((scenario) => scenario.status === "failed").map((scenario) => ({ id: scenario.id, reason: scenario.reason })));
       checks.push({
         id: "synthetic-conformance",
@@ -410,13 +412,14 @@ export class LoopgraphAppPublisher {
         signature: { present: Boolean(signature), publisherId: signature?.publisherId, keyId: signature?.keyId, trusted: Boolean(key && !key.revokedAt) },
         checks,
         issues: [...loaded.issues, ...issues],
-        failedScenarios
+        failedScenarios,
+        scenarioCount
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       checks.push({ id: "pack-contract", status: "failed", summary: message });
       issues.push({ severity: "error", code: "publisher_validation_failed", message });
-      return { ok: false, packRoot, checks, issues, failedScenarios };
+      return { ok: false, packRoot, checks, issues, failedScenarios, scenarioCount };
     }
   }
 
@@ -495,12 +498,7 @@ export class LoopgraphAppPublisher {
     const validation = await this.validateApp(packRoot);
     const loaded = await loadLoopPackDirectory(packRoot);
     const compiled = await compileLoopPack(loaded);
-    const installation = validationInstallation(
-      loaded.manifest.metadata.id,
-      loaded.manifest.metadata.version,
-      loaded.artifact.digest,
-      loaded.manifest.permissions
-    );
+    const installation = createSyntheticValidationInstallation(loaded, "app-publisher-preview");
     const evaluation = await runAppSyntheticConformance({
       loaded,
       compiled,
@@ -641,9 +639,20 @@ export class LoopgraphAppPublisher {
       }
       const timestamp = (input.now ?? new Date()).toISOString();
       const current = await readPublishedCatalog(catalogRoot);
-      const release = current?.releases.find((candidate) =>
+      const existingRelease = current?.releases.find((candidate) =>
         publishedReleaseKey(candidate.appId, candidate.version, candidate.digest) ===
-        publishedReleaseKey(loaded.manifest.metadata.id, loaded.manifest.metadata.version, loaded.artifact.digest)) ?? {
+        publishedReleaseKey(loaded.manifest.metadata.id, loaded.manifest.metadata.version, loaded.artifact.digest));
+      const validation = existingRelease?.validation ?? createSyntheticMaturityEvidence({
+        artifactDigest: loaded.artifact.digest,
+        status: "passed",
+        scenarioCount: report.scenarioCount,
+        passedScenarioCount: report.scenarioCount,
+        providerWrites: 0,
+        evidenceRefs: report.checks.filter((check) => check.status === "passed").map((check) => `publisher-check:${check.id}`),
+        evaluatedAt: timestamp
+      });
+      const release = {
+        ...(existingRelease ?? {
         appId: loaded.manifest.metadata.id,
         version: loaded.manifest.metadata.version,
         digest: loaded.artifact.digest,
@@ -652,6 +661,11 @@ export class LoopgraphAppPublisher {
         status: "active" as const,
         publishedAt: timestamp,
         updatedAt: timestamp
+        }),
+        validation,
+        updatedAt: existingRelease?.validation
+          ? existingRelease.updatedAt
+          : timestamp
       };
       const catalog = publishedCatalogSchema.parse({
         schemaVersion: PUBLISHED_CATALOG_SCHEMA_VERSION,
@@ -756,49 +770,6 @@ export class LoopgraphAppPublisher {
     }
     return resolved;
   }
-}
-
-function validationInstallation(
-  appId: string,
-  version: string,
-  artifactDigest: string,
-  permissions: Array<{ capability: string; authority: "read" | "draft" | "approve" | "execute"; defaultPolicy: "allowed" | "approval_required" | "forbidden" }>
-): WorkspaceAppInstallation {
-  return {
-    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
-    id: `validation.${appId}`,
-    workspaceId: "publisher-validation",
-    appId,
-    version,
-    artifactDigest,
-    state: "ready_to_test",
-    mode: "simulation",
-    selectedModules: [],
-    presetId: "validation",
-    configuration: {
-      schemaVersion: "loopgraph-app-configuration/v1alpha1",
-      appId,
-      version,
-      fields: [],
-      values: {},
-      provenance: {},
-      completedAt: new Date(0).toISOString()
-    },
-    connectionBindings: {},
-    fieldMappingIds: [],
-    permissions: permissions.map((permission) => ({
-      capability: permission.capability,
-      authority: permission.authority,
-      decision: permission.defaultPolicy === "allowed" ? "allow" : permission.defaultPolicy === "forbidden" ? "forbid" : "approval_required",
-      reason: "Publisher conformance keeps provider execution blocked.",
-      changedFromInstalled: false
-    })),
-    ownedAssets: [],
-    history: [],
-    installedAt: new Date(0).toISOString(),
-    updatedAt: new Date(0).toISOString(),
-    installedBy: "app-publisher"
-  };
 }
 
 async function rewriteCapturedIdentifiers(

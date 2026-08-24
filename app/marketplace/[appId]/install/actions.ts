@@ -18,7 +18,7 @@ export async function planMarketplaceAppInstallAction(
   previousState: InstallWizardState,
   formData: FormData
 ): Promise<InstallWizardState> {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedInstallActor();
   const projectRoot = getActiveLoopgraphProjectRoot();
   try {
     const appId = requiredFormString(formData, "appId");
@@ -29,7 +29,7 @@ export async function planMarketplaceAppInstallAction(
     }) as MarketplaceAppDetail;
     const selectedModules = formData.getAll("selectedModule").filter((value): value is string => typeof value === "string");
     const configuration = configurationFromInstallForm(formData, detail.setupQuestions);
-    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_get", {
+    const journey = await callLoopgraphAppTool("loopgraph_app_onboarding_save", {
       projectRoot,
       appId,
       versionRange: detail.selectedVersion.version,
@@ -37,7 +37,9 @@ export async function planMarketplaceAppInstallAction(
       selectedModules,
       configuration,
       fieldMappingIds: previousState.plan.fieldMappingIds.length > 0 ? previousState.plan.fieldMappingIds : undefined,
-      actor: "loopgraph-browser"
+      expectedDraftRevision: previousState.journey.draft?.revision ?? 0,
+      confirmPresetChange: formData.get("confirmPresetChange") === "on",
+      actor
     }) as AppOnboardingJourney;
     if (!journey.plan) throw new Error("Loopgraph did not return an exact install plan for this journey");
     const plan = journey.plan;
@@ -49,8 +51,8 @@ export async function planMarketplaceAppInstallAction(
       journey: appOnboardingProgressForView(journey),
       unresolvedQuestionKeys: journey.questions.map((question) => question.key),
       notice: plan.missingConfigurationKeys.length === 0
-        ? "Configuration was validated. Review the exact graph and permission transaction below."
-        : "Your answers were saved into a new read-only plan. Complete the remaining items before installation."
+        ? "Your onboarding progress was saved. Review the exact graph and permission transaction below."
+        : "Your onboarding progress was saved. Complete only the remaining items before installation."
     };
   } catch (error) {
     return {
@@ -62,7 +64,7 @@ export async function planMarketplaceAppInstallAction(
 }
 
 export async function applyReviewedAppInstallAction(formData: FormData): Promise<void> {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedInstallActor();
   if (formData.get("confirmPlan") !== "on") throw new Error("Confirm the reviewed installation plan before applying it");
   const projectRoot = getActiveLoopgraphProjectRoot();
   const rawPlan = requiredFormString(formData, "plan", 2_000_000);
@@ -78,7 +80,7 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   const result = await callLoopgraphAppTool("loopgraph_app_install_apply", {
     projectRoot,
     plan,
-    actor: "loopgraph-browser"
+    actor
   }) as { installation: { id: string } };
   revalidatePath("/marketplace");
   revalidatePath("/apps");
@@ -86,8 +88,32 @@ export async function applyReviewedAppInstallAction(formData: FormData): Promise
   redirect(`/apps/${encodeURIComponent(result.installation.id)}`);
 }
 
+export async function resetMarketplaceAppOnboardingAction(formData: FormData): Promise<void> {
+  const actor = await authorizedInstallActor();
+  if (formData.get("confirmReset") !== "on") throw new Error("Confirm that you want to clear this onboarding draft");
+  const appId = requiredFormString(formData, "appId");
+  const presetId = requiredFormString(formData, "presetId");
+  const expectedDraftId = requiredFormString(formData, "expectedDraftId");
+  const expectedDraftRevision = Number(requiredFormString(formData, "expectedDraftRevision"));
+  if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision <= 0) {
+    throw new Error("The onboarding draft revision is invalid; reload before starting over");
+  }
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  await callLoopgraphAppTool("loopgraph_app_onboarding_reset", {
+    projectRoot,
+    appId,
+    expectedDraftId,
+    expectedDraftRevision,
+    confirmReset: true,
+    actor
+  });
+  const target = `/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`;
+  revalidatePath(target);
+  redirect(target);
+}
+
 export async function confirmAppFieldMappingsAction(formData: FormData): Promise<void> {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedInstallActor();
   if (formData.get("confirmMappings") !== "on") throw new Error("Confirm the reviewed field mappings before saving them");
   const projectRoot = getActiveLoopgraphProjectRoot();
   const appId = requiredFormString(formData, "appId");
@@ -108,7 +134,7 @@ export async function confirmAppFieldMappingsAction(formData: FormData): Promise
     connectionId,
     objectType,
     mappings,
-    actor: "loopgraph-browser"
+    actor
   });
   revalidatePath(`/marketplace/${encodeURIComponent(appId)}/install`);
   redirect(`/marketplace/${encodeURIComponent(appId)}/install?preset=${encodeURIComponent(presetId)}`);
@@ -120,4 +146,9 @@ function requiredFormString(formData: FormData, key: string, maxLength = 240): s
     throw new Error(`Missing or invalid form field: ${key}`);
   }
   return value.trim();
+}
+
+async function authorizedInstallActor(): Promise<string> {
+  const identity = await requireHostedPermission("organization.manage");
+  return identity?.email?.trim() || identity?.userId || "local-browser";
 }

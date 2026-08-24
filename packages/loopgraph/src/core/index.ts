@@ -34,6 +34,7 @@ export * from "./daily-summary";
 export * from "./readiness";
 export * from "./routing";
 export * from "./hermes-operations";
+export * from "./hermes-route-activation";
 export * from "./provider-onboarding";
 export * from "./credential-reference";
 export * from "./connector-broker";

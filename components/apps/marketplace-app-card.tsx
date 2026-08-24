@@ -25,7 +25,7 @@ export function MarketplaceAppCard({ entry }: { entry: MarketplaceSearchEntry })
         <Fact label="Stacks" value={`${latest.presets.length} presets`} />
         <Fact label="Required" value={`${latest.requiredCapabilities.length} capabilities`} />
         <Fact label="Optional" value={`${latest.optionalCapabilities.length} capabilities`} />
-        <Fact label="Maturity" value={latest.maturity.replace(/_/g, " ")} />
+        <Fact label="Maturity" value={maturityEvidenceLabel(latest)} />
         <Fact label="Version" value={`v${latest.version}`} />
         <Fact label="Publisher" value={entry.app.publisher.name} />
         <Fact label="Historical preview" value={historicalPreviewLabel(entry.previewStatus.historicalReplay)} />
@@ -78,6 +78,12 @@ export function historicalPreviewLabel(value: MarketplaceSearchEntry["previewSta
   if (value === "available") return "available now";
   if (value === "requires_readiness") return "after setup + rehearsal";
   return "after install";
+}
+
+export function maturityEvidenceLabel(version: MarketplaceSearchEntry["app"]["versions"][number]): string {
+  const evidence = version.maturityEvidence;
+  if (!evidence) return `${version.maturity.replace(/_/g, " ")} · no recorded test`;
+  return `${version.maturity.replace(/_/g, " ")} · ${evidence.passedScenarioCount}/${evidence.scenarioCount} synthetic`;
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

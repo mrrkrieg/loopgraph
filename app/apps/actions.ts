@@ -1,8 +1,17 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireHostedPermission } from "@/lib/auth/hosted-access";
-import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import { redirect } from "next/navigation";
+import { requireHostedPermission, requireHostedStepUp } from "@/lib/auth/hosted-access";
+import { approveConnectorPreparedAction, revokeConnectorPreparedAction } from "@/lib/connector-broker/admin";
+import { getWorkspaceDatabase } from "@/lib/db/workspace-database";
+import { approveAppOperationAction } from "@/lib/app-platform/app-operation-action-approval";
+import { revokeAppOperationAction } from "@/lib/app-platform/app-operation-action-revocation";
+import {
+  getActiveLoopgraphProjectRoot,
+  getAppInstallationStore,
+  getAppOperationActionStore
+} from "@/lib/loopgraph-runtime/storage-resolver";
 import { callLoopgraphAppTool, type LoopgraphAppToolName } from "@/lib/app-platform/tool-bridge";
 
 const actionTools = {
@@ -13,36 +22,113 @@ const actionTools = {
 } as const satisfies Record<string, LoopgraphAppToolName>;
 
 export async function operateInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   const action = requiredFormString(formData, "action");
   if (!(action in actionTools)) throw new Error(`Unsupported app operation: ${action}`);
+  const exactRepairSource = action === "repair" ? {
+    expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt")
+  } : {};
   await callLoopgraphAppTool(actionTools[action as keyof typeof actionTools], {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
-    actor: "loopgraph-browser"
+    actor,
+    ...exactRepairSource
+  });
+  revalidateInstalledApp(installationId);
+}
+
+export async function approveInstalledAppOperationAction(formData: FormData) {
+  const identity = await requireHostedPermission("integrations.manage");
+  await requireHostedStepUp();
+  const database = await getWorkspaceDatabase("integrations.manage");
+  if (!database.organizationId || !database.userId || !identity) {
+    throw new Error("Hosted App action approval requires an authenticated organization administrator");
+  }
+  const installationId = requiredFormString(formData, "installationId");
+  const actionId = requiredFormString(formData, "actionId");
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  await approveAppOperationAction({
+    workspaceId,
+    installationId,
+    actionId,
+    reason: requiredFormString(formData, "reason", 1_000),
+    actorSubject: database.userId,
+    actionStore: getAppOperationActionStore({ projectRoot, workspaceId }),
+    installationStore: getAppInstallationStore({ projectRoot, workspaceId }),
+    approveConnectorAction: (approval) => approveConnectorPreparedAction({ database, ...approval })
+  });
+  revalidateInstalledApp(installationId);
+}
+
+export async function revokeInstalledAppOperationAction(formData: FormData) {
+  const identity = await requireHostedPermission("integrations.manage");
+  await requireHostedStepUp();
+  const database = await getWorkspaceDatabase("integrations.manage");
+  if (!database.organizationId || !database.userId || !identity) {
+    throw new Error("Hosted App action revocation requires an authenticated organization administrator");
+  }
+  const installationId = requiredFormString(formData, "installationId");
+  const actionId = requiredFormString(formData, "actionId");
+  const projectRoot = getActiveLoopgraphProjectRoot();
+  const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  await revokeAppOperationAction({
+    workspaceId,
+    installationId,
+    actionId,
+    reason: requiredFormString(formData, "reason", 1_000),
+    actorSubject: database.userId,
+    actionStore: getAppOperationActionStore({ projectRoot, workspaceId }),
+    revokeConnectorAction: (revocation) => revokeConnectorPreparedAction({ database, ...revocation })
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function activateInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
-  const mode = requiredFormString(formData, "mode");
-  if (mode !== "shadow" && mode !== "recommend" && mode !== "execute_with_approval") {
-    throw new Error("Browser activation is limited to shadow, recommend, or execute with approval");
-  }
+  const mode = browserActivationMode(formData);
   await callLoopgraphAppTool("loopgraph_app_activate", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     mode,
-    actor: "loopgraph-browser"
+    approvalReceiptId: requiredFormString(formData, "approvalReceiptId", 512),
+    actor
+  });
+  revalidateInstalledApp(installationId);
+}
+
+export async function approveInstalledAppActivationAction(formData: FormData) {
+  const actor = await authorizedAppActor();
+  await requireHostedStepUp();
+  const installationId = requiredFormString(formData, "installationId");
+  const mode = browserActivationMode(formData);
+  if (requiredFormString(formData, "confirmation", 32) !== "APPROVE") {
+    throw new Error("Explicit activation approval is required");
+  }
+  const evidenceRefs = formData.getAll("evidenceRef").map((value) => {
+    if (typeof value !== "string" || value.length < 1 || value.length > 1_000) {
+      throw new Error("Invalid activation evidence reference");
+    }
+    return value;
+  });
+  if (evidenceRefs.length > 100) throw new Error("Activation approval accepts at most 100 evidence references");
+  await callLoopgraphAppTool("loopgraph_app_activation_approve", {
+    projectRoot: getActiveLoopgraphProjectRoot(),
+    installationId,
+    mode,
+    approvedBy: actor,
+    reason: requiredFormString(formData, "reason", 2_000),
+    evidenceRefs: [...new Set(evidenceRefs)],
+    expiresInSeconds: 900
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function replayInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   const rawDataset = requiredFormString(formData, "dataset", 1_000_000);
   let dataset: unknown;
@@ -58,13 +144,13 @@ export async function replayInstalledAppAction(formData: FormData) {
     ...(dataset as Record<string, unknown>),
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function labelAppEvaluationAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   const label = requiredFormString(formData, "label");
   if (label !== "correct" && label !== "incomplete" && label !== "false_positive") {
@@ -77,26 +163,26 @@ export async function labelAppEvaluationAction(formData: FormData) {
     scenarioId: requiredFormString(formData, "scenarioId"),
     label,
     reviewMinutes,
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function configureInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   await callLoopgraphAppTool("loopgraph_app_configure", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     values: parseJsonObject(requiredFormString(formData, "values", 100_000), "Configuration values"),
     expectedConfigurationDigest: requiredFormString(formData, "expectedConfigurationDigest"),
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function overlayInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   const overlay = parseJsonObject(requiredFormString(formData, "overlay", 100_000), "Overlay");
   await callLoopgraphAppTool("loopgraph_app_overlay_apply", {
@@ -105,64 +191,72 @@ export async function overlayInstalledAppAction(formData: FormData) {
     operations: overlay.operations,
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
     expectedOverlayRevision: Number(requiredFormString(formData, "expectedOverlayRevision")),
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function duplicateInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   const rawOverlay = optionalFormString(formData, "overlay", 100_000);
   const overlay = rawOverlay ? parseJsonObject(rawOverlay, "Duplicate overlay") : {};
-  await callLoopgraphAppTool("loopgraph_app_duplicate", {
+  const result = await callLoopgraphAppTool("loopgraph_app_duplicate", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     derivedAppId: requiredFormString(formData, "derivedAppId"),
     overlayOperations: overlay.operations ?? [],
-    actor: "loopgraph-browser"
-  });
-  revalidateInstalledApp(installationId);
+    expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
+    actor
+  }) as { installation?: { id?: unknown } };
+  const derivedInstallationId = result.installation?.id;
+  if (typeof derivedInstallationId !== "string" || derivedInstallationId.length < 1 || derivedInstallationId.length > 240) {
+    throw new Error("Loopgraph did not return the new private App installation identity");
+  }
+  revalidateInstalledApp(derivedInstallationId);
+  redirect(`/apps/${encodeURIComponent(derivedInstallationId)}?created=duplicate`);
 }
 
 export async function applyInstalledAppUpdateAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   await callLoopgraphAppTool("loopgraph_app_update_apply", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     plan: parseJsonObject(requiredFormString(formData, "plan", 1_000_000), "Update plan"),
     approvedPermissionCapabilities: formData.getAll("approvedPermissionCapabilities").filter((value): value is string => typeof value === "string"),
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function rollbackInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   await callLoopgraphAppTool("loopgraph_app_rollback", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function detachInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   await callLoopgraphAppTool("loopgraph_app_detach", {
     projectRoot: getActiveLoopgraphProjectRoot(),
     installationId,
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
-    actor: "loopgraph-browser"
+    expectedUpdatedAt: requiredFormString(formData, "expectedUpdatedAt"),
+    actor
   });
   revalidateInstalledApp(installationId);
 }
 
 export async function uninstallInstalledAppAction(formData: FormData) {
-  await requireHostedPermission("organization.manage");
+  const actor = await authorizedAppActor();
   const installationId = requiredFormString(formData, "installationId");
   if (requiredFormString(formData, "confirmation") !== "UNINSTALL") throw new Error("Type UNINSTALL to confirm removal");
   await callLoopgraphAppTool("loopgraph_app_uninstall", {
@@ -171,7 +265,7 @@ export async function uninstallInstalledAppAction(formData: FormData) {
     expectedArtifactDigest: requiredFormString(formData, "expectedArtifactDigest"),
     reason: requiredFormString(formData, "reason", 2000),
     confirmed: true,
-    actor: "loopgraph-browser"
+    actor
   });
   revalidateInstalledApp(installationId);
 }
@@ -181,6 +275,11 @@ function revalidateInstalledApp(installationId: string) {
   revalidatePath(`/apps/${installationId}`);
   revalidatePath("/brain");
   revalidatePath("/marketplace");
+}
+
+async function authorizedAppActor(): Promise<string> {
+  const identity = await requireHostedPermission("organization.manage");
+  return identity?.email?.trim() || identity?.userId || "local-browser";
 }
 
 function requiredFormString(formData: FormData, key: string, maxLength = 240): string {
@@ -207,4 +306,12 @@ function parseJsonObject(value: string, label: string): Record<string, unknown> 
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
   return parsed as Record<string, unknown>;
+}
+
+function browserActivationMode(formData: FormData): "shadow" | "recommend" {
+  const mode = requiredFormString(formData, "mode");
+  if (mode !== "shadow" && mode !== "recommend") {
+    throw new Error("Browser activation is limited to shadow or recommend mode");
+  }
+  return mode;
 }

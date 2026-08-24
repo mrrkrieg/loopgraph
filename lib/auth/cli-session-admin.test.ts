@@ -31,8 +31,9 @@ describe("CLI session administration", () => {
     expect(page.sessions[0]).toMatchObject({
       id: "123e4567-e89b-12d3-a456-426614174010",
       userEmail: "owner@example.com",
-      status: "active",
-      capabilities: ["marketplace.consume"]
+      status: "revoked",
+      capabilities: ["marketplace.consume"],
+      refreshReuseDetectedAt: "2026-08-17T11:55:00.000Z"
     });
     expect(selected.join(",")).not.toMatch(/token|hash|secret/i);
   });
@@ -92,7 +93,8 @@ function sessionQuery(selected: string[]) {
         access_expires_at: "2026-08-17T12:15:00.000Z",
         refresh_expires_at: "2026-09-16T12:00:00.000Z",
         last_used_at: null,
-        revoked_at: null,
+        revoked_at: "2026-08-17T11:55:00.000Z",
+        refresh_reuse_detected_at: "2026-08-17T11:55:00.000Z",
         created_at: "2026-08-17T11:50:00.000Z",
         updated_at: "2026-08-17T11:50:00.000Z"
       }],
