@@ -1,6 +1,6 @@
 # Loopgraph current build state
 
-Last updated: 2026-08-22
+Last updated: 2026-08-23
 
 ## One-line summary
 
@@ -14,7 +14,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - `loopgraph setup` now prepares the empty workspace, project-local Hermes contract, synchronized route manifest, and Studio plan through one safe path; `--activate` is explicit because it updates Hermes registrations.
 - `loopgraph start` now owns the local Studio plus an exclusive, gracefully stopped supervisor for route synchronization, connector checks, measurement scheduling, route jobs, opportunity scans, app update checks, controller scheduling, and aggregate health. Component cadences prevent expensive reconciliation work from running at the fast worker poll rate, errors are secret-redacted, and status is atomically persisted for the Brain UI.
 - `loopgraph hermes setup` creates project-local admin, webhook-router, and lifecycle-router MCP profiles plus Hermes skills.
-- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph skill from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
+- `loopgraph hermes setup --activate` applies those MCP registrations and installs the Loopgraph design plus isolated event-router skills from GitHub in one command after clone, failing with explicit recovery commands when Hermes cannot apply a step.
 - Hermes immediately presents canonical departments and guides the user through five compact question bundles.
 - Project inspection reads allowlisted manifests and environment key names only after permission.
 - Durable Hermes design tasks can be dispatched over a signed transport, request focused evidence gaps, resume after answers, and submit schema-constrained proposals.
@@ -44,12 +44,14 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 
 ### Hermes event brain and durable execution
 
-- Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision.
+- Provider webhooks are planned to terminate at Hermes, which normalizes the event and submits one bounded routing decision. Loopgraph can now compile content-bound, secret-free desired state into a Hermes Route Controller request and verify an exact receipt for the route profile, restricted MCP tools, transformer, signature state, and provider subscription state. Local desired state remains project-portable through the registered LoopSpecs, App/connection projection, and synchronized route manifest. Hosted desired state instead comes from one tenant/project snapshot of the distributed LoopSpec registry, distributed App ownership and exact connection bindings, and the secret-free Hermes Connector Broker projection; a two-phase revision/digest check rejects concurrent drift, and no replica-local manifest is accepted as authority. Activation uses a projected workload token, stores only a validated secret-free receipt, permits additions/updates in shadow mode only, and never authorizes deletion or live execution. Local receipts use an atomic owner-private file; hosted receipts use an append-only organization/project/workspace-scoped Supabase ledger with RLS, revoked direct writes, and bounded audited RPC persistence. A workload-authenticated hosted boundary exposes the current plan and accepts only its exact confirmation digest; tenant, project, controller target, audience, outbound identity, stores, routes, connections, and receipt are server-derived. App readiness/onboarding, Management routing views, and hosted reconciliation use the same authority and receipt. A real Hermes controller deployment and provider-domain registration remain environment-specific.
 - Twenty-four provider onboarding profiles define least-privilege authorization, subscriptions/streams/detectors, signature requirements, and normalization transformers. Trusted Hermes MCP tools expose catalog, preparation, and bounded normalization operations while default-redacting one-time OAuth material.
 - BigQuery and Snowflake satisfy the warehouse capabilities already declared by the official Management and Operations/Finance apps through broker-owned, read-only query templates with mandatory time windows, byte/result ceilings, fixed provider endpoints, and no caller-supplied SQL or account context.
 - A durable warehouse detector scheduler now provisions company-metric, forecast-variance, and capacity-plan windows, fences concurrent workers with hashed leases, validates explicit material-event rows, signs normalized evidence, forwards it to Hermes with workload identity, retries the exact window, and advances checkpoints only after complete delivery. Raw query rows remain process-local; durable state contains hashes and receipt/event identities only.
 - Exact provider aliases resolve Account, Campaign, Incident, Customer, Contract, and related company objects to tenant-scoped canonical entities before routing; ambiguous deterministic matches require human review and fuzzy auto-merge is disabled.
 - Loopgraph validates route eligibility, evidence, confidence, readiness, deduplication, cooldown, concurrency, fan-out, policy, and immutable LoopSpec identity.
+- Event ingest returns `routing-learning-context/v1alpha1`, a workspace/company/subject-scoped advisory projection of routing evaluations, human corrections, observed outcomes, and observed value for eligible and historically related loops. It contains bounded record identities and aggregates rather than provider payloads or correction prose. Duplicate deliveries receive a `not_applicable` context, unavailable evidence stays explicitly unknown, and historical results cannot override current eligibility, fan-out, policy, or execution authority.
+- Event ingest also returns a stable semantic digest for that packet. The native and generated Hermes router skills echo it on decision submission; Loopgraph recomputes the current packet, rejects a supplied stale digest before creating a route commit, and stores the exact bounded context plus acknowledgement state inside the durable routing attempt. Legacy callers without a digest remain readable and valid but are explicitly marked unacknowledged. Management decision detail, the correlation timeline, and the event-routing graph expose the evidence-to-decision binding without treating it as execution authority.
 - Accepted routes create durable jobs with atomic claims, leases, retries, dead-letter state, activation gates, and review reconciliation.
 - Shadow, recommendation, and simulation jobs run locally. Live jobs carry an explicit Hermes execution target and are dispatched only to a healthy registered runtime with the required capabilities.
 - Hermes reports assignment, run, task, tool, approval, output, outcome, and terminal facts through signed APIs or trusted MCP tools. Loopgraph projects those facts into the same durable run trace without storing provider secrets.
@@ -62,6 +64,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Aligned schedules create idempotent, leased measurement jobs; trusted Hermes collectors return evidence-qualified results or durable failures.
 - Complete baseline/current windows evaluate outcomes automatically only after required guardrails arrive.
 - Connection reconciliation checks capabilities, scopes, health freshness, Hermes route manifests, and overdue measurements, then triggers the controller.
+- Connection reconciliation now distinguishes a synchronized local route manifest from an actually applied Hermes route. Provider routing remains blocked when the controller receipt is missing or stale, or when any exact route is still awaiting its connection, provider confirmation, signature verifier, transformer, or subscription. The Event Routing UI shows planned-only, pending, and exact applied route states, while trusted Hermes admin turns can read the same activation plan/status without receiving mutation authority.
 - Outcome evaluation compares baselines and post-loop windows without inventing missing measurements.
 - The value ledger subtracts review, rework, supervision, escalation, and governance cost.
 - Value proof additionally subtracts connector operations, ongoing supervision, and organizational-change time, and remains explicitly unproven without observed evidence and those cost inputs.
@@ -103,6 +106,8 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Operational maturity is now a shared Hermes/runtime service rather than browser-only derivation. `loopgraph_app_maturity_get` joins exact-digest evaluations, current readiness, App-owned completed Hermes runs, observed outcomes/value, and workspace verification state. Its v1alpha2 response gives Hermes, CLI, and browser consumers one ordered evidence clock with each proof status, the earliest valid-until time, and a seven-day renewal recommendation; the installed-App page exposes those details before maturity expires. Admin tools and matching CLI commands add approved public verifier trust, revoke it with accountable references, and verify/import exact-installation receipts. The local registry is atomic, workspace-bound, `0600`, and never accepts verifier private keys.
 - App proof renewal is now actionable across a tenant fleet instead of visible only one installation at a time. `loopgraph_apps_renewal_plan` batch-joins App-owned run, outcome, value, replay, readiness, and verifier evidence once; reports complete counts for `not_applicable`, `incomplete`, `current`, `renew_soon`, `expired`, and `invalid`; ranks at most 100 results by deterministic urgency; and returns an exact setup, replay, operating-evidence, repair, renewal, or monitoring action. The tool is read-only and shared by Hermes/MCP, CLI, and the Installed Apps overview. It never invokes providers or turns a recommendation into authority.
 - The local supervisor now evaluates App updates and fleet proof freshness in one hourly component. Invalid evidence blocks aggregate supervisor health; expired or renew-soon proof degrades it; incomplete proof remains an honest maturity gap without making a healthy new installation look broken. The owner-private status projection retains bounded fleet counts and the first exact renewal action, and recommended actions hand that work to Hermes without starting replay, creating approval, promoting an App, or calling a provider.
+- Hosted App evidence health now has an executable, no-write staging validator rather than a manual checklist. It proves unauthenticated and cross-tenant denial, workload request replay rejection, exact workspace and clock binding, a strict aggregate-only response, complete status-count invariants, exact parity with protected Prometheus gauges, all six fixed evidence-classification outcomes through the same core function used by hosted operations, and the accepted schedule request inside a separately authorized verified audit checkpoint. It reads separate schedule and observability workload JWTs only from projected `0600` files and emits a secret-free `hosted-app-evidence-health-staging-validation/v3` receipt. The environment-specific run remains external evidence.
+- Hosted operations now evaluate that same versioned fleet proof contract on every protected metrics snapshot and through an hourly `schedule.app_evidence_health` job. Prometheus receives tenant-aggregate invalid, expired, renew-soon, incomplete, current, not-applicable, returned-item, and truncation gauges without App IDs or provider data. Evidence drift degrades operations while an unavailable, malformed, cross-workspace, stale, or future-dated projection fails readiness closed; neither scraper nor scheduler can execute the recommended action.
 - Hosted verification trust and receipts now use an organization/project/workspace-scoped Supabase store behind the same runtime contract. Its tables are RLS-enabled and service-role-only; bounded trust, revoke, and import functions enforce immutable identities and append accepted changes to the tamper-evident security audit chain. Hosted resolution fails closed when the distributed store is unavailable rather than writing verification authority to ephemeral deployment disk.
 - The App verification registry is now available through a read-only Hermes/MCP/CLI tool and a dedicated Settings console. Admins can add reviewed Ed25519 public keys, import signed exact-artifact receipts, and revoke trust; hosted mutations require `integrations.manage` plus step-up authentication and derive the actor from the session. The UI displays fingerprints rather than full key material, while shared validation rejects private-key PEM input before persistence.
 - Hosted App installation state now resolves through the same shared runtime contract to a tenant/project/workspace-scoped Supabase registry. Revision-bound database leases serialize lifecycle mutations across serverless instances, the registry and lock commit together through bounded service-role RPCs, and accepted revisions enter the tamper-evident audit chain. Hosted App calls use the server-derived project key as workspace/company identity, browser mutations derive their actor from the authenticated session, and generated LoopSpecs materialize through the distributed LoopSpec registry. Detached private App artifacts use immutable, tenant-scoped objects in a private Supabase Storage bucket and verified per-replica caches instead of deployment-local authoritative files; database or snapshot-store unavailability fails closed.
@@ -112,6 +117,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   raises the production alert contract without making otherwise healthy workers fail public
   readiness. The snapshot never emits App IDs, installation IDs, actors, or owned-resource names.
 - The shared onboarding contract now promotes unfinished install, activation, pause, resume, configure, overlay, update, rollback, and uninstall work to a `recover_lifecycle` stage with affected resource counts and one accountable exact-retry boundary. Hermes instructions, the Installed Apps list, and Installed App detail use that same state; ordinary lifecycle/runtime controls are suppressed or rejected until recovery completes.
+- Installed App readiness and activation now consume the exact Hermes Route Controller receipt rather than treating a synchronized local manifest as runtime proof. Each App is matched to event routes through its owned Loop IDs. Provider-agnostic routes specialize to the exact provider connections selected during installation, while Hermes- and Loopgraph-generated business events use internal routes without fake provider subscriptions. Missing manifest coverage, a stale receipt, absent authentication verification, or a required provider subscription that is not active blocks connected maturity and approval creation. Unrelated pending routes do not block the App. Hosted App tools, Management operations, and measurement reconciliation use the same tenant-scoped distributed receipt and fail closed when hosted persistence is unavailable; they do not silently read an ephemeral replica file. The shared onboarding journey proactively moves from conformance to manifest synchronization, controller-plan preparation, and only then an accountable shadow approval.
 - App installation planning now resolves each logical capability through its immutable Connector Recipe to an exact bounded Connector Broker or governed Loopgraph runtime operation. Required scope and authority checks use the broker descriptor as well as the recipe, so a self-claimed connection cannot make an unsupported operation ready. Applied installations persist the secret-free operation contract through update and rollback; readiness and operational maturity require it, while older label-only installations fail closed and ask for a fresh plan. Default Product, Sales, and Marketing presets have required-operation conformance coverage.
 - Hermes now has a read-only, installation-scoped operation resolver. The caller supplies only an installation ID, owned loop ID, and logical capability; Loopgraph derives the pinned artifact, active LoopSpec hash, exact provider/runtime binding, permission, scopes, and connection. It blocks undeclared cross-loop capabilities, inactive or recovering Apps, unresolved permissions, and changed connection bindings, and returns a five-minute content-digested `invoke_read`, `invoke_loopgraph_runtime`, `prepare_action`, or `blocked` disposition. It does not accept provider IDs, operations, URLs, headers, or credentials and does not execute the resolved operation.
 - Installed Connector Broker bindings now have an executable Hermes bridge. The workload supplies only installation, owned loop, logical capability, durable route job, registered agent, call identity, and bounded input. Loopgraph re-resolves the operation, verifies the exact active LoopSpec hash, fresh capable assigned agent, event/problem company object, tenant, environment, scopes, and current healthy Broker projection, then derives the Broker envelope server-side. Reads execute through the allowlisted operation; writes stop at a fingerprint-bound prepared action for separate approval and commit. The workload-authenticated API requires a dedicated tenant-scoped `hermes.app_operations` grant, derives the machine tenant without a browser session, rejects caller-selected providers, operations, connections, tenants, URLs, workspace identities, and project roots, and fails secret-shaped input before the Broker.
@@ -123,11 +129,12 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Interrupted App commits now have a separate receipt-only reconciliation path. The assigned Hermes route names only the App action, route, agent, and reconciliation call; Loopgraph re-derives the Broker identity and asks for the original idempotency receipt. A matching response appends terminal App evidence without invoking the provider again, while pending and unresolved outcomes remain visibly nonterminal and block replacement work.
 - Hosted App commit recovery is scheduled every five minutes behind its own machine capability. The bounded worker discovers only old, nonterminal `commit_requested` events, uses stable reconciliation identities, skips revoked/finished work, and returns secret-free counts while reusing the same no-provider-call boundary as Hermes.
 - Production promotion evidence now consumes the protected aggregate action-reconciliation metrics. The `staging-validation/v5` receipt requires zero pending/stale App commits, records only bounded counts and the reviewed stale threshold, and the production evidence compiler rejects older receipts or any nonterminal action backlog.
-- The release workflow now runs a no-network, no-credential App action fault-injection proof against the real Connector Broker state machine. It models a lost terminal App-ledger write, resolves the original durable receipt, replays the commit, and blocks the `loopgraph-production-promotion-evidence/v9` manifest unless the fixture handler ran exactly once and the receipt is bound to the promoted source commit.
+- The release workflow now runs a no-network, no-credential App action fault-injection proof against the real Connector Broker state machine. It models a lost terminal App-ledger write, resolves the original durable receipt, replays the commit, and blocks the `loopgraph-production-promotion-evidence/v16` manifest unless the fixture handler ran exactly once and the receipt is bound to the promoted source commit.
 - Hosted detached-App reconciliation now closes both inventory directions. It first uses a service-role-only catalog attestation to prove the exact registry and private-bucket triggers are installed with their full unconditional row-level event masks in the deployed Supabase project, and independently pins the generation and attestation function bodies, owners, hardened search paths, and effective execute capabilities. It then verifies current registry authority against exact immutable archives, inventories the exact tenant/project Storage prefix back to those registries, and requires two identical full passes within a bounded stability window so offset pagination cannot silently miss a concurrent detach. Registry and private-bucket triggers transactionally advance one durable tenant/project generation whenever authoritative registry payloads or archive objects change; every pass reads it before the registry and after the final Storage page, and both accepted passes bind the same generation. It rejects malformed objects and binds intentionally retained unreferenced archives to an independently reviewed opaque digest. The pinned origin is verified before privileged credentials are read, the release compiler rechecks the live-fence and retention digests, receipts expose counts and digests only, and no archive is deleted automatically.
-- Production evidence now binds the separate active staging mutation-fence receipt. The compiler independently reconstructs its scope from the validated Storage origin, lowercase organization UUID, and reserved probe namespace; requires the exact eight registry/Storage mutation and cleanup controls; rechecks freshness during production approval; and includes the complete receipt digest in `loopgraph-production-promotion-evidence/v9`.
+- Production evidence now binds the separate active staging mutation-fence receipt. The compiler independently reconstructs its scope from the validated Storage origin, lowercase organization UUID, and reserved probe namespace; requires the exact eight registry/Storage mutation and cleanup controls; rechecks freshness during production approval; and includes the complete receipt digest in `loopgraph-production-promotion-evidence/v16`.
 - The protected snapshot staging job now actively rehearses that fence in a random reserved project scope. It proves registry insert/update/delete and Storage upload/replace/delete each advance generation, removes the probe registry and object, deletes the synthetic generation row, and exposes only eight booleans plus the pinned staging scope digest. The probe is never part of local startup or production reconciliation and refuses to run without an explicit staging mutation confirmation.
-- The protected release workflow now runs the hosted learning/entity staging probe with two independent Supabase clients in a random reserved project scope. It proves one-winner measurement claims, stale-lease rejection, cross-client finalization visibility, canonical JSONB replay, immutable metric/outcome/value conflicts at the database boundary, canonical-entity visibility, single-owner provider aliases, and exact evidence/entity/alias cleanup. Cleanup is authorized by a short-lived one-time nonce only after the scope is proven empty; the authority is consumed atomically, and a bounded expired-run sweeper can recover an interrupted probe without granting a general reserved-prefix delete primitive. The protected job reads the service role only from a projected `0600` file after the bare HTTPS origin and independently pinned scope digest pass, emits nine booleans without probe identities, nonce, or payloads, and never runs during local startup or live request handling. Evidence compilation and production verification independently reconstruct its `learning_probe` scope, require the exact nine controls and freshness, and bind the complete receipt into `loopgraph-production-promotion-evidence/v9`.
+- The protected release workflow now runs the hosted learning/entity staging probe with two independent Supabase clients in a random reserved project scope. It proves one-winner measurement claims, stale-lease rejection, cross-client finalization visibility, canonical JSONB replay, immutable metric/outcome/value conflicts at the database boundary, canonical-entity visibility, single-owner provider aliases, and exact evidence/entity/alias cleanup. Cleanup is authorized by a short-lived one-time nonce only after the scope is proven empty; the authority is consumed atomically, and a bounded expired-run sweeper can recover an interrupted probe without granting a general reserved-prefix delete primitive. The protected job reads the service role only from a projected `0600` file after the bare HTTPS origin and independently pinned scope digest pass, emits nine booleans without probe identities, nonce, or payloads, and never runs during local startup or live request handling. Evidence compilation and production verification independently reconstruct its `learning_probe` scope, require the exact nine controls and freshness, and bind the complete receipt into `loopgraph-production-promotion-evidence/v16`.
+- Production promotion now requires the protected hosted App evidence-health staging receipt. The release compiler independently rechecks its exact deployment origin, tenant/project, clock window, eight controls and statuses, fleet-count coverage, derived health, schedule/metrics parity, the exact six-case classifier rehearsal, and accepted-request audit checkpoint; the external retention drain must prove that exact checkpoint before production verification re-reads the immutable artifacts. `loopgraph-production-promotion-evidence/v16` includes aggregate proof-state counts, bounded audit identity, classifier case count, and receipt digest, never App identities, provider data, actions, or workload tokens.
 - App rollout now changes executable graph state as well as installation metadata. Activation revision-binds and synchronizes every LoopSpec owned by the installation to shadow, recommend, or execute-with-approval; pause moves the owned graph back to shadow and resume restores the last approved mode. Each pause/resume transition is journaled first with its exact source and target state/mode, pinned artifact, actor, and owned loop inventory. A worker interruption therefore exposes one exact recovery action instead of leaving the App registry and executable graph silently split. Missing or changed owned specs, a competing actor, or a changed transition fails closed; completed retries are revision-stable, while a later pause/resume cycle receives a new graph transaction identity.
 - App uninstall recovery now binds the complete source-installation and ownership digests, source workspace revision, exact pre-removal and permitted shared post-removal LoopSpec inventories, accountable actor, and normalized reason digest before any destructive side effect. The recovery journal stores no raw reason. A retry accepts only the original actor and exact reason and fails closed on source, ownership, or topology drift; legacy unfinished removals without the stronger binding require administrator reconciliation.
 - App duplication now uses the same prepared/materialized/completed recovery discipline across the installation registry, namespaced LoopSpec registry, shared field-mapping consumers, and approved company-context consumers. The request is bound to the exact source artifact and revision, source installation/ownership/mapping digests, accountable actor, private App ID, overlay digest, deterministic derived installation/ownership, and exact target LoopSpec inventory. Lost responses return the original receipt; substituted inputs or a third target topology fail closed.
@@ -146,6 +153,34 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - Hermes MCP and managed CLI runners can use the hosted marketplace through short-lived ambient OIDC workload identity. The API requires tenant/project claims, a durable `marketplace.consume` grant, fresh replay metadata, rate limits, and organization visibility; it proxies one exact private archive without exposing service credentials or reusable object keys. The package re-verifies and atomically stages the release before invoking the existing app tools.
 - Interactive terminals can use browser-approved device authorization without receiving a workload identity or Supabase cookie. Device/user codes and access/refresh credentials are stored only as hashes server-side; access lasts 15 minutes, refresh rotates, membership is checked on every request, the only grant is `marketplace.consume`, and the local credential profile is atomic, current-user-only, and never printed by status output.
 - Hosted admins and owners have a paged, token-free human CLI session inventory. MFA-gated emergency controls revoke one device, one user's sessions, or every organization session in the exact tenant/project scope, while the revocation and immutable reason-digest audit event commit atomically.
+- Human CLI refresh rotation now retains prior generations only as private, expiry-bounded SHA-256
+  digests. Reuse of any replaced generation locks and revokes the current session family, records one
+  digest-free tenant audit event, appears in the safe admin inventory, and removes the rejected local
+  profile. Random invalid tokens remain indistinguishable and generate no audit amplification.
+- Human CLI deployment behavior now has an executable two-replica staging drill. It proves the fixed
+  device-issuance ceiling, polling slowdown, two cross-replica refresh rotations, stale metadata
+  denial, suspended membership, pre-revoked session denial, a bounded shared request-rate window,
+  prior-generation family revocation, and the exact accepted request in the verified audit chain.
+  Returned credentials remain process-local; the receipt is aggregate and secret-free.
+- The protected release chain now runs that CLI drill as its own `cli-session-staging` trust
+  boundary. The external retention drain proves the accepted CLI request as a fourth named audit
+  checkpoint, while the separate administrator drill adds a fifth exact revocation checkpoint. It
+  emits `audit-drain/v8`, and the v16 production manifest rechecks both distinct origins,
+  tenant/project, freshness, ten exact controls/statuses, bounded rate policy, family revocation,
+  and the full receipt digest before the prebuilt deployment can be promoted.
+- The separate CLI administrator staging validator now proves the deployed MFA boundary with one
+  AAL1 denial and one AAL2 exact-session revocation. It confirms the disposable session remains
+  revocable after denial, projects the committed revocation through the token-free inventory, denies
+  the revoked CLI token, and finds the exact correlation/target/reason digest in the verified audit
+  chain. The protected `cli-admin-staging` job validates and retains that receipt, the external
+  drain proves its fifth audit checkpoint, and the v16 promotion manifest rechecks and binds the full
+  receipt. Its output excludes browser sessions, user identities, CLI tokens, and the target session ID.
+- Hosted readiness and protected Prometheus metrics now consume a tenant/project-scoped,
+  service-role-only CLI security projection. It separates active, refresh-required, expired, and
+  revoked sessions; reports recent refresh replay, impossible unrevoked replay families, pending
+  device-flow age, and no identities or credential digests. Contained replay degrades operations for
+  review; an unrevoked replay or unavailable projection fails readiness closed. The v2 SLO contract
+  assigns both conditions to the security runbook.
 - Production promotion now compiles staging readiness, hosted-marketplace isolation, snapshot-consistent recovery, and independently acknowledged audit-retention receipts into one content-bound manifest. The workflow attests that exact manifest with GitHub OIDC, reconstructs it in the protected production job, verifies the upstream digest and provenance, and only then promotes the same prebuilt deployment. Receipt freshness is rechecked against the actual promotion time; deployment origin, tenant/project, database identity, marketplace artifact, exact audit sequence/hash checkpoints, acknowledgement digest, and restored-table fingerprints all fail closed.
 - Hosted App snapshot activation now has a dedicated protected staging gate. It proves the real
   bucket is private and bounded, exercises authenticated read/insert/update/delete denial, replays
@@ -163,7 +198,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   verifies every archive through the signed LoopPack loader, fails on missing, corrupt, untracked,
   or unavailable recovery authority, and retains only aggregate health evidence.
 - Production promotion now requires a second fresh reconciliation receipt bound to the exact
-  validated Storage origin and marketplace tenant/project. The v5 manifest rejects scope
+  validated Storage origin and marketplace tenant/project. The v16 manifest rejects scope
   substitution, incomplete controls, empty inventory without explicit policy, every non-zero
   failure class, and stale evidence. The release workflow is repository-dispatch-only so the
   credential-bearing chain always resolves from the protected default branch.
@@ -195,6 +230,31 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
   reconciliation and weekly management review.
 - Hosted machine authorization decisions append to a tenant/project hash-chained security audit
   ledger in the same database transaction as replay and rate enforcement.
+- Workload issuer rotation no longer waits for the cached JWKS TTL. A new key ID or a same-ID key
+  replacement triggers one bounded refresh; each verifier deduplicates concurrent loads, caps and
+  validates key documents, rejects redirects and fetch failures, and throttles attacker-controlled
+  misses.
+- A protected issuer-rotation staging validator now drives one disposable previous/next key through
+  a fixed two-operation controller protocol, observes the live old-only, overlap, and new-only JWKS
+  states, exercises two deployed origins, waits beyond the verifier's five-minute maximum cache
+  lifetime, proves retired-key denial and continued next-key acceptance, and finds the final request
+  in the verified tenant audit chain. The secret-free receipt stores only public identity plus
+  controller-receipt digests. Its protected workflow is implemented, the external retention drain
+  binds it as the seventh exact checkpoint in `audit-drain/v8`, and the v16 production manifest
+  independently pins and rechecks its issuer/JWKS/rotation/key scope.
+- Hosted marketplace release deprecation and revocation now cross an MFA-gated API and a separate
+  service-role RPC. The database rechecks active administrator ownership, permits only monotonic
+  lifecycle transitions, and commits the exact transition with a reason digest in the append-only
+  tenant audit chain. The older direct authenticated RPC path is revoked, so clients cannot bypass
+  the step-up and audit boundary.
+- A destructive, disposable-release staging validator now proves that boundary end to end. It
+  verifies and caches one exact active signed release, proves AAL1 denial does not mutate it, uses
+  AAL2 to revoke it, re-authorizes through the workload API, proves exact cache eviction, and finds
+  the correlated active-to-revoked event in the verified audit chain. Its secret-free receipt is
+  implemented. The protected job serializes behind the CLI administrator drill, validates the exact
+  six controls, and contributes a sixth sequence/hash checkpoint to `audit-drain/v8`. The v16
+  promotion manifest independently pins the disposable artifact digest and rechecks the complete
+  receipt. Only the first environment-specific execution remains external.
 - Hosted routing state, route jobs, Hermes design tasks, and Hermes callback receipts use
   tenant/project-scoped Supabase stores. Active design-task creation is idempotent, and task plus
   callback updates use revision fencing so independent replicas cannot overwrite one another.
@@ -229,12 +289,17 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 ## Safety boundary
 
 - Webhook turns cannot invoke discovery, design, controller, worker, graph mutation, promotion, lifecycle, or rollback tools.
+- The isolated Hermes webhook-router contract requires every decision to echo the exact learning-context digest returned by event ingest; missing or stale acknowledgements cannot create route commits.
+- The Learning operations view aggregates evidence-binding coverage, stale-context rejection, abstention, human corrections, golden-event quality, per-loop selection/evaluation counts, outcome truth status, and value without treating routing volume as proof of correctness.
+- Hosted Learning operations compile routing, measurement, and outcome evidence from tenant/project-scoped distributed stores; authenticated hosted mode fails closed instead of showing replica-local file state.
 - Provider secrets, OAuth tokens, signing keys, and raw payloads remain in Hermes or an approved credential store. Loopgraph accepts only constrained opaque credential references.
 - Model output, repository text, and webhook text are untrusted until validated by Loopgraph contracts.
 - Simulation and shadow routing do not perform external writes.
 - Live execution remains experimental and requires connector readiness, policy, approvals, and exact prepared-action fingerprints.
 
 ## Remaining product layers
+
+The repository now also includes a Hermes-native distribution boundary at `integrations/hermes-plugin`. It provides direct GitHub installation through `hermes plugins install mrrkrieg/loopgraph/integrations/hermes-plugin --enable`, an official-Doctor-compatible manifest, bundled design and isolated event-router skills, a read-only install plan, an exact-revision and package-lock-bound runtime bootstrap, and Hermes-native plan/install/doctor/start/webhook commands. Registration performs no disk or network work, and the provider credential boundary is unchanged.
 
 1. Apply the evidence/entity/probe migrations to each staging environment, configure the protected
    `learning-entity-staging` runner and independently pinned scope digest, and produce the first
@@ -252,19 +317,39 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
    receiver receipt continuity, and an Ed25519-signed immutability acknowledgement; the repository
    cannot contain a receipt proving a customer storage account actually enabled WORM enforcement.
 4. Register provider applications and use Hermes-owned credentials to execute the supplied OAuth,
-   webhook/stream/detector, signature, and transformer contracts against live tenant accounts.
+   webhook/stream/detector, signature, and transformer contracts against live tenant accounts. Deploy
+   the narrow Hermes Route Controller endpoint, bind its workload-identity audience, and produce the
+   first real `hermes-route-controller-receipt/v1alpha1`; Loopgraph now validates and stores that
+   receipt but cannot manufacture evidence for an external Hermes gateway.
 5. Consolidate the stacked implementation changes, apply the RLS migration to a real Supabase
    staging project, run the App snapshot staging gate, and complete clean-install plus hosted
    multi-user release audits. The executable gate is present; the environment-specific receipt
    remains external.
-6. Validate issuer rotation, device-code and request rate-limit saturation, refresh-token replay,
-   cross-replica session/cache behavior, membership removal, and release revocation in staging.
-   Durable workload grant revocation, cross-tenant denial, replay rejection, exact signed staging,
-   and audit presence are already part of the executable marketplace gate.
+6. Configure the protected `cli-session-staging` runner with two real replica origins and disposable
+   session projections, then produce the first deployment-specific CLI receipt through the now-mandatory
+   release gate. Run issuer rotation against the real identity provider, MFA administrator
+   controls, and hosted App release revocation as separate staging drills.
+   The verifier now handles new-`kid` and same-`kid` rotation immediately with a deduplicated,
+   throttled, fail-closed JWKS refresh. Refresh-token reuse now revokes its current family and enters
+   the audit chain atomically. Durable workload grant revocation, cross-tenant denial, request replay
+   rejection, exact signed staging, and audit presence are already part of the executable marketplace
+   gate. The CLI-session matrix, exact workflow validator, seven retained audit checkpoints, and v16
+   promotion binding are implemented. The bounded live issuer-rotation validator and its protected
+   workflow/promotion binding are implemented; its first environment-specific receipt,
+   first live MFA administrator-control receipt, first live release-revocation receipt,
+   migration application, and real alert delivery remain external. The aggregate CLI security
+   projection, v2 SLO/runbook contract, and bounded MFA staging validator are implemented in the
+   repository.
+7. Configure the protected App evidence-health staging workload identities and run
+   `validate:app-evidence-health-staging` against each deployed environment. The executable gate is
+   present; only the first deployment-specific receipt remains external. The gate now runs the
+   invalid, expired, renew-soon, incomplete, current, and not-applicable classification rehearsal
+   without tenant data or mutation authority.
 
 ## Key documentation
 
 - [Hermes quickstart](./HERMES-QUICKSTART.md)
+- [Hermes shared routing learning](./HERMES-SHARED-ROUTING-LEARNING.md)
 - [Local supervisor](./LOCAL-SUPERVISOR.md)
 - [Hermes design bridge](./HERMES-DESIGN-BRIDGE.md)
 - [Loop opportunity engine](./LOOP-OPPORTUNITY-ENGINE.md)
@@ -286,6 +371,7 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Scoped machine request guards](./MACHINE-REQUEST-GUARDS.md)
 - [Hosted user API quotas](./USER-API-QUOTAS.md)
 - [Operational audit and observability](./OPERATIONAL-AUDIT-OBSERVABILITY.md)
+- [Hosted App evidence-health staging gate](./HOSTED-APP-EVIDENCE-HEALTH-STAGING-GATE.md)
 - [Hosted marketplace registry](./HOSTED-MARKETPLACE-REGISTRY.md)
 - [Hosted marketplace delivery](./HOSTED-MARKETPLACE-DELIVERY.md)
 - [Hosted marketplace installation](./HOSTED-MARKETPLACE-INSTALL.md)
@@ -294,3 +380,5 @@ Loopgraph is a local-first governed control plane for Hermes Brain: it discovers
 - [Company Blueprints](./COMPANY-BLUEPRINTS.md)
 - [Hosted marketplace access for Hermes and CLI](./HOSTED-MARKETPLACE-WORKLOAD-ACCESS.md)
 - [Interactive CLI device authorization](./CLI-DEVICE-AUTHORIZATION.md)
+- [Hosted CLI session staging gate](./HOSTED-CLI-SESSION-STAGING-GATE.md)
+- [Hosted workload issuer rotation staging gate](./HOSTED-WORKLOAD-ISSUER-ROTATION-STAGING-GATE.md)
