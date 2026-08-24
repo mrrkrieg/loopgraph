@@ -11,11 +11,14 @@ import {
   routerEvaluationSchema,
   routingCardSchema,
   routingCorrectionSchema,
+  routingLearningContextBindingSchema,
   valueLedgerEntrySchema
 } from "../core";
 import { FileOutcomeStore } from "./outcome-store";
 import {
+  bindRoutingLearningContext,
   compileRoutingLearningContext,
+  routingLearningContextDigest,
   unavailableRoutingLearningContext
 } from "./routing-learning-context";
 import { FileRoutingStore } from "./routing-store";
@@ -257,6 +260,46 @@ describe("Hermes routing learning context", () => {
       loopEvidence: [],
       warnings: ["Shared learning evidence is unavailable."]
     });
+  });
+
+  it("binds the semantic evidence packet while ignoring generation time", () => {
+    const first = unavailableRoutingLearningContext({
+      event: companyEvent("delivery_digest_1", "company_1"),
+      now: new Date("2026-07-21T12:00:02.000Z"),
+      warning: "Shared learning evidence is unavailable."
+    });
+    const second = {
+      ...first,
+      generatedAt: "2026-07-21T12:01:02.000Z"
+    };
+    const digest = routingLearningContextDigest(first);
+
+    expect(routingLearningContextDigest(second)).toBe(digest);
+    expect(routingLearningContextDigest({
+      ...second,
+      warnings: ["A different bounded state was observed."]
+    })).not.toBe(digest);
+    expect(bindRoutingLearningContext({
+      context: second,
+      acknowledgedDigest: digest,
+      boundAt: new Date("2026-07-21T12:01:03.000Z")
+    })).toMatchObject({
+      schemaVersion: "routing-learning-context-binding/v1alpha1",
+      contextDigest: digest,
+      acknowledgedDigest: digest,
+      acknowledged: true,
+      context: second,
+      boundAt: "2026-07-21T12:01:03.000Z"
+    });
+    expect(() => routingLearningContextBindingSchema.parse({
+      ...bindRoutingLearningContext({
+        context: second,
+        acknowledgedDigest: digest,
+        boundAt: new Date("2026-07-21T12:01:03.000Z")
+      }),
+      contextDigest: "0000000000000000000000000000000000000000000000000000000000000000",
+      acknowledged: true
+    })).toThrow(/contextDigest must match/);
   });
 });
 

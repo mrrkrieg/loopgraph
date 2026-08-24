@@ -1,13 +1,17 @@
 import {
+  ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION,
   ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION,
   entityResolutionResultSchema,
   routingLearningContextSchema,
+  routingLearningContextBindingSchema,
+  routingLearningContextSemanticDigest,
   safeEventSubject,
   type BusinessProblem,
   type EventEnvelope,
   type RoutingCard,
   type RoutingEligibilityResult,
   type RoutingLearningContext,
+  type RoutingLearningContextBinding,
   type RoutingLearningLoopEvidence
 } from "../core";
 import type { OutcomeStore } from "./outcome-store";
@@ -18,8 +22,36 @@ const MAX_ELIGIBLE_LOOPS = 100;
 const MAX_SUBJECT_PROBLEMS = 100;
 const MAX_SOURCE_RECORDS = 500;
 const MAX_EVIDENCE_REFS = 20;
+export const MAX_ROUTING_LEARNING_CONTEXT_BYTES = 256 * 1024;
 const DECISION_RULE =
   "Only currently eligible routing cards may be selected; learning evidence cannot authorize a route, fan-out, execution, or provider action." as const;
+
+export function routingLearningContextDigest(input: RoutingLearningContext): string {
+  return routingLearningContextSemanticDigest(input);
+}
+
+export function bindRoutingLearningContext(input: {
+  context: RoutingLearningContext;
+  acknowledgedDigest?: string;
+  boundAt?: Date;
+}): RoutingLearningContextBinding {
+  const context = routingLearningContextSchema.parse(input.context);
+  const contextBytes = Buffer.byteLength(JSON.stringify(context), "utf8");
+  if (contextBytes > MAX_ROUTING_LEARNING_CONTEXT_BYTES) {
+    throw new Error(
+      `Routing learning context exceeds ${MAX_ROUTING_LEARNING_CONTEXT_BYTES} bytes (${contextBytes} received)`
+    );
+  }
+  const contextDigest = routingLearningContextDigest(context);
+  return routingLearningContextBindingSchema.parse({
+    schemaVersion: ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION,
+    contextDigest,
+    ...(input.acknowledgedDigest ? { acknowledgedDigest: input.acknowledgedDigest } : {}),
+    acknowledged: input.acknowledgedDigest === contextDigest,
+    context,
+    boundAt: (input.boundAt ?? new Date()).toISOString()
+  });
+}
 
 export async function compileRoutingLearningContext(input: {
   event: EventEnvelope;

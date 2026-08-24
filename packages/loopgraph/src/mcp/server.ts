@@ -32,6 +32,7 @@ import {
   requireDepartmentType,
   routingCardSchema,
   routingDecisionSchema,
+  routingLearningContextBindingSchema,
   routingLearningContextSchema,
   valueLedgerEntrySchema
 } from "../core";
@@ -42,6 +43,7 @@ import {
   routeCommitSimulateInputSchema,
   routingCatalogGetInputSchema,
   eventsIngestInputSchema,
+  evidenceBoundRoutingDecisionSubmitInputSchema,
   routingDecisionSubmitInputSchema,
   routingHumanChoiceSubmitInputSchema,
   type LoopgraphRoutingToolName
@@ -56,6 +58,7 @@ import {
   routeJobsGetInputSchema,
   routingEvaluationsGetInputSchema,
   routingDecisionGetInputSchema,
+  routingLearningEffectivenessGetInputSchema,
   type LoopgraphRoutingOpsToolName
 } from "../runtime/routing-ops-tools";
 import {
@@ -446,6 +449,7 @@ const toolInputSchemas = {
   loopgraph_events_get: eventsGetInputSchema,
   loopgraph_problems_get: problemsGetInputSchema,
   loopgraph_routing_decision_get: routingDecisionGetInputSchema,
+  loopgraph_routing_learning_effectiveness_get: routingLearningEffectivenessGetInputSchema,
   loopgraph_route_jobs_get: routeJobsGetInputSchema,
   loopgraph_routing_evaluations_get: routingEvaluationsGetInputSchema,
   loopgraph_lifecycle_events_get: lifecycleEventsGetInputSchema,
@@ -591,14 +595,16 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/hermes-agent-instance",
   "loopgraph://schemas/hermes-execution-event",
   "loopgraph://graph/company",
-  "loopgraph://catalog/company-loops"
+  "loopgraph://catalog/company-loops",
+  "loopgraph://schemas/routing-learning-context-binding"
 ] as const;
 
 const LOOPGRAPH_ROUTER_SCHEMA_RESOURCE_URIS = new Set([
   "loopgraph://schemas/event-envelope",
   "loopgraph://schemas/routing-card",
   "loopgraph://schemas/routing-decision",
-  "loopgraph://schemas/routing-learning-context"
+  "loopgraph://schemas/routing-learning-context",
+  "loopgraph://schemas/routing-learning-context-binding"
 ]);
 
 export function normalizeLoopgraphMcpExposure(value: unknown): LoopgraphMcpExposure {
@@ -611,19 +617,24 @@ export function listLoopgraphMcpTools(options: Pick<LoopgraphMcpServerOptions, "
   const exposure = normalizeLoopgraphMcpExposure(options.exposure);
   return loopgraphMcpToolDefinitions
     .filter((tool) => isToolAllowedForExposure(tool.name, exposure))
-    .map((tool) => ({
-      name: tool.name,
-      title: titleFromToolName(tool.name),
-      description: tool.description,
-      inputSchema: zodToJsonSchema(toolInputSchemas[tool.name], `${tool.name}_input`),
-      annotations: {
+    .map((tool) => {
+      const inputSchema = exposure === "webhook_router" && tool.name === "loopgraph_routing_decision_submit"
+        ? evidenceBoundRoutingDecisionSubmitInputSchema
+        : toolInputSchemas[tool.name];
+      return {
+        name: tool.name,
         title: titleFromToolName(tool.name),
-        readOnlyHint: isReadOnlyToolName(tool.name),
-        destructiveHint: isDestructiveToolName(tool.name),
-        idempotentHint: isIdempotentToolName(tool.name),
-        openWorldHint: false
-      }
-    }));
+        description: tool.description,
+        inputSchema: zodToJsonSchema(inputSchema, `${tool.name}_input`),
+        annotations: {
+          title: titleFromToolName(tool.name),
+          readOnlyHint: isReadOnlyToolName(tool.name),
+          destructiveHint: isDestructiveToolName(tool.name),
+          idempotentHint: isIdempotentToolName(tool.name),
+          openWorldHint: false
+        }
+      };
+    });
 }
 
 export async function listLoopgraphMcpResources(
@@ -785,6 +796,12 @@ export async function listLoopgraphMcpResources(
       uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
       name: "HermesExecutionEvent schema",
       description: "Assignment-bound task, tool, approval, output, outcome, and run telemetry contract.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[27],
+      name: "RoutingLearningContextBinding schema",
+      description: "Content-bound snapshot proving which advisory cross-loop evidence accompanied a Hermes route decision.",
       mimeType: "application/json"
     }
   ];
@@ -1125,9 +1142,14 @@ async function handleToolCall(
   }
 
   try {
+    const exposure = normalizeLoopgraphMcpExposure(options.exposure);
+    const rawInput = isRecord(params.arguments) ? params.arguments : {};
+    const input = exposure === "webhook_router" && name === "loopgraph_routing_decision_submit"
+      ? parseEvidenceBoundWebhookRouterDecision(rawInput)
+      : rawInput;
     const structuredContent = await callLoopgraphMcpTool(
       name,
-      isRecord(params.arguments) ? params.arguments : {},
+      input,
       options
     );
 
@@ -1368,6 +1390,13 @@ function schemaResource(id: string) {
       schemaVersion: "mcp-schema-resource/v1alpha1",
       id,
       jsonSchema: zodToJsonSchema(routingLearningContextSchema, "RoutingLearningContext")
+    };
+  }
+  if (id === "routing-learning-context-binding") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(routingLearningContextBindingSchema, "RoutingLearningContextBinding")
     };
   }
   if (id === "evidence-gap-set") {
@@ -1657,12 +1686,22 @@ function isResourceAllowedForExposure(uri: string, exposure: LoopgraphMcpExposur
 
 function mcpInstructionsForExposure(exposure: LoopgraphMcpExposure): string {
   if (exposure === "webhook_router") {
-    return "Loopgraph exposes only bounded event-ingest, routing-decision, routing-state, and graph tools for isolated Hermes webhook-router turns.";
+    return "Loopgraph exposes only bounded event-ingest, evidence-bound routing-decision, routing-state, and graph tools for isolated Hermes webhook-router turns. Every routing decision must echo the learningContextDigest returned by event ingest.";
   }
   if (exposure === "lifecycle_router") {
     return "Loopgraph exposes only lifecycle event receipt, lifecycle state read, and graph tools for notification-only Hermes lifecycle turns.";
   }
   return "Loopgraph exposes project-bound workspace, department, discovery, design, semantic graph transaction, local runtime, and routing administration tools for trusted Hermes/operator turns.";
+}
+
+function parseEvidenceBoundWebhookRouterDecision(input: Record<string, unknown>): Record<string, unknown> {
+  const parsed = evidenceBoundRoutingDecisionSubmitInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(
+      "Hermes webhook-router decisions require the valid learningContextDigest returned by loopgraph_events_ingest. Re-ingest the event before routing."
+    );
+  }
+  return parsed.data;
 }
 
 function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {

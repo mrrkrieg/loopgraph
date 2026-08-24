@@ -247,6 +247,7 @@ describe("routing tool surface", () => {
         eligibleForCurrentEvent: true
       })]
     });
+    expect(result.learningContextDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(await store.getEventReceipt(event.id)).toBeTruthy();
     expect(result.controllerTrigger).toMatchObject({
       enqueued: true,
@@ -379,6 +380,7 @@ describe("routing tool surface", () => {
         modelMetadata: { hermesTaskId: "task_tool_1" },
         policyVersion: "routing-policy/v1alpha1"
       },
+      learningContextDigest: ingest.learningContextDigest,
       hermesMetadata: { route: "google_ads_detector" }
     }, {
       store,
@@ -386,6 +388,15 @@ describe("routing tool surface", () => {
     });
 
     expect(result.valid).toBe(true);
+    expect(result.attempt.learningContextBinding).toMatchObject({
+      contextDigest: ingest.learningContextDigest,
+      acknowledgedDigest: ingest.learningContextDigest,
+      acknowledged: true,
+      context: {
+        status: "available",
+        eligibleLoopIds: ["marketing_ads"]
+      }
+    });
     expect(result.problem?.primaryLoopId).toBe("marketing_ads");
     expect(result.routeCommits).toHaveLength(1);
     expect(result.lifecycleDeliveries).toEqual([
@@ -422,6 +433,60 @@ describe("routing tool surface", () => {
         routeKey: "loopgraph-lifecycle-events"
       }
     });
+  });
+
+  it("rejects a stale Hermes learning-context digest before committing a route", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = adsEvent("delivery_tool_stale_learning_1");
+    const ingest = await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+
+    const result = await loopgraph_routing_decision_submit({
+      projectRoot,
+      learningContextDigest: "0000000000000000000000000000000000000000000000000000000000000000",
+      decision: {
+        schemaVersion: "routing-decision/v1alpha1",
+        eventId: event.id,
+        catalogVersion: ingest.catalogVersion,
+        action: "route",
+        problem: {
+          summary: "Campaign efficiency dropped.",
+          problemTypes: ["paid_acquisition_efficiency_drop"],
+          subject: event.subject,
+          severity: "medium",
+          dedupeKeyInputs: [event.subject.id]
+        },
+        selectedRoutes: [{
+          loopId: "marketing_ads",
+          role: "primary",
+          confidence: 0.92,
+          reasonSummary: "Campaign anomaly includes qualified-cost evidence.",
+          evidenceRefs: [],
+          inputMapping: { campaignId: event.subject.id },
+          priority: 0
+        }],
+        alternatives: [],
+        modelMetadata: { hermesTaskId: "task_tool_stale_1" },
+        policyVersion: "routing-policy/v1alpha1"
+      }
+    }, {
+      store,
+      now: new Date("2026-07-21T12:00:03.000Z")
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.validationErrors).toContain(
+      "Hermes learning-context digest is stale; re-ingest the event before routing"
+    );
+    expect(result.attempt.learningContextBinding).toMatchObject({
+      contextDigest: ingest.learningContextDigest,
+      acknowledgedDigest: "0000000000000000000000000000000000000000000000000000000000000000",
+      acknowledged: false
+    });
+    expect(await store.listRouteCommits()).toHaveLength(0);
   });
 
   it("simulates a validated route commit locally and links the run back to the commit", async () => {

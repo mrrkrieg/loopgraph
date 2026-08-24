@@ -17,6 +17,7 @@ import {
   getOutcomeStore,
   getStorageAdapter,
   getProviderSchemaSnapshotStore,
+  getRoutingStore,
   resetStorageAdapterCache,
   resolveHostedRuntimeProjectRoot
 } from "./storage-resolver";
@@ -259,6 +260,9 @@ describe("hosted runtime namespaces", () => {
     );
     expect(() => getMeasurementStore()).toThrow(
       "Distributed measurement storage is required"
+    );
+    expect(() => getRoutingStore()).toThrow(
+      "Distributed routing storage is required"
     );
     expect(() => getOutcomeStore()).toThrow(
       "Distributed outcome storage is required"

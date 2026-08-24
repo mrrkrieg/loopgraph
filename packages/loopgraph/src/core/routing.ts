@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DepartmentTypeSchema, normalizeDepartmentType } from "./department-skills";
-import { contentHash, loopSpecHash } from "./hash";
+import { contentDigest, contentHash, loopSpecHash } from "./hash";
 import type { LoopSpec } from "./loop-spec";
 
 export const EVENT_ENVELOPE_SCHEMA_VERSION = "event-envelope/v1alpha1" as const;
@@ -9,6 +9,8 @@ export const ROUTING_CARD_SCHEMA_VERSION = "routing-card/v1alpha1" as const;
 export const ROUTING_DECISION_SCHEMA_VERSION = "routing-decision/v1alpha1" as const;
 export const ROUTE_JOB_SCHEMA_VERSION = "route-job/v1alpha1" as const;
 export const ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION = "routing-learning-context/v1alpha1" as const;
+export const ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION =
+  "routing-learning-context-binding/v1alpha1" as const;
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
@@ -242,18 +244,6 @@ export const eventReceiptSchema = z.object({
   lastSeenAt: z.string().datetime()
 });
 
-export const routingAttemptSchema = z.object({
-  id: z.string().min(1),
-  eventId: z.string().min(1),
-  catalogVersion: z.string().min(1),
-  action: routingDecisionActionSchema.optional(),
-  status: z.enum(["received", "validated", "rejected", "committed", "failed"]),
-  decision: routingDecisionSchema.optional(),
-  validationErrors: z.array(z.string()).default([]),
-  hermesMetadata: z.record(z.string(), z.unknown()).default({}),
-  createdAt: z.string().datetime()
-});
-
 export const routeCommitSchema = z.object({
   id: z.string().min(1),
   eventId: z.string().min(1),
@@ -436,6 +426,53 @@ export const routingLearningContextSchema = z.object({
   warnings: z.array(z.string().min(1)).max(10).default([])
 });
 
+export function routingLearningContextSemanticDigest(input: RoutingLearningContext): string {
+  const context = routingLearningContextSchema.parse(input);
+  return contentDigest(Object.fromEntries(
+    Object.entries(context).filter(([key]) => key !== "generatedAt")
+  ));
+}
+
+export const routingLearningContextBindingSchema = z.object({
+  schemaVersion: z.literal(ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION)
+    .default(ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION),
+  contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  acknowledgedDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  acknowledged: z.boolean(),
+  context: routingLearningContextSchema,
+  boundAt: z.string().datetime()
+}).superRefine((value, refinement) => {
+  const actualDigest = routingLearningContextSemanticDigest(value.context);
+  if (value.contextDigest !== actualDigest) {
+    refinement.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["contextDigest"],
+      message: "contextDigest must match the bounded routing learning context"
+    });
+  }
+  const actualAcknowledgement = value.acknowledgedDigest === actualDigest;
+  if (value.acknowledged !== actualAcknowledgement) {
+    refinement.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["acknowledged"],
+      message: "acknowledged must match the supplied learning-context digest"
+    });
+  }
+});
+
+export const routingAttemptSchema = z.object({
+  id: z.string().min(1),
+  eventId: z.string().min(1),
+  catalogVersion: z.string().min(1),
+  action: routingDecisionActionSchema.optional(),
+  status: z.enum(["received", "validated", "rejected", "committed", "failed"]),
+  decision: routingDecisionSchema.optional(),
+  validationErrors: z.array(z.string()).default([]),
+  hermesMetadata: z.record(z.string(), z.unknown()).default({}),
+  learningContextBinding: routingLearningContextBindingSchema.optional(),
+  createdAt: z.string().datetime()
+});
+
 export const unhandledBusinessProblemSchema = businessProblemSchema.extend({
   status: z.literal("unhandled"),
   recurrenceCount: z.number().int().min(1).default(1),
@@ -458,6 +495,7 @@ export type RoutingCorrection = z.infer<typeof routingCorrectionSchema>;
 export type RouterEvaluation = z.infer<typeof routerEvaluationSchema>;
 export type RoutingLearningLoopEvidence = z.infer<typeof routingLearningLoopEvidenceSchema>;
 export type RoutingLearningContext = z.infer<typeof routingLearningContextSchema>;
+export type RoutingLearningContextBinding = z.infer<typeof routingLearningContextBindingSchema>;
 export type UnhandledBusinessProblem = z.infer<typeof unhandledBusinessProblemSchema>;
 
 export type RoutingEligibilityResult = {
