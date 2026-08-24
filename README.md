@@ -120,7 +120,7 @@ The automation is not successful merely because it produced a brief. It is succe
 | The diagram documents the workflow | Governed graph changes update backend topology and routing contracts |
 | Automations optimize local activity | Evidence can improve decisions across departments |
 
-Each event turn now includes a bounded shared-learning context: scoped routing evaluations, accountable human corrections, subject-related outcomes, and observed net value. Hermes can use that evidence to compare eligible loops, append evidence to an existing problem, lower confidence, or abstain. The context is advisory and can never make an ineligible loop eligible or authorize execution. See [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md).
+Each event turn now includes a bounded shared-learning context: scoped routing evaluations, accountable human corrections, subject-related outcomes, and observed net value. Hermes can use that evidence to compare eligible loops, append evidence to an existing problem, lower confidence, or abstain. The isolated Hermes router must acknowledge the exact context digest when it submits its decision; stale or omitted evidence cannot create a route commit. The context remains advisory and can never make an ineligible loop eligible or authorize execution. See [Hermes shared routing learning](docs/HERMES-SHARED-ROUTING-LEARNING.md).
 
 Loopgraph does not replace LangGraph, Mastra, Temporal, Langfuse, or HumanLayer. It provides the company operating contract around recurring AI work: **context, routing, policy, evidence, approval, escalation, and outcome**. See the [competitive boundary](docs/competitive-boundary.md).
 

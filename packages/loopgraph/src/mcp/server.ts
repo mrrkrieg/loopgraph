@@ -43,6 +43,7 @@ import {
   routeCommitSimulateInputSchema,
   routingCatalogGetInputSchema,
   eventsIngestInputSchema,
+  evidenceBoundRoutingDecisionSubmitInputSchema,
   routingDecisionSubmitInputSchema,
   routingHumanChoiceSubmitInputSchema,
   type LoopgraphRoutingToolName
@@ -614,19 +615,24 @@ export function listLoopgraphMcpTools(options: Pick<LoopgraphMcpServerOptions, "
   const exposure = normalizeLoopgraphMcpExposure(options.exposure);
   return loopgraphMcpToolDefinitions
     .filter((tool) => isToolAllowedForExposure(tool.name, exposure))
-    .map((tool) => ({
-      name: tool.name,
-      title: titleFromToolName(tool.name),
-      description: tool.description,
-      inputSchema: zodToJsonSchema(toolInputSchemas[tool.name], `${tool.name}_input`),
-      annotations: {
+    .map((tool) => {
+      const inputSchema = exposure === "webhook_router" && tool.name === "loopgraph_routing_decision_submit"
+        ? evidenceBoundRoutingDecisionSubmitInputSchema
+        : toolInputSchemas[tool.name];
+      return {
+        name: tool.name,
         title: titleFromToolName(tool.name),
-        readOnlyHint: isReadOnlyToolName(tool.name),
-        destructiveHint: isDestructiveToolName(tool.name),
-        idempotentHint: isIdempotentToolName(tool.name),
-        openWorldHint: false
-      }
-    }));
+        description: tool.description,
+        inputSchema: zodToJsonSchema(inputSchema, `${tool.name}_input`),
+        annotations: {
+          title: titleFromToolName(tool.name),
+          readOnlyHint: isReadOnlyToolName(tool.name),
+          destructiveHint: isDestructiveToolName(tool.name),
+          idempotentHint: isIdempotentToolName(tool.name),
+          openWorldHint: false
+        }
+      };
+    });
 }
 
 export async function listLoopgraphMcpResources(
@@ -1134,9 +1140,14 @@ async function handleToolCall(
   }
 
   try {
+    const exposure = normalizeLoopgraphMcpExposure(options.exposure);
+    const rawInput = isRecord(params.arguments) ? params.arguments : {};
+    const input = exposure === "webhook_router" && name === "loopgraph_routing_decision_submit"
+      ? parseEvidenceBoundWebhookRouterDecision(rawInput)
+      : rawInput;
     const structuredContent = await callLoopgraphMcpTool(
       name,
-      isRecord(params.arguments) ? params.arguments : {},
+      input,
       options
     );
 
@@ -1673,12 +1684,22 @@ function isResourceAllowedForExposure(uri: string, exposure: LoopgraphMcpExposur
 
 function mcpInstructionsForExposure(exposure: LoopgraphMcpExposure): string {
   if (exposure === "webhook_router") {
-    return "Loopgraph exposes only bounded event-ingest, routing-decision, routing-state, and graph tools for isolated Hermes webhook-router turns.";
+    return "Loopgraph exposes only bounded event-ingest, evidence-bound routing-decision, routing-state, and graph tools for isolated Hermes webhook-router turns. Every routing decision must echo the learningContextDigest returned by event ingest.";
   }
   if (exposure === "lifecycle_router") {
     return "Loopgraph exposes only lifecycle event receipt, lifecycle state read, and graph tools for notification-only Hermes lifecycle turns.";
   }
   return "Loopgraph exposes project-bound workspace, department, discovery, design, semantic graph transaction, local runtime, and routing administration tools for trusted Hermes/operator turns.";
+}
+
+function parseEvidenceBoundWebhookRouterDecision(input: Record<string, unknown>): Record<string, unknown> {
+  const parsed = evidenceBoundRoutingDecisionSubmitInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(
+      "Hermes webhook-router decisions require the valid learningContextDigest returned by loopgraph_events_ingest. Re-ingest the event before routing."
+    );
+  }
+  return parsed.data;
 }
 
 function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {

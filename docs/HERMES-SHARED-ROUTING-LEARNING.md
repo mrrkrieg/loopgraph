@@ -51,10 +51,12 @@ The event-router skill must echo `learningContextDigest` through `loopgraph_rout
 
 - A match stores `routing-learning-context-binding/v1alpha1` with the complete bounded packet, digest, acknowledgement, and binding time inside the durable routing attempt.
 - A supplied mismatch creates a durable rejected attempt and no route commit. Hermes must re-ingest before it reasons again.
-- An omitted digest remains valid for older clients, but the attempt is marked unacknowledged so the UI never implies stronger proof than exists.
+- The isolated `webhook_router` MCP profile advertises the digest as required and rejects an omitted or malformed value before decision submission. An omitted digest remains valid only on trusted admin/legacy surfaces, where the attempt is marked unacknowledged so the UI never implies stronger proof than exists.
 - If evidence cannot be loaded or safely bounded, Loopgraph records a small typed `unavailable` packet with a fixed redacted warning. It never stores the underlying infrastructure error.
 
 The Management routing receipt shows the acknowledgement state, digest, evidence counts, and per-loop summary. The correlation timeline adds the binding as a separate event. The event-routing projection draws a non-executable advisory-evidence node into the Hermes decision while preserving the executable event-to-decision edge. This makes the evidence that influenced one historical decision inspectable even after newer outcomes and corrections arrive.
+
+The local shadow-route simulator follows the same evidence-bound path: it ingests the event, retains the returned digest, and submits that digest with the deterministic rehearsal decision. A passing local rehearsal therefore proves the binding contract rather than silently producing a legacy unacknowledged receipt.
 
 ## Interfaces
 
