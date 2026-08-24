@@ -91,6 +91,8 @@ import {
   searchOfficialCompanyBlueprints
 } from "./company-blueprint-catalog";
 import { assertSecretFree } from "./secret-redaction";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import type { HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
@@ -659,6 +661,14 @@ export async function callLoopgraphAppTool(
     connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
     providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
+    routeActivationStatusProvider?: (input: {
+      projectRoot?: string;
+      now?: Date;
+    }) => Promise<HermesRouteActivationStatus>;
+    webhookDoctorProvider?: (input: {
+      projectRoot?: string;
+      now?: Date;
+    }) => Promise<HermesWebhookDoctorResult>;
     connectorBroker?: AppOperationTransport;
     connectorTenant?: ConnectorTenant;
     routingStore?: RoutingStore;
@@ -788,7 +798,9 @@ export async function callLoopgraphAppTool(
         snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId),
         outcomeStore: options.outcomeStore,
         operationsStore: options.hermesOperationsStore,
-        verificationStore: appVerificationStore(options, path.join(projectRoot, ".loopgraph", "apps"), identity.workspaceId)
+        verificationStore: appVerificationStore(options, path.join(projectRoot, ".loopgraph", "apps"), identity.workspaceId),
+        routeActivationStatusProvider: options.routeActivationStatusProvider,
+        webhookDoctorProvider: options.webhookDoctorProvider
       }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
@@ -1143,7 +1155,9 @@ export async function callLoopgraphAppTool(
       snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId),
       outcomeStore: options.outcomeStore,
       operationsStore: options.hermesOperationsStore,
-      verificationStore: appVerificationStore(options, appsRoot, identity.workspaceId)
+      verificationStore: appVerificationStore(options, appsRoot, identity.workspaceId),
+      routeActivationStatusProvider: options.routeActivationStatusProvider,
+      webhookDoctorProvider: options.webhookDoctorProvider
     }
   );
   if (name === "loopgraph_app_onboarding_get") {

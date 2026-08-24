@@ -123,7 +123,8 @@ previous/next key through a narrow protected rotation-controller protocol, obser
 old-only, overlap, and new-only JWKS states, and proves adoption plus retired-key denial through two
 deployed origins. See
 [Hosted workload issuer rotation staging gate](./HOSTED-WORKLOAD-ISSUER-ROTATION-STAGING-GATE.md).
-The first environment-specific receipt and production-promotion binding remain external. Rate-limit saturation,
+The protected workflow and production-promotion binding are implemented; the first
+environment-specific rotation receipt remains external. Rate-limit saturation,
 backup/restore, external retention, and cross-replica human refresh-token rotation
 remain separate operational drills. Exact release revocation now has its own executable destructive
 staging gate, including workload denial and local cache eviction; see
