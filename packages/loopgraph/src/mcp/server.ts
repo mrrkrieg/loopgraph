@@ -32,6 +32,8 @@ import {
   requireDepartmentType,
   routingCardSchema,
   routingDecisionSchema,
+  routingLearningContextBindingSchema,
+  routingLearningContextSchema,
   valueLedgerEntrySchema
 } from "../core";
 import {
@@ -41,6 +43,7 @@ import {
   routeCommitSimulateInputSchema,
   routingCatalogGetInputSchema,
   eventsIngestInputSchema,
+  evidenceBoundRoutingDecisionSubmitInputSchema,
   routingDecisionSubmitInputSchema,
   routingHumanChoiceSubmitInputSchema,
   type LoopgraphRoutingToolName
@@ -55,6 +58,7 @@ import {
   routeJobsGetInputSchema,
   routingEvaluationsGetInputSchema,
   routingDecisionGetInputSchema,
+  routingLearningEffectivenessGetInputSchema,
   type LoopgraphRoutingOpsToolName
 } from "../runtime/routing-ops-tools";
 import {
@@ -72,6 +76,13 @@ import {
   loopgraphHermesWebhookToolDefinitions,
   type LoopgraphHermesWebhookToolName
 } from "../runtime/hermes-webhooks";
+import {
+  callLoopgraphHermesRouteActivationTool,
+  hermesRouteActivationPrepareInputSchema,
+  hermesRouteActivationStatusInputSchema,
+  loopgraphHermesRouteActivationToolDefinitions,
+  type LoopgraphHermesRouteActivationToolName
+} from "../runtime/hermes-route-activation";
 import {
   agentOperationsGetInputSchema,
   callLoopgraphHermesOperationsTool,
@@ -173,6 +184,7 @@ import {
 import { listLoopgraphLoops } from "../runtime/loop-materialization";
 import {
   appActivationApproveInputSchema,
+  appActivationGateGetInputSchema,
   appActivateInputSchema,
   companyBlueprintGetInputSchema,
   companyBlueprintsSearchInputSchema,
@@ -182,6 +194,8 @@ import {
   departmentPacksSearchInputSchema,
   appGetInputSchema,
   appOnboardingGetInputSchema,
+  appOnboardingSaveInputSchema,
+  appOnboardingResetInputSchema,
   appHistoricalReplayInputSchema,
   appEvaluationLabelInputSchema,
   appConfigureInputSchema,
@@ -201,7 +215,10 @@ import {
   appOperationResolveInputSchema,
   appOperationInvokeInputSchema,
   appOperationActionsGetInputSchema,
+  appOperationActionCommitInputSchema,
+  appOperationActionReconcileInputSchema,
   appMaturityGetInputSchema,
+  appsRenewalPlanInputSchema,
   appVerificationRegistryGetInputSchema,
   appVerifierTrustAddInputSchema,
   appVerifierTrustRevokeInputSchema,
@@ -335,6 +352,7 @@ type LoopgraphMcpToolName =
   | LoopgraphRoutingOpsToolName
   | LoopgraphRoutingEvaluationToolName
   | LoopgraphHermesWebhookToolName
+  | LoopgraphHermesRouteActivationToolName
   | LoopgraphHermesOperationsToolName
   | LoopgraphWorkspaceToolName
   | LoopgraphDiscoveryToolName
@@ -431,6 +449,7 @@ const toolInputSchemas = {
   loopgraph_events_get: eventsGetInputSchema,
   loopgraph_problems_get: problemsGetInputSchema,
   loopgraph_routing_decision_get: routingDecisionGetInputSchema,
+  loopgraph_routing_learning_effectiveness_get: routingLearningEffectivenessGetInputSchema,
   loopgraph_route_jobs_get: routeJobsGetInputSchema,
   loopgraph_routing_evaluations_get: routingEvaluationsGetInputSchema,
   loopgraph_lifecycle_events_get: lifecycleEventsGetInputSchema,
@@ -440,6 +459,8 @@ const toolInputSchemas = {
   loopgraph_hermes_webhooks_sync: hermesWebhooksSyncInputSchema,
   loopgraph_hermes_webhooks_doctor: hermesWebhooksDoctorInputSchema,
   loopgraph_hermes_webhooks_test: hermesWebhookFixtureTestInputSchema,
+  loopgraph_hermes_webhooks_prepare: hermesRouteActivationPrepareInputSchema,
+  loopgraph_hermes_webhooks_activation_status: hermesRouteActivationStatusInputSchema,
   loopgraph_hermes_agent_register: hermesAgentRegisterInputSchema,
   loopgraph_hermes_agent_heartbeat: hermesAgentHeartbeatInputSchema,
   loopgraph_hermes_execution_event_ingest: hermesExecutionEventIngestInputSchema,
@@ -453,13 +474,18 @@ const toolInputSchemas = {
   loopgraph_marketplace_search: marketplaceSearchInputSchema,
   loopgraph_app_get: appGetInputSchema,
   loopgraph_app_onboarding_get: appOnboardingGetInputSchema,
+  loopgraph_app_onboarding_save: appOnboardingSaveInputSchema,
+  loopgraph_app_onboarding_reset: appOnboardingResetInputSchema,
   loopgraph_app_install_plan: appInstallPlanInputSchema,
   loopgraph_app_install_apply: appInstallApplyInputSchema,
   loopgraph_app_install_status: appInstallStatusInputSchema,
   loopgraph_app_operation_resolve: appOperationResolveInputSchema,
   loopgraph_app_operation_invoke: appOperationInvokeInputSchema,
   loopgraph_app_operation_actions_get: appOperationActionsGetInputSchema,
+  loopgraph_app_operation_action_commit: appOperationActionCommitInputSchema,
+  loopgraph_app_operation_action_reconcile: appOperationActionReconcileInputSchema,
   loopgraph_app_maturity_get: appMaturityGetInputSchema,
+  loopgraph_apps_renewal_plan: appsRenewalPlanInputSchema,
   loopgraph_app_verification_registry_get: appVerificationRegistryGetInputSchema,
   loopgraph_app_verifier_trust_add: appVerifierTrustAddInputSchema,
   loopgraph_app_verifier_trust_revoke: appVerifierTrustRevokeInputSchema,
@@ -481,6 +507,7 @@ const toolInputSchemas = {
   loopgraph_app_rollback: appRollbackInputSchema,
   loopgraph_app_detach: appDetachInputSchema,
   loopgraph_app_uninstall: appUninstallInputSchema,
+  loopgraph_app_activation_gate_get: appActivationGateGetInputSchema,
   loopgraph_app_activation_approve: appActivationApproveInputSchema,
   loopgraph_app_activate: appActivateInputSchema,
   loopgraph_app_pause: appPauseInputSchema,
@@ -520,6 +547,7 @@ const loopgraphMcpToolDefinitions = [
   ...loopgraphRoutingOpsToolDefinitions,
   ...loopgraphRoutingEvaluationToolDefinitions,
   ...loopgraphHermesWebhookToolDefinitions,
+  ...loopgraphHermesRouteActivationToolDefinitions,
   ...loopgraphHermesOperationsToolDefinitions,
   ...loopgraphAppToolDefinitions
 ] as const;
@@ -546,6 +574,7 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/event-envelope",
   "loopgraph://schemas/routing-card",
   "loopgraph://schemas/routing-decision",
+  "loopgraph://schemas/routing-learning-context",
   "loopgraph://schemas/evidence-gap-set",
   "loopgraph://schemas/hermes-design-task",
   "loopgraph://schemas/loop-opportunity",
@@ -566,13 +595,16 @@ export const LOOPGRAPH_MCP_STATIC_RESOURCE_URIS = [
   "loopgraph://schemas/hermes-agent-instance",
   "loopgraph://schemas/hermes-execution-event",
   "loopgraph://graph/company",
-  "loopgraph://catalog/company-loops"
+  "loopgraph://catalog/company-loops",
+  "loopgraph://schemas/routing-learning-context-binding"
 ] as const;
 
 const LOOPGRAPH_ROUTER_SCHEMA_RESOURCE_URIS = new Set([
   "loopgraph://schemas/event-envelope",
   "loopgraph://schemas/routing-card",
-  "loopgraph://schemas/routing-decision"
+  "loopgraph://schemas/routing-decision",
+  "loopgraph://schemas/routing-learning-context",
+  "loopgraph://schemas/routing-learning-context-binding"
 ]);
 
 export function normalizeLoopgraphMcpExposure(value: unknown): LoopgraphMcpExposure {
@@ -585,19 +617,24 @@ export function listLoopgraphMcpTools(options: Pick<LoopgraphMcpServerOptions, "
   const exposure = normalizeLoopgraphMcpExposure(options.exposure);
   return loopgraphMcpToolDefinitions
     .filter((tool) => isToolAllowedForExposure(tool.name, exposure))
-    .map((tool) => ({
-      name: tool.name,
-      title: titleFromToolName(tool.name),
-      description: tool.description,
-      inputSchema: zodToJsonSchema(toolInputSchemas[tool.name], `${tool.name}_input`),
-      annotations: {
+    .map((tool) => {
+      const inputSchema = exposure === "webhook_router" && tool.name === "loopgraph_routing_decision_submit"
+        ? evidenceBoundRoutingDecisionSubmitInputSchema
+        : toolInputSchemas[tool.name];
+      return {
+        name: tool.name,
         title: titleFromToolName(tool.name),
-        readOnlyHint: isReadOnlyToolName(tool.name),
-        destructiveHint: isDestructiveToolName(tool.name),
-        idempotentHint: isIdempotentToolName(tool.name),
-        openWorldHint: false
-      }
-    }));
+        description: tool.description,
+        inputSchema: zodToJsonSchema(inputSchema, `${tool.name}_input`),
+        annotations: {
+          title: titleFromToolName(tool.name),
+          readOnlyHint: isReadOnlyToolName(tool.name),
+          destructiveHint: isDestructiveToolName(tool.name),
+          idempotentHint: isIdempotentToolName(tool.name),
+          openWorldHint: false
+        }
+      };
+    });
 }
 
 export async function listLoopgraphMcpResources(
@@ -643,127 +680,139 @@ export async function listLoopgraphMcpResources(
     },
     {
       uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[5],
+      name: "RoutingLearningContext schema",
+      description: "Bounded advisory routing evaluations, corrections, observed outcomes, and value evidence for Hermes.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[6],
       name: "EvidenceGapSet schema",
       description: "Focused missing-evidence contract Loopgraph uses to drive adaptive Hermes questions.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[6],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
       name: "HermesDesignTask schema",
       description: "Durable Loopgraph-initiated design task and delivery state exposed to trusted Hermes sessions.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[7],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[8],
       name: "LoopOpportunity schema",
       description: "Explainable, scored opportunity to create, improve, split, merge, or retire a business loop.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[8],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[9],
       name: "GraphChangeSet schema",
       description: "Versioned proposed changes to the company loop graph derived from observed evidence.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[9],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[10],
       name: "MetricSample schema",
       description: "Source-qualified observed, modeled, or incomplete metric evidence.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[10],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[11],
       name: "ObservedOutcome schema",
       description: "Versioned comparison between baseline and post-loop business measurements.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[11],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[12],
       name: "ValueLedgerEntry schema",
       description: "Net loop value after review, rework, supervision, escalation, and governance cost.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[12],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[13],
       name: "LoopControllerPolicy schema",
       description: "Project-local policy boundaries for continuous evidence evaluation and automatic shadow changes.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[13],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[14],
       name: "LoopControllerRun schema",
       description: "Durable controller trigger, evidence, decision, policy receipt, and error record.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[14],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[15],
       name: "GraphSnapshot schema",
       description: "Content-bound registered LoopSpecs and generated assets captured before and after graph mutation.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[15],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[16],
       name: "GraphChangeApprovalReceipt schema",
       description: "Accountable approval bound to an exact graph, operation set, policy, actor, and evidence.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[16],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[17],
       name: "GraphTransaction schema",
       description: "Atomic semantic graph change, promotion, lifecycle, or rollback transaction record.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[17],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
       name: "LoopPromotionReceipt schema",
       description: "Evidence-bound receipt for one ordered loop activation-mode promotion.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[18],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
       name: "PromotionRehearsal schema",
       description: "Content-bound simulation, routing, ambiguity, regression, and policy gate report required for promotion.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[19],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[20],
       name: "MetricBinding schema",
       description: "Exact contract between a LoopSpec metric and one scheduled Hermes connector query.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[20],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[21],
       name: "MeasurementJob schema",
       description: "Leased, idempotent provider measurement job with a durable evidence result.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[21],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
       name: "ConnectionReconciliation schema",
       description: "Connector, scope, webhook, health, and overdue-measurement reconciliation report.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[22],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[23],
       name: "HermesAgentInstance schema",
       description: "Capability-bounded Hermes runtime registration and heartbeat contract.",
       mimeType: "application/json"
     },
     {
-      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[23],
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
       name: "HermesExecutionEvent schema",
       description: "Assignment-bound task, tool, approval, output, outcome, and run telemetry contract.",
+      mimeType: "application/json"
+    },
+    {
+      uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[27],
+      name: "RoutingLearningContextBinding schema",
+      description: "Content-bound snapshot proving which advisory cross-loop evidence accompanied a Hermes route decision.",
       mimeType: "application/json"
     }
   ];
   const graphResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[24],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[25],
     name: "Hermes Company Brain graph",
     description: "Project-bound design graph projection: Hermes Brain -> Department -> Loops.",
     mimeType: "application/json"
   }];
   const companyCatalogResources: LoopgraphMcpResource[] = [{
-    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[25],
+    uri: LOOPGRAPH_MCP_STATIC_RESOURCE_URIS[26],
     name: "Prebuilt company loop library",
     description: "Canonical department operating skills, Hermes routing questions, prebuilt loop claims, and shared-learning playbooks.",
     mimeType: "application/json"
@@ -1093,9 +1142,14 @@ async function handleToolCall(
   }
 
   try {
+    const exposure = normalizeLoopgraphMcpExposure(options.exposure);
+    const rawInput = isRecord(params.arguments) ? params.arguments : {};
+    const input = exposure === "webhook_router" && name === "loopgraph_routing_decision_submit"
+      ? parseEvidenceBoundWebhookRouterDecision(rawInput)
+      : rawInput;
     const structuredContent = await callLoopgraphMcpTool(
       name,
-      isRecord(params.arguments) ? params.arguments : {},
+      input,
       options
     );
 
@@ -1149,6 +1203,13 @@ async function callLoopgraphMcpTool(
 
   if (isLoopgraphHermesWebhookToolName(name)) {
     return callLoopgraphHermesWebhookTool(name, boundInput, {
+      projectRoot: options.projectRoot,
+      now: options.now
+    });
+  }
+
+  if (isLoopgraphHermesRouteActivationToolName(name)) {
+    return callLoopgraphHermesRouteActivationTool(name, boundInput, {
       projectRoot: options.projectRoot,
       now: options.now
     });
@@ -1322,6 +1383,20 @@ function schemaResource(id: string) {
       schemaVersion: "mcp-schema-resource/v1alpha1",
       id,
       jsonSchema: zodToJsonSchema(routingDecisionSchema, "RoutingDecision")
+    };
+  }
+  if (id === "routing-learning-context") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(routingLearningContextSchema, "RoutingLearningContext")
+    };
+  }
+  if (id === "routing-learning-context-binding") {
+    return {
+      schemaVersion: "mcp-schema-resource/v1alpha1",
+      id,
+      jsonSchema: zodToJsonSchema(routingLearningContextBindingSchema, "RoutingLearningContextBinding")
     };
   }
   if (id === "evidence-gap-set") {
@@ -1506,6 +1581,10 @@ function isLoopgraphHermesWebhookToolName(value: unknown): value is LoopgraphHer
   return typeof value === "string" && loopgraphHermesWebhookToolDefinitions.some((tool) => tool.name === value);
 }
 
+function isLoopgraphHermesRouteActivationToolName(value: unknown): value is LoopgraphHermesRouteActivationToolName {
+  return typeof value === "string" && loopgraphHermesRouteActivationToolDefinitions.some((tool) => tool.name === value);
+}
+
 function isLoopgraphHermesOperationsToolName(value: unknown): value is LoopgraphHermesOperationsToolName {
   return typeof value === "string" && loopgraphHermesOperationsToolDefinitions.some((tool) => tool.name === value);
 }
@@ -1575,6 +1654,7 @@ function isLoopgraphMcpToolName(value: unknown): value is LoopgraphMcpToolName {
     isLoopgraphRoutingOpsToolName(value) ||
     isLoopgraphRoutingEvaluationToolName(value) ||
     isLoopgraphHermesWebhookToolName(value) ||
+    isLoopgraphHermesRouteActivationToolName(value) ||
     isLoopgraphHermesOperationsToolName(value) ||
     isLoopgraphWorkspaceToolName(value) ||
     isLoopgraphDiscoveryToolName(value) ||
@@ -1606,12 +1686,22 @@ function isResourceAllowedForExposure(uri: string, exposure: LoopgraphMcpExposur
 
 function mcpInstructionsForExposure(exposure: LoopgraphMcpExposure): string {
   if (exposure === "webhook_router") {
-    return "Loopgraph exposes only bounded event-ingest, routing-decision, routing-state, and graph tools for isolated Hermes webhook-router turns.";
+    return "Loopgraph exposes only bounded event-ingest, evidence-bound routing-decision, routing-state, and graph tools for isolated Hermes webhook-router turns. Every routing decision must echo the learningContextDigest returned by event ingest.";
   }
   if (exposure === "lifecycle_router") {
     return "Loopgraph exposes only lifecycle event receipt, lifecycle state read, and graph tools for notification-only Hermes lifecycle turns.";
   }
   return "Loopgraph exposes project-bound workspace, department, discovery, design, semantic graph transaction, local runtime, and routing administration tools for trusted Hermes/operator turns.";
+}
+
+function parseEvidenceBoundWebhookRouterDecision(input: Record<string, unknown>): Record<string, unknown> {
+  const parsed = evidenceBoundRoutingDecisionSubmitInputSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new Error(
+      "Hermes webhook-router decisions require the valid learningContextDigest returned by loopgraph_events_ingest. Re-ingest the event before routing."
+    );
+  }
+  return parsed.data;
 }
 
 function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
@@ -1662,7 +1752,9 @@ function isReadOnlyToolName(name: LoopgraphMcpToolName): boolean {
     name === "loopgraph_lifecycle_events_get" ||
     name === "loopgraph_graph_get" ||
     name === "loopgraph_hermes_webhooks_plan" ||
-    name === "loopgraph_hermes_webhooks_doctor";
+    name === "loopgraph_hermes_webhooks_doctor" ||
+    name === "loopgraph_hermes_webhooks_prepare" ||
+    name === "loopgraph_hermes_webhooks_activation_status";
 }
 
 function isIdempotentToolName(name: LoopgraphMcpToolName): boolean {

@@ -12,7 +12,7 @@ describe("Installed App operations panels", () => {
     const html = renderToStaticMarkup(React.createElement(React.Fragment, null,
       React.createElement(InstalledAppTopologyPanel, { operations }),
       React.createElement(InstalledAppActivityPanel, { operations }),
-      React.createElement(InstalledAppActionsPanel, { operations }),
+      React.createElement(InstalledAppActionsPanel, { operations, canApproveActions: true }),
       React.createElement(InstalledAppOutcomesPanel, { operations })
     ));
 
@@ -31,6 +31,8 @@ describe("Installed App operations panels", () => {
     expect(html).toContain("crm.contacts.update");
     expect(html).toContain("Human approval required");
     expect(html).toContain("provider write has not run");
+    expect(html).toContain("Approve exact action");
+    expect(html).toContain("step-up authentication");
     expect(html).not.toContain("canonicalInput");
   });
 
@@ -66,6 +68,20 @@ describe("Installed App operations panels", () => {
     expect(html).toContain("No events have reached this App yet");
     expect(html).toContain("never mixed into this view");
     expect(html).not.toContain("Google Ads");
+  });
+
+  it("tells operators to reconcile an interrupted commit instead of retrying the provider write", () => {
+    const operations = populatedOperations();
+    operations.actions[0] = {
+      ...operations.actions[0]!,
+      effectiveStatus: "committing"
+    };
+
+    const html = renderToStaticMarkup(React.createElement(InstalledAppActionsPanel, { operations }));
+
+    expect(html).toContain("Hermes must reconcile this action");
+    expect(html).toContain("never repeats the provider write");
+    expect(html).not.toContain("Approve exact action");
   });
 });
 
@@ -126,7 +142,8 @@ function populatedOperations(): InstalledAppOperationsView {
       expiresAt: "2026-08-20T12:14:00.000Z",
       updatedAt: "2026-08-20T12:04:00.000Z",
       recordDigest: `sha256:${"9".repeat(64)}`,
-      effectiveStatus: "prepared"
+      effectiveStatus: "prepared",
+      lifecycleEvents: []
     }],
     outcomes: [{
       id: "outcome-1",

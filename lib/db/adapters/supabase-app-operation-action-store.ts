@@ -1,9 +1,17 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { appOperationActionSchema, type AppOperationAction } from "loopgraph/core";
 import {
+  appOperationActionEventSchema,
+  appOperationActionSchema,
+  type AppOperationAction,
+  type AppOperationActionEvent
+} from "loopgraph/core";
+import {
+  assertActionEventBoundary,
   assertPreparedActionBoundary,
+  type AppOperationActionEventQuery,
+  type AppOperationActionReconciliationCandidate,
   type AppOperationActionQuery,
   type AppOperationActionStore
 } from "loopgraph/runtime";
@@ -45,6 +53,19 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
     return data ? parseActionRow(data, this.scope.workspaceId) : undefined;
   }
 
+  async recordEvent(input: AppOperationActionEvent): Promise<AppOperationActionEvent> {
+    const event = appOperationActionEventSchema.parse(input);
+    assertActionEventBoundary(event, this.scope.workspaceId);
+    const { data, error } = await this.supabase.rpc("record_loopgraph_app_operation_action_event", {
+      p_organization_id: this.scope.organizationId,
+      p_project_key: this.scope.projectKey,
+      p_workspace_id: this.scope.workspaceId,
+      p_event: event
+    });
+    if (!error) return appOperationActionEventSchema.parse(data);
+    throw new Error(`Failed to record App action lifecycle event: ${error.message}`);
+  }
+
   async list(queryInput: AppOperationActionQuery): Promise<AppOperationAction[]> {
     if (queryInput.workspaceId !== this.scope.workspaceId) return [];
     const limit = boundedLimit(queryInput.limit);
@@ -58,6 +79,55 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
     return (data ?? []).map((row) => parseActionRow(row, this.scope.workspaceId));
   }
 
+  async listEvents(queryInput: AppOperationActionEventQuery): Promise<AppOperationActionEvent[]> {
+    if (queryInput.workspaceId !== this.scope.workspaceId) return [];
+    const limit = boundedLimit(queryInput.limit);
+    let query = this.supabase
+      .from("loopgraph_app_operation_action_events")
+      .select("event_payload")
+      .eq("organization_id", this.scope.organizationId)
+      .eq("project_key", this.scope.projectKey)
+      .eq("workspace_id", this.scope.workspaceId);
+    if (queryInput.installationId) query = query.eq("installation_id", queryInput.installationId);
+    if (queryInput.actionId) query = query.eq("action_id", queryInput.actionId);
+    if (queryInput.eventType) query = query.eq("event_type", queryInput.eventType);
+    const { data, error } = await query.order("occurred_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(`Failed to list App action lifecycle events: ${error.message}`);
+    return (data ?? []).map((row) => parseEventRow(row, this.scope.workspaceId));
+  }
+
+  async listReconciliationCandidates(query: {
+    workspaceId: string;
+    requestedBefore: string;
+    limit: number;
+  }): Promise<AppOperationActionReconciliationCandidate[]> {
+    if (query.workspaceId !== this.scope.workspaceId) return [];
+    const limit = boundedLimit(query.limit);
+    if (!Number.isFinite(Date.parse(query.requestedBefore))) throw new Error("App action reconciliation cutoff is invalid");
+    const { data, error } = await this.supabase.rpc("list_loopgraph_app_action_reconciliation_candidates", {
+      p_organization_id: this.scope.organizationId,
+      p_project_key: this.scope.projectKey,
+      p_workspace_id: this.scope.workspaceId,
+      p_requested_before: query.requestedBefore,
+      p_limit: limit
+    });
+    if (error) throw new Error(`Failed to list App action reconciliation candidates: ${error.message}`);
+    if (!Array.isArray(data)) throw new Error("Hosted App action reconciliation query returned an invalid result");
+    return data.map((row) => {
+      if (!row || typeof row !== "object" || !("action_payload" in row) || !("request_event_payload" in row)) {
+        throw new Error("Hosted App action reconciliation query returned an invalid row");
+      }
+      const action = appOperationActionSchema.parse((row as { action_payload: unknown }).action_payload);
+      const requestEvent = appOperationActionEventSchema.parse((row as { request_event_payload: unknown }).request_event_payload);
+      if (action.workspaceId !== this.scope.workspaceId || requestEvent.workspaceId !== this.scope.workspaceId ||
+        requestEvent.eventType !== "commit_requested" || !requestEvent.commit ||
+        action.id !== requestEvent.actionId || action.installationId !== requestEvent.installationId) {
+        throw new Error("Hosted App action reconciliation candidate is out of scope or malformed");
+      }
+      return { action, requestEvent } as AppOperationActionReconciliationCandidate;
+    });
+  }
+
   private scopedQuery() {
     return this.supabase
       .from("loopgraph_app_operation_actions")
@@ -66,6 +136,15 @@ export class SupabaseAppOperationActionStore implements AppOperationActionStore 
       .eq("project_key", this.scope.projectKey)
       .eq("workspace_id", this.scope.workspaceId);
   }
+}
+
+function parseEventRow(row: unknown, workspaceId: string): AppOperationActionEvent {
+  if (!row || typeof row !== "object" || !("event_payload" in row)) {
+    throw new Error("Hosted App operation action store returned an invalid lifecycle event row");
+  }
+  const event = appOperationActionEventSchema.parse((row as { event_payload: unknown }).event_payload);
+  if (event.workspaceId !== workspaceId) throw new Error("App operation action event belongs to another workspace");
+  return event;
 }
 
 function parseActionRow(row: unknown, workspaceId: string): AppOperationAction {
