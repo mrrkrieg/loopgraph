@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
 import {
+  APP_INSTALL_SCHEMA_VERSION,
   APP_EVAL_SCHEMA_VERSION,
   appEvalRunSchema,
   appHistoricalReplayRequestSchema,
@@ -53,6 +54,49 @@ const REQUIRED_CONFORMANCE_CATEGORIES = {
   retry_idempotency: ["retry-replay", "retry-idempotency"],
   upgrade_rollback: ["upgrade-rollback"]
 } as const;
+
+export function createSyntheticValidationInstallation(
+  loaded: LoopPackLoadResult,
+  actor: string
+): WorkspaceAppInstallation {
+  const { manifest, artifact } = loaded;
+  return {
+    schemaVersion: APP_INSTALL_SCHEMA_VERSION,
+    id: `validation.${manifest.metadata.id}`,
+    workspaceId: "publisher-validation",
+    appId: manifest.metadata.id,
+    version: manifest.metadata.version,
+    artifactDigest: artifact.digest,
+    state: "ready_to_test",
+    mode: "simulation",
+    selectedModules: manifest.modules.map((moduleDefinition) => moduleDefinition.id),
+    presetId: "validation",
+    configuration: {
+      schemaVersion: "loopgraph-app-configuration/v1alpha1",
+      appId: manifest.metadata.id,
+      version: manifest.metadata.version,
+      fields: [],
+      values: {},
+      provenance: {},
+      completedAt: new Date(0).toISOString()
+    },
+    connectionBindings: {},
+    operationBindings: {},
+    fieldMappingIds: [],
+    permissions: manifest.permissions.map((permission) => ({
+      capability: permission.capability,
+      authority: permission.authority,
+      decision: permission.defaultPolicy === "allowed" ? "allow" : permission.defaultPolicy === "forbidden" ? "forbid" : "approval_required",
+      reason: "Synthetic conformance keeps provider execution blocked.",
+      changedFromInstalled: false
+    })),
+    ownedAssets: [],
+    history: [],
+    installedAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    installedBy: actor
+  };
+}
 
 export async function runAppSyntheticConformance(input: {
   loaded: LoopPackLoadResult;
@@ -194,6 +238,7 @@ export function runAppHistoricalReplay(input: {
     writeBlocked: true,
     startedAt,
     completedAt: startedAt,
+    sourceWindow: { from: request.from, to: request.to },
     scenarios,
     metrics: {
       eventCount: scenarios.length,
@@ -248,6 +293,11 @@ export function createPromotionRecommendation(input: {
       id: "false-positive-rate",
       status: falsePositiveRate === undefined ? "warn" : falsePositiveRate <= 0.05 ? "pass" : "fail",
       summary: falsePositiveRate === undefined ? "False-positive rate needs reviewer labels." : `Observed false-positive rate is ${(falsePositiveRate * 100).toFixed(1)}%.`
+    },
+    {
+      id: "incomplete-rate",
+      status: incompleteRate === undefined ? "warn" : incompleteRate <= 0.05 ? "pass" : "fail",
+      summary: incompleteRate === undefined ? "Incomplete-decision rate needs reviewer labels." : `Observed incomplete-decision rate is ${(incompleteRate * 100).toFixed(1)}%.`
     },
     {
       id: "review-burden",
