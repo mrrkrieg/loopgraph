@@ -5,6 +5,7 @@ import {
   formatOperatingDate
 } from "@/components/operate/format";
 import { OperateNav } from "@/components/operate/operate-nav";
+import { OperationsAutoRefresh } from "@/components/operate/operations-auto-refresh";
 import { OperatingModeNote } from "@/components/operate/operating-mode-note";
 import { MetricCard } from "@/components/metric-card";
 import { PageHeader } from "@/components/page-header";
@@ -21,6 +22,7 @@ export default async function LearningPage() {
 
   return (
     <>
+      <OperationsAutoRefresh />
       <PageHeader
         eyebrow="Operate"
         title="Learning evidence"
