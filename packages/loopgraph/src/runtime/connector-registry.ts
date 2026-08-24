@@ -597,6 +597,7 @@ export function connectionInstanceFromBrokerInstallation(
     status,
     statusReason: status === "connected" ? undefined : `Hermes Connector Broker installation is ${installation.status}.`,
     environment: installation.environment === "production" ? "live" : "sandbox",
+    brokerEnvironment: installation.environment,
     readPolicy: canRead ? "read_only" : "not_allowed",
     writePolicy: canExecute ? "approved_only" : canDraft ? "draft_only" : "not_allowed",
     lastHealthCheckAt: installation.lastHealthCheckAt,

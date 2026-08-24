@@ -7,7 +7,10 @@ import {
   type AppIndependentVerificationReceipt,
   type AppVerifierTrustKey
 } from "../core";
-import { verifyAppIndependentVerificationReceipt } from "./app-operational-maturity";
+import {
+  validateAppVerifierPublicKey,
+  verifyAppIndependentVerificationReceipt
+} from "./app-operational-maturity";
 
 export const APP_VERIFICATION_REGISTRY_SCHEMA_VERSION = "loopgraph-app-verification-registry/v1alpha1" as const;
 
@@ -22,7 +25,31 @@ const appVerificationRegistrySchema = z.object({
 
 export type AppVerificationRegistry = z.infer<typeof appVerificationRegistrySchema>;
 
-export class FileAppVerificationStore {
+export type AppVerificationImportContext = {
+  importedBy: string;
+  importRef: string;
+  importedAt: string;
+};
+
+export interface AppVerificationStore {
+  readonly persistence?: "local" | "distributed";
+  read(): Promise<AppVerificationRegistry>;
+  trustVerifierKey(key: AppVerifierTrustKey): Promise<AppVerificationRegistry>;
+  revokeVerifierKey(input: {
+    verifierId: string;
+    keyId: string;
+    revokedBy: string;
+    revocationRef: string;
+    revokedAt: string;
+  }): Promise<AppVerificationRegistry>;
+  importReceipt(
+    receipt: AppIndependentVerificationReceipt,
+    context: AppVerificationImportContext
+  ): Promise<AppVerificationRegistry>;
+}
+
+export class FileAppVerificationStore implements AppVerificationStore {
+  readonly persistence = "local" as const;
   private readonly filePath: string;
   private readonly lockPath: string;
 
@@ -51,6 +78,7 @@ export class FileAppVerificationStore {
 
   async trustVerifierKey(keyInput: AppVerifierTrustKey): Promise<AppVerificationRegistry> {
     const key = appVerifierTrustKeySchema.parse(keyInput);
+    if (!validateAppVerifierPublicKey(key)) throw new Error("Verifier public key must be a valid Ed25519 public key");
     return this.update((registry) => {
       const existing = registry.trustedVerifierKeys.find((candidate) => candidate.verifierId === key.verifierId && candidate.keyId === key.keyId);
       if (existing && (existing.publicKey.trim() !== key.publicKey.trim() || existing.algorithm !== key.algorithm)) {
@@ -83,8 +111,12 @@ export class FileAppVerificationStore {
     });
   }
 
-  async importReceipt(receiptInput: AppIndependentVerificationReceipt): Promise<AppVerificationRegistry> {
+  async importReceipt(
+    receiptInput: AppIndependentVerificationReceipt,
+    context: AppVerificationImportContext
+  ): Promise<AppVerificationRegistry> {
     const receipt = appIndependentVerificationReceiptSchema.parse(receiptInput);
+    appVerificationImportContextSchema.parse(context);
     return this.update((registry) => {
       const key = registry.trustedVerifierKeys.find((candidate) =>
         candidate.verifierId === receipt.verifierId && candidate.keyId === receipt.signature.keyId);
@@ -106,6 +138,9 @@ export class FileAppVerificationStore {
     try {
       const current = await this.read();
       const changed = operation(current);
+      if (JSON.stringify({ ...changed, revision: current.revision }) === JSON.stringify(current)) {
+        return current;
+      }
       const next = appVerificationRegistrySchema.parse({ ...changed, revision: current.revision + 1 });
       await atomicWriteJson(this.filePath, next);
       return next;
@@ -115,6 +150,12 @@ export class FileAppVerificationStore {
     }
   }
 }
+
+const appVerificationImportContextSchema = z.object({
+  importedBy: z.string().min(1).max(300),
+  importRef: z.string().min(1).max(1000),
+  importedAt: z.string().datetime()
+}).strict();
 
 function compareVerifierKeys(left: AppVerifierTrustKey, right: AppVerifierTrustKey): number {
   return `${left.verifierId}/${left.keyId}`.localeCompare(`${right.verifierId}/${right.keyId}`);

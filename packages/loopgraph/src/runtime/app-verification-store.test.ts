@@ -23,6 +23,15 @@ describe("App independent verification registry", () => {
       publicKeyEncoding: { type: "spki", format: "pem" },
       privateKeyEncoding: { type: "pkcs8", format: "pem" }
     });
+    await expect(store.trustVerifierKey({
+      verifierId: "unsafe-verifier",
+      keyId: "unsafe-verifier.primary",
+      algorithm: "ed25519",
+      publicKey: keys.privateKey,
+      approvedBy: "security-admin",
+      approvalRef: "change:rejected",
+      approvedAt: now
+    })).rejects.toThrow(/public keys only/);
     const trusted = await store.trustVerifierKey({
       verifierId: "independent-auditor",
       keyId: "independent-auditor.primary",
@@ -46,9 +55,11 @@ describe("App independent verification registry", () => {
       keyId: "independent-auditor.primary",
       privateKeyPem: keys.privateKey
     });
-    const imported = await store.importReceipt(receipt);
+    const importContext = { importedBy: "security-admin", importRef: "change:SEC-45", importedAt: now };
+    const imported = await store.importReceipt(receipt, importContext);
     expect(imported.receipts).toEqual([receipt]);
-    expect((await store.importReceipt(receipt)).receipts).toHaveLength(1);
+    expect((await store.importReceipt(receipt, importContext)).receipts).toHaveLength(1);
+    expect((await store.read()).revision).toBe(2);
 
     const registryPath = path.join(root, "operational-verification.json");
     expect((await stat(registryPath)).mode & 0o777).toBe(0o600);
@@ -88,7 +99,8 @@ describe("App independent verification registry", () => {
       keyId: "loopgraph-verifier.primary"
     };
     const forged = createAppIndependentVerificationReceipt({ ...receiptInput, privateKeyPem: attackerKeys.privateKey });
-    await expect(store.importReceipt(forged)).rejects.toThrow(/active trusted verifier key/);
+    const importContext = { importedBy: "security-admin", importRef: "change:SEC-46", importedAt: now };
+    await expect(store.importReceipt(forged, importContext)).rejects.toThrow(/active trusted verifier key/);
 
     const valid = createAppIndependentVerificationReceipt({ ...receiptInput, privateKeyPem: trustedKeys.privateKey });
     await store.revokeVerifierKey({
@@ -98,6 +110,6 @@ describe("App independent verification registry", () => {
       revocationRef: "incident:IR-9",
       revokedAt: "2026-08-21T12:05:00.000Z"
     });
-    await expect(store.importReceipt(valid)).rejects.toThrow(/active trusted verifier key/);
+    await expect(store.importReceipt(valid, importContext)).rejects.toThrow(/active trusted verifier key/);
   });
 });
