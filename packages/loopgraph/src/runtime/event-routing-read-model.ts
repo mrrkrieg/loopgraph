@@ -10,6 +10,13 @@ import type {
   RoutingCorrection
 } from "../core";
 import { planHermesWebhookRoutes, type HermesWebhookPlanResult } from "./hermes-webhooks";
+import {
+  getHermesRouteActivationStatus,
+  validateHermesRouteActivationAuthority,
+  type HermesRouteActivationAuthorityProvider,
+  type HermesRouteActivationStatus,
+  type HermesRouteActivationStore
+} from "./hermes-route-activation";
 import { listLoopgraphLifecycleDeliveries, type LoopgraphLifecycleDelivery } from "./lifecycle-events";
 import {
   loopgraph_events_get,
@@ -44,6 +51,8 @@ export type EventRoutingOperationsInput = EventRoutingOperationsFilters & {
   now?: Date;
   store?: RoutingStore;
   loopSpecStore?: LoopSpecRegistryStore;
+  routeActivationStore?: HermesRouteActivationStore;
+  routeActivationAuthorityProvider?: HermesRouteActivationAuthorityProvider;
 };
 
 export type EventRoutingOperationsRow = {
@@ -110,6 +119,7 @@ export type EventRoutingDecisionDetail = {
     key: string;
     value: string;
   }>;
+  learningContextBinding?: RoutingAttempt["learningContextBinding"];
   selectedRoutes: Array<{
     loopId: string;
     loopLabel: string;
@@ -150,6 +160,7 @@ export type EventRoutingTimelineEntry = {
   at: string;
   stage:
     | "event_receipt"
+    | "learning_context"
     | "hermes_decision"
     | "business_problem"
     | "route_commit"
@@ -221,6 +232,13 @@ export type EventRoutingOperationsReadModel = {
     routeCount: number;
     eventFamilyCount: number;
     warnings: string[];
+    activation: {
+      exists: boolean;
+      current: boolean;
+      ready: boolean;
+      planDigest?: string;
+      routes: HermesRouteActivationStatus["routeStates"];
+    };
     routes: Array<{
       routeName: string;
       sourcePattern: string;
@@ -236,9 +254,20 @@ export async function loadEventRoutingOperations(
 ): Promise<EventRoutingOperationsReadModel> {
   const projectRoot = path.resolve(input.projectRoot ?? process.cwd());
   const limit = input.limit ?? 100;
-  const generatedAt = (input.now ?? new Date()).toISOString();
+  const now = input.now ?? new Date();
+  const generatedAt = now.toISOString();
   const store = input.store ?? new FileRoutingStore(getLoopgraphRoot(projectRoot));
   const filters = normalizeFilters(input);
+  const authorityPromise = input.routeActivationAuthorityProvider
+    ? input.routeActivationAuthorityProvider({ projectRoot, now })
+        .then(validateHermesRouteActivationAuthority)
+    : undefined;
+  const routeAuthority = authorityPromise
+    ? await authorityPromise.catch(() => undefined)
+    : undefined;
+  const routeActivationAuthorityProvider = authorityPromise
+    ? async () => authorityPromise
+    : undefined;
   const [
     catalog,
     events,
@@ -248,11 +277,15 @@ export async function loadEventRoutingOperations(
     evaluations,
     corrections,
     lifecycleDeliveries,
-    webhookPlan
+    webhookPlan,
+    webhookActivation
   ] = await Promise.all([
     loopgraph_routing_catalog_get(
       { projectRoot },
-      { loopSpecStore: input.loopSpecStore }
+      {
+        loopSpecStore: input.loopSpecStore,
+        trustedConnections: routeAuthority?.connections
+      }
     ),
     loopgraph_events_get({
       projectRoot,
@@ -274,7 +307,13 @@ export async function loadEventRoutingOperations(
     loopgraph_routing_evaluations_get({ projectRoot, limit }, { store }),
     store.listRoutingCorrections(),
     listLoopgraphLifecycleDeliveries(projectRoot),
-    safeWebhookPlan(projectRoot, input.now)
+    safeWebhookPlan(projectRoot, now, routeActivationAuthorityProvider),
+    safeWebhookActivation(
+      projectRoot,
+      now,
+      input.routeActivationStore,
+      routeActivationAuthorityProvider
+    )
   ]);
 
   const catalogByLoopId = new Map(catalog.routingCards.map((card) => [card.loopId, card]));
@@ -356,7 +395,7 @@ export async function loadEventRoutingOperations(
       failedEvaluationCount,
       catalogLoopCount: routingCatalog.length,
       hermesRouteCount: webhookPlan.summary.routeCount,
-      warningCount: webhookPlan.warnings.length
+      warningCount: webhookPlan.warnings.length + webhookActivation.warnings.length
     },
     rows,
     problemInbox,
@@ -364,7 +403,14 @@ export async function loadEventRoutingOperations(
     webhookHealth: {
       routeCount: webhookPlan.summary.routeCount,
       eventFamilyCount: webhookPlan.summary.eventFamilyCount,
-      warnings: webhookPlan.warnings,
+      warnings: [...webhookPlan.warnings, ...webhookActivation.warnings],
+      activation: {
+        exists: webhookActivation.exists,
+        current: webhookActivation.current,
+        ready: webhookActivation.ready,
+        ...(webhookActivation.planDigest ? { planDigest: webhookActivation.planDigest } : {}),
+        routes: webhookActivation.routeStates
+      },
       routes: webhookPlan.routes.map((route) => ({
         routeName: route.routeName,
         sourcePattern: route.sourcePattern,
@@ -575,6 +621,9 @@ function decisionDetailForRow(input: {
     ...(input.attempt?.catalogVersion ? { catalogVersion: input.attempt.catalogVersion } : {}),
     ...(decision?.policyVersion ? { policyVersion: decision.policyVersion } : {}),
     modelMetadata: summarizeModelMetadata(decision?.modelMetadata ?? {}),
+    ...(input.attempt?.learningContextBinding ? {
+      learningContextBinding: input.attempt.learningContextBinding
+    } : {}),
     selectedRoutes: decision?.selectedRoutes.map((route) => ({
       loopId: route.loopId,
       loopLabel: input.catalogByLoopId.get(route.loopId)?.loopName ?? route.loopId,
@@ -632,6 +681,17 @@ function correlationTimelineForRow(input: {
   }];
 
   if (input.attempt) {
+    const learningBinding = input.attempt.learningContextBinding;
+    if (learningBinding) {
+      entries.push({
+        id: `${input.attempt.id}:learning-context`,
+        at: learningBinding.boundAt,
+        stage: "learning_context",
+        label: "Cross-loop evidence bound to decision",
+        detail: `${learningBinding.context.eligibleLoopIds.length} eligible loops · ${learningBinding.context.loopEvidence.length} evidence summaries · digest ${learningBinding.contextDigest}`,
+        status: learningBinding.acknowledged ? "acknowledged" : "unacknowledged"
+      });
+    }
     entries.push({
       id: input.attempt.id,
       at: input.attempt.createdAt,
@@ -779,8 +839,16 @@ function lifecycleDeliveryDetail(delivery: LoopgraphLifecycleDelivery): string {
   return `${delivery.event.eventType} · ${readString(delivery.event.normalizedPayload, "runId") ?? delivery.event.subject.id}`;
 }
 
-async function safeWebhookPlan(projectRoot: string, now?: Date): Promise<HermesWebhookPlanResult> {
+async function safeWebhookPlan(
+  projectRoot: string,
+  now?: Date,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
+): Promise<HermesWebhookPlanResult> {
   try {
+    if (authorityProvider) return (await authorityProvider({
+      projectRoot,
+      now: now ?? new Date()
+    })).webhookPlan;
     return await planHermesWebhookRoutes({ projectRoot, now });
   } catch {
     return {
@@ -797,6 +865,34 @@ async function safeWebhookPlan(projectRoot: string, now?: Date): Promise<HermesW
       routes: [],
       warnings: ["Hermes webhook route plan is unavailable for the current routing catalog."],
       nextActions: []
+    };
+  }
+}
+
+async function safeWebhookActivation(
+  projectRoot: string,
+  now?: Date,
+  recordStore?: HermesRouteActivationStore,
+  authorityProvider?: HermesRouteActivationAuthorityProvider
+): Promise<HermesRouteActivationStatus> {
+  try {
+    return await getHermesRouteActivationStatus({
+      projectRoot,
+      now,
+      recordStore,
+      authorityProvider
+    });
+  } catch {
+    return {
+      projectRoot,
+      recordPath: recordStore?.reference ?? path.join(getLoopgraphRoot(projectRoot), "hermes-route-activation.json"),
+      checkedAt: (now ?? new Date()).toISOString(),
+      exists: true,
+      current: false,
+      ready: false,
+      routeStates: [],
+      warnings: ["The stored Hermes route activation receipt is invalid."],
+      nextActions: ["Apply the current confirmed route plan again through the Hermes Route Controller."]
     };
   }
 }

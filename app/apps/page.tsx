@@ -10,7 +10,9 @@ export default async function InstalledAppsPage() {
   const data = await getInstalledAppsViewData();
   const readinessById = new Map(data.readiness.map((readiness) => [readiness.installationId, readiness]));
   const appByInstallationId = new Map(data.applications.map((entry) => [entry.installation.id, entry.app]));
+  const renewalByInstallationId = new Map(data.renewalPlan.items.map((item) => [item.installationId, item]));
   const unfinishedOperations = data.lifecycleOperations.filter((operation) => operation.status !== "completed");
+  const evidenceAttention = data.renewalPlan.counts.invalid + data.renewalPlan.counts.expired + data.renewalPlan.counts.renewSoon;
   return (
     <>
       <PageHeader
@@ -20,6 +22,16 @@ export default async function InstalledAppsPage() {
         action={<Link className="rounded-md bg-ink px-4 py-2 text-sm font-semibold text-white" href="/marketplace">Find an app</Link>}
       />
       {unfinishedOperations.length > 0 ? <div className="mb-6"><AppLifecycleRecoveryNotice operations={unfinishedOperations} /></div> : null}
+      {data.installations.length > 0 ? (
+        <section className="mb-6 grid gap-3 rounded-xl border border-line bg-white p-4 shadow-sm sm:grid-cols-[1fr_auto_auto] sm:items-center">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.14em] text-ink/40">Hermes operating-proof plan</div>
+            <p className="mt-1 text-sm text-ink/70">Hermes ranks evidence renewal across this tenant without running replays or changing provider state.</p>
+          </div>
+          <Metric label="Needs attention" value={String(evidenceAttention)} />
+          <Metric label="Current" value={String(data.renewalPlan.counts.current)} />
+        </section>
+      ) : null}
       {data.installations.length === 0 ? (
         <section className="rounded-xl border border-dashed border-line bg-white px-6 py-14 text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-ink text-lg font-semibold text-white">H</div>
@@ -33,11 +45,12 @@ export default async function InstalledAppsPage() {
             const readiness = readinessById.get(installation.id);
             const app = appByInstallationId.get(installation.id);
             const recovery = unfinishedOperations.find((operation) => operation.installationId === installation.id);
+            const renewal = renewalByInstallationId.get(installation.id);
             return (
               <article className="rounded-xl border border-line bg-white p-5 shadow-sm" key={installation.id}>
                 <div className="flex items-start justify-between gap-3"><div><div className="text-xs font-semibold uppercase tracking-[0.14em] text-signal">{app?.department.replace(/_/g, " ") ?? "application"}</div><h2 className="mt-2 text-xl font-semibold">{app?.name ?? installation.appId}</h2><div className="mt-1 font-mono text-xs text-ink/40">{installation.appId} · v{installation.version}</div></div><AppStatusPill state={installation.state} readiness={readiness?.state} /></div>
-                <div className="mt-5 grid grid-cols-3 gap-3"><Metric label="Readiness" value={`${readiness?.score ?? 0}%`} /><Metric label="Loops" value={String(installation.ownedAssets.filter((asset) => asset.kind === "loop_spec").length)} /><Metric label="Reviews" value={String(installation.permissions.filter((permission) => permission.decision === "approval_required").length)} /></div>
-                <div className="mt-5 border-t border-line pt-4"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">Recommended next action</div><p className="mt-2 text-sm text-ink/70">{recovery ? "Finish the interrupted lifecycle operation before testing, promotion, updates, or removal." : recommendedAction(installation.state, readiness?.state)}</p></div>
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4"><Metric label="Readiness" value={`${readiness?.score ?? 0}%`} /><Metric label="Loops" value={String(installation.ownedAssets.filter((asset) => asset.kind === "loop_spec").length)} /><Metric label="Reviews" value={String(installation.permissions.filter((permission) => permission.decision === "approval_required").length)} /><Metric label="Proof" value={proofLabel(renewal?.status)} /></div>
+                <div className="mt-5 border-t border-line pt-4"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">Recommended next action</div><p className="mt-2 text-sm text-ink/70">{recovery ? "Finish the interrupted lifecycle operation before testing, promotion, updates, or removal." : renewal?.nextAction.summary ?? recommendedAction(installation.state, readiness?.state)}</p>{renewal?.renewalRecommendedAt ? <p className="mt-2 text-xs text-ink/45">Renewal window opens {new Date(renewal.renewalRecommendedAt).toLocaleDateString()}.</p> : null}</div>
                 <Link className="mt-5 inline-flex w-full items-center justify-center rounded-md bg-ink px-4 py-2.5 text-sm font-semibold text-white" href={`/apps/${encodeURIComponent(installation.id)}`}>Open application</Link>
               </article>
             );
@@ -56,4 +69,9 @@ function recommendedAction(state: string, readiness?: string) {
   if (state === "paused") return "Resolve the pause reason, then resume at the prior safe mode.";
   if (readiness === "blocked") return "Resolve the failed readiness checks before promotion.";
   return "Monitor routing quality, review burden, and observed outcomes.";
+}
+
+function proofLabel(status?: string) {
+  if (!status) return "Unknown";
+  return status.replace(/_/g, " ").replace(/^./, (character) => character.toUpperCase());
 }

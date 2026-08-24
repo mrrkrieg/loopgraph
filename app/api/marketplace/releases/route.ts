@@ -9,6 +9,11 @@ import {
 import { requireHostedStepUp } from "@/lib/auth/hosted-access";
 import { hostedMarketplaceError, readBoundedMarketplaceJson, requireHostedMarketplaceContext } from "@/lib/app-platform/hosted-marketplace-api";
 import { HostedMarketplaceArtifactService, hostedMarketplaceArtifactObjectKey } from "@/lib/app-platform/hosted-marketplace-artifacts";
+import {
+  hostedMarketplaceProjectKey,
+  hostedMarketplaceReleaseStatusInputSchema,
+  setHostedMarketplaceReleaseStatus
+} from "@/lib/app-platform/hosted-marketplace-release-admin";
 import { SupabaseMarketplaceRegistryStore } from "@/lib/db/adapters/supabase-marketplace-registry-store";
 
 export const runtime = "nodejs";
@@ -56,6 +61,30 @@ export async function POST(request: Request) {
       schemaVersion: "hosted-marketplace-publication/v1",
       release
     }, { status: release.created ? 201 : 200, headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    return hostedMarketplaceError(error);
+  }
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const context = await requireHostedMarketplaceContext("marketplace.publish");
+    await requireHostedStepUp();
+    const release = hostedMarketplaceReleaseStatusInputSchema.parse(
+      await readBoundedMarketplaceJson(request)
+    );
+    const receipt = await setHostedMarketplaceReleaseStatus({
+      adminClient: context.adminClient,
+      organizationId: context.organizationId,
+      projectKey: hostedMarketplaceProjectKey(),
+      actorUserId: context.identity.userId,
+      release
+    });
+    return NextResponse.json({
+      schemaVersion: "hosted-marketplace-release-status/v1",
+      accepted: true,
+      release: receipt
+    }, { headers: { "cache-control": "no-store" } });
   } catch (error) {
     return hostedMarketplaceError(error);
   }
