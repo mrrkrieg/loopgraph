@@ -1,0 +1,57 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: product-feedback-clustering
+  name: Feedback Clustering
+  version: 1.0.0
+  description: Normalize customer feedback, resolve durable product and customer identities, join related evidence, and form reviewable recurring themes.
+  department: product
+  ownerRole: product_operations
+  tags: [feedback, clustering, discovery]
+trigger: { type: event, source: "*", event: product.feedback_received }
+input:
+  requiredFields: [normalizedPayload.feedbackId, normalizedPayload.text, normalizedPayload.productArea]
+  subjectTypes: [feedback, conversation, support_ticket]
+  fixtures: [{ id: recurring-feedback, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize feedback, actor: system, type: observe, description: Preserve source identity and translate provider feedback into a canonical evidence record. }
+  - { id: resolve, name: Resolve affected objects, actor: system, type: observe, description: "Join the product area, workflow, segment, account, and existing problem identity without guessing." }
+  - { id: cluster, name: Cluster recurring evidence, actor: agent, type: assess, description: "Group semantically similar evidence while preserving disagreement, source diversity, and recurrence." }
+  - { id: decide, name: Select one route, actor: agent, type: decide, description: "Append evidence to an existing theme, create one bounded theme, or abstain when identity is ambiguous." }
+  - { id: learn, name: Learn from review, actor: system, type: learn, description: "Return merge, split, rejection, and downstream validation outcomes to Hermes." }
+capabilities:
+  - { key: support.feedback.read, authority: read, risk: low, required: true, purpose: Read normalized feedback and its durable provider identity., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Join bounded usage evidence for the affected workflow and segment., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Detect existing product issues and avoid duplicate problem work., customerFacing: false }
+  - { key: project.issue.create, authority: approve, risk: high, required: false, purpose: Create an exact approved product-problem issue from validated evidence., customerFacing: false }
+skills: [product-feedback-synthesis, product-evidence-quality]
+outcomes:
+  - { metric: feedback_to_theme_latency_hours, description: Time from recurring feedback to an accountable product theme., direction: decrease, sourceCapability: support.feedback.read }
+  - { metric: theme_merge_split_correction_rate, description: Fraction of clusters corrected by product reviewers., direction: decrease, sourceCapability: support.feedback.read }
+  - { metric: evidence_source_diversity, description: Distinct trusted evidence sources supporting each theme., direction: increase, sourceCapability: support.feedback.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [product.recurring_feedback]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: product.feedback_received, subjectTypes: [feedback, conversation, support_ticket], requiredFields: [normalizedPayload.feedbackId, normalizedPayload.text, normalizedPayload.productArea], reason: New product feedback has the minimum evidence required for bounded clustering. }
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle evidence updates existing work and cannot create a duplicate feedback problem. }
+  inputMapping: { feedbackId: normalizedPayload.feedbackId, text: normalizedPayload.text, productArea: normalizedPayload.productArea }
+  priority: 90
+  minimumConfidence: 0.82
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 100, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.feedback.read, analytics.event.query, project.issue.read]
+  examples:
+    shouldRoute: [Repeated feedback names a product area and contains enough text to compare with existing themes.]
+    shouldNotRoute: ["The product area is missing.", "Multiple product identities match.", "The event is a duplicate delivery."]
+policy:
+  forbiddenActions: [{ capability: project.issue.create, reason: Creating product work requires exact prepared-action approval. }]
+  escalationOwner: product_operations
+  escalationSla: 1d
+  separateCustomerFacingApproval: true

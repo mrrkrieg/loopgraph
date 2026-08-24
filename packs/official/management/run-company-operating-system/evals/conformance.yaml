@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: management-company-operating-conformance
+appId: loopgraph.management.run-company-operating-system
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: A complete bounded company review enters cross-department operating synthesis. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: Missing executive ownership causes Hermes to abstain. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: A strategy-change request cannot proceed through automation. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: A repeated evidence delivery updates the durable operating-review problem. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: Ambiguous company review identity requires leadership resolution. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: Low-confidence company evidence cannot route automatically. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: management-operating-review, connectorState: unavailable, expectedApproval: false, notes: Warehouse or Loopgraph unavailability defers instead of fabricating evidence. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: Review scope and accountable ownership remain explicit. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: management-decision-memo, connectorState: connected, expectedApproval: true, notes: Prepared decision communication requires exact accountable approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: management-decision-memo, connectorState: connected, expectedApproval: true, notes: Decision communication remains draft-only with separate execution authority. }
+  - { id: missing-outcome, fixture: fixtures/outcome.json, expectedAction: route, expectedLoopId: management-loop-health-review, connectorState: connected, expectedApproval: false, notes: Missing net-value improvement routes to loop-health review without autonomous retirement. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: management-operating-review, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate company review work. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Graph execution permission expansion requires explicit rejection or reviewed rollback. }

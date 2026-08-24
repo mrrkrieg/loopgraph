@@ -80,7 +80,7 @@ describe("Loopgraph topology", () => {
 
   it("overlays runtime cases and traces onto the operating map", () => {
     const workspace = getDemoWorkspace();
-    const loop = workspace.loops.find((item) => item.templateId === "strategic-account-escalation");
+    const loop = workspace.loops.find((item) => item.templateId === "cs-strategic-account-escalation");
     expect(loop).toBeTruthy();
 
     const graph = buildLoopGraph({
@@ -90,14 +90,14 @@ describe("Loopgraph topology", () => {
       runs: [
         {
           id: "run_test_1",
-          loopId: "strategic-account-escalation",
+          loopId: loop?.id ?? "catalog_cs-strategic-account-escalation",
           status: "WAITING_FOR_REVIEW"
         }
       ],
       cases: [
         {
           id: "case_test_1",
-          sourceLoopId: "strategic-account-escalation",
+          sourceLoopId: loop?.id ?? "catalog_cs-strategic-account-escalation",
           severity: "P1",
           status: "open",
           summary: "Enterprise outage near renewal"

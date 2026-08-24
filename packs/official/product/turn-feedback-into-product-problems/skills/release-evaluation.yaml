@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: product-release-evaluation
+name: Product Release Evaluation
+description: Compare post-release usage and support outcomes with the original validated problem and guardrails.
+department: product
+goal: Learn whether shipped work improved the target workflow without hiding regressions or measurement uncertainty.
+inputs: [original problem, release scope, baseline metrics, post-release metrics, support outcomes]
+outputs: [release learning review, outcome classification, uncertainty, follow-up measurement request]
+instructions:
+  - Recover the original problem, target segment, baseline, expected change, and guardrails.
+  - Use the approved comparison window and identify material confounders.
+  - Separate improvement, no change, regression, and insufficient evidence.
+  - Compare customer feedback and support burden with behavior evidence.
+  - Return findings to future clustering and product-problem decisions.
+boundaries:
+  - Do not claim causality that the evidence cannot establish.
+  - Do not autonomously revert, expand, or reprioritize product work.
+  - Do not treat shipping as evidence of value.
+requiredCapabilities: [analytics.event.query, support.feedback.read, project.issue.read]

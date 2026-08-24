@@ -19,6 +19,17 @@ The Hermes Connector Broker owns authorization, signing secrets, webhook/stream 
 | Greenhouse | OAuth 2.0 + PKCE | Webhook API |
 | NetSuite | Admin-managed connected app | Enterprise event route |
 | QuickBooks | Admin-managed connected app | Provider-console webhook |
+| Gmail | OAuth 2.0 + PKCE | Scheduled thread detector |
+| Google Calendar | OAuth 2.0 + PKCE | Scheduled event detector |
+| Microsoft Outlook | Microsoft identity OAuth 2.0 + PKCE | Microsoft Graph change notifications |
+| Microsoft Teams | Microsoft identity OAuth 2.0 + PKCE | Microsoft Graph change notifications |
+| PostHog | Admin-managed project API key | Scheduled saved-insight detector |
+| Amplitude | Admin-managed project API + secret key | Scheduled event-metric detector |
+| Linear | OAuth 2.0 + PKCE app actor | OAuth app organization webhooks |
+| Jira Cloud | Atlassian OAuth 2.0 (3LO) + PKCE | Renewable dynamic webhooks |
+| GitLab.com | OAuth 2.0 + PKCE | Project or group webhooks |
+| Google BigQuery | Admin-managed service account / workload token | Scheduled bounded-query detector |
+| Snowflake | Admin-managed OAuth, key-pair, or workload token | Scheduled bounded-query detector |
 
 The executable source of truth is `PROVIDER_ONBOARDING_CATALOG`; the matching synthetic payloads are `PROVIDER_GOLDEN_FIXTURES`.
 
@@ -26,8 +37,8 @@ The executable source of truth is `PROVIDER_ONBOARDING_CATALOG`; the matching sy
 
 1. Call `loopgraph_provider_catalog_get` and choose a profile.
 2. Call `loopgraph_provider_install_prepare` for a non-secret plan, or open **Settings → Integrations** to start live consent.
-3. The broker generates OAuth state and PKCE, writes one-time material directly to the configured tenant vault, and returns only the provider authorization URL.
-4. The broker consumes the callback once, exchanges the code at the catalog's fixed token endpoint, and writes the token bundle under the opaque `credentialRef`.
+3. For OAuth providers, the broker generates OAuth state and PKCE, writes one-time material directly to the configured tenant vault, and returns only the provider authorization URL. For admin-managed providers, an administrator provisions the dedicated identity directly into that same vault boundary.
+4. For OAuth providers, the broker consumes the callback once, exchanges the code at the catalog's fixed token endpoint, and writes the token bundle under the opaque `credentialRef`.
 5. Apply the declared subscription API, event stream, provider-console route, or scheduled detector through a capability-scoped broker operation.
 6. Send provider webhooks to `/api/connector-broker/v1/webhooks/{installationId}`. The installation selects the verifier; provider identity is never trusted from the webhook body or URL. The broker verifies the raw body, timestamp, and replay identity before normalization.
 7. The broker sends the verified normalized `EventEnvelope` to Hermes using workload identity; Hermes decides which eligible loop should handle it.
@@ -36,6 +47,14 @@ The executable source of truth is `PROVIDER_ONBOARDING_CATALOG`; the matching sy
    provider capability and connection it needs. Use the hierarchical kill-switch panel for incident containment.
 
 Provider application registration, admin consent, callback-domain verification, and live subscription calls require credentials in the operator's provider tenant. The repository provides the executable contract and tests; it cannot manufacture those external grants.
+
+Default Gmail and Microsoft consent is read-only. Compose, send, or channel-post scopes require a separate capability escalation and are never inferred from installing an app. Google classifies broad server-side Gmail read and compose scopes as restricted, so a hosted public deployment must complete Google's applicable verification and security assessment before enabling them. Microsoft Graph notifications are accepted only when every notification in the batch contains the installation's secret `clientState`; endpoint validation echoes an opaque validation token only for an existing Outlook or Teams installation in a subscription-capable lifecycle state. PostHog reads saved insight IDs rather than accepting arbitrary HogQL, and Amplitude uses its fixed event-segmentation endpoint with a project-scoped API/secret-key pair.
+
+Linear, Jira, and GitLab also begin read-only. Linear receives only the fixed issue/project queries declared by the broker; its replay identity comes from the provider-signed raw body instead of a mutable header. Jira uses `api.atlassian.com/ex/jira/{cloudId}`, never accepts arbitrary JQL or a caller-provided site URL, and requires an installation-bound callback parameter in addition to Atlassian's app JWT. The built-in GitLab adapter is fixed to `gitlab.com`. Linear issue mutations and Jira issue mutations exist as approval-bound broker operations, but they remain unavailable until a separate consent escalation grants the matching write scope. GitLab Self-Managed requires a reviewed custom connector with an explicit hostname policy rather than reusing a customer-controlled base URL.
+
+BigQuery and Snowflake are read-only scheduled-detector providers for the official Management and Operations/Finance apps. A credential-vault record owns the account/project context and one approved SQL template per broker operation. Every template must be a single comment-free `SELECT`/`WITH` statement, must bind `windowStart` and `windowEnd`, and is capped by caller-independent byte/result limits. Capability callers submit only a bounded window, optional company-object ID, and row limit; they cannot submit SQL, endpoint URLs, project/account identifiers, databases, schemas, warehouses, roles, or table names. BigQuery uses named `@window_start`, `@window_end`, optional `@subject_id`, and optional `@limit` parameters. Snowflake uses `?` placeholders plus an explicit `binding_order` containing only `windowStart`, `windowEnd`, `subjectId`, and `limit`.
+
+The durable scheduler provisions fixed company-metric, forecast-variance, and capacity-plan detectors for every active warehouse installation with `provider.events.emit`. Each approved query must return the explicit material-event row contract; the scheduler signs and forwards only material observations, retains the exact window across retries, and advances its checkpoint only after Hermes accepts every event. Query results remain process-local and are not written to the broker response cache. See the [provider detector scheduler](PROVIDER-DETECTOR-SCHEDULER.md) for the required columns, failure behavior, migration, and deployment checks.
 
 ## Security invariants
 

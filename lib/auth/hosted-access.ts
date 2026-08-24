@@ -22,6 +22,7 @@ export const hostedPermissions = [
   "loops.write",
   "runs.write",
   "reviews.write",
+  "marketplace.publish",
   "organization.manage",
   "members.manage",
   "organization.delete"
@@ -42,6 +43,7 @@ const ROLE_PERMISSIONS: Record<HostedOrganizationRole, ReadonlySet<HostedPermiss
     "loops.write",
     "runs.write",
     "reviews.write",
+    "marketplace.publish",
     "organization.manage",
     "members.manage"
   ]),
@@ -87,7 +89,7 @@ export async function requireHostedStepUp(): Promise<void> {
   const { data, error } = await supabase.auth.getClaims();
   const claims = data?.claims as Record<string, unknown> | undefined;
   if (error || typeof claims?.sub !== "string") {
-    throw new HostedAccessError("authentication_required", "Sign in before changing connector credentials.", 401);
+    throw new HostedAccessError("authentication_required", "Sign in before performing this sensitive hosted operation.", 401);
   }
   const aal = claims.aal;
   const amr = Array.isArray(claims.amr) ? claims.amr : [];
@@ -100,7 +102,7 @@ export async function requireHostedStepUp(): Promise<void> {
   if (aal !== "aal2" && !hasMfa) {
     throw new HostedAccessError(
       "step_up_required",
-      "Multi-factor step-up authentication is required for this credential operation.",
+      "Multi-factor step-up authentication is required for this sensitive hosted operation.",
       403
     );
   }

@@ -1,0 +1,22 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: customer-success-support-risk-triage
+name: Support Risk Triage
+description: Classify support demand using service policy, account context, explicit evidence, and customer-communication boundaries.
+department: customer_success
+goal: Produce one accountable support route, an evidence-grounded response draft, and a clear escalation decision.
+inputs: [normalized ticket, support policy, approved account context, service levels, active incident evidence]
+outputs: [ticket class, priority and confidence, accountable owner, response draft, escalation evidence]
+instructions:
+  - Resolve durable ticket and customer identities before creating new work.
+  - Separate provider priority from evidence-backed urgency and business impact.
+  - Use only approved account, entitlement, incident, and renewal context.
+  - Choose one primary queue unless an explicit independent business problem permits supporting work.
+  - Prepare customer communication as a draft and keep ticket mutations approval-bound.
+  - Return resolution, review corrections, and escalation outcomes as evidence.
+boundaries:
+  - Never promise credits, deadlines, remediation, or contract changes.
+  - Never reveal another customer or internal confidential evidence.
+  - Never send a customer message directly.
+  - Ask a human when identity, severity, entitlement, or owner is ambiguous.
+requiredCapabilities: [support.ticket.read]

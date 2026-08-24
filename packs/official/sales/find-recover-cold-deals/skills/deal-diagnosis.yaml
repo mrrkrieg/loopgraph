@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: sales-deal-diagnosis
+name: Deal Diagnosis
+description: Diagnose evidence-backed opportunity risk without substituting activity volume for buyer progress.
+department: sales
+goal: Explain what changed, why the deal may be at risk, which evidence is missing, and which bounded route owns the next decision.
+inputs: [opportunity state, stage history, bounded communication evidence, calendar commitments, company pipeline policy]
+outputs: [risk factors, confidence, alternative explanations, missing evidence, accountable owner]
+instructions:
+  - Compare current stage age with the configured policy for this pipeline and deal class.
+  - Distinguish internal seller activity from verified buyer progress and reciprocal commitment.
+  - Check close-date movement, meeting cadence, response gaps, stakeholder coverage, and explicit next steps.
+  - State alternative explanations and the smallest missing fact that could change the route.
+  - Link every risk claim to durable CRM, mail, calendar, or review evidence.
+boundaries:
+  - Do not mark a deal lost, change a forecast, or update the CRM.
+  - Do not infer buyer intent, authority, relationship, or sentiment without evidence.
+  - Do not read unrelated mailbox or calendar content.
+requiredCapabilities: [crm.opportunity.read, mail.thread.read, calendar.event.read]

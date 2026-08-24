@@ -11,6 +11,12 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
   try {
     const input = connectorBrokerRequestSchema.parse(await request.json());
+    if (input.capability === "provider.events.emit") {
+      return NextResponse.json({ error: "Provider detector operations are internal to the authenticated scheduler" }, {
+        status: 403,
+        headers: { "cache-control": "no-store" }
+      });
+    }
     const tenantDenied = connectorTenantBoundaryResponse(input.tenant);
     if (tenantDenied) return tenantDenied;
     const workloadDenied = connectorWorkloadGrantHeaderResponse(request, input);

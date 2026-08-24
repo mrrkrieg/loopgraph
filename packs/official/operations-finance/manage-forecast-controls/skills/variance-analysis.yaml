@@ -1,0 +1,21 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: ops-finance-variance-analysis
+name: Operations and Finance Variance Analysis
+description: Reconcile versioned financial and operating evidence, explain material variance, and preserve uncertainty and decision boundaries.
+department: ops_finance
+goal: Explain what changed, which company object is affected, why the change is material, and which bounded decision—if any—requires accountable review.
+inputs: [forecast version and baseline, realized financial evidence, operational drivers, materiality policy, source timestamps, reviewer corrections]
+outputs: [reconciled variance finding, driver table, unresolved evidence gaps, bounded decision options, learning return]
+instructions:
+  - Resolve forecast, period, entity, currency, version, and source identity before calculating a variance.
+  - Reconcile totals and time windows before attributing a driver; expose every unresolved difference.
+  - Separate timing, volume, price, mix, approval, capacity, and source-quality drivers.
+  - Apply the approved materiality definition and show absolute, relative, and confidence context.
+  - Name the one primary problem; invoke supporting loops only when the signed topology condition is evidenced.
+  - Return reviewer corrections and realized outcomes to improve subsequent forecast-driver accuracy.
+boundaries:
+  - Never create, alter, approve, or publish a forecast, budget, accounting entry, payment, or resource commitment.
+  - Never fill missing financial evidence with an estimate unless the estimate is explicitly labeled and policy permits it.
+  - Material variance, conflicting sources, and unclear ownership require finance-controller review.
+requiredCapabilities: [finance.forecast.read, analytics.metric.query]

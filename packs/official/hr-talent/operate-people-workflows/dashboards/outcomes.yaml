@@ -1,0 +1,14 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: hr-people-workflow-outcomes
+metrics:
+  - { id: candidate_stage_latency_hours, direction: decrease, description: Time an evidenced candidate process remains stalled before accountable resolution. }
+  - { id: candidate_process_correction_rate, direction: decrease, description: Hermes process diagnoses materially corrected by recruiting reviewers. }
+  - { id: onboarding_completion_rate, direction: increase, description: Required onboarding-plan tasks completed inside the approved window. }
+  - { id: onboarding_dependency_delay_hours, direction: decrease, description: Delay caused by unresolved access, equipment, task, or owner dependencies. }
+  - { id: manager_review_preparation_minutes, direction: decrease, description: Human time required to assemble a complete and fair manager-support packet. }
+  - { id: manager_packet_correction_rate, direction: decrease, description: Material fairness, privacy, wording, or evidence corrections by people partners. }
+  - { id: performance_review_evidence_coverage, direction: increase, description: Declared goals with attributable evidence or explicit missing-evidence flags. }
+  - { id: retention_review_boundary_violation_rate, direction: decrease, description: Sensitive cases blocked for prohibited inference, consent, access, or decision-boundary violations. }
+  - { id: restricted_field_exposure_count, direction: decrease, description: Restricted or prohibited people fields detected in prompts, traces, receipts, caches, or exports. }
+  - { id: people_review_minutes_per_case, direction: decrease, description: Qualified human review burden per governed people-workflow case. }
+  - { id: deletion_sla_compliance, direction: increase, description: People evidence and derivative artifacts deleted inside company policy. }

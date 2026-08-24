@@ -1,0 +1,1 @@
+{"id":"support-ticket-duplicate","eventType":"support.ticket_created","subject":{"type":"support_ticket","id":"ticket-204"},"normalizedPayload":{"ticketId":"204","summary":"Same outage report","priority":"high","matchedProblemId":"ticket-188","confidence":0.98},"evidenceRefs":["support:ticket:204","support:ticket:188"]}

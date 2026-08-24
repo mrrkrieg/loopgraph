@@ -21,7 +21,11 @@ export type MachineCapability =
   | "hermes.agent_register"
   | "hermes.agent_heartbeat"
   | "hermes.execution_events"
+  | "hermes.app_operations"
+  | "hermes.route_activation"
   | "measurements.collect"
+  | "marketplace.consume"
+  | "marketplace.verify"
   | "observability.read"
   | "provider.github_forward"
   | "provider.connector_broker"
@@ -33,10 +37,14 @@ export type MachineCapability =
   | "schedule.connector_oauth"
   | "schedule.connector_revocations"
   | "schedule.connector_webhooks"
+  | "schedule.connector_detectors"
   | "schedule.hermes_design"
   | "schedule.hermes_callbacks"
+  | "schedule.app_evidence_health"
+  | "schedule.app_action_reconciliation"
   | "schedule.management"
-  | "schedule.measurements";
+  | "schedule.measurements"
+  | "schedule.marketplace_verifier";
 
 export type GuardOptions = {
   environmentVariable: string;
@@ -343,7 +351,7 @@ async function authorizeHostedMachineRequest(
     }
     throw error;
   }
-  if (workloadIdentity && shouldRequireDurableWorkloadGrant(options.capability)) {
+  if (workloadIdentity && machineCapabilityRequiresDurableGrant(options.capability)) {
     const grantDenied = await authorizeDurableWorkloadGrant({
       request,
       identity: workloadIdentity,
@@ -374,8 +382,10 @@ async function authorizeDurableWorkloadGrant(input: {
 }) {
   const supabase = createSupabaseAdminClient();
   if (!supabase) return unavailable("Durable workload grant storage is unavailable.");
-  const requestedCapability = input.request.headers.get("x-loopgraph-provider-capability") ?? input.broadCapability;
-  const connectionId = input.request.headers.get("x-loopgraph-connection-id");
+  const { capability: requestedCapability, connectionId } = resolveDurableWorkloadGrantScope(
+    input.request,
+    input.broadCapability
+  );
   const environment = input.identity.environment ?? process.env.LOOPGRAPH_DEPLOYMENT_ENVIRONMENT?.trim();
   const audience = input.identity.audience.find((value) => value === process.env.LOOPGRAPH_CONNECTOR_BROKER_AUDIENCE) ?? input.identity.audience[0];
   if (!environment || !["development", "staging", "production"].includes(environment) || !audience) {
@@ -416,6 +426,19 @@ async function authorizeDurableWorkloadGrant(input: {
   });
 }
 
+export function resolveDurableWorkloadGrantScope(
+  request: Request,
+  broadCapability: MachineCapability
+): { capability: string; connectionId: string | null } {
+  if (!broadCapability.startsWith("provider.")) {
+    return { capability: broadCapability, connectionId: null };
+  }
+  return {
+    capability: request.headers.get("x-loopgraph-provider-capability") ?? broadCapability,
+    connectionId: request.headers.get("x-loopgraph-connection-id")
+  };
+}
+
 function verifySenderBinding(request: Request, expected?: string): string | null | NextResponse {
   if (!expected) return null;
   if (process.env.LOOPGRAPH_TRUSTED_MTLS_PROXY !== "true") {
@@ -435,8 +458,11 @@ function verifySenderBinding(request: Request, expected?: string): string | null
   return supplied;
 }
 
-function shouldRequireDurableWorkloadGrant(capability: MachineCapability) {
-  if (!capability.startsWith("provider.")) return false;
+export function machineCapabilityRequiresDurableGrant(capability: MachineCapability) {
+  if (!capability.startsWith("provider.") &&
+      capability !== "marketplace.consume" &&
+      capability !== "hermes.app_operations" &&
+      capability !== "hermes.route_activation") return false;
   return process.env.NODE_ENV === "production" || process.env.LOOPGRAPH_REQUIRE_DURABLE_WORKLOAD_GRANTS === "true";
 }
 

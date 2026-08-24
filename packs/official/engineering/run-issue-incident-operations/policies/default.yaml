@@ -1,0 +1,4 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules: { issue.read: allowed, project.read: allowed, incident.read: allowed, release.read: allowed, project.create: approval_required, project.update: approval_required, communication.draft: approval_required, code.merge: forbidden, deploy: forbidden, communication.send: forbidden, severity.change: forbidden }
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

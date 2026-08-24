@@ -1,0 +1,1 @@
+{"id":"cs-health-low-confidence","eventType":"cs.account_snapshot_changed","subject":{"type":"account","id":"account-606"},"normalizedPayload":{"accountId":"606","ownerId":"csm-11","tier":"growth","confidence":0.3},"evidenceRefs":["zendesk:account:606"]}

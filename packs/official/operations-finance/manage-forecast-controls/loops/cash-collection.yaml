@@ -1,0 +1,53 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: ops-finance-cash-collection
+  name: Cash Collection
+  version: 1.0.0
+  description: Resolve invoice and account context, diagnose receivable risk, and prepare controlled collection follow-up without sending or moving money.
+  department: ops_finance
+  ownerRole: accounts_receivable_owner
+  tags: [receivables, invoices, collections, customer-risk]
+trigger: { type: event, source: "*", event: finance.receivable_risk_detected }
+input:
+  requiredFields: [normalizedPayload.invoiceId, normalizedPayload.accountId, normalizedPayload.amount, normalizedPayload.currency, normalizedPayload.dueAt, normalizedPayload.ownerId]
+  subjectTypes: [invoice, receivable_risk]
+  fixtures: [{ id: receivable-risk, path: fixtures/customer-facing.json }]
+routine:
+  - { id: normalize, name: Normalize receivable identity, actor: system, type: observe, description: "Resolve invoice, account, amount, currency, due date, owner, payment state, dispute state, and relationship policy." }
+  - { id: verify, name: Verify balance and dispute evidence, actor: agent, type: verify, description: "Confirm open balance, payment events, credits, disputes, promises, and source recency before any proposal." }
+  - { id: assess, name: Assess collection risk, actor: agent, type: assess, description: "Distinguish operational delay, dispute, payment failure, relationship risk, and data error." }
+  - { id: prepare, name: Prepare bounded follow-up, actor: agent, type: prepare, description: "Prepare an internal action or customer draft using approved tone, facts, owner, and escalation policy." }
+  - { id: learn, name: Return cash outcome, actor: system, type: learn, description: "Record payment, dispute resolution, communication review, promise accuracy, and relationship outcome." }
+capabilities:
+  - { key: finance.receivable.read, authority: read, risk: high, required: true, purpose: "Read invoice, balance, payment, dispute, and due-date evidence.", customerFacing: false }
+  - { key: crm.account.read, authority: read, risk: high, required: true, purpose: "Read account owner, tier, relationship, and escalation policy.", customerFacing: false }
+  - { key: mail.message.draft, authority: approve, risk: critical, required: false, purpose: Prepare an exact customer collection draft for account-owner approval., customerFacing: true }
+skills: [ops-finance-evidence-reconciliation, ops-finance-decision-brief]
+outcomes:
+  - { metric: overdue_receivable_days, description: Days an eligible receivable remains unresolved after its due date., direction: decrease, sourceCapability: finance.receivable.read }
+  - { metric: collection_draft_correction_rate, description: Prepared customer collection drafts materially corrected by reviewers., direction: decrease, sourceCapability: crm.account.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [finance.receivable_risk]
+  accepts: [{ sourcePattern: "*", eventTypePattern: finance.receivable_risk_detected, subjectTypes: [invoice, receivable_risk], requiredFields: [normalizedPayload.invoiceId, normalizedPayload.accountId, normalizedPayload.amount, normalizedPayload.currency, normalizedPayload.dueAt, normalizedPayload.ownerId], reason: "An overdue or at-risk receivable has resolvable invoice, account, amount, due date, and ownership evidence." }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Payment and communication outcomes append to the existing receivable problem. }]
+  inputMapping: { invoiceId: normalizedPayload.invoiceId, accountId: normalizedPayload.accountId, amount: normalizedPayload.amount, currency: normalizedPayload.currency, dueAt: normalizedPayload.dueAt, ownerId: normalizedPayload.ownerId }
+  priority: 90
+  minimumConfidence: 0.94
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 200, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [finance.receivable.read, crm.account.read]
+  examples: { shouldRoute: [An invoice is overdue with resolved account, balance, dispute, owner, and policy evidence.], shouldNotRoute: [The balance is already settled., Multiple accounts match the invoice identity.] }
+policy:
+  forbiddenActions:
+    - { capability: finance.payment.execute, reason: "Hermes can never collect, refund, debit, or transfer money." }
+    - { capability: mail.message.send, reason: Customer communication requires separate account-owner approval and remains draft-only. }
+  escalationOwner: accounts_receivable_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

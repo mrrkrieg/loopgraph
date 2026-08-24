@@ -1,0 +1,4 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules: { forecast.read: allowed, ledger.read: allowed, receivable.read: allowed, vendor.read: allowed, approval.read: allowed, contract.read: allowed, analytics.read: allowed, crm.read: allowed, capacity.read: allowed, finance.update: approval_required, task.create: approval_required, communication.draft: approval_required, payment.execute: forbidden, accounting.post: forbidden, budget.change: forbidden, approval.execute: forbidden, contract.commit: forbidden, customer.send: forbidden }
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

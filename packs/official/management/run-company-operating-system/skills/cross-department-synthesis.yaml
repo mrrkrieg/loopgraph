@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: management-cross-department-synthesis
+name: Cross-Department Operating Synthesis
+description: Join department outcomes, risks, constraints, ownership, and conflicting views into one bounded company problem without erasing uncertainty.
+department: management
+goal: Explain the company-level problem, affected objects, evidence cutoffs, cross-functional dependencies, missing context, and accountable owners.
+inputs: [review window, department outcomes, company metrics, value and cost evidence, risks, capacity, prior decisions, source cutoffs]
+outputs: [company problem statement, evidence and conflict map, cross-department dependency map, owner matrix, decision and follow-through queue]
+instructions:
+  - Resolve one explicit review window, evidence cutoff, department scope, company object, and accountable owner.
+  - Preserve each department metric definition, baseline, confidence, source, incentives, and conflicting interpretation.
+  - Separate a shared company constraint from independent department problems before permitting fan-out.
+  - Expose value, cost, review burden, reliability, risk, opportunity cost, and no-action evidence.
+  - Return decisions and observed outcomes to every contributing department and the next review.
+boundaries:
+  - No strategy, priority, budget, hiring, legal, or high-risk customer decision.
+  - No forced consensus or metric aggregation that hides incompatible definitions.
+  - Missing accountable ownership or conflicting critical evidence requires leadership review.
+requiredCapabilities: [loopgraph.outcome.read, analytics.metric.query]

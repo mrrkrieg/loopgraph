@@ -73,6 +73,41 @@ describe("buildBrainGraph", () => {
     ]);
   });
 
+  it("keeps an installed app boundary visible between its department and loops", () => {
+    const graph = buildBrainGraph({
+      topology: topology([
+        node({ id: "company:root", type: "company", label: "Hermes Brain" }),
+        node({ id: "loop:department:sales", type: "department_loop", label: "Sales", parentId: "company:root", department: "sales" }),
+        node({ id: "app:sales-inbound", type: "workflow_loop", label: "Qualify and Route Inbound Leads", parentId: "loop:department:sales", department: "sales", metadata: { appNode: true, installationId: "install.sales-inbound" } }),
+        node({ id: "loop:lead-intake", type: "task_loop", label: "Lead Intake", loopId: "lead-intake", parentId: "app:sales-inbound", department: "sales", metadata: { appId: "sales-inbound" } }),
+        node({ id: "loop:lead-qualification", type: "task_loop", label: "Lead Qualification", loopId: "lead-qualification", parentId: "app:sales-inbound", department: "sales", metadata: { appId: "sales-inbound" } })
+      ], [
+        edge({ source: "company:root", target: "loop:department:sales" }),
+        edge({ source: "loop:department:sales", target: "app:sales-inbound" }),
+        edge({ source: "app:sales-inbound", target: "loop:lead-intake" }),
+        edge({ source: "app:sales-inbound", target: "loop:lead-qualification" })
+      ], { brainLabel: "Hermes Brain", hierarchyMode: "hermes_brain", managementLoopId: "company:root" }),
+      includeData: false,
+      includeMetrics: false,
+      includeReviews: false,
+      includeImprove: false
+    });
+
+    expect(graph.nodes.map((item) => item.id)).toEqual(expect.arrayContaining([
+      "company:root",
+      "loop:department:sales",
+      "app:sales-inbound",
+      "loop:lead-intake",
+      "loop:lead-qualification"
+    ]));
+    expect(graph.nodes).toHaveLength(5);
+    expect(graph.nodes.find((item) => item.id === "app:sales-inbound")).toMatchObject({
+      radius: 36,
+      color: "#fff7ed",
+      metadata: { appNode: true, installationId: "install.sales-inbound" }
+    });
+  });
+
   it("excludes orphans and template-only workflow nodes", () => {
     const graph = buildBrainGraph({
       topology: topology([

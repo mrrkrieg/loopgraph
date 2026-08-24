@@ -1,0 +1,45 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: product-roadmap-evidence, name: Roadmap Evidence, version: 1.0.0, description: "Assemble comparable product-problem evidence and prepare governed issue work without making priority commitments.", department: product, ownerRole: product_lead, tags: [roadmap, evidence, prioritization] }
+trigger: { type: event, source: hermes, event: product.problem_validated }
+input: { requiredFields: [normalizedPayload.problemId, normalizedPayload.productArea, normalizedPayload.segment, normalizedPayload.evidenceRefs], subjectTypes: [product_problem], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble problem evidence, actor: system, type: observe, description: "Join the original problem, recurrence, segment, usage, support, revenue-risk, and existing-work evidence." }
+  - { id: compare, name: Compare evidence quality, actor: agent, type: assess, description: "Make evidence strength, uncertainty, affected workflow, guardrails, and opportunity cost explicit." }
+  - { id: decide, name: Select review path, actor: agent, type: decide, description: "Prepare one bounded issue proposal or request product judgment when strategic tradeoffs remain." }
+  - { id: prepare, name: Prepare roadmap brief, actor: system, type: prepare, description: "Draft an exact issue create or update request without setting priority, commitment, or release date." }
+  - { id: learn, name: Track product decision, actor: system, type: learn, description: "Return accepted, deferred, rejected, reframed, and linked-release outcomes." }
+capabilities:
+  - { key: support.feedback.read, authority: read, risk: low, required: true, purpose: Read supporting customer evidence., customerFacing: false }
+  - { key: analytics.event.query, authority: read, risk: medium, required: true, purpose: Read bounded product behavior evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Compare with active and historical product work., customerFacing: false }
+  - { key: project.issue.create, authority: approve, risk: high, required: false, purpose: Create an exact approved problem issue., customerFacing: false }
+  - { key: project.issue.update, authority: approve, risk: high, required: false, purpose: Append exact approved evidence to existing work., customerFacing: false }
+skills: [product-evidence-quality, product-problem-framing]
+outcomes:
+  - { metric: validated_problem_to_decision_days, description: Time from validated problem to an accountable product decision., direction: decrease, sourceCapability: project.issue.read }
+  - { metric: roadmap_evidence_rework_rate, description: Evidence briefs returned for missing or misleading evidence., direction: decrease, sourceCapability: project.issue.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [product.roadmap_evidence]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: product.problem_validated, subjectTypes: [product_problem], requiredFields: [normalizedPayload.problemId, normalizedPayload.productArea, normalizedPayload.segment, normalizedPayload.evidenceRefs], reason: An accountable product problem has sufficient evidence for a decision brief. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: product.feedback_cluster_ready, subjectTypes: [], fields: [], reason: Unvalidated themes cannot enter roadmap evidence. }]
+  inputMapping: { problemId: normalizedPayload.problemId, productArea: normalizedPayload.productArea, segment: normalizedPayload.segment }
+  priority: 80
+  minimumConfidence: 0.88
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [support.feedback.read, analytics.event.query, project.issue.read]
+  examples: { shouldRoute: ["A validated problem has traceable evidence and a defined affected segment."], shouldNotRoute: ["Only a requested solution is present.", "The brief implies an unapproved customer commitment."] }
+policy:
+  forbiddenActions:
+    - { capability: project.issue.create, reason: Issue creation requires product-owner approval and cannot set roadmap priority. }
+    - { capability: project.issue.update, reason: Issue updates require exact evidence and approval. }
+  escalationOwner: product_lead
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

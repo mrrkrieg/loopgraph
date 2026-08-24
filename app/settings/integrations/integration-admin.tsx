@@ -14,6 +14,7 @@ const BROKER_CAPABILITIES = [
   "provider.oauth.revoke",
   "provider.webhooks.subscribe",
   "provider.webhooks.verify",
+  "provider.events.emit",
   "provider.health.read",
   "provider.data.read",
   "provider.draft.write",
@@ -26,12 +27,14 @@ export function IntegrationAdmin({
   initialWorkloadIdentities,
   initialKillSwitches,
   providers,
+  initialProviderId,
   brokerConfigured
 }: {
   initialInstallations: ConnectorInstallationView[];
   initialWorkloadIdentities: WorkloadIdentityAdminView[];
   initialKillSwitches: ConnectorKillSwitchAdminView[];
   providers: ProviderOnboardingProfile[];
+  initialProviderId?: string;
   brokerConfigured: boolean;
 }) {
   const [installations, setInstallations] = useState(initialInstallations);
@@ -120,7 +123,9 @@ export function IntegrationAdmin({
       }
       const installation = body.installation as ConnectorInstallationView;
       setInstallations((current) => current.map((item) => item.id === installationId ? installation : item));
-      setMessage(`${installation.providerId} webhook is ${installation.webhookStatus}. Endpoint: ${String(body.endpointUrl ?? "broker route")}`);
+      setMessage(body.intakeMode === "scheduled_detector"
+        ? `${installation.providerId} detector is ${installation.status}. Hermes will poll the approved evidence templates on its configured schedule.`
+        : `${installation.providerId} webhook is ${installation.webhookStatus}. Endpoint: ${String(body.endpointUrl ?? "broker route")}`);
     });
   }
 
@@ -316,7 +321,7 @@ export function IntegrationAdmin({
         <form action={connect} className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="text-sm font-medium">
             Provider
-            <select name="provider_id" className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" disabled={pending || !brokerConfigured}>
+            <select name="provider_id" defaultValue={initialProviderId ?? providers[0]?.providerId} className="mt-1 w-full rounded-md border border-line bg-white px-3 py-2" disabled={pending || !brokerConfigured}>
               {providers.map((provider) => <option key={provider.providerId} value={provider.providerId}>{provider.label}</option>)}
             </select>
           </label>

@@ -2,8 +2,11 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { LOOPGRAPH_API_VERSION, LOOP_KIND } from "loopgraph/core";
-import { getLoopRunsForHermes } from "loopgraph/runtime";
+import { contentHash, LOOPGRAPH_API_VERSION, LOOP_KIND } from "loopgraph/core";
+import {
+  getLoopRunsForHermes,
+  type SubmitGraphEditorTransactionInput
+} from "loopgraph/runtime";
 import { getSemanticTopology } from "../../lib/loop-engineering-builder/workspace";
 import { resetStorageAdapterCache } from "../../lib/loopgraph-runtime/storage-resolver";
 import {
@@ -12,6 +15,18 @@ import {
   submitBrainGraphEditAction,
   validateBrainLoopAction
 } from "./actions";
+
+const getGraphAuthoringContext = vi.hoisted(() => vi.fn());
+const startGraphEditorProposalLifecycle = vi.hoisted(() => vi.fn());
+
+vi.mock("../../lib/loopgraph-runtime/graph-authoring-store-resolver", () => ({
+  getGraphAuthoringContext
+}));
+
+vi.mock("loopgraph/runtime", async (importOriginal) => ({
+  ...await importOriginal<typeof import("loopgraph/runtime")>(),
+  startGraphEditorProposalLifecycle
+}));
 
 vi.mock("next/cache", () => ({
   revalidatePath: vi.fn()
@@ -151,14 +166,207 @@ describe("brain graph loop actions", () => {
     expect(runs.count).toBe(0);
   });
 
-  it("fails closed for direct hosted graph-authoring actions", async () => {
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://example.supabase.co");
-    vi.stubEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "anon");
-    vi.stubEnv("LOOPGRAPH_HOSTED_MODE", "1");
+  it("submits authenticated graph-authoring actions through the resolved backend store", async () => {
+    const { projectRoot } = await createHermesLoopProject();
+    vi.stubEnv("LOOPGRAPH_PROJECT_ROOT", projectRoot);
+    process.env.LOOPGRAPH_PROJECT_ROOT = projectRoot;
+    const topology = await getSemanticTopology(undefined, {
+      includeCatalogLoops: false,
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain"
+    });
+    const topologyHash = contentHash({ nodes: topology.nodes, edges: topology.edges });
+    const submit = vi.fn(async (input: SubmitGraphEditorTransactionInput) => ({
+      schemaVersion: "graph-editor-transaction/v1alpha1" as const,
+      id: input.transactionId!,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      actorId: input.actorId,
+      expectedTopologyHash: input.expectedTopologyHash,
+      operations: input.operations,
+      status: "layout_applied" as const,
+      createdAt: input.now!.toISOString()
+    }));
+    getGraphAuthoringContext.mockResolvedValue({
+      store: { persistence: "distributed", submit, getLayout: vi.fn(), list: vi.fn() },
+      workspaceId: "main",
+      companyId: "123e4567-e89b-12d3-a456-426614174000",
+      actorId: "123e4567-e89b-12d3-a456-426614174001"
+    });
     const formData = new FormData();
     formData.set("operations", JSON.stringify([{ kind: "move_node", nodeId: "brain", x: 0, y: 0 }]));
-    formData.set("expectedTopologyHash", "aaaaaaaaaaaaaaaa");
-    await expect(submitBrainGraphEditAction(formData)).rejects.toThrow("local-only");
+    formData.set("expectedTopologyHash", topologyHash);
+
+    await expect(submitBrainGraphEditAction(formData)).resolves.toEqual({
+      id: expect.stringMatching(/^graph_edit_/),
+      status: "layout_applied",
+      proposalLifecycle: []
+    });
+    expect(getGraphAuthoringContext).toHaveBeenCalledWith("loops.write");
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "main",
+      companyId: "123e4567-e89b-12d3-a456-426614174000",
+      actorId: "123e4567-e89b-12d3-a456-426614174001",
+      expectedTopologyHash: topologyHash
+    }));
+  });
+
+  it("turns a semantic graph proposal into a Hermes design lifecycle", async () => {
+    const { projectRoot } = await createHermesLoopProject();
+    vi.stubEnv("LOOPGRAPH_PROJECT_ROOT", projectRoot);
+    process.env.LOOPGRAPH_PROJECT_ROOT = projectRoot;
+    const topology = await getSemanticTopology(undefined, {
+      includeCatalogLoops: false,
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain"
+    });
+    const topologyHash = contentHash({ nodes: topology.nodes, edges: topology.edges });
+    const operation = {
+      kind: "propose_node" as const,
+      temporaryId: "draft:new-product-loop",
+      nodeType: "workflow_loop" as const,
+      label: "Product Signal Review",
+      departmentId: "product",
+      purpose: "Turn repeated product signals into a governed review loop."
+    };
+    const workspaceId = "main";
+    const companyId = "123e4567-e89b-12d3-a456-426614174000";
+    const actorId = "123e4567-e89b-12d3-a456-426614174001";
+    const submit = vi.fn(async (input: SubmitGraphEditorTransactionInput) => ({
+      schemaVersion: "graph-editor-transaction/v1alpha1" as const,
+      id: input.transactionId!,
+      workspaceId: input.workspaceId,
+      companyId: input.companyId,
+      actorId: input.actorId,
+      expectedTopologyHash: input.expectedTopologyHash,
+      operations: input.operations,
+      status: "proposal_pending" as const,
+      createdAt: input.now!.toISOString()
+    }));
+    getGraphAuthoringContext.mockResolvedValue({
+      store: {
+        persistence: "distributed",
+        submit,
+        getLayout: vi.fn(),
+        list: vi.fn()
+      },
+      workspaceId,
+      companyId,
+      actorId
+    });
+    startGraphEditorProposalLifecycle.mockResolvedValue({
+      opportunity: {
+        id: "opportunity_graph_edit_1",
+        kind: "create_loop",
+        status: "design_requested",
+        title: "Design Product Signal Review",
+        department: "product",
+        targetLoopIds: [],
+        updatedAt: "2026-08-15T12:00:00.000Z"
+      },
+      graphChangeSet: { id: "graph_change_graph_edit_1", status: "proposed" },
+      designTask: { id: "hermes_task_graph_edit_1", sessionId: "discovery_graph_edit_1" },
+      nextAction: "answer_questions"
+    });
+    const formData = new FormData();
+    formData.set("operations", JSON.stringify([operation]));
+    formData.set("expectedTopologyHash", topologyHash);
+
+    const result = await submitBrainGraphEditAction(formData);
+    expect(result).toEqual({
+      id: expect.stringMatching(/^graph_edit_/),
+      status: "proposal_pending",
+      proposalLifecycle: [{
+        opportunityId: "opportunity_graph_edit_1",
+        kind: "create_loop",
+        status: "design_requested",
+        title: "Design Product Signal Review",
+        department: "product",
+        targetLoopIds: [],
+        graphChangeSetId: "graph_change_graph_edit_1",
+        graphChangeSetStatus: "proposed",
+        designTaskId: "hermes_task_graph_edit_1",
+        discoverySessionId: "discovery_graph_edit_1",
+        updatedAt: "2026-08-15T12:00:00.000Z",
+        nextAction: "answer_questions"
+      }]
+    });
+    expect(startGraphEditorProposalLifecycle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        transactionId: result.id,
+        department: "product",
+        kind: "create_loop",
+        title: "Design Product Signal Review",
+        projectRoot
+      }),
+      expect.objectContaining({
+        designStore: expect.any(Object),
+        discoveryStore: expect.any(Object),
+        loopSpecStore: expect.any(Object),
+        opportunityStore: expect.any(Object)
+      })
+    );
+  });
+
+  it("rejects non-compilable decorative edges before persisting a receipt", async () => {
+    const { projectRoot } = await createHermesLoopProject();
+    vi.stubEnv("LOOPGRAPH_PROJECT_ROOT", projectRoot);
+    process.env.LOOPGRAPH_PROJECT_ROOT = projectRoot;
+    const topology = await getSemanticTopology(undefined, {
+      includeCatalogLoops: false,
+      brainLabel: "Hermes Brain",
+      hierarchyMode: "hermes_brain"
+    });
+    const source = topology.nodes.find((node) => node.type === "company");
+    const target = topology.nodes.find((node) => node.type === "department_loop");
+    expect(source).toBeDefined();
+    expect(target).toBeDefined();
+    const topologyHash = contentHash({ nodes: topology.nodes, edges: topology.edges });
+    const submit = vi.fn();
+    getGraphAuthoringContext.mockResolvedValue({
+      store: {
+        persistence: "distributed",
+        submit,
+        getLayout: vi.fn(),
+        list: vi.fn()
+      },
+      workspaceId: "main",
+      companyId: "123e4567-e89b-12d3-a456-426614174000",
+      actorId: "123e4567-e89b-12d3-a456-426614174001"
+    });
+    const formData = new FormData();
+    formData.set("operations", JSON.stringify([{
+      kind: "propose_edge",
+      sourceId: source!.id,
+      targetId: target!.id,
+      relation: "brain_routes_to",
+      reason: "This edge has no workflow loop to compile."
+    }]));
+    formData.set("expectedTopologyHash", topologyHash);
+
+    await expect(submitBrainGraphEditAction(formData)).rejects.toThrow(
+      "must connect Hermes Brain to a workflow loop"
+    );
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("bounds semantic lifecycle fan-out before authorization or persistence", async () => {
+    const operations = Array.from({ length: 26 }, (_, index) => ({
+      kind: "propose_node" as const,
+      temporaryId: `draft_${index}`,
+      nodeType: "workflow_loop" as const,
+      label: `Product Review ${index}`,
+      departmentId: "product",
+      purpose: `Review product evidence stream ${index}.`
+    }));
+    const formData = new FormData();
+    formData.set("operations", JSON.stringify(operations));
+    formData.set("expectedTopologyHash", "unused");
+
+    await expect(submitBrainGraphEditAction(formData))
+      .rejects.toThrow("A graph edit can contain at most 25 semantic proposals");
+    expect(getGraphAuthoringContext).not.toHaveBeenCalled();
+    expect(startGraphEditorProposalLifecycle).not.toHaveBeenCalled();
   });
 });
 

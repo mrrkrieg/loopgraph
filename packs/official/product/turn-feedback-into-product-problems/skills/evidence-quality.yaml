@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: product-evidence-quality
+name: Product Evidence Quality
+description: Evaluate whether feedback, usage, support, and defect evidence is sufficient for a bounded product decision.
+department: product
+goal: Make product evidence strength, missing facts, uncertainty, and alternative explanations explicit.
+inputs: [feedback evidence, product analytics, support evidence, existing issues, company segment definitions]
+outputs: [evidence assessment, confidence, alternative explanations, smallest missing fact]
+instructions:
+  - Require a defined affected workflow and segment before validating a product problem.
+  - Distinguish recurrence from duplicate delivery and correlated evidence from independent evidence.
+  - Test onboarding, support-process, usability, recurring-defect, and strategic-account explanations.
+  - Prefer bounded queries and explicit observation windows.
+  - State when analytics or identity evidence is unavailable rather than estimating it.
+boundaries:
+  - No solution-first recommendation without problem evidence.
+  - No invented usage metrics, customer identity, or statistical significance.
+  - Security, privacy, and strategic-account implications require accountable review.
+requiredCapabilities: [support.feedback.read, analytics.event.query, project.issue.read]

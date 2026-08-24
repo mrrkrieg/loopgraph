@@ -1,0 +1,49 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: sales-pipeline-outcome
+  name: Pipeline Outcome Learning
+  version: 1.0.0
+  description: Attribute observed pipeline outcomes to prior risk signals and reviewed interventions without claiming unsupported causality.
+  department: sales
+  ownerRole: revenue_operations
+  tags: [pipeline, outcomes, forecast, learning]
+trigger: { type: event, source: "*", event: sales.pipeline_outcome_observed }
+input: { requiredFields: [normalizedPayload.opportunityId, normalizedPayload.outcome, normalizedPayload.observedAt], subjectTypes: [opportunity, pipeline_outcome], fixtures: [] }
+routine:
+  - { id: recover, name: Recover prior decision, actor: system, type: observe, description: "Load the original risk evidence, review, approved action, and durable provider receipts." }
+  - { id: measure, name: Measure pipeline outcome, actor: system, type: observe, description: "Record re-engagement, meeting, stage, close, loss, and forecast evidence without imputing missing outcomes." }
+  - { id: evaluate, name: Evaluate signal quality, actor: agent, type: assess, description: "Compare prediction and intervention evidence with observed outcomes and alternative explanations." }
+  - { id: decide, name: Prepare learning update, actor: agent, type: decide, description: "Recommend threshold, evidence, or playbook review without automatically changing production routing." }
+  - { id: learn, name: Return shared learning, actor: system, type: learn, description: "Feed calibrated risk and recovery evidence into future Hermes decisions." }
+capabilities:
+  - { key: crm.opportunity.read, authority: read, risk: low, required: true, purpose: Read observed stage and forecast outcomes., customerFacing: false }
+  - { key: mail.thread.read, authority: read, risk: high, required: true, purpose: Verify response and re-engagement outcomes., customerFacing: false }
+  - { key: calendar.event.read, authority: read, risk: medium, required: true, purpose: Verify meeting outcomes., customerFacing: false }
+skills: [sales-deal-diagnosis, sales-commitment-extraction]
+outcomes:
+  - { metric: at_risk_stage_progression_rate, description: Flagged opportunities that progress after review and intervention., direction: increase, sourceCapability: crm.opportunity.read }
+  - { metric: deal_risk_false_positive_rate, description: Flagged opportunities judged healthy or progressing without intervention., direction: decrease, sourceCapability: crm.opportunity.read }
+  - { metric: forecast_accuracy_change, description: Change in forecast calibration for reviewed opportunities., direction: increase, sourceCapability: crm.opportunity.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [sales.pipeline_outcome_learning]
+  accepts: [{ sourcePattern: "*", eventTypePattern: sales.pipeline_outcome_observed, subjectTypes: [opportunity, pipeline_outcome], requiredFields: [normalizedPayload.opportunityId, normalizedPayload.outcome, normalizedPayload.observedAt], reason: A durable pipeline outcome can update prior deal-risk evidence. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: sales.opportunity_changed, subjectTypes: [], fields: [], reason: Current opportunity state is not itself a completed outcome. }]
+  inputMapping: { opportunityId: normalizedPayload.opportunityId, outcome: normalizedPayload.outcome, observedAt: normalizedPayload.observedAt }
+  priority: 70
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [crm.opportunity.read, mail.thread.read, calendar.event.read]
+  examples: { shouldRoute: ["A pipeline outcome links to one prior deal-risk problem."], shouldNotRoute: ["No prior problem identity exists.", "The opportunity outcome is not observed yet."] }
+policy:
+  forbiddenActions: []
+  escalationOwner: revenue_operations
+  escalationSla: 2d
+  separateCustomerFacingApproval: true

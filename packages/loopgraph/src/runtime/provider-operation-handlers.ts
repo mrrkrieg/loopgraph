@@ -7,7 +7,9 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   const handlers = new Map<string, ConnectorOperationHandler>();
   for (const providerId of [
     "hubspot", "google_ads", "slack", "notion", "salesforce", "stripe", "github",
-    "zendesk", "intercom", "workday", "greenhouse", "netsuite", "quickbooks"
+    "zendesk", "intercom", "workday", "greenhouse", "netsuite", "quickbooks",
+    "gmail", "google_calendar", "outlook", "teams", "posthog", "amplitude",
+    "linear", "jira", "gitlab", "bigquery", "snowflake"
   ] satisfies ProviderId[]) {
     handlers.set(operationKey(providerId, "health.check"), async (context) => {
       const lease = await context.getCredential();
@@ -57,6 +59,11 @@ export function createProviderOperationHandlers(fetcher: typeof fetch = fetch) {
   registerSupportHandlers(handlers, fetcher);
   registerHrisHandlers(handlers, fetcher);
   registerFinanceHandlers(handlers, fetcher);
+  registerGoogleWorkspaceHandlers(handlers, fetcher);
+  registerMicrosoftGraphHandlers(handlers, fetcher);
+  registerAnalyticsHandlers(handlers, fetcher);
+  registerEngineeringHandlers(handlers, fetcher);
+  registerWarehouseHandlers(handlers, fetcher);
   return handlers;
 }
 
@@ -436,6 +443,356 @@ function registerFinanceHandlers(handlers: Map<string, ConnectorOperationHandler
   });
 }
 
+function registerGoogleWorkspaceHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  handlers.set(operationKey("gmail", "threads.read"), async (context) => {
+    const input = z.object({ threadId: safeProviderId }).strict().parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(input.threadId)}`);
+    url.searchParams.set("format", "metadata");
+    url.searchParams.append("metadataHeaders", "From");
+    url.searchParams.append("metadataHeaders", "To");
+    url.searchParams.append("metadataHeaders", "Date");
+    url.searchParams.append("metadataHeaders", "Subject");
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const messages = Array.isArray(body.messages) ? body.messages.slice(0, 100).map((item) => {
+      const message = objectValue(item);
+      return selectFields(message, ["id", "threadId", "labelIds", "snippet", "internalDate", "payload"]);
+    }) : [];
+    return { providerObjectRef: `gmail:thread:${input.threadId}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), messages };
+  });
+  handlers.set(operationKey("gmail", "drafts.create"), async (context) => {
+    const draft = emailMessageInput.parse(context.request.input);
+    return { providerObjectRef: "gmail:draft:prepared", sourceTimestamp: new Date().toISOString(), responseStatusClass: "not_sent", draft };
+  });
+  handlers.set(operationKey("gmail", "messages.send"), async (context) => {
+    const input = emailMessageInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const raw = Buffer.from(`To: ${input.to}\r\nSubject: ${input.subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${input.body}`, "utf8").toString("base64url");
+    const response = await fixedFetch(fetcher, "https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+      body: JSON.stringify({ raw })
+    });
+    const body = await providerJson(response);
+    return { providerObjectRef: `gmail:message:${stringField(body, "id") ?? "sent"}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), delivered: true, threadId: stringField(body, "threadId") };
+  });
+  handlers.set(operationKey("google_calendar", "events.read"), async (context) => {
+    const input = eventWindowInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId ?? "primary")}/events`);
+    url.searchParams.set("timeMin", input.startAt);
+    url.searchParams.set("timeMax", input.endAt);
+    url.searchParams.set("singleEvents", "true");
+    url.searchParams.set("maxResults", String(input.limit));
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const events = Array.isArray(body.items) ? body.items.slice(0, input.limit).map((item) => selectFields(objectValue(item), ["id", "status", "summary", "start", "end", "attendees", "updated", "organizer"])) : [];
+    return { providerObjectRef: `google_calendar:${input.calendarId ?? "primary"}:${input.startAt}:${input.endAt}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), events };
+  });
+}
+
+function registerMicrosoftGraphHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  handlers.set(operationKey("outlook", "threads.read"), async (context) => {
+    const input = z.object({ conversationId: safeProviderId, limit: z.number().int().min(1).max(100).default(50) }).strict().parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL("https://graph.microsoft.com/v1.0/me/messages");
+    url.searchParams.set("$filter", `conversationId eq '${input.conversationId}'`);
+    url.searchParams.set("$select", "id,conversationId,subject,from,toRecipients,receivedDateTime,sentDateTime,bodyPreview,isRead");
+    url.searchParams.set("$top", String(input.limit));
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const messages = Array.isArray(body.value) ? body.value.slice(0, input.limit).map((item) => selectFields(objectValue(item), ["id", "conversationId", "subject", "from", "toRecipients", "receivedDateTime", "sentDateTime", "bodyPreview", "isRead"])) : [];
+    return { providerObjectRef: `outlook:conversation:${input.conversationId}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), messages };
+  });
+  handlers.set(operationKey("outlook", "events.read"), async (context) => {
+    const input = eventWindowInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const url = new URL("https://graph.microsoft.com/v1.0/me/calendarView");
+    url.searchParams.set("startDateTime", input.startAt);
+    url.searchParams.set("endDateTime", input.endAt);
+    url.searchParams.set("$select", "id,subject,start,end,attendees,organizer,isCancelled,lastModifiedDateTime");
+    url.searchParams.set("$top", String(input.limit));
+    const response = await fixedFetch(fetcher, url, { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    const events = Array.isArray(body.value) ? body.value.slice(0, input.limit).map((item) => selectFields(objectValue(item), ["id", "subject", "start", "end", "attendees", "organizer", "isCancelled", "lastModifiedDateTime"])) : [];
+    return { providerObjectRef: `outlook:calendar:${input.startAt}:${input.endAt}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), events };
+  });
+  const prepareOutlookDraft: ConnectorOperationHandler = async (context) => {
+    const draft = emailMessageInput.parse(context.request.input);
+    return { providerObjectRef: "outlook:draft:prepared", sourceTimestamp: new Date().toISOString(), responseStatusClass: "not_sent", draft };
+  };
+  handlers.set(operationKey("outlook", "drafts.create"), prepareOutlookDraft);
+  handlers.set(operationKey("outlook", "message.draft"), prepareOutlookDraft);
+  handlers.set(operationKey("outlook", "message.send"), async (context) => {
+    const input = emailMessageInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const response = await fixedFetch(fetcher, "https://graph.microsoft.com/v1.0/me/sendMail", {
+      method: "POST",
+      headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+      body: JSON.stringify({ message: { subject: input.subject, body: { contentType: "Text", content: input.body }, toRecipients: [{ emailAddress: { address: input.to } }] }, saveToSentItems: true })
+    });
+    return { providerObjectRef: `outlook:message:${context.request.idempotencyKey}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), delivered: true };
+  });
+  handlers.set(operationKey("teams", "messages.draft"), async (context) => {
+    const draft = teamsMessageInput.parse(context.request.input);
+    return { providerObjectRef: `teams:${draft.teamId}:${draft.channelId}:draft`, sourceTimestamp: new Date().toISOString(), responseStatusClass: "not_sent", draft };
+  });
+  handlers.set(operationKey("teams", "channel.post"), async (context) => {
+    const input = teamsMessageInput.parse(context.request.input);
+    const credential = await revealCredential(context);
+    const response = await fixedFetch(fetcher, `https://graph.microsoft.com/v1.0/teams/${encodeURIComponent(input.teamId)}/channels/${encodeURIComponent(input.channelId)}/messages`, {
+      method: "POST",
+      headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+      body: JSON.stringify({ body: { contentType: "text", content: input.body } })
+    });
+    const body = await providerJson(response);
+    return { providerObjectRef: `teams:${input.teamId}:${input.channelId}:message:${stringField(body, "id") ?? "sent"}`, sourceTimestamp: stringField(body, "createdDateTime") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), delivered: true };
+  });
+}
+
+function registerAnalyticsHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  handlers.set(operationKey("posthog", "insights.query"), async (context) => {
+    const input = z.object({ insightId: safeProviderId }).strict().parse(context.request.input);
+    const credential = await revealCredential(context);
+    if (!credential.projectId || !/^\d{1,20}$/.test(credential.projectId)) throw new ConnectorBrokerError("provider_credential_invalid", "PostHog project ID is unavailable.", false, true);
+    const base = credential.instanceUrl ? trustedInstanceUrl(credential, /(?:^|\.)posthog\.com$/) : new URL("https://us.posthog.com");
+    const response = await fixedFetch(fetcher, new URL(`/api/projects/${credential.projectId}/insights/${encodeURIComponent(input.insightId)}/`, base), { headers: bearerHeaders(credential) });
+    const body = await providerJson(response);
+    return { providerObjectRef: `posthog:project:${credential.projectId}:insight:${input.insightId}`, sourceTimestamp: stringField(body, "last_modified_at") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), insight: selectFields(body, ["id", "short_id", "name", "description", "filters", "result", "last_modified_at"]) };
+  });
+  handlers.set(operationKey("amplitude", "events.query"), async (context) => {
+    const input = z.object({ eventType: z.string().trim().min(1).max(200), startDate: z.string().regex(/^\d{8}$/), endDate: z.string().regex(/^\d{8}$/) }).strict().refine((value) => value.startDate <= value.endDate, "startDate must not be after endDate").parse(context.request.input);
+    const credential = await revealCredential(context);
+    if (!credential.apiKey || !credential.apiSecret) throw new ConnectorBrokerError("provider_credential_invalid", "Amplitude API key and secret are unavailable.", false, true);
+    const base = credential.region === "eu" ? "https://analytics.eu.amplitude.com" : "https://amplitude.com";
+    const url = new URL("/api/2/events/segmentation", base);
+    url.searchParams.set("e", JSON.stringify({ event_type: input.eventType }));
+    url.searchParams.set("start", input.startDate);
+    url.searchParams.set("end", input.endDate);
+    const authorization = Buffer.from(`${credential.apiKey}:${credential.apiSecret}`, "utf8").toString("base64");
+    const response = await fixedFetch(fetcher, url, { headers: { authorization: `Basic ${authorization}`, accept: "application/json" } });
+    const body = await providerJson(response);
+    return { providerObjectRef: `amplitude:event:${createHash("sha256").update(input.eventType).digest("hex").slice(0, 16)}:${input.startDate}:${input.endDate}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), series: selectFields(body, ["data", "timeComputed", "wasCached"]) };
+  });
+}
+
+function registerEngineeringHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  const linearIssueInput = z.object({ issueId: z.string().trim().min(1).max(255) }).strict();
+  const linearIssueQuery = `query LoopgraphIssue($id: String!) { issue(id: $id) { id identifier title description priority createdAt updatedAt canceledAt completedAt url state { id name type } team { id key name } project { id name state } assignee { id name } labels { nodes { id name } } } }`;
+  const readLinearIssue = (objectType: "issue" | "incident"): ConnectorOperationHandler => async (context) => {
+    const input = linearIssueInput.parse(context.request.input);
+    const body = await linearGraphql(fetcher, context, linearIssueQuery, { id: input.issueId });
+    const issue = objectField(objectField(body, "data"), "issue");
+    return {
+      providerObjectRef: `linear:${objectType}:${stringField(issue, "id") ?? input.issueId}`,
+      sourceTimestamp: stringField(issue, "updatedAt") ?? new Date().toISOString(),
+      responseStatusClass: "success",
+      [objectType]: selectFields(issue, ["id", "identifier", "title", "description", "priority", "createdAt", "updatedAt", "canceledAt", "completedAt", "url", "state", "team", "project", "assignee", "labels"])
+    };
+  };
+  handlers.set(operationKey("linear", "issues.read"), readLinearIssue("issue"));
+  handlers.set(operationKey("linear", "incidents.read"), readLinearIssue("incident"));
+  handlers.set(operationKey("linear", "projects.read"), async (context) => {
+    const input = z.object({ projectId: z.string().trim().min(1).max(255) }).strict().parse(context.request.input);
+    const body = await linearGraphql(fetcher, context, `query LoopgraphProject($id: String!) { project(id: $id) { id name description state progress startDate targetDate completedAt canceledAt updatedAt teams { nodes { id key name } } } }`, { id: input.projectId });
+    const project = objectField(objectField(body, "data"), "project");
+    return { providerObjectRef: `linear:project:${stringField(project, "id") ?? input.projectId}`, sourceTimestamp: stringField(project, "updatedAt") ?? new Date().toISOString(), responseStatusClass: "success", project: selectFields(project, ["id", "name", "description", "state", "progress", "startDate", "targetDate", "completedAt", "canceledAt", "updatedAt", "teams"]) };
+  });
+  handlers.set(operationKey("linear", "issues.create"), async (context) => {
+    const input = z.object({ teamId: z.string().trim().min(1).max(255), title: z.string().trim().min(1).max(512), description: z.string().max(100_000).optional(), priority: z.number().int().min(0).max(4).optional(), projectId: z.string().trim().min(1).max(255).optional() }).strict().parse(context.request.input);
+    const body = await linearGraphql(fetcher, context, `mutation LoopgraphIssueCreate($input: IssueCreateInput!) { issueCreate(input: $input) { success issue { id identifier title url createdAt updatedAt } } }`, { input });
+    const payload = objectField(objectField(body, "data"), "issueCreate");
+    if (payload.success !== true) throw new ConnectorBrokerError("provider_request_rejected", "Linear did not create the issue.", false, true);
+    const issue = objectField(payload, "issue");
+    return { providerObjectRef: `linear:issue:${stringField(issue, "id") ?? "created"}`, sourceTimestamp: stringField(issue, "updatedAt") ?? new Date().toISOString(), responseStatusClass: "success", issue: selectFields(issue, ["id", "identifier", "title", "url", "createdAt", "updatedAt"]) };
+  });
+  handlers.set(operationKey("linear", "issues.update"), async (context) => {
+    const input = z.object({ issueId: z.string().trim().min(1).max(255), title: z.string().trim().min(1).max(512).optional(), description: z.string().max(100_000).nullable().optional(), priority: z.number().int().min(0).max(4).optional(), stateId: z.string().trim().min(1).max(255).optional(), assigneeId: z.string().trim().min(1).max(255).nullable().optional() }).strict().refine((value) => Object.keys(value).some((key) => key !== "issueId"), "At least one issue field is required").parse(context.request.input);
+    const { issueId, ...fields } = input;
+    const body = await linearGraphql(fetcher, context, `mutation LoopgraphIssueUpdate($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success issue { id identifier title url updatedAt } } }`, { id: issueId, input: fields });
+    const payload = objectField(objectField(body, "data"), "issueUpdate");
+    if (payload.success !== true) throw new ConnectorBrokerError("provider_request_rejected", "Linear did not update the issue.", false, true);
+    const issue = objectField(payload, "issue");
+    return { providerObjectRef: `linear:issue:${stringField(issue, "id") ?? issueId}`, sourceTimestamp: stringField(issue, "updatedAt") ?? new Date().toISOString(), responseStatusClass: "success", issue: selectFields(issue, ["id", "identifier", "title", "url", "updatedAt"]) };
+  });
+
+  const jiraIssueInput = z.object({ issueIdOrKey: z.string().regex(/^(?:[A-Z][A-Z0-9_]{1,19}-[1-9]\d*|\d{1,24})$/) }).strict();
+  const readJiraIssue = (objectType: "issue" | "incident"): ConnectorOperationHandler => async (context) => {
+    const input = jiraIssueInput.parse(context.request.input);
+    const response = await jiraRequest(fetcher, context, `/issue/${encodeURIComponent(input.issueIdOrKey)}?fields=summary,description,status,priority,labels,assignee,reporter,created,updated,resolutiondate,fixVersions,project,issuetype`);
+    const body = await providerJson(response);
+    return { providerObjectRef: `jira:${objectType}:${stringField(body, "key") ?? input.issueIdOrKey}`, sourceTimestamp: stringField(objectField(body, "fields"), "updated") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), [objectType]: selectFields(body, ["id", "key", "fields"]) };
+  };
+  handlers.set(operationKey("jira", "issues.read"), readJiraIssue("issue"));
+  handlers.set(operationKey("jira", "incidents.read"), readJiraIssue("incident"));
+  handlers.set(operationKey("jira", "versions.read"), async (context) => {
+    const input = z.object({ projectIdOrKey: z.string().regex(/^(?:[A-Z][A-Z0-9_]{1,19}|\d{1,24})$/), limit: z.number().int().min(1).max(100).default(50) }).strict().parse(context.request.input);
+    const response = await jiraRequest(fetcher, context, `/project/${encodeURIComponent(input.projectIdOrKey)}/version?maxResults=${input.limit}&orderBy=-releaseDate`);
+    const body = await providerJson(response);
+    const values = Array.isArray(body.values) ? body.values.slice(0, input.limit).map((value) => selectFields(objectValue(value), ["id", "name", "description", "archived", "released", "startDate", "releaseDate", "projectId"])) : [];
+    return { providerObjectRef: `jira:project:${input.projectIdOrKey}:versions`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), versions: values };
+  });
+  handlers.set(operationKey("jira", "issues.create"), async (context) => {
+    const input = z.object({ projectIdOrKey: z.string().regex(/^(?:[A-Z][A-Z0-9_]{1,19}|\d{1,24})$/), issueTypeId: z.string().regex(/^\d{1,24}$/), summary: z.string().trim().min(1).max(255), description: z.string().max(100_000).optional(), labels: z.array(z.string().regex(/^[A-Za-z0-9_.-]{1,255}$/)).max(20).optional() }).strict().parse(context.request.input);
+    const fields = { project: /^\d+$/.test(input.projectIdOrKey) ? { id: input.projectIdOrKey } : { key: input.projectIdOrKey }, issuetype: { id: input.issueTypeId }, summary: input.summary, ...(input.description ? { description: jiraDocument(input.description) } : {}), ...(input.labels ? { labels: input.labels } : {}) };
+    const response = await jiraRequest(fetcher, context, "/issue", { method: "POST", body: JSON.stringify({ fields }) });
+    const body = await providerJson(response);
+    return { providerObjectRef: `jira:issue:${stringField(body, "key") ?? stringField(body, "id") ?? "created"}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), issue: selectFields(body, ["id", "key", "self"]) };
+  });
+  handlers.set(operationKey("jira", "issues.update"), async (context) => {
+    const input = jiraIssueInput.extend({ summary: z.string().trim().min(1).max(255).optional(), description: z.string().max(100_000).nullable().optional(), labels: z.array(z.string().regex(/^[A-Za-z0-9_.-]{1,255}$/)).max(20).optional(), priorityId: z.string().regex(/^\d{1,24}$/).optional(), assigneeAccountId: z.string().trim().min(1).max(255).nullable().optional() }).refine((value) => Object.keys(value).some((key) => key !== "issueIdOrKey"), "At least one issue field is required").parse(context.request.input);
+    const fields = { ...(input.summary ? { summary: input.summary } : {}), ...(input.description !== undefined ? { description: input.description === null ? null : jiraDocument(input.description) } : {}), ...(input.labels ? { labels: input.labels } : {}), ...(input.priorityId ? { priority: { id: input.priorityId } } : {}), ...(input.assigneeAccountId !== undefined ? { assignee: input.assigneeAccountId === null ? null : { accountId: input.assigneeAccountId } } : {}) };
+    const response = await jiraRequest(fetcher, context, `/issue/${encodeURIComponent(input.issueIdOrKey)}`, { method: "PUT", body: JSON.stringify({ fields }) });
+    return { providerObjectRef: `jira:issue:${input.issueIdOrKey}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), updated: true };
+  });
+
+  handlers.set(operationKey("gitlab", "issues.read"), async (context) => {
+    const input = gitlabProjectInput.extend({ issueIid: z.number().int().positive() }).parse(context.request.input);
+    const response = await gitlabRequest(fetcher, context, `/projects/${encodeURIComponent(input.projectIdOrPath)}/issues/${input.issueIid}`);
+    const body = await providerJson(response);
+    return { providerObjectRef: `gitlab:project:${input.projectIdOrPath}:issue:${input.issueIid}`, sourceTimestamp: stringField(body, "updated_at") ?? new Date().toISOString(), responseStatusClass: statusClass(response.status), issue: selectFields(body, ["id", "iid", "project_id", "title", "description", "state", "labels", "milestone", "assignees", "created_at", "updated_at", "closed_at", "web_url"]) };
+  });
+  handlers.set(operationKey("gitlab", "deployments.read"), async (context) => {
+    const input = gitlabProjectInput.extend({ deploymentId: z.number().int().positive().optional(), limit: z.number().int().min(1).max(100).default(20) }).parse(context.request.input);
+    const path = input.deploymentId ? `/projects/${encodeURIComponent(input.projectIdOrPath)}/deployments/${input.deploymentId}` : `/projects/${encodeURIComponent(input.projectIdOrPath)}/deployments?order_by=updated_at&sort=desc&per_page=${input.limit}`;
+    const response = await gitlabRequest(fetcher, context, path);
+    const body = await providerJsonValue(response);
+    const deployments = Array.isArray(body) ? body.slice(0, input.limit).map((value) => selectGitLabDeployment(objectValue(value))) : [selectGitLabDeployment(objectValue(body))];
+    return { providerObjectRef: `gitlab:project:${input.projectIdOrPath}:deployment:${input.deploymentId ?? "latest"}`, sourceTimestamp: new Date().toISOString(), responseStatusClass: statusClass(response.status), deployments };
+  });
+}
+
+function registerWarehouseHandlers(handlers: Map<string, ConnectorOperationHandler>, fetcher: typeof fetch) {
+  const bigQueryOperations = [
+    ["company-metrics.query", "company-metrics.query"],
+    ["finance-forecast.query", "finance-forecast.query"],
+    ["capacity-plan.query", "capacity-plan.query"],
+    ["company-metrics.detect", "company-metrics.query"],
+    ["finance-forecast.detect", "finance-forecast.query"],
+    ["capacity-plan.detect", "capacity-plan.query"]
+  ] as const;
+  const snowflakeOperations = [
+    ["company-metrics.query", "company-metrics.query"],
+    ["finance-forecast.query", "finance-forecast.query"],
+    ["capacity-plan.query", "capacity-plan.query"],
+    ["finance_forecast.query", "finance_forecast.query"],
+    ["operating_metrics.query", "operating_metrics.query"],
+    ["capacity_plan.query", "capacity_plan.query"],
+    ["company-metrics.detect", "company-metrics.query"],
+    ["finance-forecast.detect", "finance-forecast.query"],
+    ["capacity-plan.detect", "capacity-plan.query"]
+  ] as const;
+
+  for (const [operation, templateOperation] of bigQueryOperations) {
+    handlers.set(operationKey("bigquery", operation), async (context) => {
+      const input = warehouseQueryInput.parse(context.request.input);
+      const credential = await revealCredential(context);
+      const projectId = gcpProjectId.parse(credential.projectId);
+      const template = warehouseTemplate(credential, templateOperation, "bigquery");
+      const maximumBytesBilled = z.string().regex(/^[1-9]\d{0,18}$/).parse(credential.maximumBytesBilled);
+      const response = await fixedFetch(fetcher, `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(projectId)}/queries`, {
+        method: "POST",
+        headers: { ...bearerHeaders(credential), "content-type": "application/json" },
+        body: JSON.stringify({
+          query: template.statement,
+          useLegacySql: false,
+          parameterMode: "NAMED",
+          queryParameters: bigQueryBindings(template.statement, input),
+          maximumBytesBilled,
+          maxResults: input.limit,
+          timeoutMs: 10_000
+        })
+      });
+      const body = await providerJson(response);
+      if (body.jobComplete === false) {
+        throw new ConnectorBrokerError("provider_query_pending", "BigQuery did not complete the bounded query inside the broker window.", true, true);
+      }
+      return {
+        providerObjectRef: `bigquery:project:${projectId}:template:${templateOperation}`,
+        sourceTimestamp: new Date().toISOString(),
+        responseStatusClass: statusClass(response.status),
+        templateId: templateOperation,
+        totalRows: stringField(body, "totalRows"),
+        totalBytesProcessed: stringField(body, "totalBytesProcessed"),
+        schema: selectFields(objectField(body, "schema"), ["fields"]),
+        rows: Array.isArray(body.rows) ? body.rows.slice(0, input.limit) : []
+      };
+    });
+  }
+
+  for (const [operation, templateOperation] of snowflakeOperations) {
+    handlers.set(operationKey("snowflake", operation), async (context) => {
+      const input = warehouseQueryInput.parse(context.request.input);
+      const credential = await revealCredential(context);
+      const template = warehouseTemplate(credential, templateOperation, "snowflake");
+      const base = trustedInstanceUrl(credential, /(?:^|\.)snowflakecomputing\.com$/);
+      const requestId = stableRequestUuid(context.request.idempotencyKey);
+      const url = new URL("/api/v2/statements", base);
+      url.searchParams.set("requestId", requestId);
+      const response = await fixedFetch(fetcher, url, {
+        method: "POST",
+        headers: {
+          ...bearerHeaders(credential),
+          accept: "application/json",
+          "content-type": "application/json",
+          "user-agent": "loopgraph-connector-broker/1.0",
+          ...(credential.tokenType ? { "x-snowflake-authorization-token-type": credential.tokenType } : {})
+        },
+        body: JSON.stringify({
+          statement: template.statement,
+          bindings: snowflakeBindings(template, input),
+          timeout: 10,
+          database: snowflakeIdentifier.parse(credential.database),
+          schema: snowflakeIdentifier.parse(credential.schema),
+          warehouse: snowflakeIdentifier.parse(credential.warehouse),
+          role: snowflakeIdentifier.parse(credential.role)
+        })
+      });
+      const body = await providerJson(response);
+      if (response.status === 202 && !Array.isArray(body.data)) {
+        throw new ConnectorBrokerError("provider_query_pending", "Snowflake did not complete the bounded query inside the broker window.", true, true);
+      }
+      return {
+        providerObjectRef: `snowflake:template:${templateOperation}:request:${requestId}`,
+        sourceTimestamp: new Date().toISOString(),
+        responseStatusClass: statusClass(response.status),
+        templateId: templateOperation,
+        statementHandle: stringField(body, "statementHandle"),
+        resultSetMetaData: selectFields(objectField(body, "resultSetMetaData"), ["numRows", "format", "rowType"]),
+        rows: Array.isArray(body.data) ? body.data.slice(0, input.limit) : []
+      };
+    });
+  }
+}
+
+async function linearGraphql(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], query: string, variables: Record<string, unknown>) {
+  const credential = await revealCredential(context);
+  const response = await fixedFetch(fetcher, "https://api.linear.app/graphql", { method: "POST", headers: { ...bearerHeaders(credential), "content-type": "application/json" }, body: JSON.stringify({ query, variables }) });
+  const body = await providerJson(response);
+  if (Array.isArray(body.errors) && body.errors.length > 0) throw new ConnectorBrokerError("provider_request_rejected", "Linear rejected the fixed GraphQL operation.", false, true);
+  return body;
+}
+
+async function jiraRequest(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], path: string, init: RequestInit = {}) {
+  const credential = await revealCredential(context);
+  if (!credential.cloudId || !/^[A-Za-z0-9-]{8,128}$/.test(credential.cloudId)) throw new ConnectorBrokerError("provider_credential_invalid", "Jira Cloud ID is unavailable.", false, true);
+  return fixedFetch(fetcher, `https://api.atlassian.com/ex/jira/${encodeURIComponent(credential.cloudId)}/rest/api/3${path}`, { ...init, headers: { ...bearerHeaders(credential), accept: "application/json", ...(init.body ? { "content-type": "application/json" } : {}) } });
+}
+
+async function gitlabRequest(fetcher: typeof fetch, context: Parameters<ConnectorOperationHandler>[0], path: string) {
+  const credential = await revealCredential(context);
+  return fixedFetch(fetcher, `https://gitlab.com/api/v4${path}`, { headers: bearerHeaders(credential) });
+}
+
+function jiraDocument(text: string) {
+  return { type: "doc", version: 1, content: text.split(/\n{2,}/).slice(0, 200).map((paragraph) => ({ type: "paragraph", content: [{ type: "text", text: paragraph.slice(0, 10_000) }] })) };
+}
+
+function selectGitLabDeployment(value: Record<string, unknown>) {
+  return selectFields(value, ["id", "iid", "status", "created_at", "updated_at", "finished_at", "ref", "sha", "tag", "environment", "deployable", "user"]);
+}
+
 function healthProbe(providerId: ProviderId, credential: StoredCredential): {
   url: string;
   method?: string;
@@ -451,6 +808,43 @@ function healthProbe(providerId: ProviderId, credential: StoredCredential): {
   if (providerId === "notion") return { url: "https://api.notion.com/v1/users/me", headers: { ...bearer, "notion-version": "2026-03-11" } };
   if (providerId === "stripe") return { url: "https://api.stripe.com/v1/account", headers: bearer };
   if (providerId === "intercom") return { url: "https://api.intercom.io/me", headers: { ...bearer, accept: "application/json" } };
+  if (providerId === "gmail") return { url: "https://gmail.googleapis.com/gmail/v1/users/me/profile", headers: bearer };
+  if (providerId === "google_calendar") return { url: "https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=1", headers: bearer };
+  if (providerId === "outlook" || providerId === "teams") return { url: "https://graph.microsoft.com/v1.0/me?$select=id", headers: bearer };
+  if (providerId === "posthog") {
+    const base = credential.instanceUrl ? trustedInstanceUrl(credential, /(?:^|\.)posthog\.com$/) : new URL("https://us.posthog.com");
+    return { url: new URL("/api/users/@me/", base).toString(), headers: bearer };
+  }
+  if (providerId === "amplitude" && credential.apiKey && credential.apiSecret) {
+    const base = credential.region === "eu" ? "https://analytics.eu.amplitude.com" : "https://amplitude.com";
+    return { url: `${base}/api/2/events/list`, headers: { authorization: `Basic ${Buffer.from(`${credential.apiKey}:${credential.apiSecret}`, "utf8").toString("base64")}` } };
+  }
+  if (providerId === "linear") return { url: "https://api.linear.app/graphql", method: "POST", headers: { ...bearer, "content-type": "application/json" }, body: JSON.stringify({ query: "query LoopgraphHealth { viewer { id } }" }) };
+  if (providerId === "jira" && credential.cloudId && /^[A-Za-z0-9-]{8,128}$/.test(credential.cloudId)) return { url: `https://api.atlassian.com/ex/jira/${encodeURIComponent(credential.cloudId)}/rest/api/3/myself`, headers: bearer };
+  if (providerId === "gitlab") return { url: "https://gitlab.com/api/v4/user", headers: bearer };
+  if (providerId === "bigquery" && credential.projectId && gcpProjectId.safeParse(credential.projectId).success) {
+    return {
+      url: `https://bigquery.googleapis.com/bigquery/v2/projects/${encodeURIComponent(credential.projectId)}/queries`,
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ query: "SELECT 1 AS loopgraph_health", useLegacySql: false, maximumBytesBilled: "0", maxResults: 1, timeoutMs: 5_000 })
+    };
+  }
+  if (providerId === "snowflake" && credential.accessToken && credential.database && credential.schema && credential.warehouse && credential.role) {
+    const base = trustedInstanceUrl(credential, /(?:^|\.)snowflakecomputing\.com$/);
+    return {
+      url: new URL("/api/v2/statements", base).toString(),
+      method: "POST",
+      headers: {
+        ...bearer,
+        accept: "application/json",
+        "content-type": "application/json",
+        "user-agent": "loopgraph-connector-broker/1.0",
+        ...(credential.tokenType ? { "x-snowflake-authorization-token-type": credential.tokenType } : {})
+      },
+      body: JSON.stringify({ statement: "SELECT CURRENT_ACCOUNT() AS LOOPGRAPH_HEALTH", timeout: 5, database: snowflakeIdentifier.parse(credential.database), schema: snowflakeIdentifier.parse(credential.schema), warehouse: snowflakeIdentifier.parse(credential.warehouse), role: snowflakeIdentifier.parse(credential.role) })
+    };
+  }
   if (providerId === "salesforce" && credential.instanceUrl) {
     const url = new URL(credential.instanceUrl);
     if (url.protocol !== "https:" || !/(?:^|\.)salesforce\.com$/.test(url.hostname)) {
@@ -467,6 +861,18 @@ type StoredCredential = {
   developerToken?: string;
   subdomain?: string;
   realmId?: string;
+  projectId?: string;
+  apiKey?: string;
+  apiSecret?: string;
+  region?: "us" | "eu";
+  cloudId?: string;
+  maximumBytesBilled?: string;
+  database?: string;
+  schema?: string;
+  warehouse?: string;
+  role?: string;
+  tokenType?: "OAUTH" | "KEYPAIR_JWT" | "PROGRAMMATIC_ACCESS_TOKEN";
+  queryTemplates?: Record<string, WarehouseQueryTemplate>;
 };
 
 function parseCredential(value: string): StoredCredential {
@@ -482,15 +888,69 @@ function parseCredential(value: string): StoredCredential {
       subdomain: typeof parsed.subdomain === "string" ? parsed.subdomain : undefined,
       realmId: typeof parsed.realm_id === "string"
         ? parsed.realm_id
-        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined
+        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined,
+      projectId: typeof parsed.project_id === "string" || typeof parsed.project_id === "number" ? String(parsed.project_id) : undefined,
+      apiKey: typeof parsed.api_key === "string" ? parsed.api_key : undefined,
+      apiSecret: typeof parsed.api_secret === "string" ? parsed.api_secret : undefined,
+      region: parsed.region === "eu" ? "eu" : parsed.region === "us" ? "us" : undefined,
+      cloudId: typeof parsed.cloud_id === "string"
+        ? parsed.cloud_id
+        : typeof parsed.provider_account_id === "string" ? parsed.provider_account_id : undefined,
+      maximumBytesBilled: typeof parsed.maximum_bytes_billed === "string" || typeof parsed.maximum_bytes_billed === "number"
+        ? String(parsed.maximum_bytes_billed)
+        : undefined,
+      database: typeof parsed.database === "string" ? parsed.database : undefined,
+      schema: typeof parsed.schema === "string" ? parsed.schema : undefined,
+      warehouse: typeof parsed.warehouse === "string" ? parsed.warehouse : undefined,
+      role: typeof parsed.role === "string" ? parsed.role : undefined,
+      tokenType: parsed.token_type === "OAUTH" || parsed.token_type === "KEYPAIR_JWT" || parsed.token_type === "PROGRAMMATIC_ACCESS_TOKEN"
+        ? parsed.token_type
+        : undefined,
+      queryTemplates: parseWarehouseQueryTemplates(parsed.query_templates)
     };
   } catch {
     return { accessToken: value };
   }
 }
 
+function parseWarehouseQueryTemplates(value: unknown): Record<string, WarehouseQueryTemplate> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: Record<string, WarehouseQueryTemplate> = {};
+  for (const [operation, candidate] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof candidate === "string") {
+      result[operation] = { statement: candidate };
+      continue;
+    }
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const record = candidate as Record<string, unknown>;
+    if (typeof record.statement !== "string") continue;
+    const rawOrder = record.binding_order ?? record.bindingOrder;
+    const bindingOrder = Array.isArray(rawOrder)
+      ? rawOrder.filter((item): item is WarehouseBindingName => ["windowStart", "windowEnd", "subjectId", "limit"].includes(String(item)))
+      : undefined;
+    result[operation] = { statement: record.statement, ...(bindingOrder ? { bindingOrder } : {}) };
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 const safeProviderId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/);
 const notionId = z.string().regex(/^[a-fA-F0-9-]{32,36}$/);
+const emailMessageInput = z.object({
+  to: z.string().email().max(320),
+  subject: z.string().trim().min(1).max(998).refine((value) => !/[\r\n]/.test(value), "subject cannot contain line breaks"),
+  body: z.string().min(1).max(100_000)
+}).strict();
+const eventWindowInput = z.object({
+  startAt: z.string().datetime(),
+  endAt: z.string().datetime(),
+  calendarId: z.string().min(1).max(512).optional(),
+  limit: z.number().int().min(1).max(100).default(50)
+}).strict().refine((value) => value.startAt <= value.endAt, "startAt must not be after endAt");
+const teamsMessageInput = z.object({
+  teamId: safeProviderId,
+  channelId: safeProviderId,
+  body: z.string().trim().min(1).max(16_000)
+}).strict();
 const slackMessageInput = z.object({
   channelId: z.string().regex(/^[CGD][A-Z0-9]{5,30}$/),
   text: z.string().trim().min(1).max(16_000)
@@ -500,6 +960,94 @@ const githubRepositoryInput = z.object({
   repository: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/)
 }).strict();
 const githubIssueInput = githubRepositoryInput.extend({ issueNumber: z.number().int().positive() }).strict();
+const gitlabProjectInput = z.object({
+  projectIdOrPath: z.string().trim().min(1).max(512).regex(/^(?:\d{1,24}|[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+){1,20})$/)
+}).strict();
+const warehouseQueryInput = z.object({
+  windowStart: z.string().datetime(),
+  windowEnd: z.string().datetime(),
+  subjectId: safeProviderId.optional(),
+  limit: z.number().int().min(1).max(500).default(100)
+}).strict().superRefine((value, context) => {
+  const start = Date.parse(value.windowStart);
+  const end = Date.parse(value.windowEnd);
+  if (start >= end) context.addIssue({ code: z.ZodIssueCode.custom, path: ["windowEnd"], message: "windowEnd must be after windowStart" });
+  if (end - start > 366 * 24 * 60 * 60 * 1_000) context.addIssue({ code: z.ZodIssueCode.custom, path: ["windowEnd"], message: "warehouse query windows cannot exceed 366 days" });
+});
+const gcpProjectId = z.string().regex(/^[a-z][a-z0-9-]{4,61}[a-z0-9]$/);
+const snowflakeIdentifier = z.string().regex(/^[A-Za-z][A-Za-z0-9_$]{0,254}$/);
+
+type WarehouseQueryInput = z.infer<typeof warehouseQueryInput>;
+type WarehouseBindingName = "windowStart" | "windowEnd" | "subjectId" | "limit";
+type WarehouseQueryTemplate = { statement: string; bindingOrder?: WarehouseBindingName[] };
+
+function warehouseTemplate(credential: StoredCredential, operation: string, providerId: "bigquery" | "snowflake") {
+  const candidate = credential.queryTemplates?.[operation];
+  if (!candidate) throw new ConnectorBrokerError("provider_query_template_missing", `No approved ${providerId} query template is configured for ${operation}.`, false, true);
+  const statement = approvedReadStatement(candidate.statement);
+  if (providerId === "bigquery") {
+    const placeholders = [...statement.matchAll(/@([a-z_][a-z0-9_]*)/gi)].map((match) => match[1]!.toLowerCase());
+    const allowed = new Set(["window_start", "window_end", "subject_id", "limit"]);
+    if (!placeholders.includes("window_start") || !placeholders.includes("window_end") || placeholders.some((name) => !allowed.has(name))) {
+      throw new ConnectorBrokerError("provider_query_template_invalid", "BigQuery templates must use bounded @window_start and @window_end parameters and only approved parameter names.", false, true);
+    }
+  } else {
+    const order = candidate.bindingOrder ?? [];
+    const placeholderCount = [...statement].filter((character) => character === "?").length;
+    if (placeholderCount === 0 || placeholderCount !== order.length || order.length > 16 || !order.includes("windowStart") || !order.includes("windowEnd")) {
+      throw new ConnectorBrokerError("provider_query_template_invalid", "Snowflake templates must bind every placeholder and include windowStart and windowEnd.", false, true);
+    }
+  }
+  return { statement, bindingOrder: candidate.bindingOrder };
+}
+
+function approvedReadStatement(value: string) {
+  const statement = z.string().trim().min(1).max(100_000).parse(value);
+  if (!/^(?:select|with)\b/i.test(statement) || /;|--|\/\*/.test(statement)) {
+    throw new ConnectorBrokerError("provider_query_template_invalid", "Warehouse query templates must contain one comment-free SELECT statement.", false, true);
+  }
+  if (/\b(?:insert|update|delete|merge|create|alter|drop|truncate|call|execute|grant|revoke|copy|put|get|remove|export)\b/i.test(statement)) {
+    throw new ConnectorBrokerError("provider_query_template_invalid", "Warehouse query templates cannot contain mutation, administration, transfer, or export operations.", false, true);
+  }
+  return statement;
+}
+
+function bigQueryBindings(statement: string, input: WarehouseQueryInput) {
+  const names = [...new Set([...statement.matchAll(/@([a-z_][a-z0-9_]*)/gi)].map((match) => match[1]!.toLowerCase()))];
+  if (names.includes("subject_id") && !input.subjectId) {
+    throw new ConnectorBrokerError("provider_query_input_missing", "The approved query template requires subjectId.", false, true);
+  }
+  const values = {
+    window_start: { type: "TIMESTAMP", value: input.windowStart },
+    window_end: { type: "TIMESTAMP", value: input.windowEnd },
+    subject_id: { type: "STRING", value: input.subjectId ?? "" },
+    limit: { type: "INT64", value: String(input.limit) }
+  } as const;
+  return names.map((name) => ({
+    name,
+    parameterType: { type: values[name as keyof typeof values].type },
+    parameterValue: { value: values[name as keyof typeof values].value }
+  }));
+}
+
+function snowflakeBindings(template: WarehouseQueryTemplate, input: WarehouseQueryInput) {
+  const order = template.bindingOrder ?? [];
+  if (order.includes("subjectId") && !input.subjectId) {
+    throw new ConnectorBrokerError("provider_query_input_missing", "The approved query template requires subjectId.", false, true);
+  }
+  return Object.fromEntries(order.map((name, index) => [String(index + 1), {
+    type: name === "limit" ? "FIXED" : "TEXT",
+    value: String(input[name] ?? "")
+  }]));
+}
+
+function stableRequestUuid(value: string) {
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 32).split("");
+  digest[12] = "4";
+  digest[16] = ["8", "9", "a", "b"][parseInt(digest[16]!, 16) % 4]!;
+  const text = digest.join("");
+  return `${text.slice(0, 8)}-${text.slice(8, 12)}-${text.slice(12, 16)}-${text.slice(16, 20)}-${text.slice(20)}`;
+}
 
 async function revealCredential(context: Parameters<ConnectorOperationHandler>[0]) {
   const lease = await context.getCredential();
@@ -606,6 +1154,21 @@ async function providerJsonArray(response: Response) {
     const parsed = JSON.parse(text) as unknown;
     if (!Array.isArray(parsed) || parsed.length > 1_000) throw new Error("invalid array");
     return parsed.map(objectValue);
+  } catch {
+    throw new ConnectorBrokerError("provider_response_invalid", "Provider returned an invalid response.", false, true);
+  }
+}
+
+async function providerJsonValue(response: Response): Promise<unknown> {
+  const maximum = 1024 * 1024;
+  const declared = Number(response.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > maximum) throw new ConnectorBrokerError("provider_response_too_large", "Provider response exceeded 1 MiB.", false, true);
+  const text = await response.text();
+  if (Buffer.byteLength(text, "utf8") > maximum) throw new ConnectorBrokerError("provider_response_too_large", "Provider response exceeded 1 MiB.", false, true);
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (!parsed || typeof parsed !== "object") throw new Error("invalid JSON value");
+    return parsed;
   } catch {
     throw new ConnectorBrokerError("provider_response_invalid", "Provider returned an invalid response.", false, true);
   }

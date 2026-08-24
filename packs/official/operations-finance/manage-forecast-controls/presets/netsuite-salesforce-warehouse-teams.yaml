@@ -1,0 +1,7 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: netsuite-salesforce-warehouse-teams
+name: NetSuite + Salesforce + Warehouse + Teams
+description: Configure enterprise finance operations around NetSuite, Salesforce, approved warehouse evidence, and governed Teams drafts.
+connectorRecipe: connectors/netsuite-salesforce-warehouse-teams.yaml
+defaults: { actionMode: prepare_for_approval, historicalReplayDays: 60, rolloutMode: shadow, currencyPolicy: preserve_source_currency }
+requiredCompanyFields: [finance.materialityPolicy, finance.forecastCadence, finance.closePolicy, finance.approvalPolicy, finance.receivablePolicy, finance.resourceDecisionPolicy]

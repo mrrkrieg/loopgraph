@@ -1,0 +1,25 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: hubspot-gmail-calendar-slack
+providerId: hubspot
+providerFamily: hubspot
+displayName: HubSpot + Gmail + Google Calendar + Slack
+capabilities:
+  - { logicalCapability: crm.opportunity.read, providerOperation: hubspot.deals.read, minimumScopes: [crm.objects.deals.read], authority: read, risk: low }
+  - { logicalCapability: crm.contact.read, providerOperation: hubspot.contacts.read, minimumScopes: [crm.objects.contacts.read], authority: read, risk: low }
+  - { logicalCapability: mail.thread.read, providerOperation: gmail.threads.read, minimumScopes: [gmail.readonly], authority: read, risk: high }
+  - { logicalCapability: calendar.event.read, providerOperation: google-calendar.events.read, minimumScopes: [calendar.events.readonly], authority: read, risk: medium }
+  - { logicalCapability: crm.opportunity.update, providerOperation: hubspot.deals.update, minimumScopes: [crm.objects.deals.write], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: gmail.drafts.create, minimumScopes: [gmail.compose], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: slack.messages.draft, minimumScopes: [chat:write], authority: approve, risk: medium }
+eventSources:
+  - { eventFamily: sales.opportunity_changed, providerEvent: deal.propertyChange, transport: webhook, normalizationTransformer: hubspot.deal-to-risk-snapshot.v1, signatureStrategy: hubspot-v3-signature, replayProtection: true, fallbackPollMinutes: 15 }
+  - { eventFamily: sales.pipeline_outcome_observed, providerEvent: deal.stageChanged, transport: webhook, normalizationTransformer: hubspot.deal-to-pipeline-outcome.v1, signatureStrategy: hubspot-v3-signature, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { providerId: hubspot, objectType: opportunity, requiredLogicalFields: [opportunity.id, opportunity.stage, opportunity.ownerId, opportunity.lastActivityAt], optionalLogicalFields: [opportunity.amount, opportunity.closeDate, opportunity.nextStep, opportunity.forecastCategory] }
+  - { providerId: gmail, objectType: communication_thread, requiredLogicalFields: [thread.id, thread.participants, thread.lastMessageAt], optionalLogicalFields: [thread.commitments, thread.sentiment] }
+  - { providerId: google_calendar, objectType: calendar_commitment, requiredLogicalFields: [event.id, event.participants, event.startAt], optionalLogicalFields: [event.opportunityId, event.outcome] }
+healthCheck:
+  capability: crm.opportunity.read
+  sampleQuery: { state: open, limit: 1 }
+  timeoutMs: 10000
+supportsBoundedSamples: true

@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: engineering-incident-synthesis
+name: Incident Synthesis
+description: Build an evidence-linked incident timeline, impact assessment, response summary, and learning record.
+department: engineering
+goal: Keep incident decisions and learning traceable without hiding disagreement or uncertainty.
+inputs: [incident record, timelines, deployments, communications, customer impact, corrective work]
+outputs: [timeline, impact, response assessment, causal confidence, learning questions]
+instructions: [Preserve timestamps and source identity., Separate fact from hypothesis., Track severity and impact changes over time., Link corrective work to one accountable owner., Measure recurrence after release.]
+boundaries: [Do not claim unsupported root cause., Do not publish communication., Do not close incidents or corrective work.]
+requiredCapabilities: [incident.record.read, deployment.release.read, project.issue.read]

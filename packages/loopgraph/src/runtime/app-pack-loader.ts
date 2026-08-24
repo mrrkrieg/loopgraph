@@ -1,4 +1,5 @@
 import { lstat, mkdir, readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { createPublicKey, verify as verifySignature } from "node:crypto";
 import path from "node:path";
 import YAML from "yaml";
 import {
@@ -7,13 +8,17 @@ import {
   canonicalAppDigest,
   loopPackArtifactSchema,
   loopPackManifestSchema,
+  loopPackSignatureSchema,
   packRelativePathSchema,
   type LoopPackArtifact,
   type LoopPackManifest,
-  type MarketplaceAppVersion
+  type MarketplaceArtifactSource,
+  type MarketplaceAppVersion,
+  type PublisherTrustKey
 } from "../core/app-platform";
 
 export const LOOP_PACK_MANIFEST_FILE = "loopgraph.pack.yaml" as const;
+export const LOOP_PACK_SIGNATURE_FILE = "loopgraph.pack.signature.json" as const;
 export const LOOP_PACK_ARCHIVE_SCHEMA_VERSION = "loopgraph-pack-archive/v1alpha1" as const;
 
 const forbiddenFileNames = new Set([
@@ -50,6 +55,7 @@ export type LoopPackValidationOptions = {
   hermesVersion?: string;
   dependencyVersions?: Record<string, string>;
   requireSignature?: boolean;
+  trustedPublisherKeys?: PublisherTrustKey[];
 };
 
 export type LoopPackLoadResult = {
@@ -121,12 +127,16 @@ export async function loadLoopPackDirectory(
   }));
   const digest = canonicalAppDigest({
     manifest,
-    files: artifactFiles.map(({ path: filePath, digest: fileDigest, sizeBytes }) => ({
+    files: artifactFiles.filter((file) => file.path !== LOOP_PACK_SIGNATURE_FILE).map(({ path: filePath, digest: fileDigest, sizeBytes }) => ({
       path: filePath,
       digest: fileDigest,
       sizeBytes
     }))
   });
+  const signatureFile = files.find((file) => file.relativePath === LOOP_PACK_SIGNATURE_FILE);
+  const signature = signatureFile
+    ? verifyLoopPackSignature(signatureFile.content, manifest.metadata.publisher.id, digest)
+    : undefined;
   const artifact = loopPackArtifactSchema.parse({
     schemaVersion: LOOP_PACK_SCHEMA_VERSION,
     manifest,
@@ -136,12 +146,29 @@ export async function loadLoopPackDirectory(
     createdAt: new Date().toISOString(),
     provenance: {
       sourceType: "filesystem",
-      sourceUri: root
+      sourceUri: root,
+      signature: signature ? {
+        algorithm: signature.algorithm,
+        publisherId: signature.publisherId,
+        keyId: signature.keyId,
+        publicKey: signature.publicKey,
+        value: signature.value
+      } : undefined
     }
   });
 
   if (options.requireSignature && !artifact.provenance.signature) {
     issues.push({ severity: "error", code: "signature_required", message: "This catalog requires a signed LoopPack" });
+  }
+  if (artifact.provenance.signature && (options.trustedPublisherKeys?.length ?? 0) > 0) {
+    const trusted = options.trustedPublisherKeys!.some((key) =>
+      key.publisherId === artifact.provenance.signature!.publisherId &&
+      key.keyId === artifact.provenance.signature!.keyId &&
+      key.algorithm === artifact.provenance.signature!.algorithm &&
+      normalizePublicKey(key.publicKey) === normalizePublicKey(artifact.provenance.signature!.publicKey));
+    if (!trusted) {
+      issues.push({ severity: "error", code: "publisher_key_untrusted", message: `Publisher key ${artifact.provenance.signature.keyId} is not trusted by this catalog source` });
+    }
   }
   const errors = issues.filter((issue) => issue.severity === "error");
   if (errors.length > 0) {
@@ -203,6 +230,38 @@ export async function readLoopPackArchive(archivePath: string): Promise<LoopPack
       throw new Error(`LoopPack archive content verification failed for ${file.path}`);
     }
   }
+  const archivedManifest = value.files.find((file) => file.path === LOOP_PACK_MANIFEST_FILE);
+  if (!archivedManifest) throw new Error("LoopPack archive is missing its manifest file");
+  const parsedManifest = loopPackManifestSchema.parse(YAML.parse(Buffer.from(archivedManifest.contentBase64, "base64").toString("utf8")));
+  if (canonicalAppDigest(parsedManifest) !== canonicalAppDigest(artifact.manifest)) {
+    throw new Error("LoopPack archive manifest content does not match artifact metadata");
+  }
+  const computedDigest = canonicalAppDigest({
+    manifest: parsedManifest,
+    files: artifact.files.filter((file) => file.path !== LOOP_PACK_SIGNATURE_FILE).map(({ path: filePath, digest: fileDigest, sizeBytes }) => ({
+      path: filePath,
+      digest: fileDigest,
+      sizeBytes
+    }))
+  });
+  if (computedDigest !== artifact.digest) {
+    throw new Error("LoopPack archive artifact digest does not match the verified manifest and files");
+  }
+  const signatureFile = value.files.find((file) => file.path === LOOP_PACK_SIGNATURE_FILE);
+  if (artifact.provenance.signature) {
+    if (!signatureFile) throw new Error("Signed LoopPack archive is missing its detached signature file");
+    const signature = verifyLoopPackSignature(
+      Buffer.from(signatureFile.contentBase64, "base64"),
+      artifact.manifest.metadata.publisher.id,
+      artifact.digest
+    );
+    if (signature.publisherId !== artifact.provenance.signature.publisherId ||
+        signature.keyId !== artifact.provenance.signature.keyId ||
+        normalizePublicKey(signature.publicKey) !== normalizePublicKey(artifact.provenance.signature.publicKey) ||
+        signature.value !== artifact.provenance.signature.value) {
+      throw new Error("LoopPack archive provenance does not match its detached signature");
+    }
+  }
   return { schemaVersion: LOOP_PACK_ARCHIVE_SCHEMA_VERSION, artifact, files: value.files };
 }
 
@@ -229,7 +288,8 @@ export async function extractLoopPackArchive(archivePath: string, destinationRoo
 export function marketplaceVersionFromArtifact(
   artifact: LoopPackArtifact,
   artifactUri: string,
-  maturity: MarketplaceAppVersion["maturity"] = "concept"
+  maturity: MarketplaceAppVersion["maturity"],
+  source: MarketplaceArtifactSource
 ): MarketplaceAppVersion {
   const manifest = artifact.manifest;
   return {
@@ -242,11 +302,19 @@ export function marketplaceVersionFromArtifact(
     dependencies: manifest.dependencies,
     permissions: manifest.permissions,
     requiredCapabilities: manifest.requiredCapabilities,
+    optionalCapabilities: manifest.optionalCapabilities,
     presets: manifest.presets,
     modules: manifest.modules,
+    includedLoopCount: manifest.entrypoints.loops.length,
+    preview: {
+      synthetic: manifest.entrypoints.evals.length > 0,
+      sampleData: manifest.entrypoints.fixtures.length > 0,
+      historicalReplay: "installed_read_only"
+    },
     maturity,
     deprecated: false,
     artifactUri,
+    source,
     provenanceVerified: Boolean(artifact.provenance.signature) || artifact.provenance.sourceType === "official"
   };
 }
@@ -348,6 +416,27 @@ function validateSensitiveContent(files: EnumeratedFile[], issues: LoopPackValid
       }
     }
   }
+}
+
+function verifyLoopPackSignature(content: Buffer, publisherId: string, digest: string) {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content.toString("utf8"));
+  } catch {
+    throw new Error(`Invalid ${LOOP_PACK_SIGNATURE_FILE}: expected JSON`);
+  }
+  const signature = loopPackSignatureSchema.parse(parsed);
+  if (signature.publisherId !== publisherId) throw new Error("LoopPack signature publisher does not match the manifest");
+  if (signature.digest !== digest) throw new Error("LoopPack signature digest does not match the pack content");
+  const publicKey = createPublicKey(signature.publicKey);
+  const algorithm = signature.algorithm === "ed25519" ? null : "sha256";
+  const verified = verifySignature(algorithm, Buffer.from(signature.digest, "utf8"), publicKey, Buffer.from(signature.value, "base64url"));
+  if (!verified) throw new Error("LoopPack publisher signature verification failed");
+  return signature;
+}
+
+function normalizePublicKey(value: string): string {
+  return createPublicKey(value).export({ type: "spki", format: "pem" }).toString().trim();
 }
 
 function validateCompatibility(

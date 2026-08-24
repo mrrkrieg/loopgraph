@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-preset/v1alpha1
+id: hubspot-gmail-calendar-slack
+name: HubSpot + Gmail + Google Calendar + Slack
+description: Configure deal-risk diagnosis for a HubSpot and Google Workspace sales team.
+connectorRecipe: connectors/hubspot-gmail-calendar-slack.yaml
+defaults:
+  stageAgePolicy: company_overlay
+  followUpMode: prepare_for_approval
+  internalChannel: company_overlay
+  historicalReplayDays: 90
+  rolloutMode: shadow
+requiredCompanyFields: [sales.pipelineStages, sales.stageAgeThresholds, sales.ownerMapping, sales.strategicAccounts]

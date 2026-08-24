@@ -1,0 +1,53 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: ops-finance-forecast-variance
+  name: Forecast Variance
+  version: 1.0.0
+  description: Reconcile a versioned forecast against its approved baseline, identify material drivers, and prepare a traceable variance finding.
+  department: ops_finance
+  ownerRole: finance_operations
+  tags: [forecast, variance, reconciliation]
+trigger: { type: event, source: "*", event: finance.forecast_variance_detected }
+input:
+  requiredFields: [normalizedPayload.forecastId, normalizedPayload.version, normalizedPayload.periodStart, normalizedPayload.periodEnd, normalizedPayload.baseline, normalizedPayload.current]
+  subjectTypes: [forecast, forecast_window]
+  fixtures: [{ id: forecast-variance, path: fixtures/happy.json }]
+routine:
+  - { id: normalize, name: Normalize forecast window, actor: system, type: observe, description: "Preserve forecast version, period, currency, baseline, current value, source timestamps, and delivery identity." }
+  - { id: reconcile, name: Reconcile source evidence, actor: agent, type: assess, description: Reconcile approved forecast assumptions with ledger and operational driver evidence; list every unresolved difference. }
+  - { id: classify, name: Classify material drivers, actor: agent, type: assess, description: "Separate timing, volume, price, source-quality, approval, and capacity drivers using company materiality policy." }
+  - { id: decide, name: Select bounded response, actor: agent, type: decide, description: Produce one primary variance finding and invoke only topology-permitted support when its evidence condition is proven. }
+  - { id: verify, name: Verify variance packet, actor: system, type: verify, description: "Check arithmetic, source coverage, period alignment, uncertainty, owner, and decision threshold." }
+  - { id: learn, name: Return forecast outcome, actor: system, type: learn, description: "Return reviewer corrections, realized values, driver accuracy, and decision outcomes to the next forecast window." }
+capabilities:
+  - { key: finance.forecast.read, authority: read, risk: high, required: true, purpose: Read versioned forecast baselines and assumptions., customerFacing: false }
+  - { key: analytics.metric.query, authority: read, risk: medium, required: true, purpose: Query bounded operational drivers and realized metric evidence., customerFacing: false }
+skills: [ops-finance-variance-analysis, ops-finance-evidence-reconciliation]
+outcomes:
+  - { metric: forecast_variance_explanation_coverage, description: Material variance with reconciled and reviewable driver evidence., direction: increase, sourceCapability: finance.forecast.read }
+  - { metric: forecast_driver_accuracy, description: Identified drivers confirmed by realized outcomes in the declared window., direction: increase, sourceCapability: analytics.metric.query }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [finance.forecast_variance]
+  accepts: [{ sourcePattern: "*", eventTypePattern: finance.forecast_variance_detected, subjectTypes: [forecast, forecast_window], requiredFields: [normalizedPayload.forecastId, normalizedPayload.version, normalizedPayload.periodStart, normalizedPayload.periodEnd, normalizedPayload.baseline, normalizedPayload.current], reason: A versioned forecast window has baseline and current evidence sufficient to investigate a material variance. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: loopgraph.lifecycle.*, subjectTypes: [], fields: [], reason: Lifecycle events update existing work and cannot open a duplicate variance problem. }]
+  inputMapping: { forecastId: normalizedPayload.forecastId, version: normalizedPayload.version, periodStart: normalizedPayload.periodStart, periodEnd: normalizedPayload.periodEnd, baseline: normalizedPayload.baseline, current: normalizedPayload.current }
+  priority: 100
+  minimumConfidence: 0.9
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: declared_ordered, maxRoutes: 3, requiresIndependentProblems: false }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 50, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [finance.forecast.read, analytics.metric.query]
+  examples: { shouldRoute: [A versioned forecast window crosses the approved materiality threshold with reconciled baseline evidence.], shouldNotRoute: [The forecast version is unknown., The signal is a draft scenario with no approved baseline.] }
+policy:
+  forbiddenActions:
+    - { capability: finance.payment.execute, reason: Forecast analysis can never move money. }
+    - { capability: finance.budget.update, reason: Budget and forecast changes require a separate exact approval. }
+  escalationOwner: finance_controller
+  escalationSla: 4h
+  separateCustomerFacingApproval: true

@@ -1,0 +1,20 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: marketing-campaign-analysis
+name: Governed Campaign Analysis
+description: Translate downstream campaign evidence into bounded, reviewable allocation and experiment decisions.
+department: marketing
+goal: Recommend the smallest evidence-backed campaign decision within company budget and risk policy.
+inputs: [campaign outcomes, comparable cohorts, budget bounds, guardrails, attribution uncertainty]
+outputs: [allocation finding, bounded proposal, expected outcome, review packet]
+instructions:
+  - Compare qualified pipeline and activation with spend and configured guardrails.
+  - Prefer extending measurement when lag or evidence completeness can change the conclusion.
+  - Specify exact campaign, field, prior value, proposed value, bound, and expiry.
+  - State expected business outcome and falsification condition.
+  - Return every applied or rejected decision to subsequent learning.
+boundaries:
+  - Do not apply budget, bid, targeting, status, or attribution changes.
+  - Do not move budget across protected brands, markets, or segments without approval.
+  - Do not recommend scaling from surface engagement alone.
+requiredCapabilities: [ads.campaign.read, crm.lead.read, crm.opportunity.read, analytics.event.query]

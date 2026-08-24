@@ -1,7 +1,7 @@
 {
   "name": "loopgraph",
   "version": "0.2.0",
-  "description": "Code-first loop runtime: validate, simulate, trace, review, and case resolve from loopgraph.yaml specs.",
+  "description": "Governed company loops for Hermes Brain: discover, install, route, operate, measure, and improve recurring AI work.",
   "type": "module",
   "license": "MIT",
   "files": [
@@ -30,6 +30,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "pretest": "npm run sync:official-packs",
     "test": "vitest run",
     "sync:official-packs": "node scripts/sync-official-packs.mjs",
     "prepack": "npm run sync:official-packs",

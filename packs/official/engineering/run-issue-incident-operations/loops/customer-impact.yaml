@@ -1,0 +1,38 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: engineering-customer-impact, name: Incident Customer Impact, version: 1.0.0, description: "Resolve affected customer and account evidence and prepare governed impact communication.", department: engineering, ownerRole: incident_commander, tags: [incident, customer-impact, communication] }
+trigger: { type: event, source: hermes, event: engineering.customer_impact_ready }
+input: { requiredFields: [normalizedPayload.incidentId, normalizedPayload.impactEvidenceRefs, normalizedPayload.owner], subjectTypes: [incident, customer_impact], fixtures: [] }
+routine:
+  - { id: assemble, name: Assemble impact evidence, actor: system, type: observe, description: "Join service, account, support, duration, and workaround evidence." }
+  - { id: assess, name: Assess impact, actor: agent, type: assess, description: "Separate verified impact, possible exposure, unaffected scope, and missing evidence." }
+  - { id: prepare, name: Prepare impact brief, actor: agent, type: prepare, description: "Draft exact internal or customer-facing impact language with evidence and uncertainty." }
+  - { id: verify, name: Require communication approval, actor: human, type: verify, description: "Require accountable review for content, audience, channel, and timing." }
+capabilities:
+  - { key: incident.record.read, authority: read, risk: high, required: true, purpose: Read incident and verified impact evidence., customerFacing: false }
+  - { key: project.issue.read, authority: read, risk: low, required: true, purpose: Read owner and response state., customerFacing: false }
+  - { key: collaboration.message.draft, authority: approve, risk: high, required: false, purpose: Prepare exact approved impact communication without sending., customerFacing: true }
+skills: [engineering-incident-synthesis, engineering-severity-classification]
+outcomes: [{ metric: customer_impact_correction_rate, description: Impact statements corrected after accountable review., direction: decrease, sourceCapability: incident.record.read }]
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [engineering.customer_impact]
+  accepts: [{ sourcePattern: hermes, eventTypePattern: engineering.customer_impact_ready, subjectTypes: [incident, customer_impact], requiredFields: [normalizedPayload.incidentId, normalizedPayload.impactEvidenceRefs, normalizedPayload.owner], reason: Verified impact evidence is ready for governed review. }]
+  excludes: [{ sourcePattern: "*", eventTypePattern: engineering.incident_detected, subjectTypes: [], fields: [], reason: Detection alone cannot support customer-impact claims. }]
+  inputMapping: { incidentId: normalizedPayload.incidentId, owner: normalizedPayload.owner }
+  priority: 100
+  minimumConfidence: 0.95
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [incident.record.read, project.issue.read]
+  examples: { shouldRoute: ["Verified impact evidence has an accountable owner."], shouldNotRoute: ["Affected accounts are inferred from service name."] }
+policy:
+  forbiddenActions: [{ capability: collaboration.message.draft, reason: Incident communication requires exact audience and content approval and this app never sends it. }]
+  escalationOwner: incident_commander
+  escalationSla: 30m
+  separateCustomerFacingApproval: true

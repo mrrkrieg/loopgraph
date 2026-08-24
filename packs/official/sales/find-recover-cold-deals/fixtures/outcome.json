@@ -1,0 +1,1 @@
+{"id":"deal-risk-outcome","eventType":"sales.pipeline_outcome_observed","subject":{"type":"pipeline_outcome","id":"deal-309-progressed"},"normalizedPayload":{"opportunityId":"309","outcome":"stage_progressed","observedAt":"2026-08-08T10:00:00.000Z","confidence":0.99},"evidenceRefs":["hubspot:deal:309","loopgraph:problem:deal-risk-309"]}

@@ -1,0 +1,1 @@
+{"id":"deal-risk-duplicate","eventType":"sales.opportunity_changed","subject":{"type":"opportunity","id":"deal-304"},"normalizedPayload":{"opportunityId":"304","stage":"negotiation","lastActivityAt":"2026-07-03T10:00:00.000Z","matchedProblemId":"deal-risk-problem-88","confidence":0.99},"evidenceRefs":["loopgraph:problem:deal-risk-problem-88"]}

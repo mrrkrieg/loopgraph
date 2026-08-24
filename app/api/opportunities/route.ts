@@ -5,8 +5,10 @@ import {
 } from "loopgraph/runtime";
 import {
   getActiveLoopgraphProjectRoot,
+  getDiscoveryDesignStore,
   getHermesDesignStore,
   getLoopOpportunityStore,
+  getLoopSpecRegistryStore,
   getRoutingStore
 } from "../../../lib/loopgraph-runtime/storage-resolver";
 
@@ -40,6 +42,8 @@ export async function POST(request: Request) {
     }, {
       routingStore: getRoutingStore(),
       designStore: getHermesDesignStore(),
+      discoveryStore: getDiscoveryDesignStore(),
+      loopSpecStore: getLoopSpecRegistryStore({ projectRoot }),
       opportunityStore: getLoopOpportunityStore({ projectRoot })
     });
     return NextResponse.json(result, { status: 202 });

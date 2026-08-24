@@ -1,0 +1,228 @@
+schemaVersion: loopgraph-department-pack-catalog-source/v1alpha1
+packs:
+  - id: loopgraph.department.product
+    version: 1.0.0
+    name: Product Learning
+    department: product
+    summary: Turn customer evidence into validated product problems, prioritized decisions, and release learning.
+    businessOutcomes:
+      - Reduce repeated customer pain without building from anecdotes.
+      - Connect product decisions to adoption, support, and customer outcomes.
+    defaultAppId: loopgraph.product.turn-feedback-into-product-problems
+    apps:
+      - appId: loopgraph.product.turn-feedback-into-product-problems
+        role: primary
+        installOrder: 1
+        reason: Establish the product problem, feedback clustering, prioritization, and release-learning system.
+        dependsOn: []
+    sharedContextKeys: [product.catalog, product.roadmap_policy, company.customer_segments]
+    sharedCapabilities: [support.ticket.read, analytics.event.query, project.issue.read]
+    topology: []
+
+  - id: loopgraph.department.sales
+    version: 1.0.0
+    name: Revenue Pipeline
+    department: sales
+    summary: Qualify new demand, route it to the right owner, and recover material deals using one shared account and pipeline context.
+    businessOutcomes:
+      - Increase qualified-lead-to-opportunity conversion.
+      - Detect and recover deal risk before pipeline is lost.
+    defaultAppId: loopgraph.sales.qualify-route-inbound-leads
+    apps:
+      - appId: loopgraph.sales.qualify-route-inbound-leads
+        role: foundation
+        installOrder: 1
+        reason: Establish canonical lead, account, qualification, ownership, and response-SLA decisions.
+        dependsOn: []
+      - appId: loopgraph.sales.find-recover-cold-deals
+        role: primary
+        installOrder: 2
+        reason: Reuse the account and pipeline definitions to detect stalled opportunities and prepare accountable recovery.
+        dependsOn: [loopgraph.sales.qualify-route-inbound-leads]
+    sharedContextKeys: [sales.icp, sales.pipeline_stages, sales.territories, sales.owner_map, company.customer_segments]
+    sharedCapabilities: [crm.lead.read, crm.account.read, crm.opportunity.read, messaging.channel.post]
+    topology:
+      - id: sales.qualified-pipeline-handoff
+        sourceAppId: loopgraph.sales.qualify-route-inbound-leads
+        targetAppId: loopgraph.sales.find-recover-cold-deals
+        type: handoff
+        reason: Qualified leads that become opportunities enter the shared pipeline evidence model.
+        condition: The CRM records an accepted opportunity for the same canonical account and contact.
+      - id: sales.recovery-learning-return
+        sourceAppId: loopgraph.sales.find-recover-cold-deals
+        targetAppId: loopgraph.sales.qualify-route-inbound-leads
+        type: evidence_return
+        reason: Downstream deal quality and loss reasons correct qualification and routing assumptions.
+
+  - id: loopgraph.department.marketing
+    version: 1.0.0
+    name: Qualified Pipeline Marketing
+    department: marketing
+    summary: Learn which campaigns, audiences, and messages create qualified pipeline instead of optimizing surface engagement.
+    businessOutcomes:
+      - Allocate campaign effort using qualified pipeline and customer-quality evidence.
+      - Turn campaign outcomes into reusable audience and message learning.
+    defaultAppId: loopgraph.marketing.learn-qualified-pipeline
+    apps:
+      - appId: loopgraph.marketing.learn-qualified-pipeline
+        role: primary
+        installOrder: 1
+        reason: Establish campaign learning across spend, funnel, CRM, and downstream pipeline evidence.
+        dependsOn: []
+    sharedContextKeys: [marketing.channel_policy, marketing.campaign_taxonomy, sales.icp, sales.pipeline_stages]
+    sharedCapabilities: [ads.campaign.read, analytics.event.query, crm.opportunity.read]
+    topology: []
+
+  - id: loopgraph.department.customer-success
+    version: 1.0.0
+    name: Customer Health and Retention
+    department: customer_success
+    summary: Triage support demand, detect strategic account risk, and protect renewals using a shared customer and service context.
+    businessOutcomes:
+      - Resolve customer issues at the right severity and ownership level.
+      - Detect account and renewal risk early enough to act.
+    defaultAppId: loopgraph.customer-success.triage-support-tickets
+    apps:
+      - appId: loopgraph.customer-success.triage-support-tickets
+        role: foundation
+        installOrder: 1
+        reason: Establish ticket severity, ownership, response policy, and repeat-demand evidence.
+        dependsOn: []
+      - appId: loopgraph.customer-success.escalate-strategic-accounts
+        role: supporting
+        installOrder: 2
+        reason: Connect severe issues and business context to accountable strategic-account escalation.
+        dependsOn: [loopgraph.customer-success.triage-support-tickets]
+      - appId: loopgraph.customer-success.catch-renewal-risk
+        role: primary
+        installOrder: 3
+        reason: Reuse account, service, and escalation evidence to detect and govern renewal risk.
+        dependsOn: [loopgraph.customer-success.escalate-strategic-accounts]
+    sharedContextKeys: [customer_success.account_tiers, customer_success.service_levels, customer_success.owner_map, company.customer_segments]
+    sharedCapabilities: [support.ticket.read, crm.account.read, crm.opportunity.read, messaging.channel.post]
+    topology:
+      - id: customer-success.ticket-risk-handoff
+        sourceAppId: loopgraph.customer-success.triage-support-tickets
+        targetAppId: loopgraph.customer-success.escalate-strategic-accounts
+        type: handoff
+        reason: Severe or repeated ticket evidence can open one strategic-account problem instead of isolated escalations.
+      - id: customer-success.account-renewal-handoff
+        sourceAppId: loopgraph.customer-success.escalate-strategic-accounts
+        targetAppId: loopgraph.customer-success.catch-renewal-risk
+        type: supports
+        reason: Account-level risk and commitments become evidence for renewal planning.
+      - id: customer-success.renewal-learning-return
+        sourceAppId: loopgraph.customer-success.catch-renewal-risk
+        targetAppId: loopgraph.customer-success.triage-support-tickets
+        type: evidence_return
+        reason: Renewal outcomes reveal which issue patterns and service failures created durable risk.
+
+  - id: loopgraph.department.engineering
+    version: 1.0.0
+    name: Engineering Reliability
+    department: engineering
+    summary: Triage engineering demand and run incident operations with shared repository, service, ownership, and customer-impact context.
+    businessOutcomes:
+      - Route engineering work with less triage overhead and clearer ownership.
+      - Reduce incident impact and return operational learning to the backlog.
+    defaultAppId: loopgraph.engineering.run-issue-incident-operations
+    apps:
+      - appId: loopgraph.engineering.triage-github-issues
+        role: foundation
+        installOrder: 1
+        reason: Establish repository, issue, ownership, duplicate, and priority routing.
+        dependsOn: []
+      - appId: loopgraph.engineering.run-issue-incident-operations
+        role: primary
+        installOrder: 2
+        reason: Connect production incidents, customer impact, communications, and learning to governed engineering operations.
+        dependsOn: [loopgraph.engineering.triage-github-issues]
+    sharedContextKeys: [engineering.service_catalog, engineering.owner_map, engineering.severity_policy, company.customer_segments]
+    sharedCapabilities: [project.issue.read, incident.event.read, messaging.channel.post]
+    topology:
+      - id: engineering.issue-incident-handoff
+        sourceAppId: loopgraph.engineering.triage-github-issues
+        targetAppId: loopgraph.engineering.run-issue-incident-operations
+        type: handoff
+        reason: Production-impacting issues enter incident operations with preserved repository and ownership evidence.
+      - id: engineering.incident-backlog-return
+        sourceAppId: loopgraph.engineering.run-issue-incident-operations
+        targetAppId: loopgraph.engineering.triage-github-issues
+        type: evidence_return
+        reason: Incident learning creates bounded prevention and reliability work in the engineering backlog.
+
+  - id: loopgraph.department.ops-finance
+    version: 1.0.0
+    name: Forecast and Financial Controls
+    department: ops_finance
+    summary: Explain forecast variance, govern financial operations, and return decision evidence to management.
+    businessOutcomes:
+      - Detect material forecast variance with traceable evidence.
+      - Reduce approval bottlenecks without weakening financial controls.
+    defaultAppId: loopgraph.ops-finance.manage-forecast-controls
+    apps:
+      - appId: loopgraph.ops-finance.manage-forecast-controls
+        role: primary
+        installOrder: 1
+        reason: Establish forecast, approval, financial-operation, and management-decision loops.
+        dependsOn: []
+    sharedContextKeys: [ops_finance.forecast_model, ops_finance.approval_matrix, management.operating_metrics]
+    sharedCapabilities: [billing.invoice.read, finance.forecast.read, analytics.metric.query]
+    topology: []
+
+  - id: loopgraph.department.hr-talent
+    version: 1.0.0
+    name: People Operations
+    department: hr_talent
+    summary: Run accountable recruiting, onboarding, employee support, and people-risk workflows with explicit human judgment.
+    businessOutcomes:
+      - Reduce coordination delay in repeatable people operations.
+      - Preserve fairness, privacy, and accountable approval for employment decisions.
+    defaultAppId: loopgraph.hr-talent.operate-people-workflows
+    apps:
+      - appId: loopgraph.hr-talent.operate-people-workflows
+        role: primary
+        installOrder: 1
+        reason: Establish governed recruiting, onboarding, service, review, and people-risk loops.
+        dependsOn: []
+    sharedContextKeys: [hr_talent.role_catalog, hr_talent.approval_roles, hr_talent.privacy_policy]
+    sharedCapabilities: [hris.employee.read, project.issue.read, messaging.channel.post]
+    topology: []
+
+  - id: loopgraph.department.legal-compliance
+    version: 1.0.0
+    name: Legal and Compliance Evidence
+    department: legal_compliance
+    summary: Govern evidence requests, exceptions, obligations, and expert review without silently automating sensitive decisions.
+    businessOutcomes:
+      - Reduce evidence collection and review coordination time.
+      - Keep legal, security, and compliance decisions expert-owned and auditable.
+    defaultAppId: loopgraph.legal-compliance.govern-evidence-and-exceptions
+    apps:
+      - appId: loopgraph.legal-compliance.govern-evidence-and-exceptions
+        role: primary
+        installOrder: 1
+        reason: Establish evidence, exception, obligation, review, and learning loops in shadow mode.
+        dependsOn: []
+    sharedContextKeys: [legal_compliance.policy_catalog, legal_compliance.approval_roles, legal_compliance.retention_policy]
+    sharedCapabilities: [docs.document.read, project.issue.read, messaging.channel.post]
+    topology: []
+
+  - id: loopgraph.department.management
+    version: 1.0.0
+    name: Company Operating System
+    department: management
+    summary: Turn department evidence into operating reviews, decision memos, resource allocation, and accountable follow-through.
+    businessOutcomes:
+      - Give founders and operators one evidence-backed company operating cadence.
+      - Connect department outcomes to decisions, ownership, and resource allocation.
+    defaultAppId: loopgraph.management.run-company-operating-system
+    apps:
+      - appId: loopgraph.management.run-company-operating-system
+        role: primary
+        installOrder: 1
+        reason: Establish daily review, decision, priority, resource-allocation, and follow-through loops.
+        dependsOn: []
+    sharedContextKeys: [management.operating_metrics, management.decision_roles, company.department_owners]
+    sharedCapabilities: [analytics.metric.query, docs.document.read, messaging.channel.post]
+    topology: []

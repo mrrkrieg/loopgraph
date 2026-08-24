@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { DepartmentTypeSchema, normalizeDepartmentType } from "./department-skills";
-import { contentHash, loopSpecHash } from "./hash";
+import { contentDigest, contentHash, loopSpecHash } from "./hash";
 import type { LoopSpec } from "./loop-spec";
 
 export const EVENT_ENVELOPE_SCHEMA_VERSION = "event-envelope/v1alpha1" as const;
@@ -8,6 +8,9 @@ export const ROUTING_CONTRACT_SCHEMA_VERSION = "routing-contract/v1alpha1" as co
 export const ROUTING_CARD_SCHEMA_VERSION = "routing-card/v1alpha1" as const;
 export const ROUTING_DECISION_SCHEMA_VERSION = "routing-decision/v1alpha1" as const;
 export const ROUTE_JOB_SCHEMA_VERSION = "route-job/v1alpha1" as const;
+export const ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION = "routing-learning-context/v1alpha1" as const;
+export const ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION =
+  "routing-learning-context-binding/v1alpha1" as const;
 
 const jsonObjectSchema = z.record(z.string(), z.unknown());
 
@@ -106,6 +109,7 @@ export const loopRoutingContractSchema = z.object({
     maxRoutes: z.number().int().min(1).default(1),
     requiresIndependentProblems: z.boolean().default(true)
   }).default({ mode: "none", maxRoutes: 1, requiresIndependentProblems: true }),
+  permittedSupportingLoopIds: z.array(z.string().min(1)).default([]),
   cooldown: z.object({
     seconds: z.number().int().min(0).default(0),
     dedupeWindowSeconds: z.number().int().min(0).default(0)
@@ -144,6 +148,7 @@ export const routingCardSchema = z.object({
   ambiguityPolicy: loopRoutingContractSchema.shape.ambiguityPolicy,
   noMatchPolicy: loopRoutingContractSchema.shape.noMatchPolicy,
   fanoutPolicy: loopRoutingContractSchema.shape.fanoutPolicy,
+  permittedSupportingLoopIds: loopRoutingContractSchema.shape.permittedSupportingLoopIds,
   cooldown: loopRoutingContractSchema.shape.cooldown,
   concurrency: loopRoutingContractSchema.shape.concurrency,
   inputMapping: loopInputMappingSchema.default({}),
@@ -237,18 +242,6 @@ export const eventReceiptSchema = z.object({
   duplicateOfEventId: z.string().optional(),
   firstSeenAt: z.string().datetime(),
   lastSeenAt: z.string().datetime()
-});
-
-export const routingAttemptSchema = z.object({
-  id: z.string().min(1),
-  eventId: z.string().min(1),
-  catalogVersion: z.string().min(1),
-  action: routingDecisionActionSchema.optional(),
-  status: z.enum(["received", "validated", "rejected", "committed", "failed"]),
-  decision: routingDecisionSchema.optional(),
-  validationErrors: z.array(z.string()).default([]),
-  hermesMetadata: z.record(z.string(), z.unknown()).default({}),
-  createdAt: z.string().datetime()
 });
 
 export const routeCommitSchema = z.object({
@@ -357,6 +350,129 @@ export const routerEvaluationSchema = z.object({
   evaluatedAt: z.string().datetime()
 });
 
+const routingLearningCountSchema = z.number().int().min(0);
+
+export const routingLearningLoopEvidenceSchema = z.object({
+  loopId: z.string().min(1),
+  relation: z.enum(["eligible_candidate", "declared_supporting", "subject_history"]),
+  eligibleForCurrentEvent: z.boolean(),
+  routingQuality: z.object({
+    evaluated: routingLearningCountSchema,
+    passed: routingLearningCountSchema,
+    failed: routingLearningCountSchema,
+    expectedSelections: routingLearningCountSchema,
+    actualSelections: routingLearningCountSchema,
+    passRate: z.number().min(0).max(1).optional(),
+    evaluationRefs: z.array(z.string().min(1)).max(20).default([])
+  }),
+  humanFeedback: z.object({
+    corrections: routingLearningCountSchema,
+    selected: routingLearningCountSchema,
+    correctionRefs: z.array(z.string().min(1)).max(20).default([])
+  }),
+  outcomes: z.object({
+    total: routingLearningCountSchema,
+    observed: routingLearningCountSchema,
+    improved: routingLearningCountSchema,
+    targetMet: routingLearningCountSchema,
+    unchanged: routingLearningCountSchema,
+    regressed: routingLearningCountSchema,
+    incomplete: routingLearningCountSchema,
+    latestAt: z.string().datetime().optional(),
+    outcomeRefs: z.array(z.string().min(1)).max(20).default([])
+  }),
+  value: z.object({
+    entries: routingLearningCountSchema,
+    observedEntries: routingLearningCountSchema,
+    observedNetSavedMinutes: z.number().finite(),
+    latestAt: z.string().datetime().optional(),
+    valueRefs: z.array(z.string().min(1)).max(20).default([])
+  })
+});
+
+export const routingLearningContextSchema = z.object({
+  schemaVersion: z.literal(ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION)
+    .default(ROUTING_LEARNING_CONTEXT_SCHEMA_VERSION),
+  status: z.enum(["available", "not_applicable", "unavailable"]),
+  authority: z.literal("advisory").default("advisory"),
+  generatedAt: z.string().datetime(),
+  scope: z.object({
+    workspaceId: z.string().min(1),
+    companyId: z.string().min(1),
+    subject: eventSubjectSchema,
+    canonicalEntityId: z.string().min(1).optional()
+  }),
+  eligibleLoopIds: z.array(z.string().min(1)).max(100).default([]),
+  subjectProblemIds: z.array(z.string().min(1)).max(100).default([]),
+  loopEvidence: z.array(routingLearningLoopEvidenceSchema).max(32).default([]),
+  totals: z.object({
+    routingEvaluations: routingLearningCountSchema,
+    routingCorrections: routingLearningCountSchema,
+    observedOutcomes: routingLearningCountSchema,
+    valueEntries: routingLearningCountSchema
+  }),
+  truncated: z.object({
+    eligibleLoops: z.boolean(),
+    subjectProblems: z.boolean(),
+    loops: z.boolean(),
+    routingEvaluations: z.boolean(),
+    routingCorrections: z.boolean(),
+    observedOutcomes: z.boolean(),
+    valueEntries: z.boolean()
+  }),
+  decisionRule: z.literal(
+    "Only currently eligible routing cards may be selected; learning evidence cannot authorize a route, fan-out, execution, or provider action."
+  ),
+  warnings: z.array(z.string().min(1)).max(10).default([])
+});
+
+export function routingLearningContextSemanticDigest(input: RoutingLearningContext): string {
+  const context = routingLearningContextSchema.parse(input);
+  return contentDigest(Object.fromEntries(
+    Object.entries(context).filter(([key]) => key !== "generatedAt")
+  ));
+}
+
+export const routingLearningContextBindingSchema = z.object({
+  schemaVersion: z.literal(ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION)
+    .default(ROUTING_LEARNING_CONTEXT_BINDING_SCHEMA_VERSION),
+  contextDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  acknowledgedDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  acknowledged: z.boolean(),
+  context: routingLearningContextSchema,
+  boundAt: z.string().datetime()
+}).superRefine((value, refinement) => {
+  const actualDigest = routingLearningContextSemanticDigest(value.context);
+  if (value.contextDigest !== actualDigest) {
+    refinement.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["contextDigest"],
+      message: "contextDigest must match the bounded routing learning context"
+    });
+  }
+  const actualAcknowledgement = value.acknowledgedDigest === actualDigest;
+  if (value.acknowledged !== actualAcknowledgement) {
+    refinement.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["acknowledged"],
+      message: "acknowledged must match the supplied learning-context digest"
+    });
+  }
+});
+
+export const routingAttemptSchema = z.object({
+  id: z.string().min(1),
+  eventId: z.string().min(1),
+  catalogVersion: z.string().min(1),
+  action: routingDecisionActionSchema.optional(),
+  status: z.enum(["received", "validated", "rejected", "committed", "failed"]),
+  decision: routingDecisionSchema.optional(),
+  validationErrors: z.array(z.string()).default([]),
+  hermesMetadata: z.record(z.string(), z.unknown()).default({}),
+  learningContextBinding: routingLearningContextBindingSchema.optional(),
+  createdAt: z.string().datetime()
+});
+
 export const unhandledBusinessProblemSchema = businessProblemSchema.extend({
   status: z.literal("unhandled"),
   recurrenceCount: z.number().int().min(1).default(1),
@@ -377,6 +493,9 @@ export type RouteJobStatus = z.infer<typeof routeJobStatusSchema>;
 export type RouteExecutionTarget = z.infer<typeof routeExecutionTargetSchema>;
 export type RoutingCorrection = z.infer<typeof routingCorrectionSchema>;
 export type RouterEvaluation = z.infer<typeof routerEvaluationSchema>;
+export type RoutingLearningLoopEvidence = z.infer<typeof routingLearningLoopEvidenceSchema>;
+export type RoutingLearningContext = z.infer<typeof routingLearningContextSchema>;
+export type RoutingLearningContextBinding = z.infer<typeof routingLearningContextBindingSchema>;
 export type UnhandledBusinessProblem = z.infer<typeof unhandledBusinessProblemSchema>;
 
 export type RoutingEligibilityResult = {
@@ -498,6 +617,7 @@ export function compileRoutingCardFromLoopSpec(
     ambiguityPolicy: routing.ambiguityPolicy,
     noMatchPolicy: routing.noMatchPolicy,
     fanoutPolicy: routing.fanoutPolicy,
+    permittedSupportingLoopIds: routing.permittedSupportingLoopIds,
     cooldown: routing.cooldown,
     concurrency: routing.concurrency,
     inputMapping: routing.inputMapping,
@@ -623,6 +743,13 @@ export function validateRoutingDecisionForEvent(input: {
     }
   }
 
+  if (input.decision.action === "route") {
+    const primaryRoutes = input.decision.selectedRoutes.filter((route) => route.role === "primary");
+    if (primaryRoutes.length !== 1) {
+      errors.push("A routed business problem requires exactly one primary loop");
+    }
+  }
+
   if (selectedCards.length > 1) {
     const maxAllowedRoutes = Math.min(...selectedCards.map((card) => card.fanoutPolicy.maxRoutes));
     if (selectedCards.length > maxAllowedRoutes) {
@@ -631,6 +758,15 @@ export function validateRoutingDecisionForEvent(input: {
     for (const card of selectedCards) {
       if (card.fanoutPolicy.mode === "none") {
         errors.push(`Selected loop "${card.loopId}" does not allow fan-out`);
+      }
+    }
+    const primaryRoute = input.decision.selectedRoutes.find((route) => route.role === "primary");
+    const primaryCard = primaryRoute ? cardsById.get(primaryRoute.loopId) : undefined;
+    if (primaryCard) {
+      for (const supportingRoute of input.decision.selectedRoutes.filter((route) => route.role === "supporting")) {
+        if (!primaryCard.permittedSupportingLoopIds.includes(supportingRoute.loopId)) {
+          errors.push(`Primary loop "${primaryCard.loopId}" does not permit supporting route "${supportingRoute.loopId}"`);
+        }
       }
     }
   }

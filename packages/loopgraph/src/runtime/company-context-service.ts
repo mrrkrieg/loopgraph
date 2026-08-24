@@ -13,6 +13,7 @@ import {
   type CompanyContext,
   type CompanyContextValue
 } from "../core";
+import { assertSecretFree } from "./secret-redaction";
 
 export type ContextProposal = Omit<CompanyContextValue, "verified" | "confirmedAt" | "confirmedBy" | "consumerInstallationIds"> & {
   explanation: string;
@@ -24,21 +25,51 @@ export type ConfigurationResolution = {
   needsConfirmation: Array<{ field: AppConfigField; value: unknown; provenance: AppConfiguration["provenance"][string] }>;
 };
 
-export class FileCompanyContextStore {
+export interface CompanyContextStore {
+  readonly persistence: "file" | "distributed";
+  get(workspaceId: string, companyId: string): Promise<CompanyContext>;
+  approveValue(input: ApproveCompanyContextValueInput): Promise<CompanyContext>;
+  attachConsumer(input: AttachCompanyContextConsumerInput): Promise<CompanyContext>;
+  detachConsumer(input: DetachCompanyContextConsumerInput): Promise<CompanyContext>;
+}
+
+export type ApproveCompanyContextValueInput = {
+  workspaceId: string;
+  companyId: string;
+  proposal: ContextProposal;
+  approvedBy: string;
+  expectedRevision: number;
+  consumerInstallationId?: string;
+  now?: Date;
+};
+
+export type AttachCompanyContextConsumerInput = {
+  workspaceId: string;
+  companyId: string;
+  contextKeys: string[];
+  installationId: string;
+  expectedRevision: number;
+  actor: string;
+  now?: Date;
+};
+
+export type DetachCompanyContextConsumerInput = {
+  workspaceId: string;
+  companyId: string;
+  installationId: string;
+  actor: string;
+  now?: Date;
+};
+
+export class FileCompanyContextStore implements CompanyContextStore {
+  readonly persistence = "file" as const;
+
   constructor(private readonly filePath: string) {}
 
   async get(workspaceId: string, companyId: string): Promise<CompanyContext> {
     const raw = await readJson(this.filePath);
     if (!raw) {
-      return companyContextSchema.parse({
-        schemaVersion: COMPANY_CONTEXT_SCHEMA_VERSION,
-        workspaceId,
-        companyId,
-        revision: 0,
-        values: [],
-        updatedAt: new Date(0).toISOString(),
-        updatedBy: "system"
-      });
+      return emptyCompanyContext(workspaceId, companyId);
     }
     const context = companyContextSchema.parse(raw);
     if (context.workspaceId !== workspaceId || context.companyId !== companyId) {
@@ -47,71 +78,115 @@ export class FileCompanyContextStore {
     return context;
   }
 
-  async approveValue(input: {
-    workspaceId: string;
-    companyId: string;
-    proposal: ContextProposal;
-    approvedBy: string;
-    expectedRevision: number;
-    consumerInstallationId?: string;
-    now?: Date;
-  }): Promise<CompanyContext> {
+  async approveValue(input: ApproveCompanyContextValueInput): Promise<CompanyContext> {
     const current = await this.get(input.workspaceId, input.companyId);
-    if (current.revision !== input.expectedRevision) {
-      throw new Error(`Company context revision mismatch: expected ${input.expectedRevision}, found ${current.revision}`);
-    }
-    const timestamp = (input.now ?? new Date()).toISOString();
-    const { explanation: _explanation, ...proposalValue } = input.proposal;
-    const value = companyContextValueSchema.parse({
-      ...proposalValue,
-      verified: true,
-      confirmedAt: timestamp,
-      confirmedBy: input.approvedBy,
-      consumerInstallationIds: input.consumerInstallationId ? [input.consumerInstallationId] : []
-    });
-    const existing = current.values.find((candidate) => candidate.key === value.key);
-    const consumerInstallationIds = Array.from(new Set([
-      ...(existing?.consumerInstallationIds ?? []),
-      ...value.consumerInstallationIds
-    ])).sort();
-    const next = companyContextSchema.parse({
-      ...current,
-      revision: current.revision + 1,
-      values: [
-        ...current.values.filter((candidate) => candidate.key !== value.key),
-        { ...value, consumerInstallationIds }
-      ].sort((left, right) => left.key.localeCompare(right.key)),
-      updatedAt: timestamp,
-      updatedBy: input.approvedBy
-    });
+    const next = approveCompanyContextValue(current, input);
     await atomicWriteJson(this.filePath, next);
     return next;
   }
 
-  async attachConsumer(input: {
-    workspaceId: string;
-    companyId: string;
-    contextKeys: string[];
-    installationId: string;
-    expectedRevision: number;
-    actor: string;
-  }): Promise<CompanyContext> {
+  async attachConsumer(input: AttachCompanyContextConsumerInput): Promise<CompanyContext> {
     const current = await this.get(input.workspaceId, input.companyId);
-    if (current.revision !== input.expectedRevision) throw new Error("Company context revision changed during installation");
-    const requested = new Set(input.contextKeys);
-    const missing = input.contextKeys.filter((key) => !current.values.some((value) => value.key === key));
-    if (missing.length > 0) throw new Error(`Cannot attach missing company context keys: ${missing.join(", ")}`);
-    const next = companyContextSchema.parse({
-      ...current,
-      revision: current.revision + 1,
-      values: current.values.map((value) => requested.has(value.key)
-        ? { ...value, consumerInstallationIds: Array.from(new Set([...value.consumerInstallationIds, input.installationId])).sort() }
-        : value),
-      updatedAt: new Date().toISOString(),
-      updatedBy: input.actor
-    });
+    const next = attachCompanyContextConsumer(current, input);
+    if (next === current) return current;
     await atomicWriteJson(this.filePath, next);
     return next;
+  }
+
+  async detachConsumer(input: DetachCompanyContextConsumerInput): Promise<CompanyContext> {
+    const current = await this.get(input.workspaceId, input.companyId);
+    const next = detachCompanyContextConsumer(current, input);
+    if (next === current) return current;
+    await atomicWriteJson(this.filePath, next);
+    return next;
+  }
+}
+
+export function emptyCompanyContext(workspaceId: string, companyId: string): CompanyContext {
+  return companyContextSchema.parse({
+    schemaVersion: COMPANY_CONTEXT_SCHEMA_VERSION,
+    workspaceId,
+    companyId,
+    revision: 0,
+    values: [],
+    updatedAt: new Date(0).toISOString(),
+    updatedBy: "system"
+  });
+}
+
+export function approveCompanyContextValue(current: CompanyContext, input: ApproveCompanyContextValueInput): CompanyContext {
+  assertContextIdentity(current, input.workspaceId, input.companyId);
+  if (current.revision !== input.expectedRevision) {
+    throw new Error(`Company context revision mismatch: expected ${input.expectedRevision}, found ${current.revision}`);
+  }
+  const timestamp = (input.now ?? new Date()).toISOString();
+  assertSecretFree(input.proposal, "company_context");
+  const { explanation, ...proposalValue } = input.proposal;
+  void explanation;
+  const value = companyContextValueSchema.parse({
+    ...proposalValue,
+    verified: true,
+    confirmedAt: timestamp,
+    confirmedBy: input.approvedBy,
+    consumerInstallationIds: input.consumerInstallationId ? [input.consumerInstallationId] : []
+  });
+  const existing = current.values.find((candidate) => candidate.key === value.key);
+  return companyContextSchema.parse({
+    ...current,
+    revision: current.revision + 1,
+    values: [
+      ...current.values.filter((candidate) => candidate.key !== value.key),
+      {
+        ...value,
+        consumerInstallationIds: Array.from(new Set([
+          ...(existing?.consumerInstallationIds ?? []),
+          ...value.consumerInstallationIds
+        ])).sort()
+      }
+    ].sort((left, right) => left.key.localeCompare(right.key)),
+    updatedAt: timestamp,
+    updatedBy: input.approvedBy
+  });
+}
+
+export function attachCompanyContextConsumer(current: CompanyContext, input: AttachCompanyContextConsumerInput): CompanyContext {
+  assertContextIdentity(current, input.workspaceId, input.companyId);
+  if (current.revision !== input.expectedRevision) throw new Error("Company context revision changed during installation");
+  const requested = new Set(input.contextKeys);
+  const missing = input.contextKeys.filter((key) => !current.values.some((value) => value.key === key));
+  if (missing.length > 0) throw new Error(`Cannot attach missing company context keys: ${missing.join(", ")}`);
+  if (current.values.every((value) => !requested.has(value.key) || value.consumerInstallationIds.includes(input.installationId))) {
+    return current;
+  }
+  return companyContextSchema.parse({
+    ...current,
+    revision: current.revision + 1,
+    values: current.values.map((value) => requested.has(value.key)
+      ? { ...value, consumerInstallationIds: Array.from(new Set([...value.consumerInstallationIds, input.installationId])).sort() }
+      : value),
+    updatedAt: (input.now ?? new Date()).toISOString(),
+    updatedBy: input.actor
+  });
+}
+
+export function detachCompanyContextConsumer(current: CompanyContext, input: DetachCompanyContextConsumerInput): CompanyContext {
+  assertContextIdentity(current, input.workspaceId, input.companyId);
+  if (current.values.every((value) => !value.consumerInstallationIds.includes(input.installationId))) return current;
+  return companyContextSchema.parse({
+    ...current,
+    revision: current.revision + 1,
+    values: current.values.map((value) => ({
+      ...value,
+      consumerInstallationIds: value.consumerInstallationIds.filter((id) => id !== input.installationId)
+    })),
+    updatedAt: (input.now ?? new Date()).toISOString(),
+    updatedBy: input.actor
+  });
+}
+
+function assertContextIdentity(context: CompanyContext, workspaceId: string, companyId: string): void {
+  if (context.workspaceId !== workspaceId || context.companyId !== companyId) {
+    throw new Error("Company context tenant identity does not match the requested workspace and company");
   }
 }
 

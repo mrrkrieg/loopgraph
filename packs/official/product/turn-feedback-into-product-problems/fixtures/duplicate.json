@@ -1,0 +1,1 @@
+{"id":"product-feedback-duplicate","eventType":"product.feedback_received","subject":{"type":"feedback","id":"feedback-204"},"normalizedPayload":{"feedbackId":"204","text":"Same export mapping failure","productArea":"exports","matchedProblemId":"problem-188","confidence":0.98},"evidenceRefs":["product:problem:188"]}

@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: strategic-account-escalation-conformance
+appId: loopgraph.customer-success.escalate-strategic-accounts
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: true, notes: A resolved strategic account routes while provider actions remain approval-bound. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: false, notes: Missing renewal context is requested rather than invented. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: An explicitly excluded low-risk account does not create strategic work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: false, notes: Repeated signals append evidence to the durable account problem. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: false, notes: Hermes abstains when one account identity cannot be resolved. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: false, notes: Low-confidence impact assessment requires human judgment. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: customer-success-strategic-account-escalation, connectorState: unavailable, expectedApproval: false, notes: Provider unavailability creates no recovery action. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: false, notes: Required business context is requested explicitly. }
+  - { id: human-approval, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: true, notes: Internal recovery actions remain exact and approval-bound. }
+  - { id: customer-facing-action, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: true, notes: Customer communication remains a separate draft and review. }
+  - { id: missing-outcome, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: true, notes: Missing renewal or recovery evidence is not treated as failure. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: customer-success-strategic-account-escalation, connectorState: connected, expectedApproval: false, notes: Retries cannot create duplicate cases or double-count value. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission changes require explicit review and preserve rollback. }

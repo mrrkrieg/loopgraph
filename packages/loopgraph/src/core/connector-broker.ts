@@ -31,11 +31,22 @@ export const brokerCapabilitySchema = z.enum([
   "provider.oauth.revoke",
   "provider.webhooks.subscribe",
   "provider.webhooks.verify",
+  "provider.events.emit",
   "provider.health.read",
   "provider.data.read",
   "provider.draft.write",
   "provider.action.execute",
   "provider.disconnect"
+]);
+
+/**
+ * Capabilities granted to non-human workloads. Provider operations remain
+ * constrained by brokerCapabilitySchema; platform services can add their own
+ * narrow capabilities without turning them into arbitrary provider access.
+ */
+export const workloadCapabilitySchema = z.union([
+  brokerCapabilitySchema,
+  z.enum(["marketplace.consume", "hermes.app_operations"])
 ]);
 
 export const connectorOperationSchema = z.string()
@@ -136,6 +147,18 @@ export const connectorActionCommitRequestSchema = z.object({
   }
 });
 
+export const connectorActionReconcileRequestSchema = z.object({
+  ...connectorActionEnvelopeShape,
+  preparedActionId: z.string().min(8).max(160),
+  preparedActionFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  originalRequestId: z.string().min(8).max(128),
+  originalIdempotencyKey: z.string().min(8).max(192)
+}).strict().superRefine((value, context) => {
+  if (Date.parse(value.expiresAt) <= Date.parse(value.issuedAt)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["expiresAt"], message: "expiresAt must be after issuedAt" });
+  }
+});
+
 export const connectorManifestOperationSchema = z.object({
   operationId: connectorOperationSchema,
   capability: brokerCapabilitySchema,
@@ -214,6 +237,26 @@ export const connectorActionPrepareResponseSchema = z.object({
 }).strict();
 
 export const connectorActionCommitResponseSchema = connectorBrokerResponseSchema;
+
+export const connectorActionReconcileResponseSchema = z.object({
+  protocolVersion: z.literal(CONNECTOR_BROKER_PROTOCOL_VERSION),
+  requestId: z.string().min(8).max(128),
+  originalRequestId: z.string().min(8).max(128),
+  status: z.enum(["resolved", "pending", "unresolved"]),
+  preparedActionStatus: z.enum(["prepared", "committing", "committed", "expired", "revoked"]),
+  brokerResponse: connectorBrokerResponseSchema.optional(),
+  reasonCode: z.string().min(1).max(128).optional()
+}).strict().superRefine((value, context) => {
+  if ((value.status === "resolved") !== Boolean(value.brokerResponse)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse"], message: "Only a resolved reconciliation contains the original Broker response" });
+  }
+  if (value.status !== "resolved" && !value.reasonCode) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["reasonCode"], message: "Pending and unresolved reconciliation require a reason code" });
+  }
+  if (value.brokerResponse && value.brokerResponse.requestId !== value.originalRequestId) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["brokerResponse", "requestId"], message: "Reconciled response must belong to the original commit request" });
+  }
+});
 
 export const connectorInstallationAdminSchema = z.object({
   id: z.string().min(1),
@@ -362,6 +405,8 @@ export type ConnectorActionPrepareRequest = z.infer<typeof connectorActionPrepar
 export type ConnectorPreparedAction = z.infer<typeof connectorPreparedActionSchema>;
 export type ConnectorActionPrepareResponse = z.infer<typeof connectorActionPrepareResponseSchema>;
 export type ConnectorActionCommitRequest = z.infer<typeof connectorActionCommitRequestSchema>;
+export type ConnectorActionReconcileRequest = z.infer<typeof connectorActionReconcileRequestSchema>;
+export type ConnectorActionReconcileResponse = z.infer<typeof connectorActionReconcileResponseSchema>;
 export type ConnectorCapabilityManifest = z.infer<typeof connectorCapabilityManifestSchema>;
 export type ConnectorAuditReceipt = z.infer<typeof connectorAuditReceiptSchema>;
 export type ConnectorInstallationAdmin = z.infer<typeof connectorInstallationAdminSchema>;

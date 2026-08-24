@@ -1,0 +1,15 @@
+schemaVersion: loopgraph-app-dashboard/v1alpha1
+id: management-company-operating-outcomes
+metrics:
+  - { id: management_decision_latency_hours, direction: decrease, description: Time from complete evidence to accountable company decision. }
+  - { id: operating_review_follow_through_rate, direction: increase, description: Owned decisions completed with observed outcome evidence. }
+  - { id: company_anomaly_explanation_coverage, direction: increase, description: Material anomalies with reconciled drivers and uncertainty. }
+  - { id: company_anomaly_driver_accuracy, direction: increase, description: Diagnosed drivers confirmed by realized outcomes. }
+  - { id: loop_health_recovery_hours, direction: decrease, description: Time from governed health degradation to verified recovery or retirement. }
+  - { id: loops_with_positive_net_value, direction: increase, description: Active loops with verified value above all execution and supervision cost. }
+  - { id: decision_evidence_completeness, direction: increase, description: Decisions with source-cited options, tradeoffs, uncertainty, ownership, and follow-through. }
+  - { id: decision_execution_rate, direction: increase, description: Approved decisions executed and measured in the declared window. }
+  - { id: resource_decision_latency_hours, direction: decrease, description: Time from complete resource evidence to accountable allocation decision. }
+  - { id: constrained_goal_improvement, direction: increase, description: Movement in the named company constraint after an approved allocation. }
+  - { id: repeated_failure_recurrence_rate, direction: decrease, description: Governed failure patterns recurring after an approved system change. }
+  - { id: system_change_value_realization, direction: increase, description: Verified improvement net of implementation, review, supervision, and change cost. }

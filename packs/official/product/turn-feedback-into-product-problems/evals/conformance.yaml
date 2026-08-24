@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: product-feedback-to-problems-conformance
+appId: loopgraph.product.turn-feedback-into-product-problems
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: true, notes: Complete feedback routes while issue creation remains approval-bound. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: false, notes: Missing product-area evidence is requested rather than inferred. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Explicit test traffic does not create product work. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: false, notes: Existing product problems receive evidence without duplicate work. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: false, notes: Hermes abstains when the affected object is ambiguous. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: false, notes: Low-confidence product classification requires human judgment. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: product-feedback-clustering, connectorState: unavailable, expectedApproval: false, notes: Provider unavailability cannot produce product work. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: false, notes: Required feedback fields are explicit. }
+  - { id: human-approval, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: true, notes: Issue creation and update remain approval-bound. }
+  - { id: customer-facing-action, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: true, notes: No customer commitment or message can be emitted by this app. }
+  - { id: missing-outcome, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: true, notes: Missing release outcomes are not fabricated. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: product-feedback-clustering, connectorState: connected, expectedApproval: false, notes: Retries append evidence and cannot double-count product value. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission increases require explicit review and preserve rollback. }

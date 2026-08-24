@@ -41,17 +41,18 @@ export async function POST(request: Request, context: { params: Promise<{ instal
     await appendConnectorAdminAudit({
       organizationId: database.organizationId,
       projectKey,
-      eventType: "connector.webhook_activation_requested",
+      eventType: "connector.intake_activation_requested",
       outcome: "accepted",
       actorId: database.userId,
       correlationId,
       resourceType: "connector_installation",
       resourceId: installationId,
-      metadata: { providerId: installation.providerId, webhookStatus: installation.webhookStatus }
+      metadata: { providerId: installation.providerId, webhookStatus: installation.webhookStatus, intakeMode: String(response.intakeMode ?? "unknown") }
     });
     return NextResponse.json({
       installation: toConnectorInstallationView(installation),
       endpointUrl: response.endpointUrl,
+      intakeMode: response.intakeMode,
       requiresProviderConfirmation: response.requiresProviderConfirmation
     }, { headers: { "cache-control": "no-store" } });
   } catch (error) {

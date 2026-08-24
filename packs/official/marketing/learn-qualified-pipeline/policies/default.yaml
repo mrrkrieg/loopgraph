@@ -1,0 +1,14 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  campaign.read: allowed
+  lead.read: allowed
+  opportunity.read: allowed
+  analytics.query: allowed
+  campaign.update: approval_required
+  content.draft: approval_required
+  collaboration.draft: approval_required
+  content.publish: forbidden
+  attribution.rewrite: forbidden
+  ambiguous.identity: request_human
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

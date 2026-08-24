@@ -1,0 +1,1 @@
+{"id":"engineering-incident-outcome","eventType":"engineering.incident_resolved","subject":{"type":"incident","id":"incident-509"},"normalizedPayload":{"incidentId":"509","resolvedAt":"2026-08-08T10:00:00.000Z","resolutionEvidenceRefs":["deployment:rollback:509","incident:timeline:509"],"confidence":0.99},"evidenceRefs":["jira:incident:509","gitlab:deployment:509"]}

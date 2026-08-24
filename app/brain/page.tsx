@@ -1,9 +1,18 @@
 import { BrainPageShell } from "@/components/brain/brain-page-shell";
 import { isHostedPreview } from "@/lib/hosted-preview";
 import { getSemanticTopology } from "@/lib/loop-engineering-builder/workspace";
-import { FileGraphAuthoringStore, getLoopgraphRoot } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import { getGraphAuthoringContext } from "../../lib/loopgraph-runtime/graph-authoring-store-resolver";
 import { contentHash } from "loopgraph/core";
+import {
+  projectGraphEditorTransactionReceipts,
+  graphEditorTransactionReceipt,
+  inspectLocalSupervisorRuntime
+} from "loopgraph/runtime";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesDesignStore,
+  getLoopOpportunityStore
+} from "../../lib/loopgraph-runtime/storage-resolver";
 
 type BrainPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -22,15 +31,44 @@ export default async function BrainPage({ searchParams }: BrainPageProps) {
     brainLabel: "Hermes Brain",
     hierarchyMode: "hermes_brain"
   });
-  const layout = await new FileGraphAuthoringStore(
-    getLoopgraphRoot(getActiveLoopgraphProjectRoot())
-  ).getLayout();
+  const activeProjectRoot = getActiveLoopgraphProjectRoot();
+  const { store: graphAuthoringStore } = await getGraphAuthoringContext("workspace.read");
+  const [layout, transactions, supervisorRuntime] = await Promise.all([
+    graphAuthoringStore.getLayout(),
+    graphAuthoringStore.list(),
+    hostedPreview ? Promise.resolve(undefined) : inspectLocalSupervisorRuntime(activeProjectRoot)
+  ]);
+  const transactionReceipts = hostedPreview
+    ? transactions.map(graphEditorTransactionReceipt)
+    : await projectGraphEditorTransactionReceipts({
+        transactions,
+        opportunityStore: getLoopOpportunityStore({
+          projectRoot: activeProjectRoot
+        }),
+        designStore: getHermesDesignStore()
+      });
+  const supervisor = supervisorRuntime
+    ? {
+        running: supervisorRuntime.running,
+        ...(supervisorRuntime.status
+          ? {
+              status: {
+                health: supervisorRuntime.status.health,
+                checkedAt: supervisorRuntime.status.checkedAt,
+                recommendedAction: supervisorRuntime.status.recommendedActions[0]
+              }
+            }
+          : {})
+      }
+    : undefined;
 
   return (
     <BrainPageShell
       includeCatalogLoops={includeCatalogLoops}
       initialLayout={layout}
+      initialTransactions={transactionReceipts}
       previewMode={previewMode}
+      supervisor={supervisor}
       topology={topology}
       topologyHash={contentHash({ nodes: topology.nodes, edges: topology.edges })}
     />

@@ -1,0 +1,12 @@
+schemaVersion: loopgraph-app-skill/v1alpha1
+kind: HermesSkill
+id: cs-recovery-plan
+name: Account Recovery Plan
+description: Prepare bounded cross-department recovery actions from verified customer-risk evidence.
+department: customer_success
+goal: Give each accountable owner one evidence-backed action and measurable recovery signal.
+inputs: [risk synthesis, owners, account goals, constraints, approvals, communication policy]
+outputs: [recovery goal, owner actions, measures, customer draft, approval packet]
+instructions: [Tie each action to one verified risk., Assign one accountable owner and due date., Define a measurable recovery signal., Separate internal and customer-facing approvals., Return action and outcome evidence to Hermes.]
+boundaries: [Do not change commercial terms., Do not promise product work., Do not update providers or send communication autonomously.]
+requiredCapabilities: [crm.account.read, support.ticket.read, billing.subscription.read, analytics.event.query]

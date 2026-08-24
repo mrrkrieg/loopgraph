@@ -1,0 +1,13 @@
+schemaVersion: loopgraph-app-policy/v1alpha1
+initialMode: shadow
+rules:
+  support.read: allowed
+  crm.read: allowed
+  incident.read: allowed
+  recovery_task.create: approval_required
+  internal.notification: approval_required
+  customer_message.draft: allowed
+  customer_message.send: forbidden
+  commercial_commitment: forbidden
+  ambiguous.identity: request_human
+approval: { requireExactPreparedActionFingerprint: true, separateCustomerFacingApproval: true, expiresMinutes: 30 }

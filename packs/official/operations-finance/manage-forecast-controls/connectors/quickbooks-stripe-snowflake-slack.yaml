@@ -1,0 +1,29 @@
+schemaVersion: loopgraph-connector-recipe/v1alpha1
+id: quickbooks-stripe-snowflake-slack
+providerId: quickbooks
+providerFamily: quickbooks
+displayName: QuickBooks + Stripe + Snowflake + Slack
+capabilities:
+  - { logicalCapability: finance.forecast.read, providerOperation: snowflake.finance_forecast.query, minimumScopes: [warehouse:read], authority: read, risk: high }
+  - { logicalCapability: finance.ledger.read, providerOperation: quickbooks.reports.read, minimumScopes: [com.intuit.quickbooks.accounting], authority: read, risk: high }
+  - { logicalCapability: finance.receivable.read, providerOperation: stripe.invoices.read, minimumScopes: [invoices:read], authority: read, risk: high }
+  - { logicalCapability: finance.vendor.read, providerOperation: quickbooks.vendors.read, minimumScopes: [com.intuit.quickbooks.accounting], authority: read, risk: high }
+  - { logicalCapability: approval.record.read, providerOperation: slack.workflow-approvals.read, minimumScopes: [channels:history], authority: read, risk: medium }
+  - { logicalCapability: contract.record.read, providerOperation: contract-repository.records.read, minimumScopes: [contracts:read], authority: read, risk: high }
+  - { logicalCapability: analytics.metric.query, providerOperation: snowflake.operating_metrics.query, minimumScopes: [warehouse:read], authority: read, risk: medium }
+  - { logicalCapability: crm.account.read, providerOperation: crm.accounts.read, minimumScopes: [crm:read], authority: read, risk: high }
+  - { logicalCapability: capacity.plan.read, providerOperation: snowflake.capacity_plan.query, minimumScopes: [warehouse:read], authority: read, risk: high }
+  - { logicalCapability: finance.record.update, providerOperation: quickbooks.records.update, minimumScopes: [com.intuit.quickbooks.accounting], authority: approve, risk: critical }
+  - { logicalCapability: project.task.create, providerOperation: project.tasks.create, minimumScopes: [tasks:write], authority: approve, risk: high }
+  - { logicalCapability: collaboration.message.draft, providerOperation: slack.messages.draft, minimumScopes: [chat:write], authority: approve, risk: high }
+  - { logicalCapability: mail.message.draft, providerOperation: mail.drafts.create, minimumScopes: [mail:draft], authority: approve, risk: critical }
+eventSources:
+  - { eventFamily: finance.forecast_variance_detected, providerEvent: finance_forecast.material_variance, transport: poll, normalizationTransformer: snowflake.forecast-to-variance.v1, replayProtection: true, fallbackPollMinutes: 60 }
+  - { eventFamily: finance.receivable_risk_detected, providerEvent: invoice.payment_failed, transport: webhook, normalizationTransformer: stripe.invoice-to-receivable-risk.v1, signatureStrategy: stripe-v1-signature, replayProtection: true, fallbackPollMinutes: 30 }
+  - { eventFamily: finance.close_review_due, providerEvent: accounting_period.review_due, transport: poll, normalizationTransformer: quickbooks.close-to-readiness.v1, replayProtection: true, fallbackPollMinutes: 60 }
+fieldMappings:
+  - { providerId: snowflake, objectType: forecast_window, requiredLogicalFields: [forecast.id, forecast.version, forecast.periodStart, forecast.periodEnd, forecast.baseline, forecast.current], optionalLogicalFields: [forecast.currency, forecast.scenario, forecast.ownerId] }
+  - { providerId: stripe, objectType: invoice, requiredLogicalFields: [invoice.id, invoice.accountId, invoice.amount, invoice.currency, invoice.dueAt, invoice.status], optionalLogicalFields: [invoice.disputeStatus, invoice.ownerId, invoice.promiseAt] }
+  - { providerId: quickbooks, objectType: vendor_contract, requiredLogicalFields: [vendor.id, contract.id, contract.renewalAt, vendor.spend, vendor.ownerId], optionalLogicalFields: [vendor.usage, vendor.securityStatus, vendor.businessCriticality] }
+healthCheck: { capability: finance.ledger.read, sampleQuery: { report: balance_sheet, limit: 1 }, timeoutMs: 10000 }
+supportsBoundedSamples: true

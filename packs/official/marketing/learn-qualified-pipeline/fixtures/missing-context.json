@@ -1,0 +1,1 @@
+{"id":"campaign-learning-missing","eventType":"marketing.campaign_window_closed","subject":{"type":"campaign_cohort","id":"campaign-402-window-7"},"normalizedPayload":{"campaignId":"402","windowStart":"2026-07-01T00:00:00.000Z","windowEnd":"2026-07-31T23:59:59.000Z","confidence":0.97},"evidenceRefs":["paid-social:campaign:402"]}

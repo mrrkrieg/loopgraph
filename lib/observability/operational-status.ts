@@ -3,6 +3,7 @@ import "server-only";
 import { isHostedAuthRequired, isPublicHostedPreviewEnvironment } from "@/lib/auth/hosted-config";
 import { createSupabaseAdminClient } from "@/lib/db/supabase-admin";
 import { resolveHostedRuntimeProjectRoot } from "@/lib/loopgraph-runtime/storage-resolver";
+import { getHostedAppEvidenceHealth } from "./app-evidence-health";
 import { emitOperationalLog } from "./operational-log";
 
 export type OperationalMetrics = {
@@ -11,6 +12,16 @@ export type OperationalMetrics = {
   machineDenied5m: number;
   auditEventsTotal: number;
   auditHeadSequence: number;
+  cliSessionsTotal: number;
+  cliSessionsActive: number;
+  cliSessionsRefreshRequired: number;
+  cliSessionsExpired: number;
+  cliSessionsRevoked: number;
+  cliRefreshReuseDetectedTotal: number;
+  cliRefreshReuseDetected24h: number;
+  cliRefreshReuseUnrevoked: number;
+  cliDeviceAuthorizationsPending: number;
+  cliDeviceAuthorizationOldestPendingSeconds: number;
   routeJobsQueued: number;
   routeJobsRunning: number;
   routeJobsWaitingReview: number;
@@ -58,18 +69,49 @@ export type OperationalMetrics = {
   graphRehearsalsTotal: number;
   graphCommitsTotal: number;
   latestGraphSequence: number;
+  appInstallationsTotal: number;
+  appEvidenceHealth: number;
+  appEvidenceInstallationsTotal: number;
+  appEvidenceInvalid: number;
+  appEvidenceExpired: number;
+  appEvidenceRenewSoon: number;
+  appEvidenceIncomplete: number;
+  appEvidenceCurrent: number;
+  appEvidenceNotApplicable: number;
+  appEvidenceItemsReturned: number;
+  appEvidencePlanTruncated: number;
+  appLifecycleRecoveryPending: number;
+  appLifecycleRecoveryPrepared: number;
+  appLifecycleRecoveryRequiresReconciliation: number;
+  appLifecycleRecoveryStale: number;
+  appLifecycleRecoveryWorkspacesAffected: number;
+  appLifecycleRecoveryOldestAgeSeconds: number;
+  appLifecycleRecoveryStaleAfterSeconds: number;
+  appActionCommitsRequestedTotal: number;
+  appActionCommitsSucceededTotal: number;
+  appActionCommitsFailedTotal: number;
+  appActionReconciliationPending: number;
+  appActionReconciliationStale: number;
+  appActionReconciliationWorkspacesAffected: number;
+  appActionReconciliationOldestAgeSeconds: number;
+  appActionReconciliationStaleAfterSeconds: number;
   lastMachineRequestAt?: string;
 };
 
 export type OperationalReadiness = {
   ready: boolean;
+  degraded: boolean;
   mode: "local" | "preview" | "hosted";
   checkedAt: string;
   checks: {
     configuration: boolean;
     database: boolean | null;
     audit: boolean | null;
+    cliSessionSecurity: boolean | null;
     runtimeNamespace: boolean | null;
+    appEvidenceFreshness: boolean | null;
+    appLifecycleRecovery: boolean | null;
+    appActionReconciliation: boolean | null;
   };
   metrics: OperationalMetrics;
 };
@@ -102,12 +144,27 @@ export type AuditIntegrity = {
   headHash: string;
 };
 
+export type AuditExportCheckpoint = AuditIntegrity & {
+  headSequence: number;
+  currentHeadSequence: number;
+};
+
 const EMPTY_METRICS: OperationalMetrics = {
   machineRequests5m: 0,
   machineRateLimited5m: 0,
   machineDenied5m: 0,
   auditEventsTotal: 0,
   auditHeadSequence: 0,
+  cliSessionsTotal: 0,
+  cliSessionsActive: 0,
+  cliSessionsRefreshRequired: 0,
+  cliSessionsExpired: 0,
+  cliSessionsRevoked: 0,
+  cliRefreshReuseDetectedTotal: 0,
+  cliRefreshReuseDetected24h: 0,
+  cliRefreshReuseUnrevoked: 0,
+  cliDeviceAuthorizationsPending: 0,
+  cliDeviceAuthorizationOldestPendingSeconds: 0,
   routeJobsQueued: 0,
   routeJobsRunning: 0,
   routeJobsWaitingReview: 0,
@@ -154,7 +211,33 @@ const EMPTY_METRICS: OperationalMetrics = {
   graphPromotionsTotal: 0,
   graphRehearsalsTotal: 0,
   graphCommitsTotal: 0,
-  latestGraphSequence: 0
+  latestGraphSequence: 0,
+  appInstallationsTotal: 0,
+  appEvidenceHealth: 1,
+  appEvidenceInstallationsTotal: 0,
+  appEvidenceInvalid: 0,
+  appEvidenceExpired: 0,
+  appEvidenceRenewSoon: 0,
+  appEvidenceIncomplete: 0,
+  appEvidenceCurrent: 0,
+  appEvidenceNotApplicable: 0,
+  appEvidenceItemsReturned: 0,
+  appEvidencePlanTruncated: 0,
+  appLifecycleRecoveryPending: 0,
+  appLifecycleRecoveryPrepared: 0,
+  appLifecycleRecoveryRequiresReconciliation: 0,
+  appLifecycleRecoveryStale: 0,
+  appLifecycleRecoveryWorkspacesAffected: 0,
+  appLifecycleRecoveryOldestAgeSeconds: 0,
+  appLifecycleRecoveryStaleAfterSeconds: 0,
+  appActionCommitsRequestedTotal: 0,
+  appActionCommitsSucceededTotal: 0,
+  appActionCommitsFailedTotal: 0,
+  appActionReconciliationPending: 0,
+  appActionReconciliationStale: 0,
+  appActionReconciliationWorkspacesAffected: 0,
+  appActionReconciliationOldestAgeSeconds: 0,
+  appActionReconciliationStaleAfterSeconds: 0
 };
 
 export async function getOperationalReadiness(): Promise<OperationalReadiness> {
@@ -162,13 +245,18 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
   if (!isHostedAuthRequired()) {
     return {
       ready: true,
+      degraded: false,
       mode: isPublicHostedPreviewEnvironment() ? "preview" : "local",
       checkedAt,
       checks: {
         configuration: true,
         database: null,
         audit: null,
-        runtimeNamespace: null
+        cliSessionSecurity: null,
+        runtimeNamespace: null,
+        appEvidenceFreshness: null,
+        appLifecycleRecovery: null,
+        appActionReconciliation: null
       },
       metrics: EMPTY_METRICS
     };
@@ -176,16 +264,32 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
 
   const organizationId = process.env.LOOPGRAPH_HOSTED_ORGANIZATION_ID?.trim();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const lifecycleStaleAfterSeconds = parseLifecycleStaleAfterSeconds(
+    process.env.LOOPGRAPH_APP_LIFECYCLE_RECOVERY_STALE_SECONDS
+  );
+  const actionStaleAfterSeconds = parseActionStaleAfterSeconds(
+    process.env.LOOPGRAPH_APP_ACTION_RECONCILIATION_STALE_SECONDS
+  );
   let runtimeNamespace = false;
+  let runtimeProjectRoot: string | undefined;
   try {
-    resolveHostedRuntimeProjectRoot(process.env);
+    runtimeProjectRoot = resolveHostedRuntimeProjectRoot(process.env);
     runtimeNamespace = true;
   } catch {
     runtimeNamespace = false;
   }
-  const configuration = Boolean(organizationId && runtimeNamespace);
+  const configuration = Boolean(
+    organizationId && runtimeNamespace && lifecycleStaleAfterSeconds !== undefined &&
+    actionStaleAfterSeconds !== undefined
+  );
   const supabase = createSupabaseAdminClient();
-  if (!configuration || !organizationId || !supabase) {
+  if (
+    !configuration ||
+    !organizationId ||
+    !supabase ||
+    lifecycleStaleAfterSeconds === undefined ||
+    actionStaleAfterSeconds === undefined
+  ) {
     emitOperationalLog({
       level: "error",
       event: "operational.readiness.failed",
@@ -196,13 +300,18 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     });
     return {
       ready: false,
+      degraded: false,
       mode: "hosted",
       checkedAt,
       checks: {
         configuration,
         database: Boolean(supabase),
         audit: false,
-        runtimeNamespace
+        cliSessionSecurity: false,
+        runtimeNamespace,
+        appEvidenceFreshness: false,
+        appLifecycleRecovery: false,
+        appActionReconciliation: false
       },
       metrics: EMPTY_METRICS
     };
@@ -210,16 +319,25 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
 
   const [
     operational,
+    cliSessionSecurity,
     callbacks,
     discoveryDesign,
     loopSpecRegistry,
     opportunityController,
-    semanticGraph
+    semanticGraph,
+    appEvidenceHealth,
+    appLifecycleRecovery,
+    appActionReconciliation
   ] =
     await Promise.all([
       supabase.rpc("get_loopgraph_operational_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      supabase.rpc("get_cli_session_security_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_now: checkedAt
       }),
       supabase.rpc("get_hermes_callback_queue_snapshot", {
         p_organization_id: organizationId,
@@ -240,21 +358,42 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
       supabase.rpc("get_semantic_graph_snapshot", {
         p_organization_id: organizationId,
         p_project_key: projectKey
+      }),
+      getHostedAppEvidenceHealth({ projectRoot: runtimeProjectRoot, now: new Date(checkedAt) })
+        .then((data) => ({ data, error: null }))
+        .catch((error: unknown) => ({ data: null, error })),
+      supabase.rpc("get_app_lifecycle_recovery_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_stale_after_seconds: lifecycleStaleAfterSeconds
+      }),
+      supabase.rpc("get_loopgraph_app_action_reconciliation_snapshot", {
+        p_organization_id: organizationId,
+        p_project_key: projectKey,
+        p_stale_after_seconds: actionStaleAfterSeconds
       })
     ]);
   if (
     operational.error ||
+    cliSessionSecurity.error ||
     callbacks.error ||
     discoveryDesign.error ||
     loopSpecRegistry.error ||
     opportunityController.error ||
     semanticGraph.error ||
+    appEvidenceHealth.error ||
+    appLifecycleRecovery.error ||
+    appActionReconciliation.error ||
     !isRecord(operational.data) ||
+    !isRecord(cliSessionSecurity.data) ||
     !isRecord(callbacks.data) ||
     !isRecord(discoveryDesign.data) ||
     !isRecord(loopSpecRegistry.data) ||
     !isRecord(opportunityController.data) ||
     !isRecord(semanticGraph.data) ||
+    !appEvidenceHealth.data ||
+    !isRecord(appLifecycleRecovery.data) ||
+    !isRecord(appActionReconciliation.data) ||
     operational.data.database_ready !== true
   ) {
     emitOperationalLog({
@@ -267,52 +406,96 @@ export async function getOperationalReadiness(): Promise<OperationalReadiness> {
     });
     return {
       ready: false,
+      degraded: false,
       mode: "hosted",
       checkedAt,
       checks: {
         configuration: true,
         database: false,
         audit: false,
-        runtimeNamespace: true
+        cliSessionSecurity: false,
+        runtimeNamespace: true,
+        appEvidenceFreshness: false,
+        appLifecycleRecovery: false,
+        appActionReconciliation: false
       },
       metrics: EMPTY_METRICS
     };
   }
 
+  const metrics = {
+    ...parseMetrics({
+      ...operational.data,
+      ...cliSessionSecurity.data,
+      ...callbacks.data,
+      ...discoveryDesign.data,
+      ...loopSpecRegistry.data,
+      ...opportunityController.data,
+      ...semanticGraph.data,
+      ...appLifecycleRecovery.data,
+      ...appActionReconciliation.data
+    }),
+    appEvidenceHealth: appEvidenceHealth.data.health === "healthy" ? 1 : 0,
+    appEvidenceInstallationsTotal: appEvidenceHealth.data.totalInstallations,
+    appEvidenceInvalid: appEvidenceHealth.data.counts.invalid,
+    appEvidenceExpired: appEvidenceHealth.data.counts.expired,
+    appEvidenceRenewSoon: appEvidenceHealth.data.counts.renewSoon,
+    appEvidenceIncomplete: appEvidenceHealth.data.counts.incomplete,
+    appEvidenceCurrent: appEvidenceHealth.data.counts.current,
+    appEvidenceNotApplicable: appEvidenceHealth.data.counts.notApplicable,
+    appEvidenceItemsReturned: appEvidenceHealth.data.itemsReturned,
+    appEvidencePlanTruncated: appEvidenceHealth.data.truncated ? 1 : 0
+  };
+  const appEvidenceFreshnessHealthy = appEvidenceHealth.data.health === "healthy";
+  const lifecycleRecoveryHealthy =
+    metrics.appLifecycleRecoveryRequiresReconciliation === 0 &&
+    metrics.appLifecycleRecoveryStale === 0;
+  const actionReconciliationHealthy = metrics.appActionReconciliationStale === 0;
+  const cliSessionIntegrityHealthy = metrics.cliRefreshReuseUnrevoked === 0;
+  const cliSessionSecurityHealthy =
+    metrics.cliRefreshReuseDetected24h === 0 && cliSessionIntegrityHealthy;
+
   return {
-    ready: true,
+    ready: cliSessionIntegrityHealthy,
+    degraded: !appEvidenceFreshnessHealthy || !lifecycleRecoveryHealthy ||
+      !actionReconciliationHealthy || !cliSessionSecurityHealthy,
     mode: "hosted",
     checkedAt,
     checks: {
       configuration: true,
       database: true,
       audit: true,
-      runtimeNamespace: true
+      cliSessionSecurity: cliSessionSecurityHealthy,
+      runtimeNamespace: true,
+      appEvidenceFreshness: appEvidenceFreshnessHealthy,
+      appLifecycleRecovery: lifecycleRecoveryHealthy,
+      appActionReconciliation: actionReconciliationHealthy
     },
-    metrics: parseMetrics({
-      ...operational.data,
-      ...callbacks.data,
-      ...discoveryDesign.data,
-      ...loopSpecRegistry.data,
-      ...opportunityController.data,
-      ...semanticGraph.data
-    })
+    metrics
   };
 }
 
 export async function exportSecurityAuditEvents(input: {
   organizationId: string;
   afterSequence: number;
+  throughSequence?: number;
   limit: number;
 }): Promise<SecurityAuditEvent[]> {
   const supabase = requiredAdminClient();
   const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
-  const { data, error } = await supabase.rpc("export_security_audit_events", {
-    p_organization_id: input.organizationId,
-    p_project_key: projectKey,
-    p_after_sequence: Math.max(0, Math.floor(input.afterSequence)),
-    p_limit: Math.min(500, Math.max(1, Math.floor(input.limit)))
-  });
+  const bounded = input.throughSequence !== undefined;
+  const { data, error } = await supabase.rpc(
+    bounded ? "export_security_audit_events_bounded" : "export_security_audit_events",
+    {
+      p_organization_id: input.organizationId,
+      p_project_key: projectKey,
+      p_after_sequence: Math.max(0, Math.floor(input.afterSequence)),
+      ...(bounded
+        ? { p_through_sequence: Math.max(0, Math.floor(input.throughSequence!)) }
+        : {}),
+      p_limit: Math.min(500, Math.max(1, Math.floor(input.limit)))
+    }
+  );
   if (error) {
     emitOperationalLog({
       level: "error",
@@ -325,6 +508,56 @@ export async function exportSecurityAuditEvents(input: {
     throw new Error("Security audit export is unavailable.");
   }
   return Array.isArray(data) ? data as SecurityAuditEvent[] : [];
+}
+
+export async function getVerifiedSecurityAuditCheckpoint(input: {
+  organizationId: string;
+  throughSequence?: number;
+}): Promise<AuditExportCheckpoint> {
+  const supabase = requiredAdminClient();
+  const projectKey = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+  const { data, error } = await supabase.rpc("get_verified_security_audit_checkpoint", {
+    p_organization_id: input.organizationId,
+    p_project_key: projectKey,
+    p_through_sequence: input.throughSequence ?? null
+  });
+  if (error) {
+    emitOperationalLog({
+      level: "error",
+      event: "audit.checkpoint.failed",
+      outcome: "error",
+      organizationId: input.organizationId,
+      projectKey,
+      reason: "audit_checkpoint_rpc_failed"
+    });
+    throw new Error("Security audit checkpoint is unavailable.");
+  }
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!isRecord(row) || typeof row.valid !== "boolean") {
+    throw new Error("Audit checkpoint returned an invalid result.");
+  }
+  const headHash = typeof row.head_hash === "string" ? row.head_hash : "";
+  if (!/^[a-f0-9]{64}$/.test(headHash)) {
+    throw new Error("Audit checkpoint returned an invalid head hash.");
+  }
+  return {
+    valid: row.valid,
+    eventsChecked: strictAuditInteger(row.events_checked, "events_checked"),
+    headSequence: strictAuditInteger(row.head_sequence, "head_sequence"),
+    currentHeadSequence: strictAuditInteger(
+      row.current_head_sequence,
+      "current_head_sequence"
+    ),
+    headHash
+  };
+}
+
+function strictAuditInteger(value: unknown, field: string) {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`Audit checkpoint returned an invalid ${field}.`);
+  }
+  return parsed;
 }
 
 export async function verifySecurityAuditChain(
@@ -367,6 +600,9 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_ready Whether the deployment passed its readiness checks.",
     "# TYPE loopgraph_ready gauge",
     `loopgraph_ready ${readiness.ready ? 1 : 0}`,
+    "# HELP loopgraph_operational_degraded Whether recoverable tenant work requires operator attention without making the service unavailable.",
+    "# TYPE loopgraph_operational_degraded gauge",
+    `loopgraph_operational_degraded ${readiness.degraded ? 1 : 0}`,
     "# HELP loopgraph_machine_requests_5m Durable machine request receipts in five minutes.",
     "# TYPE loopgraph_machine_requests_5m gauge",
     `loopgraph_machine_requests_5m ${metrics.machineRequests5m}`,
@@ -382,6 +618,36 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_security_audit_head_sequence Current audit-chain sequence.",
     "# TYPE loopgraph_security_audit_head_sequence gauge",
     `loopgraph_security_audit_head_sequence ${metrics.auditHeadSequence}`,
+    "# HELP loopgraph_cli_sessions_total Human CLI sessions in the tenant project.",
+    "# TYPE loopgraph_cli_sessions_total gauge",
+    `loopgraph_cli_sessions_total ${metrics.cliSessionsTotal}`,
+    "# HELP loopgraph_cli_sessions_active Human CLI sessions with current access and refresh authority.",
+    "# TYPE loopgraph_cli_sessions_active gauge",
+    `loopgraph_cli_sessions_active ${metrics.cliSessionsActive}`,
+    "# HELP loopgraph_cli_sessions_refresh_required Human CLI sessions whose access token expired while refresh authority remains.",
+    "# TYPE loopgraph_cli_sessions_refresh_required gauge",
+    `loopgraph_cli_sessions_refresh_required ${metrics.cliSessionsRefreshRequired}`,
+    "# HELP loopgraph_cli_sessions_expired Human CLI sessions whose refresh authority expired without explicit revocation.",
+    "# TYPE loopgraph_cli_sessions_expired gauge",
+    `loopgraph_cli_sessions_expired ${metrics.cliSessionsExpired}`,
+    "# HELP loopgraph_cli_sessions_revoked Human CLI sessions explicitly revoked or revoked by policy.",
+    "# TYPE loopgraph_cli_sessions_revoked gauge",
+    `loopgraph_cli_sessions_revoked ${metrics.cliSessionsRevoked}`,
+    "# HELP loopgraph_cli_refresh_reuse_detected_total CLI session families with detected prior-generation refresh replay.",
+    "# TYPE loopgraph_cli_refresh_reuse_detected_total gauge",
+    `loopgraph_cli_refresh_reuse_detected_total ${metrics.cliRefreshReuseDetectedTotal}`,
+    "# HELP loopgraph_cli_refresh_reuse_detected_24h CLI session families with refresh replay detected in the last 24 hours.",
+    "# TYPE loopgraph_cli_refresh_reuse_detected_24h gauge",
+    `loopgraph_cli_refresh_reuse_detected_24h ${metrics.cliRefreshReuseDetected24h}`,
+    "# HELP loopgraph_cli_refresh_reuse_unrevoked CLI session families where replay was detected without family revocation.",
+    "# TYPE loopgraph_cli_refresh_reuse_unrevoked gauge",
+    `loopgraph_cli_refresh_reuse_unrevoked ${metrics.cliRefreshReuseUnrevoked}`,
+    "# HELP loopgraph_cli_device_authorizations_pending Unexpired pending CLI device authorizations.",
+    "# TYPE loopgraph_cli_device_authorizations_pending gauge",
+    `loopgraph_cli_device_authorizations_pending ${metrics.cliDeviceAuthorizationsPending}`,
+    "# HELP loopgraph_cli_device_authorization_oldest_pending_seconds Age of the oldest unexpired pending CLI device authorization.",
+    "# TYPE loopgraph_cli_device_authorization_oldest_pending_seconds gauge",
+    `loopgraph_cli_device_authorization_oldest_pending_seconds ${metrics.cliDeviceAuthorizationOldestPendingSeconds}`,
     "# HELP loopgraph_route_jobs_queued Route jobs queued or waiting for retry.",
     "# TYPE loopgraph_route_jobs_queued gauge",
     `loopgraph_route_jobs_queued ${metrics.routeJobsQueued}`,
@@ -523,6 +789,84 @@ export function formatPrometheusMetrics(readiness: OperationalReadiness): string
     "# HELP loopgraph_latest_graph_sequence Latest semantic graph snapshot sequence.",
     "# TYPE loopgraph_latest_graph_sequence gauge",
     `loopgraph_latest_graph_sequence ${metrics.latestGraphSequence}`,
+    "# HELP loopgraph_app_installations_total Installed Apps in this tenant project.",
+    "# TYPE loopgraph_app_installations_total gauge",
+    `loopgraph_app_installations_total ${metrics.appInstallationsTotal}`,
+    "# HELP loopgraph_app_evidence_health Whether every installed App has non-invalid, non-expired evidence outside its renewal window.",
+    "# TYPE loopgraph_app_evidence_health gauge",
+    `loopgraph_app_evidence_health ${metrics.appEvidenceHealth}`,
+    "# HELP loopgraph_app_evidence_installations_total Installed Apps evaluated by the evidence-renewal contract.",
+    "# TYPE loopgraph_app_evidence_installations_total gauge",
+    `loopgraph_app_evidence_installations_total ${metrics.appEvidenceInstallationsTotal}`,
+    "# HELP loopgraph_app_evidence_invalid Installed Apps with invalid operating evidence.",
+    "# TYPE loopgraph_app_evidence_invalid gauge",
+    `loopgraph_app_evidence_invalid ${metrics.appEvidenceInvalid}`,
+    "# HELP loopgraph_app_evidence_expired Installed Apps whose operating evidence has expired.",
+    "# TYPE loopgraph_app_evidence_expired gauge",
+    `loopgraph_app_evidence_expired ${metrics.appEvidenceExpired}`,
+    "# HELP loopgraph_app_evidence_renew_soon Installed Apps whose operating evidence is inside the renewal window.",
+    "# TYPE loopgraph_app_evidence_renew_soon gauge",
+    `loopgraph_app_evidence_renew_soon ${metrics.appEvidenceRenewSoon}`,
+    "# HELP loopgraph_app_evidence_incomplete Installed Apps that still need operating evidence for higher maturity.",
+    "# TYPE loopgraph_app_evidence_incomplete gauge",
+    `loopgraph_app_evidence_incomplete ${metrics.appEvidenceIncomplete}`,
+    "# HELP loopgraph_app_evidence_current Installed Apps with current operating evidence.",
+    "# TYPE loopgraph_app_evidence_current gauge",
+    `loopgraph_app_evidence_current ${metrics.appEvidenceCurrent}`,
+    "# HELP loopgraph_app_evidence_not_applicable Installed Apps whose current maturity does not yet require operating evidence.",
+    "# TYPE loopgraph_app_evidence_not_applicable gauge",
+    `loopgraph_app_evidence_not_applicable ${metrics.appEvidenceNotApplicable}`,
+    "# HELP loopgraph_app_evidence_items_returned Bounded renewal-plan items returned to the health projection.",
+    "# TYPE loopgraph_app_evidence_items_returned gauge",
+    `loopgraph_app_evidence_items_returned ${metrics.appEvidenceItemsReturned}`,
+    "# HELP loopgraph_app_evidence_plan_truncated Whether the bounded renewal-plan item list was truncated.",
+    "# TYPE loopgraph_app_evidence_plan_truncated gauge",
+    `loopgraph_app_evidence_plan_truncated ${metrics.appEvidencePlanTruncated}`,
+    "# HELP loopgraph_app_lifecycle_recovery_pending Prepared or interrupted App lifecycle operations requiring an exact retry.",
+    "# TYPE loopgraph_app_lifecycle_recovery_pending gauge",
+    `loopgraph_app_lifecycle_recovery_pending ${metrics.appLifecycleRecoveryPending}`,
+    "# HELP loopgraph_app_lifecycle_recovery_prepared App lifecycle operations prepared but not yet completed.",
+    "# TYPE loopgraph_app_lifecycle_recovery_prepared gauge",
+    `loopgraph_app_lifecycle_recovery_prepared ${metrics.appLifecycleRecoveryPrepared}`,
+    "# HELP loopgraph_app_lifecycle_recovery_requires_reconciliation Interrupted App lifecycle operations requiring reconciliation.",
+    "# TYPE loopgraph_app_lifecycle_recovery_requires_reconciliation gauge",
+    `loopgraph_app_lifecycle_recovery_requires_reconciliation ${metrics.appLifecycleRecoveryRequiresReconciliation}`,
+    "# HELP loopgraph_app_lifecycle_recovery_stale App lifecycle operations older than the configured recovery threshold.",
+    "# TYPE loopgraph_app_lifecycle_recovery_stale gauge",
+    `loopgraph_app_lifecycle_recovery_stale ${metrics.appLifecycleRecoveryStale}`,
+    "# HELP loopgraph_app_lifecycle_recovery_workspaces_affected Workspaces with unfinished App lifecycle operations.",
+    "# TYPE loopgraph_app_lifecycle_recovery_workspaces_affected gauge",
+    `loopgraph_app_lifecycle_recovery_workspaces_affected ${metrics.appLifecycleRecoveryWorkspacesAffected}`,
+    "# HELP loopgraph_app_lifecycle_recovery_oldest_age_seconds Age of the oldest unfinished App lifecycle operation.",
+    "# TYPE loopgraph_app_lifecycle_recovery_oldest_age_seconds gauge",
+    `loopgraph_app_lifecycle_recovery_oldest_age_seconds ${metrics.appLifecycleRecoveryOldestAgeSeconds}`,
+    "# HELP loopgraph_app_lifecycle_recovery_stale_after_seconds Configured age at which unfinished App lifecycle work is stale.",
+    "# TYPE loopgraph_app_lifecycle_recovery_stale_after_seconds gauge",
+    `loopgraph_app_lifecycle_recovery_stale_after_seconds ${metrics.appLifecycleRecoveryStaleAfterSeconds}`,
+    "# HELP loopgraph_app_action_commits_requested_total App provider commits requested in the tenant project.",
+    "# TYPE loopgraph_app_action_commits_requested_total gauge",
+    `loopgraph_app_action_commits_requested_total ${metrics.appActionCommitsRequestedTotal}`,
+    "# HELP loopgraph_app_action_commits_succeeded_total App provider commits with a durable successful terminal receipt.",
+    "# TYPE loopgraph_app_action_commits_succeeded_total gauge",
+    `loopgraph_app_action_commits_succeeded_total ${metrics.appActionCommitsSucceededTotal}`,
+    "# HELP loopgraph_app_action_commits_failed_total App provider commits with a durable failed terminal receipt.",
+    "# TYPE loopgraph_app_action_commits_failed_total gauge",
+    `loopgraph_app_action_commits_failed_total ${metrics.appActionCommitsFailedTotal}`,
+    "# HELP loopgraph_app_action_reconciliation_pending Commit requests without a matching terminal receipt.",
+    "# TYPE loopgraph_app_action_reconciliation_pending gauge",
+    `loopgraph_app_action_reconciliation_pending ${metrics.appActionReconciliationPending}`,
+    "# HELP loopgraph_app_action_reconciliation_stale Nonterminal commit requests older than the configured recovery threshold.",
+    "# TYPE loopgraph_app_action_reconciliation_stale gauge",
+    `loopgraph_app_action_reconciliation_stale ${metrics.appActionReconciliationStale}`,
+    "# HELP loopgraph_app_action_reconciliation_workspaces_affected Workspaces with a nonterminal App commit request.",
+    "# TYPE loopgraph_app_action_reconciliation_workspaces_affected gauge",
+    `loopgraph_app_action_reconciliation_workspaces_affected ${metrics.appActionReconciliationWorkspacesAffected}`,
+    "# HELP loopgraph_app_action_reconciliation_oldest_age_seconds Age of the oldest nonterminal App commit request.",
+    "# TYPE loopgraph_app_action_reconciliation_oldest_age_seconds gauge",
+    `loopgraph_app_action_reconciliation_oldest_age_seconds ${metrics.appActionReconciliationOldestAgeSeconds}`,
+    "# HELP loopgraph_app_action_reconciliation_stale_after_seconds Configured age at which a nonterminal App commit request is stale.",
+    "# TYPE loopgraph_app_action_reconciliation_stale_after_seconds gauge",
+    `loopgraph_app_action_reconciliation_stale_after_seconds ${metrics.appActionReconciliationStaleAfterSeconds}`,
     ""
   ].join("\n");
 }
@@ -542,6 +886,18 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     machineDenied5m: nonnegative(data.machine_denied_5m),
     auditEventsTotal: nonnegative(data.audit_events_total),
     auditHeadSequence: nonnegative(data.audit_head_sequence),
+    cliSessionsTotal: nonnegative(data.cli_sessions_total),
+    cliSessionsActive: nonnegative(data.cli_sessions_active),
+    cliSessionsRefreshRequired: nonnegative(data.cli_sessions_refresh_required),
+    cliSessionsExpired: nonnegative(data.cli_sessions_expired),
+    cliSessionsRevoked: nonnegative(data.cli_sessions_revoked),
+    cliRefreshReuseDetectedTotal: nonnegative(data.cli_refresh_reuse_detected_total),
+    cliRefreshReuseDetected24h: nonnegative(data.cli_refresh_reuse_detected_24h),
+    cliRefreshReuseUnrevoked: nonnegative(data.cli_refresh_reuse_unrevoked),
+    cliDeviceAuthorizationsPending: nonnegative(data.cli_device_authorizations_pending),
+    cliDeviceAuthorizationOldestPendingSeconds: nonnegative(
+      data.cli_device_authorizations_oldest_pending_seconds
+    ),
     routeJobsQueued: nonnegative(data.route_jobs_queued),
     routeJobsRunning: nonnegative(data.route_jobs_running),
     routeJobsWaitingReview: nonnegative(data.route_jobs_waiting_review),
@@ -607,10 +963,77 @@ function parseMetrics(data: Record<string, unknown>): OperationalMetrics {
     graphRehearsalsTotal: nonnegative(data.graph_rehearsals_total),
     graphCommitsTotal: nonnegative(data.graph_commits_total),
     latestGraphSequence: nonnegative(data.latest_graph_sequence),
+    appInstallationsTotal: nonnegative(data.app_installations_total),
+    appEvidenceHealth: 1,
+    appEvidenceInstallationsTotal: 0,
+    appEvidenceInvalid: 0,
+    appEvidenceExpired: 0,
+    appEvidenceRenewSoon: 0,
+    appEvidenceIncomplete: 0,
+    appEvidenceCurrent: 0,
+    appEvidenceNotApplicable: 0,
+    appEvidenceItemsReturned: 0,
+    appEvidencePlanTruncated: 0,
+    appLifecycleRecoveryPending: nonnegative(data.app_lifecycle_recovery_pending),
+    appLifecycleRecoveryPrepared: nonnegative(data.app_lifecycle_recovery_prepared),
+    appLifecycleRecoveryRequiresReconciliation: nonnegative(
+      data.app_lifecycle_recovery_requires_reconciliation
+    ),
+    appLifecycleRecoveryStale: nonnegative(data.app_lifecycle_recovery_stale),
+    appLifecycleRecoveryWorkspacesAffected: nonnegative(
+      data.app_lifecycle_recovery_workspaces_affected
+    ),
+    appLifecycleRecoveryOldestAgeSeconds: nonnegative(
+      data.app_lifecycle_recovery_oldest_age_seconds
+    ),
+    appLifecycleRecoveryStaleAfterSeconds: nonnegative(
+      data.app_lifecycle_recovery_stale_after_seconds
+    ),
+    appActionCommitsRequestedTotal: nonnegative(
+      data.app_action_commits_requested_total
+    ),
+    appActionCommitsSucceededTotal: nonnegative(
+      data.app_action_commits_succeeded_total
+    ),
+    appActionCommitsFailedTotal: nonnegative(
+      data.app_action_commits_failed_total
+    ),
+    appActionReconciliationPending: nonnegative(
+      data.app_action_reconciliation_pending
+    ),
+    appActionReconciliationStale: nonnegative(
+      data.app_action_reconciliation_stale
+    ),
+    appActionReconciliationWorkspacesAffected: nonnegative(
+      data.app_action_reconciliation_workspaces_affected
+    ),
+    appActionReconciliationOldestAgeSeconds: nonnegative(
+      data.app_action_reconciliation_oldest_age_seconds
+    ),
+    appActionReconciliationStaleAfterSeconds: nonnegative(
+      data.app_action_reconciliation_stale_after_seconds
+    ),
     ...(typeof data.last_machine_request_at === "string"
       ? { lastMachineRequestAt: data.last_machine_request_at }
       : {})
   };
+}
+
+function parseLifecycleStaleAfterSeconds(value: string | undefined): number | undefined {
+  return parseStaleAfterSeconds(value, 900);
+}
+
+function parseActionStaleAfterSeconds(value: string | undefined): number | undefined {
+  return parseStaleAfterSeconds(value, 300);
+}
+
+function parseStaleAfterSeconds(value: string | undefined, fallback: number): number | undefined {
+  if (value === undefined || value.trim() === "") return fallback;
+  if (!/^[0-9]+$/.test(value.trim())) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 60 && parsed <= 86_400
+    ? parsed
+    : undefined;
 }
 
 function nonnegative(value: unknown): number {

@@ -1,0 +1,18 @@
+{
+  "id": "fixture-customer-facing-action",
+  "scenario": "customer_facing_action",
+  "eventType": "lead.routed",
+  "subject": { "type": "lead", "id": "lead-follow-up-review" },
+  "normalizedPayload": {
+    "leadId": "lead-follow-up-review",
+    "owner": "owner-1",
+    "accountBrief": { "company": "Example Enterprise", "verifiedSignal": "requested_demo" }
+  },
+  "evidenceRefs": ["evidence:routing:lead-follow-up-review", "evidence:crm:account-example"],
+  "expected": {
+    "action": "route",
+    "loopId": "sales-inbound-follow-up",
+    "customerFacingApproval": true,
+    "providerWritesBeforeApproval": 0
+  }
+}

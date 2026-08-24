@@ -7,6 +7,7 @@ import {
   createLoopPackArchive,
   extractLoopPackArchive,
   loadLoopPackDirectory,
+  marketplaceVersionFromArtifact,
   readLoopPackArchive,
   satisfiesVersionRange,
   validateLoopPackDirectory
@@ -80,6 +81,22 @@ describe("LoopPack loader", () => {
     expect(loaded.manifest.metadata.id).toBe("loopgraph.sales.test-inbound");
     expect(loaded.artifact.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(loaded.artifact.files.map((file) => file.path)).toContain("loops/lead-intake.yaml");
+    const version = marketplaceVersionFromArtifact(loaded.artifact, root, "tested", {
+      sourceId: "test-local",
+      sourceType: "filesystem",
+      sourceUri: root,
+      snapshotDigest: loaded.artifact.digest,
+      trustPolicy: "explicit_local",
+      synchronizedAt: "2026-08-20T00:00:00.000Z"
+    });
+    expect(version.includedLoopCount).toBe(1);
+    expect(version.requiredCapabilities).toEqual(["crm.lead.read"]);
+    expect(version.optionalCapabilities).toEqual([]);
+    expect(version.preview).toEqual({
+      synthetic: true,
+      sampleData: true,
+      historicalReplay: "installed_read_only"
+    });
   });
 
   it("changes the artifact digest when file content changes", async () => {
@@ -118,6 +135,17 @@ describe("LoopPack loader", () => {
     expect(await readFile(path.join(extracted, "skills/icp.yaml"), "utf8")).toContain("icp-evaluation");
   });
 
+  it("recomputes archive identity instead of trusting attacker-controlled artifact metadata", async () => {
+    const root = await createFixturePack();
+    const archivePath = path.join(root, "..", `${path.basename(root)}-tampered.loopgraph-pack`);
+    temporaryDirectories.push(archivePath);
+    await createLoopPackArchive(root, archivePath);
+    const archive = JSON.parse(await readFile(archivePath, "utf8")) as { artifact: { digest: string } };
+    archive.artifact.digest = `sha256:${"0".repeat(64)}`;
+    await writeFile(archivePath, JSON.stringify(archive));
+    await expect(readLoopPackArchive(archivePath)).rejects.toThrow(/digest does not match/i);
+  });
+
   it("supports exact, bounded, caret, tilde, and OR semantic-version ranges", () => {
     expect(satisfiesVersionRange("1.4.2", "1.4.2")).toBe(true);
     expect(satisfiesVersionRange("1.4.2", ">=1.0.0 <2.0.0")).toBe(true);
@@ -127,4 +155,3 @@ describe("LoopPack loader", () => {
     expect(satisfiesVersionRange("2.0.0", "<2.0.0")).toBe(false);
   });
 });
-

@@ -3,6 +3,8 @@ import {
   CONNECTOR_BROKER_PROTOCOL_VERSION,
   CONNECTOR_PREPARED_ACTION_VERSION,
   connectorActionCommitRequestSchema,
+  connectorActionReconcileRequestSchema,
+  connectorActionReconcileResponseSchema,
   connectorActionPrepareRequestSchema,
   connectorActionPrepareResponseSchema,
   connectorInstallationHasExpectedNamespace,
@@ -10,6 +12,8 @@ import {
   connectorBrokerResponseSchema,
   type ConnectorAuditReceipt,
   type ConnectorActionCommitRequest,
+  type ConnectorActionReconcileRequest,
+  type ConnectorActionReconcileResponse,
   type ConnectorActionPrepareRequest,
   type ConnectorActionPrepareResponse,
   type ConnectorBrokerRequest,
@@ -124,14 +128,17 @@ export class HermesConnectorBroker {
     if (Date.parse(request.issuedAt) > now + 30_000 || Date.parse(request.expiresAt) < now) {
       return this.failure(request, started, "denied", "request_expired", "Connector request is expired or not active.");
     }
-    const duplicate = await this.dependencies.idempotency.getResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey });
-    if (duplicate) {
-      if (!responseMatchesRequest(duplicate, request)) {
-        const response = this.failure(request, started, "denied", "idempotency_conflict", "Idempotency key was already used for a different connector request.");
-        await this.dependencies.audit.append(response.receipt);
-        return response;
+    const ephemeralDetector = request.capability === "provider.events.emit";
+    if (!ephemeralDetector) {
+      const duplicate = await this.dependencies.idempotency.getResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey });
+      if (duplicate) {
+        if (!responseMatchesRequest(duplicate, request)) {
+          const response = this.failure(request, started, "denied", "idempotency_conflict", "Idempotency key was already used for a different connector request.");
+          await this.dependencies.audit.append(response.receipt);
+          return response;
+        }
+        return duplicate;
       }
-      return duplicate;
     }
 
     const installation = await this.dependencies.installations.get({
@@ -169,6 +176,13 @@ export class HermesConnectorBroker {
     if (descriptor.capability === "provider.data.read" && !request.context) {
       return this.persistFailure(request, started, "denied", "invocation_context_required", "Provider reads require a complete LoopSpec and company-object context.");
     }
+    if (descriptor.capability === "provider.events.emit" &&
+      (request.actor.type !== "system" || request.actor.subject !== "system:provider-detector")) {
+      return this.persistFailure(request, started, "denied", "system_actor_required", "Provider detectors can only be invoked by the authenticated scheduler workload.");
+    }
+    if (descriptor.capability === "provider.events.emit" && request.context) {
+      return this.persistFailure(request, started, "denied", "detector_context_forbidden", "Provider detectors run before Hermes selects a loop and cannot accept a loop invocation context.");
+    }
     if (descriptor.write) {
       return this.persistFailure(request, started, "denied", "prepare_commit_required", "Provider writes must use the fingerprint-bound prepare and commit protocol.");
     }
@@ -180,25 +194,27 @@ export class HermesConnectorBroker {
       return this.persistFailure(request, started, "denied", "operation_unavailable", "Provider operation is not installed in this broker.");
     }
 
-    const reservation = await this.dependencies.idempotency.reserve({
-      ...request.tenant,
-      idempotencyKey: request.idempotencyKey,
-      requestHash: requestFingerprint(request),
-      leaseUntil: new Date(this.now().getTime() + 5 * 60 * 1_000).toISOString()
-    });
-    if (reservation !== "claimed") {
-      const response = this.failure(
-        request,
-        started,
-        "denied",
-        reservation === "conflict" ? "idempotency_conflict" : "request_in_progress",
-        reservation === "conflict"
-          ? "Idempotency key was already used for a different connector request."
-          : "An identical connector request is already in progress.",
-        reservation === "busy"
-      );
-      await this.dependencies.audit.append(response.receipt);
-      return response;
+    if (!ephemeralDetector) {
+      const reservation = await this.dependencies.idempotency.reserve({
+        ...request.tenant,
+        idempotencyKey: request.idempotencyKey,
+        requestHash: requestFingerprint(request),
+        leaseUntil: new Date(this.now().getTime() + 5 * 60 * 1_000).toISOString()
+      });
+      if (reservation !== "claimed") {
+        const response = this.failure(
+          request,
+          started,
+          "denied",
+          reservation === "conflict" ? "idempotency_conflict" : "request_in_progress",
+          reservation === "conflict"
+            ? "Idempotency key was already used for a different connector request."
+            : "An identical connector request is already in progress.",
+          reservation === "busy"
+        );
+        await this.dependencies.audit.append(response.receipt);
+        return response;
+      }
     }
 
     try {
@@ -221,10 +237,10 @@ export class HermesConnectorBroker {
         result,
         receipt
       });
-      await Promise.all([
-        this.dependencies.audit.append(receipt),
-        this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response })
-      ]);
+      await this.dependencies.audit.append(receipt);
+      if (!ephemeralDetector) {
+        await this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response });
+      }
       return response;
     } catch (error) {
       const known = error instanceof ConnectorBrokerError ? error : undefined;
@@ -438,6 +454,72 @@ export class HermesConnectorBroker {
     }
   }
 
+  async reconcileAction(rawRequest: unknown): Promise<ConnectorActionReconcileResponse> {
+    let request: ConnectorActionReconcileRequest;
+    try {
+      request = connectorActionReconcileRequestSchema.parse(rawRequest);
+    } catch {
+      throw new ConnectorBrokerError("invalid_request", "Connector action reconciliation request does not match the broker protocol.", false, true);
+    }
+    this.assertFresh(request.issuedAt, request.expiresAt);
+    const store = this.dependencies.preparedActions;
+    if (!store) throw new ConnectorBrokerError("prepared_action_store_unavailable", "Durable prepared-action storage is required.", true, true);
+    const prepared = await store.getPrepared({ ...request.tenant, actionId: request.preparedActionId });
+    if (!prepared) throw new ConnectorBrokerError("prepared_action_not_found", "Prepared action was not found.", false, true);
+    const identityMatches = prepared.fingerprint === request.preparedActionFingerprint &&
+      prepared.providerId === request.providerId &&
+      prepared.installationId === request.installationId &&
+      prepared.capability === request.capability &&
+      prepared.operation === request.operation &&
+      prepared.preparedBy === request.actor.subject &&
+      hash(prepared.context) === hash(request.context);
+    if (!identityMatches) throw new ConnectorBrokerError("prepared_action_mismatch", "Prepared action identity or reconciliation context does not match.", false, true);
+
+    const response = await this.dependencies.idempotency.getResponse({
+      ...request.tenant,
+      idempotencyKey: request.originalIdempotencyKey
+    });
+    if (response) {
+      const originalRequest = connectorBrokerRequestSchema.parse({
+        protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+        requestId: request.originalRequestId,
+        idempotencyKey: request.originalIdempotencyKey,
+        tenant: request.tenant,
+        actor: request.actor,
+        providerId: request.providerId,
+        installationId: request.installationId,
+        capability: request.capability,
+        operation: request.operation,
+        input: prepared.canonicalInput,
+        context: request.context,
+        issuedAt: request.issuedAt,
+        expiresAt: request.expiresAt,
+        correlationId: request.correlationId
+      });
+      if (response.requestId !== request.originalRequestId || response.receipt.requestId !== request.originalRequestId ||
+        !responseMatchesRequest(response, originalRequest)) {
+        throw new ConnectorBrokerError("reconciliation_receipt_mismatch", "Durable connector response does not match the original App action commit.", false, true);
+      }
+      return connectorActionReconcileResponseSchema.parse({
+        protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        originalRequestId: request.originalRequestId,
+        status: "resolved",
+        preparedActionStatus: prepared.status,
+        brokerResponse: response
+      });
+    }
+
+    return connectorActionReconcileResponseSchema.parse({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      originalRequestId: request.originalRequestId,
+      status: prepared.status === "committing" ? "pending" : "unresolved",
+      preparedActionStatus: prepared.status,
+      reasonCode: prepared.status === "committing" ? "connector_commit_in_progress" : "connector_commit_receipt_unavailable"
+    });
+  }
+
   private assertFresh(issuedAt: string, expiresAt: string) {
     const now = this.now().getTime();
     if (Date.parse(issuedAt) > now + 30_000 || Date.parse(expiresAt) < now) {
@@ -516,10 +598,10 @@ export class HermesConnectorBroker {
     retryable = false
   ) {
     const response = this.failure(request, started, outcome, code, message, retryable);
-    await Promise.all([
-      this.dependencies.audit.append(response.receipt),
-      this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response })
-    ]);
+    await this.dependencies.audit.append(response.receipt);
+    if (request.capability !== "provider.events.emit") {
+      await this.dependencies.idempotency.putResponse({ ...request.tenant, idempotencyKey: request.idempotencyKey, response });
+    }
     return response;
   }
 

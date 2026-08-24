@@ -1,0 +1,55 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata:
+  id: hr-performance-review-preparation
+  name: Performance Review Preparation
+  version: 1.0.0
+  description: Reconcile declared goals and authored evidence for a bounded review period while leaving ratings and employment judgment to accountable humans.
+  department: hr_talent
+  ownerRole: direct_manager
+  tags: [performance, goals, review, evidence]
+trigger: { type: event, source: "*", event: talent.performance_review_due }
+input:
+  requiredFields: [normalizedPayload.employeeId, normalizedPayload.managerId, normalizedPayload.reviewPeriod, normalizedPayload.policyVersion, normalizedPayload.goalEvidenceIds]
+  subjectTypes: [employee, performance_review_period]
+  fixtures: [{ id: performance-review, path: fixtures/permission-change.json }]
+routine:
+  - { id: normalize, name: Normalize review period, actor: system, type: observe, description: "Resolve employee, manager, period, policy version, declared goals, authored evidence, and access boundary." }
+  - { id: reconcile, name: Reconcile goal evidence, actor: agent, type: assess, description: "Map authored evidence to declared goals, identify missing context, and expose conflicts without generating a rating." }
+  - { id: prepare, name: Prepare balanced packet, actor: agent, type: prepare, description: "Prepare a balanced evidence packet, source citations, gaps, and reviewer questions for the manager." }
+  - { id: verify, name: Verify review boundaries, actor: human, type: verify, description: "The manager and configured reviewer verify evidence, fairness, policy alignment, and wording before any review decision." }
+  - { id: learn, name: Return review corrections, actor: system, type: learn, description: "Return source gaps, manager corrections, review completion, and process outcomes without retaining an agent-created score." }
+capabilities:
+  - { key: hris.employee.read, authority: read, risk: critical, required: true, purpose: "Resolve employee, manager, review ownership, and policy context.", customerFacing: false }
+  - { key: performance.goal.read, authority: read, risk: critical, required: true, purpose: Read declared goals and authored evidence for the bounded review period., customerFacing: false }
+skills: [hr-manager-review-preparation, hr-evidence-minimization, hr-fairness-and-boundary-review]
+outcomes:
+  - { metric: performance_review_evidence_coverage, description: "Declared goals supported by current, attributable, reviewable evidence or explicit gaps.", direction: increase, sourceCapability: performance.goal.read }
+  - { metric: performance_packet_correction_rate, description: Material evidence or fairness corrections made during accountable review., direction: decrease, sourceCapability: hris.employee.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [talent.performance_review]
+  accepts: [{ sourcePattern: "*", eventTypePattern: talent.performance_review_due, subjectTypes: [employee, performance_review_period], requiredFields: [normalizedPayload.employeeId, normalizedPayload.managerId, normalizedPayload.reviewPeriod, normalizedPayload.policyVersion, normalizedPayload.goalEvidenceIds], reason: "A declared performance review period has resolved ownership, policy, goals, and authored evidence references." }]
+  excludes:
+    - { sourcePattern: "*", eventTypePattern: talent.performance_rating_requested, subjectTypes: [employee], fields: [], reason: Hermes cannot create or recommend a performance rating. }
+    - { sourcePattern: "*", eventTypePattern: talent.disciplinary_action_requested, subjectTypes: [employee], fields: [], reason: Discipline is a qualified human process outside this app. }
+  inputMapping: { employeeId: normalizedPayload.employeeId, managerId: normalizedPayload.managerId, reviewPeriod: normalizedPayload.reviewPeriod, policyVersion: normalizedPayload.policyVersion, goalEvidenceIds: normalizedPayload.goalEvidenceIds }
+  priority: 90
+  minimumConfidence: 0.98
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 604800 }
+  concurrency: { maxActive: 20, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [hris.employee.read, performance.goal.read]
+  examples: { shouldRoute: [An identified review period contains declared goals and attributable authored evidence for manager review.], shouldNotRoute: [A manager asks Hermes to generate an employee rating or disciplinary recommendation.] }
+policy:
+  forbiddenActions:
+    - { capability: performance.rating.create, reason: Performance ratings are accountable human judgments. }
+    - { capability: hris.employment.update, reason: Review preparation cannot alter employment state or terms. }
+    - { capability: hris.compensation.update, reason: Compensation changes require separate accountable controls. }
+  escalationOwner: people_partner
+  escalationSla: 1bd
+  separateCustomerFacingApproval: true

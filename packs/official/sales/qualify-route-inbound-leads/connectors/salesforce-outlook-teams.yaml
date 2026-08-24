@@ -20,9 +20,11 @@ eventSources:
     fallbackPollMinutes: 15
 fieldMappings:
   - objectType: lead
+    providerId: salesforce
     requiredLogicalFields: [lead.id, lead.email, lead.company, lead.lifecycleStage]
     optionalLogicalFields: [lead.source, lead.title, lead.employeeCount, lead.revenue, lead.country]
   - objectType: account
+    providerId: salesforce
     requiredLogicalFields: [account.id, account.domain, account.customerStatus]
     optionalLogicalFields: [account.industry, account.employeeCount, account.revenue, account.territory]
 healthCheck:
@@ -30,4 +32,3 @@ healthCheck:
   sampleQuery: { soql: "SELECT Id, Email, Company, Status FROM Lead LIMIT 1" }
   timeoutMs: 10000
 supportsBoundedSamples: true
-

@@ -1,0 +1,1 @@
+{"id":"strategic-risk-missing-context","eventType":"account.risk_detected","subject":{"type":"account","id":"account-302"},"normalizedPayload":{"ticketId":"302","accountId":"account-302","severity":"P1","confidence":0.95},"evidenceRefs":["support:ticket:302","crm:account:302"]}

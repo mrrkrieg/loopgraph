@@ -10,14 +10,16 @@ export const MANUAL_CONNECTION_FALLBACKS_SCHEMA_VERSION = "manual-connection-fal
 export const connectionRequiredForSchema = z.enum(["design", "simulation", "execution", "routing"]);
 export const connectionCapabilityStatusSchema = z.enum(["missing", "manual_fallback", "connected", "degraded"]);
 export const connectorTransportSchema = z.enum(["native_adapter", "mcp", "http_api", "file_import", "manual"]);
-export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hmac", "provider_app", "manual"]);
+export const connectorAuthTypeSchema = z.enum(["none", "api_key", "oauth2", "hmac", "provider_app", "service_account", "manual"]);
 export const connectorCapabilityDirectionSchema = z.enum(["read", "event", "draft_write", "approved_write"]);
 export const connectorRiskLevelSchema = z.enum(["low", "medium", "high", "critical"]);
 export const connectionEnvironmentSchema = z.enum(["simulate", "sandbox", "live"]);
+export const connectionSourceSchema = z.enum(["local_registry", "hermes_connector_broker"]);
 export { credentialReferenceSchema };
 export const connectorCategorySchema = z.enum([
   "ads",
   "analytics",
+  "data_warehouse",
   "crm",
   "content_repository",
   "cms",
@@ -86,6 +88,9 @@ export const connectionInstanceSchema = z.object({
   schemaVersion: z.literal(CONNECTION_INSTANCE_SCHEMA_VERSION).default(CONNECTION_INSTANCE_SCHEMA_VERSION),
   id: z.string().min(1),
   manifestId: z.string().min(1),
+  source: connectionSourceSchema.default("local_registry"),
+  externalInstallationId: z.string().min(1).optional(),
+  brokerCapabilities: z.array(z.string().min(1)).default([]),
   accountLabel: z.string().optional(),
   capabilityKeys: z.array(z.string().min(1)).default([]),
   credentialRef: credentialReferenceSchema.optional(),
@@ -93,6 +98,7 @@ export const connectionInstanceSchema = z.object({
   status: connectionCapabilityStatusSchema,
   statusReason: z.string().optional(),
   environment: connectionEnvironmentSchema.default("simulate"),
+  brokerEnvironment: z.enum(["development", "staging", "production"]).optional(),
   readPolicy: z.enum(["not_allowed", "manual_fallback", "read_only"]).default("manual_fallback"),
   writePolicy: z.enum(["not_allowed", "draft_only", "approved_only"]).default("not_allowed"),
   lastHealthCheckAt: z.string().datetime().optional(),
@@ -215,6 +221,7 @@ export type ConnectorTransport = z.infer<typeof connectorTransportSchema>;
 export type ConnectorAuthType = z.infer<typeof connectorAuthTypeSchema>;
 export type ConnectorCapabilityDirection = z.infer<typeof connectorCapabilityDirectionSchema>;
 export type ConnectorRiskLevel = z.infer<typeof connectorRiskLevelSchema>;
+export type ConnectionSource = z.infer<typeof connectionSourceSchema>;
 export type ConnectorCategory = z.infer<typeof connectorCategorySchema>;
 export type ConnectorCapability = z.infer<typeof connectorCapabilitySchema>;
 export type ConnectorWebhook = z.infer<typeof connectorWebhookSchema>;

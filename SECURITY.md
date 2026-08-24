@@ -57,6 +57,11 @@ Do not commit or paste:
 - webhook signing secrets;
 - raw customer data or unredacted provider payloads;
 - exported Hermes credential stores.
+- `.loopgraph/apps/publisher/keys/*.private.pem` or the publisher key registry.
+
+Private Loopgraph App catalogs use detached Ed25519 signatures. A signed catalog must pin the publisher ID, algorithm, key ID, and exact public key; key IDs are labels and are never sufficient trust anchors. Publisher private keys remain project-confined under the Git-ignored `.loopgraph/` directory with mode `0600`. The CLI, MCP tools, and Hermes skill return only public trust material and never expose private-key contents.
+
+`loopgraph app capture` copies the immutable pack behavior, not installation configuration. It reports configuration key names and overlay paths for deliberate parameterization, but it does not copy values, credentials, tokens, or raw provider payloads. Always inspect the resulting pack and run `loopgraph app validate` before signing.
 
 ## Supported security posture
 
@@ -81,3 +86,10 @@ Accepted and denied hosted machine decisions are appended to a tenant/project ha
 health checks expose status only, while detailed metrics and audit exports require separate
 authorization. See
 [Operational audit and observability](docs/OPERATIONAL-AUDIT-OBSERVABILITY.md).
+
+Production promotion is also fail-closed across staging readiness, marketplace isolation, recovery,
+and independent audit retention. Their secret-free receipts are content-bound, freshness-checked,
+and attested before the exact prebuilt deployment can be promoted. Promotion rechecks every source
+timestamp, exact retained audit checkpoint hash, and signed acknowledgement digest instead of
+trusting coverage or presence alone. See
+[Production promotion evidence](docs/PRODUCTION-PROMOTION-EVIDENCE.md).

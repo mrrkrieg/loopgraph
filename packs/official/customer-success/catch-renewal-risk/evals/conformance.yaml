@@ -1,0 +1,18 @@
+schemaVersion: loopgraph-app-eval-suite/v1alpha1
+kind: AppEvalSuite
+id: customer-success-risk-conformance
+appId: loopgraph.customer-success.catch-renewal-risk
+scenarios:
+  - { id: high-fit, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: A complete account snapshot enters health assessment. }
+  - { id: missing-context, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Missing account tier is requested. }
+  - { id: exclusion, fixture: fixtures/exclusion.json, expectedAction: request_human, connectorState: connected, expectedApproval: false, notes: Internal accounts are excluded. }
+  - { id: duplicate, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Existing risk receives evidence. }
+  - { id: ambiguous-route, fixture: fixtures/ambiguous.json, expectedAction: request_human, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Ambiguous account identity abstains. }
+  - { id: low-confidence, fixture: fixtures/low-confidence.json, expectedAction: request_human, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Low confidence requires review. }
+  - { id: connector-unavailable, fixture: fixtures/happy.json, expectedAction: defer, expectedLoopId: cs-customer-health, connectorState: unavailable, expectedApproval: false, notes: Provider outage defers. }
+  - { id: missing-field, fixture: fixtures/missing-context.json, expectedAction: request_human, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Required fields remain explicit. }
+  - { id: human-approval, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: cs-qbr-preparation, connectorState: connected, expectedApproval: true, notes: Customer review material requires approval. }
+  - { id: customer-facing-action, fixture: fixtures/customer-facing.json, expectedAction: route, expectedLoopId: cs-qbr-preparation, connectorState: connected, expectedApproval: true, notes: Customer communication is never sent. }
+  - { id: missing-outcome, fixture: fixtures/happy.json, expectedAction: route, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Missing outcome remains distinct from negative health. }
+  - { id: retry-idempotency, fixture: fixtures/duplicate.json, expectedAction: append_evidence, expectedLoopId: cs-customer-health, connectorState: connected, expectedApproval: false, notes: Retries cannot duplicate risk or value. }
+  - { id: upgrade-rollback, fixture: fixtures/permission-change.json, expectedAction: request_human, connectorState: connected, expectedApproval: true, notes: Permission changes require review and rollback. }

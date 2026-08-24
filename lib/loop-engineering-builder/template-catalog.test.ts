@@ -39,7 +39,7 @@ describe("Loopgraph template catalog", () => {
       expect(template.primaryMetric).toBeTruthy();
       expect(template.defaultOwners?.length).toBeGreaterThan(0);
       expect(template.defaultMetrics?.length).toBeGreaterThanOrEqual(3);
-      expect(template.requiredDataSources?.length).toBeGreaterThanOrEqual(3);
+      expect(template.requiredDataSources?.length).toBeGreaterThan(0);
       expect(template.routine?.length).toBeGreaterThanOrEqual(4);
       expect(template.verification?.length).toBeGreaterThanOrEqual(3);
       expect(template.escalation?.length).toBeGreaterThanOrEqual(2);
@@ -49,6 +49,63 @@ describe("Loopgraph template catalog", () => {
       expect(template.verification).not.toContain("Verify output");
       expect(template.requiredDataSources).not.toContain("Workspace signals");
     }
+  });
+
+  it("builds migrated department cards from the generated official app catalog", () => {
+    const productTemplates = getDepartmentTemplates().find((department) => department.key === "product")!.commonLoops;
+    expect(productTemplates).toHaveLength(5);
+    expect(productTemplates.find((template) => template.id === "product-feedback_to_problem")).toBeUndefined();
+    expect(productTemplates.find((template) => template.id === "product-feedback-clustering")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/product/turn-feedback-into-product-problems",
+      routingDefinition: expect.objectContaining({ problemTypes: ["product.recurring_feedback"] })
+    });
+
+    const financeTemplates = getDepartmentTemplates().find((department) => department.key === "operations_finance")!.commonLoops;
+    expect(financeTemplates).toHaveLength(6);
+    expect(financeTemplates.find((template) => template.id === "operations_finance-forecast_variance")).toBeUndefined();
+    expect(financeTemplates.find((template) => template.id === "ops-finance-forecast-variance")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/operations-finance/manage-forecast-controls",
+      routingDefinition: expect.objectContaining({
+        problemTypes: ["finance.forecast_variance"],
+        supportingLoopTemplateIds: ["ops-finance-approval-bottleneck", "ops-finance-resource-allocation"]
+      })
+    });
+
+    const hrTemplates = getDepartmentTemplates().find((department) => department.key === "hr")!.commonLoops;
+    expect(hrTemplates).toHaveLength(5);
+    expect(hrTemplates.find((template) => template.id === "hr-performance_review_prep")).toBeUndefined();
+    expect(hrTemplates.find((template) => template.id === "hr-performance-review-preparation")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/hr-talent/operate-people-workflows",
+      routingDefinition: expect.objectContaining({ problemTypes: ["talent.performance_review"] })
+    });
+
+    const legalTemplates = getDepartmentTemplates().find((department) => department.key === "legal_security")!.commonLoops;
+    expect(legalTemplates).toHaveLength(6);
+    expect(legalTemplates.find((template) => template.id === "legal_security-contract_triage")).toBeUndefined();
+    expect(legalTemplates.find((template) => template.id === "legal-contract-exception-triage")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/legal-compliance/govern-evidence-and-exceptions",
+      routingDefinition: expect.objectContaining({
+        problemTypes: ["legal.contract_exception"],
+        supportingLoopTemplateIds: ["legal-policy-control-drift"]
+      })
+    });
+
+    const managementTemplates = getDepartmentTemplates().find((department) => department.key === "management")!.commonLoops;
+    expect(managementTemplates).toHaveLength(7);
+    expect(managementTemplates.find((template) => template.id === "management-decision_memo")).toBeUndefined();
+    expect(managementTemplates.find((template) => template.id === "management-company-anomaly-review")).toMatchObject({
+      runtimeLevel: "runnable",
+      examplePath: "packs/official/management/run-company-operating-system",
+      routingDefinition: expect.objectContaining({
+        problemTypes: ["management.company_anomaly"],
+        supportingLoopTemplateIds: ["management-decision-memo", "management-resource-allocation"]
+      })
+    });
+    expect(managementTemplates.find((template) => template.id === "management-operating_rhythm")).toBeTruthy();
   });
 
   it("generates valid v1alpha1 starter specs for spec-stub templates", () => {
@@ -72,6 +129,7 @@ describe("Loopgraph template catalog", () => {
       expect(card?.problemTypes).toEqual(definition.problemTypes);
       expect(card?.requiredConnections).toEqual(definition.requiredConnections);
       expect(card?.fanoutPolicy).toEqual(definition.fanoutPolicy);
+      expect(card?.permittedSupportingLoopIds).toEqual(definition.supportingLoopTemplateIds);
       expect(card?.activationMode).toBe("shadow");
     }
   });

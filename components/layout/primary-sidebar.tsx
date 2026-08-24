@@ -6,12 +6,14 @@ import { usePathname } from "next/navigation";
 import { LoopgraphMark } from "../loopgraph-mark";
 
 export const primaryNav = [
-  { href: "/brain", label: "Hermes Brain", description: "Event router" },
-  { href: "/operate", label: "Operate", description: "Improve and measure loops" },
-  { href: "/management", label: "Management", description: "Operating review" },
-  { href: "/loops", label: "Loops", description: "Loop definitions" },
-  { href: "/daily", label: "Daily", description: "Operating summary" },
-  { href: "/settings/integrations", label: "Integrations", description: "Provider access and consent" }
+  { href: "/marketplace", label: "Marketplace", description: "Find capabilities for Hermes" },
+  { href: "/apps", label: "Installed Apps", description: "Operate company applications" },
+  { href: "/brain", label: "Company Graph", description: "Hermes, apps, loops, evidence" },
+  { href: "/operate", label: "Activity", description: "Events, decisions, and outcomes" },
+  { href: "/settings/integrations", label: "Connections", description: "Provider access and consent" },
+  { href: "/discovery", label: "Build", description: "Identify loops with Hermes" },
+  { href: "/settings", label: "Settings", description: "Company context and workspace" },
+  { href: "/advanced", label: "Advanced", description: "LoopSpecs and runtime controls" }
 ] as const;
 
 const previewNav = {
@@ -78,7 +80,10 @@ export function PrimarySidebar({
       ) : null}
       <nav className="mt-6 space-y-1">
         {primaryNav.map((item) => {
-          const active = pathname === item.href || (item.href !== "/brain" && pathname.startsWith(`${item.href}/`));
+          const active = pathname === item.href || (
+            pathname.startsWith(`${item.href}/`) &&
+            !(item.href === "/settings" && pathname.startsWith("/settings/integrations"))
+          );
           return (
             <Link
               key={item.href}

@@ -1,0 +1,46 @@
+schemaVersion: loopgraph-app-loop/v1alpha1
+kind: AppLoop
+metadata: { id: management-resource-allocation, name: Management Resource Allocation, version: 1.0.0, description: "Prepare explicit budget and capacity tradeoffs tied to a named company constraint while keeping allocation decisions human-owned.", department: management, ownerRole: executive_owner, tags: [resources, budget, capacity, tradeoffs] }
+trigger: { type: event, source: "*", event: management.resource_allocation_requested }
+input: { requiredFields: [normalizedPayload.planId, normalizedPayload.version, normalizedPayload.constraintId, normalizedPayload.optionIds, normalizedPayload.goalImpact], subjectTypes: [resource_plan, forecast, company_resource_plan], fixtures: [] }
+routine:
+  - { id: normalize, name: Normalize resource plan, actor: system, type: observe, description: "Resolve plan, version, budget, capacity, constraint, options, affected goals, current commitments, owner, and measurement window." }
+  - { id: reconcile, name: Reconcile capacity and finance, actor: agent, type: assess, description: "Join forecast, capacity, opportunity cost, dependencies, timing, risk, people, vendor, and system evidence." }
+  - { id: prepare, name: Prepare allocation options, actor: agent, type: prepare, description: "Prepare explicit options, tradeoffs, constraints, displacement effects, reversibility, conditions, and success measures." }
+  - { id: decide, name: Record allocation decision, actor: human, type: decide, description: "Accountable leadership and finance approve, reject, defer, or request evidence for the allocation." }
+  - { id: learn, name: Return constraint outcome, actor: system, type: learn, description: "Return execution, cost, constraint movement, goal outcome, corrections, and unintended effects." }
+capabilities:
+  - { key: finance.forecast.read, authority: read, risk: critical, required: true, purpose: "Read approved budget, forecast, commitments, and financial constraints.", customerFacing: false }
+  - { key: capacity.plan.read, authority: read, risk: critical, required: true, purpose: "Read approved people, vendor, and system capacity plans.", customerFacing: false }
+  - { key: loopgraph.outcome.read, authority: read, risk: high, required: true, purpose: "Read outcomes, value, cost, and confidence from affected company loops.", customerFacing: false }
+skills: [management-decision-and-follow-through, management-metric-and-constraint-diagnosis]
+outcomes:
+  - { metric: resource_decision_latency_hours, description: Time from complete resource evidence to accountable allocation decision., direction: decrease, sourceCapability: finance.forecast.read }
+  - { metric: constrained_goal_improvement, description: Movement in the named company constraint after an approved allocation., direction: increase, sourceCapability: loopgraph.outcome.read }
+routing:
+  schemaVersion: routing-contract/v1alpha1
+  problemTypes: [management.resource_allocation]
+  accepts:
+    - { sourcePattern: "*", eventTypePattern: management.resource_allocation_requested, subjectTypes: [resource_plan, forecast, company_resource_plan], requiredFields: [normalizedPayload.planId, normalizedPayload.version, normalizedPayload.constraintId, normalizedPayload.optionIds, normalizedPayload.goalImpact], reason: "A versioned resource plan identifies a company constraint, real options, and affected goals." }
+    - { sourcePattern: "*", eventTypePattern: management.material_constraint_detected, subjectTypes: [resource_plan, forecast, company_resource_plan], requiredFields: [normalizedPayload.planId, normalizedPayload.version, normalizedPayload.constraintId, normalizedPayload.optionIds, normalizedPayload.goalImpact], reason: "A reconciled material constraint has approved finance and capacity evidence." }
+  excludes: [{ sourcePattern: "*", eventTypePattern: management.budget_change_requested, subjectTypes: [resource_plan], fields: [], reason: "Hermes cannot change a budget or resource commitment." }]
+  inputMapping: { planId: normalizedPayload.planId, version: normalizedPayload.version, constraintId: normalizedPayload.constraintId, optionIds: normalizedPayload.optionIds, goalImpact: normalizedPayload.goalImpact }
+  priority: 100
+  minimumConfidence: 0.98
+  ambiguityPolicy: request_human
+  noMatchPolicy: unhandled
+  fanoutPolicy: { mode: none, maxRoutes: 1, requiresIndependentProblems: true }
+  cooldown: { seconds: 0, dedupeWindowSeconds: 86400 }
+  concurrency: { maxActive: 10, strategy: append_evidence }
+  activationMode: shadow
+  lifecycleEvents: [loopgraph.run.completed, loopgraph.outcome.observed]
+  requiredConnections: [finance.forecast.read, capacity.plan.read, loopgraph.outcome.read]
+  examples: { shouldRoute: ["A versioned plan exposes an evidenced company constraint and real resource options."], shouldNotRoute: ["A user asks Hermes to move budget or change headcount."] }
+policy:
+  forbiddenActions:
+    - { capability: finance.budget.update, reason: "Budget changes require accountable approval and separate execution." }
+    - { capability: hris.headcount.update, reason: "Hiring and headcount decisions remain human-owned." }
+    - { capability: contract.vendor.commit, reason: "Vendor commitments require separate procurement and legal controls." }
+  escalationOwner: executive_owner
+  escalationSla: 4h
+  separateCustomerFacingApproval: true
