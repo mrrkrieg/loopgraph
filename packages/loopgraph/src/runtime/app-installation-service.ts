@@ -105,6 +105,14 @@ import {
 import { FileOutcomeStore, type OutcomeStore } from "./outcome-store";
 import { FileHermesOperationsStore, type HermesOperationsStore } from "./hermes-operations-store";
 import {
+  getHermesRouteActivationStatus,
+  type HermesRouteActivationStatus
+} from "./hermes-route-activation";
+import {
+  doctorHermesWebhookRoutes,
+  type HermesWebhookDoctorResult
+} from "./hermes-webhooks";
+import {
   FileAppVerificationStore,
   type AppVerificationRegistry,
   type AppVerificationStore
@@ -210,6 +218,14 @@ export class AppInstallationService {
   private readonly outcomeStore: OutcomeStore;
   private readonly operationsStore: HermesOperationsStore;
   private readonly verificationStore: AppVerificationStore;
+  private readonly routeActivationStatusProvider: (input: {
+    projectRoot?: string;
+    now?: Date;
+  }) => Promise<HermesRouteActivationStatus>;
+  private readonly webhookDoctorProvider: (input: {
+    projectRoot?: string;
+    now?: Date;
+  }) => Promise<HermesWebhookDoctorResult>;
 
   constructor(
     private readonly marketplace: LocalAppMarketplace,
@@ -225,6 +241,14 @@ export class AppInstallationService {
       outcomeStore?: OutcomeStore;
       operationsStore?: HermesOperationsStore;
       verificationStore?: AppVerificationStore;
+      routeActivationStatusProvider?: (input: {
+        projectRoot?: string;
+        now?: Date;
+      }) => Promise<HermesRouteActivationStatus>;
+      webhookDoctorProvider?: (input: {
+        projectRoot?: string;
+        now?: Date;
+      }) => Promise<HermesWebhookDoctorResult>;
     } = {}
   ) {
     const appsRoot = path.join(path.resolve(projectRoot), ".loopgraph", "apps");
@@ -236,6 +260,8 @@ export class AppInstallationService {
     this.outcomeStore = dependencies.outcomeStore ?? new FileOutcomeStore(path.join(path.resolve(projectRoot), ".loopgraph"));
     this.operationsStore = dependencies.operationsStore ?? new FileHermesOperationsStore(path.join(path.resolve(projectRoot), ".loopgraph"));
     this.verificationStore = dependencies.verificationStore ?? new FileAppVerificationStore(appsRoot, workspaceId);
+    this.routeActivationStatusProvider = dependencies.routeActivationStatusProvider ?? getHermesRouteActivationStatus;
+    this.webhookDoctorProvider = dependencies.webhookDoctorProvider ?? doctorHermesWebhookRoutes;
   }
 
   private async prepareLifecycleOperation(input: PrepareLifecycleOperationInput): Promise<AppLifecycleOperation> {
@@ -2825,6 +2851,33 @@ export class AppInstallationService {
       latestSynthetic.metrics.providerWrites === 0;
     const connectionsPassed = requiredCapabilities.size > 0 && missingCapabilities.length === 0;
     const mappingsPassed = !mappingsRequired || installation.fieldMappingIds.length > 0;
+    const declaredRoutedLoopIds = compiled.loopSpecs
+      .filter((spec) => (spec.routing?.accepts.length ?? 0) > 0)
+      .map((spec) => spec.metadata.id)
+      .sort();
+    const [webhookDoctor, routeActivation] = declaredRoutedLoopIds.length > 0
+      ? await Promise.all([
+          this.webhookDoctorProvider({ projectRoot: this.projectRoot, now }),
+          this.safeRouteActivationStatus(now)
+        ])
+      : [undefined, undefined];
+    const ownedLoopIdSet = new Set(declaredRoutedLoopIds);
+    const routedLoopIds = [...new Set((webhookDoctor?.plan.routes ?? [])
+      .filter((route) => route.routeKind !== "loopgraph_lifecycle")
+      .flatMap((route) => route.loopIds)
+      .filter((loopId) => ownedLoopIdSet.has(loopId)))].sort();
+    const routedLoopIdSet = new Set(routedLoopIds);
+    const appRouteStates = routeActivation?.routeStates.filter((route) =>
+      route.routeKind !== "loopgraph_lifecycle" && route.loopIds.some((loopId) => routedLoopIdSet.has(loopId))) ?? [];
+    const coveredLoopIds = new Set(appRouteStates.flatMap((route) => route.loopIds).filter((loopId) => routedLoopIdSet.has(loopId)));
+    const missingRouteLoopIds = routedLoopIds.filter((loopId) => !coveredLoopIds.has(loopId));
+    const appRoutesReady = Boolean(
+      routeActivation?.exists &&
+      routeActivation.current &&
+      appRouteStates.length > 0 &&
+      missingRouteLoopIds.length === 0 &&
+      appRouteStates.every((route) => route.ready)
+    );
     const checks: AppReadiness["checks"] = [
       { id: "artifact", category: "artifact", status: "pass", summary: "Pinned artifact version and digest are recorded.", evidenceRefs: [installation.artifactDigest] },
       {
@@ -2856,6 +2909,39 @@ export class AppInstallationService {
       },
       { id: "configuration", category: "configuration", status: installation.configuration.completedAt ? "pass" : "fail", summary: installation.configuration.completedAt ? "Required configuration is complete." : "Configuration is incomplete.", evidenceRefs: [] },
       { id: "simulation", category: "simulation", status: syntheticPassed ? "pass" : latestSynthetic ? "fail" : "warn", summary: syntheticPassed ? "Latest exact-digest synthetic conformance run passed with writes blocked." : "A passing exact-digest synthetic conformance run is required.", evidenceRefs: latestSynthetic ? [latestSynthetic.id] : [] },
+      {
+        id: "hermes-route-manifest",
+        category: "routing",
+        status: declaredRoutedLoopIds.length === 0 ? "not_applicable" : webhookDoctor?.ok ? "pass" : "fail",
+        summary: declaredRoutedLoopIds.length === 0
+          ? "This App declares no event routing contracts."
+          : webhookDoctor?.ok
+            ? `The local Hermes route manifest covers the current catalog for ${declaredRoutedLoopIds.length} routed App loop(s).`
+            : "The local Hermes route manifest is missing or stale for the current runtime catalog.",
+        evidenceRefs: webhookDoctor?.ok ? [webhookDoctor.plan.catalogVersion] : [],
+        ...(declaredRoutedLoopIds.length > 0 && !webhookDoctor?.ok ? { remediation: "Synchronize the current non-secret Hermes route manifest, then rehearse the exact event contracts again." } : {})
+      },
+      {
+        id: "hermes-route-activation",
+        category: "routing",
+        status: routedLoopIds.length === 0 ? "not_applicable" : appRoutesReady ? "pass" : "fail",
+        summary: routedLoopIds.length === 0
+          ? "This App does not require a Hermes event route."
+          : appRoutesReady
+            ? `${appRouteStates.length} exact Hermes event route(s) cover every routed App loop with signature verification and every required provider subscription active.`
+            : !routeActivation?.exists
+              ? "No Hermes Route Controller receipt proves that this App can receive routed business events."
+              : !routeActivation.current
+                ? "The Hermes Route Controller receipt is stale for the current App routing catalog."
+                : missingRouteLoopIds.length > 0
+                  ? `No active Hermes route covers App loop(s): ${missingRouteLoopIds.join(", ")}.`
+                  : `Hermes route(s) for this App are not ready: ${appRouteStates.filter((route) => !route.ready).map((route) => `${route.routeName} (${route.state}/${route.subscriptionState})`).join(", ")}.`,
+        evidenceRefs: routeActivation?.planDigest ? [
+          `hermes-route-plan:${routeActivation.planDigest}`,
+          ...appRouteStates.map((route) => `hermes-route:${route.routeId}`)
+        ] : [],
+        ...(routedLoopIds.length > 0 && !appRoutesReady ? { remediation: "Prepare the exact current Hermes route plan and apply it through the workload-authenticated Route Controller; every required provider subscription must be active before App promotion." } : {})
+      },
       { id: "permissions", category: "permission", status: installation.permissions.some((permission) => permission.decision === "unresolved") ? "fail" : "pass", summary: "Permission decisions are explicit and provider execution was not enabled by install.", evidenceRefs: [] }
     ];
     const failureCount = checks.filter((check) => check.status === "fail").length;
@@ -2871,6 +2957,24 @@ export class AppInstallationService {
       evaluatedAt: now.toISOString(),
       evidenceDerived: true
     });
+  }
+
+  private async safeRouteActivationStatus(now: Date): Promise<HermesRouteActivationStatus> {
+    try {
+      return await this.routeActivationStatusProvider({ projectRoot: this.projectRoot, now });
+    } catch {
+      return {
+        projectRoot: path.resolve(this.projectRoot),
+        recordPath: path.join(path.resolve(this.projectRoot), ".loopgraph", "hermes-route-activation.json"),
+        checkedAt: now.toISOString(),
+        exists: true,
+        current: false,
+        ready: false,
+        routeStates: [],
+        warnings: ["The stored Hermes route activation receipt is invalid."],
+        nextActions: ["Apply the current exact route plan again through the Hermes Route Controller."]
+      };
+    }
   }
 
   async operationalMaturity(

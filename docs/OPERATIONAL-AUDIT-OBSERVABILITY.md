@@ -87,6 +87,13 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 - `loopgraph_ready == 0` for two consecutive checks: page the service owner;
 - any sustained increase in `loopgraph_machine_denied_5m`: investigate credential drift or abuse;
 - any `loopgraph_machine_rate_limited_5m > 0`: inspect the caller and expected schedule;
+- any `loopgraph_cli_refresh_reuse_detected_24h > 0`: page the security owner, preserve the
+  matching bounded audit chain, revoke or rotate adjacent user authority, and confirm the affected
+  family is represented in `loopgraph_cli_sessions_revoked`;
+- any `loopgraph_cli_refresh_reuse_unrevoked > 0`: fail readiness, block promotion, and treat the
+  session store as inconsistent until every replayed family is revoked;
+- `loopgraph_cli_device_authorization_oldest_pending_seconds > 600`: investigate expiry processing
+  and device-flow abuse; never expose codes or request fingerprints in the alert;
 - any `loopgraph_route_jobs_dead_letter > 0`: stop promotion for the affected route and inspect
   its last error;
 - sustained `loopgraph_route_job_expired_leases > 0` or increasing
@@ -122,11 +129,12 @@ Wire the protected metrics into the deployment monitoring system and begin with:
 - an audit-chain verification response of `409`: stop promotion and preserve database evidence.
 
 The snapshot now covers the hosted authorization plane, database-backed route queue, outbound
-Hermes dispatch queue, inbound Hermes callback inbox, discovery sessions, evidence gaps, immutable
+Hermes dispatch queue, inbound Hermes callback inbox, human CLI session security, discovery sessions, evidence gaps, immutable
 design artifacts, App lifecycle recovery, App action receipt reconciliation, and the same versioned
-App evidence-renewal contract consumed by Hermes. App recovery and evidence-health metrics contain
-aggregate counts only; App IDs, installation IDs, action IDs, request IDs, actors, connector fields,
-provider payloads, and company-context keys are excluded. Invalid, expired, or renew-soon proof
+App evidence-renewal contract consumed by Hermes. CLI, App recovery, and evidence-health metrics contain
+aggregate counts only; token digests, user/device identities, request fingerprints, App IDs,
+installation IDs, action IDs, request IDs, actors, connector fields, provider payloads, and
+company-context keys are excluded. Invalid, expired, or renew-soon proof
 sets `loopgraph_operational_degraded` without failing public traffic readiness. An unavailable,
 cross-workspace, malformed, stale, or future-dated evidence projection fails readiness closed.
 `loopgraph_operational_degraded` reports recoverable operator work without returning a public
@@ -153,6 +161,12 @@ After applying migrations to staging:
    non-production provider account that independently records invocation count. The aggregate
    `staging-validation/v5` gate proves the final zero-backlog state but cannot by itself prove the
    external provider's idempotency behavior.
-10. Run the App evidence-health schedule, verify its protected response contains aggregate counts
-    only, and prove invalid/expired/renew-soon fixtures set the expected protected metrics without
-    creating replay, approval, activation, or provider-write records.
+10. Run `npm run --silent validate:app-evidence-health-staging` from a protected runner. Preserve
+    the secret-free receipt and separately prove invalid/expired/renew-soon fixtures set the
+    expected protected metrics without creating replay, approval, activation, or provider-write
+    records.
+11. Rotate and replay one disposable staging CLI refresh family. Confirm
+    `loopgraph_cli_refresh_reuse_detected_24h` increments, `loopgraph_cli_refresh_reuse_unrevoked`
+    remains zero, readiness becomes operationally degraded, and the replay audit event reaches the
+    independent retention acknowledgement. Correlate the expected disposable staging alert to the
+    protected workflow run; the same signal outside that exact drill is a security incident.

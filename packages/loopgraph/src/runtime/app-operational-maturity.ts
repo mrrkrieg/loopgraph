@@ -58,7 +58,7 @@ export function assessAppOperationalMaturity(input: {
   );
 
   const connectionChecks = input.readiness.checks.filter((check) => check.category === "connection");
-  const supportingChecks = input.readiness.checks.filter((check) => ["mapping", "configuration", "permission"].includes(check.category));
+  const supportingChecks = input.readiness.checks.filter((check) => ["mapping", "configuration", "permission", "routing"].includes(check.category));
   const connected = tested &&
     Object.keys(input.installation.operationBindings).length > 0 &&
     connectionChecks.length > 0 &&
@@ -165,14 +165,14 @@ export function assessAppOperationalMaturity(input: {
       status: connected ? "achieved" : "blocked",
       summary: connected
         ? `${Object.keys(input.installation.operationBindings).length} executable capability bindings and their setup checks are ready.`
-        : "Every required capability must resolve to an exact executable operation, and every mapping, configuration value, and permission decision must be ready after testing passes.",
+        : "Every required capability must resolve to an exact executable operation, and every mapping, configuration value, permission decision, and Hermes route must be ready after testing passes.",
       evidenceRefs: connected
         ? [
             ...Object.values(input.installation.operationBindings).map((binding) => `${binding.providerId}:${binding.operation}`),
             ...connectionChecks.flatMap((check) => check.evidenceRefs)
           ]
         : [],
-      ...(!connected ? { remediation: "Re-plan unsupported operations, then resolve all required connection, mapping, configuration, and permission readiness checks." } : {})
+      ...(!connected ? { remediation: "Re-plan unsupported operations, then resolve all required connection, mapping, configuration, permission, and Hermes routing readiness checks." } : {})
     },
     {
       level: "production_proven",

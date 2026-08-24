@@ -28,6 +28,7 @@ import {
   createStoredLoopSpecArtifact,
   type LoopSpecRegistryStore
 } from "./loop-spec-store";
+import type { OutcomeStore } from "./outcome-store";
 
 async function createProjectWithRoutingSpec(
   spec = marketingAdsSpec()
@@ -235,12 +236,77 @@ describe("routing tool surface", () => {
 
     expect(result.duplicate).toBe(false);
     expect(result.eligibleRoutes.map((route) => route.card.loopId)).toEqual(["marketing_ads"]);
+    expect(result.learningContext).toMatchObject({
+      schemaVersion: "routing-learning-context/v1alpha1",
+      status: "available",
+      authority: "advisory",
+      eligibleLoopIds: ["marketing_ads"],
+      loopEvidence: [expect.objectContaining({
+        loopId: "marketing_ads",
+        relation: "eligible_candidate",
+        eligibleForCurrentEvent: true
+      })]
+    });
+    expect(result.learningContextDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(await store.getEventReceipt(event.id)).toBeTruthy();
     expect(result.controllerTrigger).toMatchObject({
       enqueued: true,
       duplicate: false,
       triggerRecordId: expect.stringMatching(/^controller_trigger_/)
     });
+  });
+
+  it("does not make Hermes reason again for a duplicate delivery", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = adsEvent("delivery_tool_duplicate_1");
+    await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+
+    const duplicate = await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      now: new Date("2026-07-21T12:00:03.000Z")
+    });
+
+    expect(duplicate).toMatchObject({
+      duplicate: true,
+      eligibleRoutes: [],
+      learningContext: {
+        status: "not_applicable",
+        authority: "advisory",
+        eligibleLoopIds: [],
+        loopEvidence: []
+      }
+    });
+  });
+
+  it("keeps current routing available while marking historical evidence unavailable", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = adsEvent("delivery_tool_learning_unavailable_1");
+    const unavailableOutcomeStore = {
+      listObservedOutcomes: async () => {
+        throw new Error("database details must not escape");
+      },
+      listValueLedgerEntries: async () => []
+    } as unknown as OutcomeStore;
+
+    const result = await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      outcomeStore: unavailableOutcomeStore,
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+
+    expect(result.eligibleRoutes.map((route) => route.card.loopId)).toEqual(["marketing_ads"]);
+    expect(result.learningContext).toMatchObject({
+      status: "unavailable",
+      authority: "advisory",
+      loopEvidence: [],
+      warnings: ["Shared learning evidence is unavailable; do not infer historical performance or value."]
+    });
+    expect(JSON.stringify(result.learningContext)).not.toContain("database details");
   });
 
   it("ignores caller-supplied routing cards on Hermes-facing ingest calls", async () => {
@@ -314,6 +380,7 @@ describe("routing tool surface", () => {
         modelMetadata: { hermesTaskId: "task_tool_1" },
         policyVersion: "routing-policy/v1alpha1"
       },
+      learningContextDigest: ingest.learningContextDigest,
       hermesMetadata: { route: "google_ads_detector" }
     }, {
       store,
@@ -321,6 +388,15 @@ describe("routing tool surface", () => {
     });
 
     expect(result.valid).toBe(true);
+    expect(result.attempt.learningContextBinding).toMatchObject({
+      contextDigest: ingest.learningContextDigest,
+      acknowledgedDigest: ingest.learningContextDigest,
+      acknowledged: true,
+      context: {
+        status: "available",
+        eligibleLoopIds: ["marketing_ads"]
+      }
+    });
     expect(result.problem?.primaryLoopId).toBe("marketing_ads");
     expect(result.routeCommits).toHaveLength(1);
     expect(result.lifecycleDeliveries).toEqual([
@@ -357,6 +433,60 @@ describe("routing tool surface", () => {
         routeKey: "loopgraph-lifecycle-events"
       }
     });
+  });
+
+  it("rejects a stale Hermes learning-context digest before committing a route", async () => {
+    const { projectRoot } = await createProjectWithRoutingSpec();
+    const store = new FileRoutingStore(path.join(projectRoot, ".loopgraph"));
+    const event = adsEvent("delivery_tool_stale_learning_1");
+    const ingest = await loopgraph_events_ingest({ projectRoot, event }, {
+      store,
+      now: new Date("2026-07-21T12:00:02.000Z")
+    });
+
+    const result = await loopgraph_routing_decision_submit({
+      projectRoot,
+      learningContextDigest: "0000000000000000000000000000000000000000000000000000000000000000",
+      decision: {
+        schemaVersion: "routing-decision/v1alpha1",
+        eventId: event.id,
+        catalogVersion: ingest.catalogVersion,
+        action: "route",
+        problem: {
+          summary: "Campaign efficiency dropped.",
+          problemTypes: ["paid_acquisition_efficiency_drop"],
+          subject: event.subject,
+          severity: "medium",
+          dedupeKeyInputs: [event.subject.id]
+        },
+        selectedRoutes: [{
+          loopId: "marketing_ads",
+          role: "primary",
+          confidence: 0.92,
+          reasonSummary: "Campaign anomaly includes qualified-cost evidence.",
+          evidenceRefs: [],
+          inputMapping: { campaignId: event.subject.id },
+          priority: 0
+        }],
+        alternatives: [],
+        modelMetadata: { hermesTaskId: "task_tool_stale_1" },
+        policyVersion: "routing-policy/v1alpha1"
+      }
+    }, {
+      store,
+      now: new Date("2026-07-21T12:00:03.000Z")
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.validationErrors).toContain(
+      "Hermes learning-context digest is stale; re-ingest the event before routing"
+    );
+    expect(result.attempt.learningContextBinding).toMatchObject({
+      contextDigest: ingest.learningContextDigest,
+      acknowledgedDigest: "0000000000000000000000000000000000000000000000000000000000000000",
+      acknowledged: false
+    });
+    expect(await store.listRouteCommits()).toHaveLength(0);
   });
 
   it("simulates a validated route commit locally and links the run back to the commit", async () => {
