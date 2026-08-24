@@ -89,6 +89,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     requirement.missingRequiredFields.length > 0 || requirement.unverifiedRequiredFields.length > 0
   ) ?? [];
   const permissionGaps = input.plan?.permissions.filter((permission) => permission.decision === "unresolved") ?? [];
+  const routeManifestReady = input.readiness?.checks.find((check) => check.id === "hermes-route-manifest")?.status !== "fail";
+  const routeActivationReady = input.readiness?.checks.find((check) => check.id === "hermes-route-activation")?.status !== "fail";
   const questions = input.setupQuestions
     .filter((question) => missingConfigurationKeys.has(question.key))
     .map((question) => ({
@@ -150,6 +152,8 @@ export function deriveAppOnboardingJourney(input: JourneyInput): AppOnboardingJo
     configurationGaps: missingConfiguration.length,
     mappingGaps: mappingGaps.length,
     permissionGaps: permissionGaps.length,
+    routeManifestReady,
+    routeActivationReady,
     activationApprovalReceiptId: pendingShadowApproval?.id,
     lifecycleOperation: recovery
   });
@@ -276,6 +280,8 @@ function decideStage(input: {
   configurationGaps: number;
   mappingGaps: number;
   permissionGaps: number;
+  routeManifestReady: boolean;
+  routeActivationReady: boolean;
   activationApprovalReceiptId?: string;
   lifecycleOperation?: AppLifecycleOperation;
 }): {
@@ -419,6 +425,27 @@ function decideStage(input: {
       return toolDecision("run_conformance", "test", "Run deterministic conformance with every provider write blocked.", "loopgraph_app_test", installationId!, false);
     }
     if (input.installation.state === "simulation_passed") {
+      if (!input.routeManifestReady) {
+        return toolDecision(
+          "activate_shadow",
+          "shadow",
+          "Rehearsal passed. Synchronize the current non-secret Hermes route manifest before preparing runtime activation.",
+          "loopgraph_hermes_webhooks_sync",
+          undefined,
+          true,
+          { dryRun: false }
+        );
+      }
+      if (!input.routeActivationReady) {
+        return toolDecision(
+          "activate_shadow",
+          "shadow",
+          "The route manifest is current, but Hermes has not proven every required event route and provider subscription. Prepare the exact controller plan for accountable activation.",
+          "loopgraph_hermes_webhooks_prepare",
+          undefined,
+          false
+        );
+      }
       return input.activationApprovalReceiptId
         ? toolDecision("activate_shadow", "shadow", "Shadow activation has an exact, unexpired approval receipt and is ready to be applied with provider writes still blocked.", "loopgraph_app_activate", installationId!, false, { mode: "shadow", approvalReceiptId: input.activationApprovalReceiptId })
         : toolDecision("activate_shadow", "shadow", "Rehearsal passed. An accountable operator must approve the exact shadow transition before Hermes can activate it.", "loopgraph_app_activation_approve", installationId!, true, { mode: "shadow" });

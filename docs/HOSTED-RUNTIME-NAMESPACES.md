@@ -90,9 +90,14 @@ the deployment organization binding is unavailable, the runtime rejects the requ
 using the local file adapters. File stores remain an explicit local-project implementation only and
 are cached by resolved project namespace so two local projects do not share evidence or identity.
 
-Applying the evidence/entity migrations and exercising claim, immutable-conflict, alias, and
-restore behavior against each real hosted environment remains an operational deployment gate; it
-is not a reason to fall back to replica-local files.
+The executable [hosted learning and entity staging gate](./HOSTED-LEARNING-ENTITY-STAGING-GATE.md)
+actively exercises cross-client claims, stale-lease rejection, finalization visibility, all three
+immutable evidence types, provider-alias uniqueness, and nonce-authorized exact cleanup against a
+deployed staging database. The protected release workflow makes its exact nine-control receipt a
+mandatory, scope-bound input to both signed evidence compilation and production verification.
+Applying the migrations, configuring the protected environment, and producing that
+environment-specific receipt remain operator actions. Database restore behavior stays part of the separate isolated recovery rehearsal;
+neither missing receipt is a reason to fall back to replica-local files.
 
 See [Distributed Hermes routing store](./DISTRIBUTED-ROUTING-STORE.md),
 [Distributed Hermes design store](./DISTRIBUTED-HERMES-DESIGN-STORE.md),

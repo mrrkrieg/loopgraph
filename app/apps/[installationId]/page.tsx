@@ -46,6 +46,7 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
   }
   const latestSynthetic = data.evaluations.filter((evaluation) => evaluation.level === "synthetic").at(-1);
   const latestReplay = data.evaluations.filter((evaluation) => evaluation.level === "historical_replay").at(-1);
+  const maturityFreshness = data.maturity.freshness;
   const installedLoopByName = new Map(data.installedLoops.map((loop) => [loop.name, loop]));
   const unfinishedOperations = data.lifecycleOperations.filter((operation) => operation.status !== "completed");
   const recovery = unfinishedOperations[0];
@@ -114,7 +115,13 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
-        <ScoreCard label="Maturity" value={data.maturity.maturity.replace(/_/g, " ")} detail="Evidence-derived ceiling" />
+        <ScoreCard
+          label="Maturity"
+          value={data.maturity.maturity.replace(/_/g, " ")}
+          detail={maturityFreshness.validUntil
+            ? `Proof ${maturityFreshness.status.replace(/_/g, " ")} · ${formatUtcDate(maturityFreshness.validUntil)}`
+            : `Proof ${maturityFreshness.status.replace(/_/g, " ")}`}
+        />
         <ScoreCard label="Readiness" value={`${data.readiness.score}%`} detail={data.readiness.state.replace(/_/g, " ")} />
         <ScoreCard label="Configured stack" value={data.detail.manifest.presets.find((preset) => preset.id === data.installation.presetId)?.name ?? data.installation.presetId} detail={`${Object.keys(data.installation.operationBindings).length} executable capability bindings`} />
         <ScoreCard label="Conformance" value={latestSynthetic?.status ?? "not run"} detail={latestSynthetic ? `${latestSynthetic.metrics.passed}/${latestSynthetic.metrics.total} scenarios` : "Provider writes remain blocked"} />
@@ -137,6 +144,33 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_21rem]">
         <div className="min-w-0 space-y-6">
           <SectionCard title="Operational maturity" description="Maturity cannot skip a gate. Each level is tied to evidence from this exact installed artifact; catalog signatures and publisher claims do not count as production proof.">
+            <div className={`mb-4 rounded-md border p-4 ${maturityFreshness.status === "current" ? "border-emerald-200 bg-emerald-50" : maturityFreshness.status === "renew_soon" ? "border-amber-300 bg-amber-50" : "border-orange-200 bg-orange-50"}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">Production-proof freshness</div>
+                  <p className="mt-2 text-sm leading-6 text-ink/70">{maturityFreshness.summary}</p>
+                </div>
+                <span className="rounded-full border border-current/20 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.08em]">{maturityFreshness.status.replace(/_/g, " ")}</span>
+              </div>
+              {maturityFreshness.renewalRecommendedAt ? (
+                <p className="mt-2 text-xs leading-5 text-ink/55">Renew by {formatUtcDate(maturityFreshness.renewalRecommendedAt)} to avoid a maturity downgrade.</p>
+              ) : null}
+              <details className="mt-3 text-xs text-ink/55">
+                <summary className="cursor-pointer font-semibold">Evidence clock ({maturityFreshness.requirements.length})</summary>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {maturityFreshness.requirements.map((requirement) => (
+                    <div className="rounded border border-line bg-white/70 p-3" key={requirement.id}>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-semibold capitalize">{requirement.id.replace(/_/g, " ")}</span>
+                        <span className="font-semibold uppercase">{requirement.status.replace(/_/g, " ")}</span>
+                      </div>
+                      <p className="mt-1 leading-5">{requirement.summary}</p>
+                      {requirement.evidenceRef ? <div className="mt-2 break-all font-mono text-[0.68rem] text-ink/40">{requirement.evidenceRef}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
             <div className="space-y-3">
               {data.maturity.gates.map((gate) => (
                 <div className={`rounded-md border p-4 ${gate.status === "achieved" ? "border-emerald-200 bg-emerald-50" : "border-line bg-paper/40"}`} key={gate.level}>
@@ -151,6 +185,39 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
               ))}
             </div>
           </SectionCard>
+
+          {data.activationGate ? (
+            <SectionCard
+              title={`Next activation gate · ${data.activationGate.requestedMode.replace(/_/g, " ")}`}
+              description="Hermes, CLI, and this browser read the same backend gate. A human approval can authorize a ready transition, but it cannot override missing evidence."
+            >
+              <div className={`mb-4 rounded-md border p-4 ${data.activationGate.status === "ready" ? "border-emerald-200 bg-emerald-50" : "border-orange-200 bg-orange-50"}`}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">Required maturity</div>
+                    <div className="mt-1 font-semibold capitalize">{data.activationGate.requiredMaturity.replace(/_/g, " ")}</div>
+                  </div>
+                  <span className={`text-xs font-semibold uppercase tracking-[0.1em] ${data.activationGate.status === "ready" ? "text-emerald-700" : "text-orange-800"}`}>{data.activationGate.status}</span>
+                </div>
+                <p className="mt-2 text-xs text-ink/55">Observed maturity: <span className="font-semibold capitalize">{data.activationGate.observedMaturity.replace(/_/g, " ")}</span></p>
+              </div>
+              <div className="space-y-3">
+                {data.activationGate.checks.map((check) => (
+                  <div className="rounded-md border border-line p-3" key={check.id}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{check.id.replace(/-/g, " ")}</div>
+                      <div className={`text-xs font-semibold uppercase ${check.status === "pass" ? "text-emerald-700" : check.status === "blocked" ? "text-red-700" : "text-ink/40"}`}>{check.status.replace(/_/g, " ")}</div>
+                    </div>
+                    <p className="mt-2 text-sm leading-6 text-ink/65">{check.summary}</p>
+                    {check.remediation ? <p className="mt-2 text-xs leading-5 text-orange-800">Next: {check.remediation}</p> : null}
+                  </div>
+                ))}
+              </div>
+              {data.activationGate.requestedMode === "execute_with_approval" && data.activationGate.status === "ready" ? (
+                <p className="mt-4 rounded-md border border-line bg-surface p-3 text-xs leading-5 text-ink/65">The production-proof gate is ready. Execute authority remains deliberately unavailable in the browser; ask Hermes or use the CLI to create and consume the short-lived approval receipt.</p>
+              ) : null}
+            </SectionCard>
+          ) : null}
 
           <SectionCard title="Readiness checks" description="Promotion is evidence-derived. A downloaded or installed app is never automatically eligible to receive live work.">
             <div className="space-y-3">{data.readiness.checks.map((check) => <div className="grid gap-3 rounded-md border border-line p-3 sm:grid-cols-[8rem_minmax(0,1fr)_5rem]" key={check.id}><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/45">{check.category}</div><div className="text-sm text-ink/70">{check.summary}</div><div className={`text-right text-xs font-semibold uppercase ${check.status === "pass" ? "text-emerald-700" : check.status === "fail" ? "text-red-700" : "text-orange-700"}`}>{check.status}</div></div>)}</div>
@@ -342,8 +409,8 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
               <form action={rollbackInstalledAppAction} className="mt-4"><input name="installationId" type="hidden" value={data.installation.id} /><input name="expectedArtifactDigest" type="hidden" value={recovery.rollback?.sourceArtifactDigest ?? data.installation.artifactDigest} /><button className="w-full rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" type="submit">Reconcile and finish rollback</button></form>
             ) : <a className="mt-4 inline-flex w-full items-center justify-center rounded-md bg-orange-700 px-4 py-2.5 text-sm font-semibold text-white" href={recovery.action === "uninstall" ? "#app-uninstall" : `/marketplace/${encodeURIComponent(data.detail.app.id)}/install`}>{recovery.action === "uninstall" ? "Finish recovery" : "Return to exact install"}</a> : <div className="mt-4 space-y-2">
               {data.installation.state === "ready_to_test" || data.installation.state === "broken" ? <OperationForm action="test" installationId={data.installation.id} label="Run conformance tests" primary /> : null}
-              {data.installation.state === "simulation_passed" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
-              {data.installation.state === "shadow" && data.readiness.state === "ready_for_recommend" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
+              {data.installation.state === "simulation_passed" && data.activationGate?.requestedMode === "shadow" && data.activationGate.status === "ready" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="shadow" receipt={shadowApproval} /> : null}
+              {data.installation.state === "shadow" && data.activationGate?.requestedMode === "recommend" && data.activationGate.status === "ready" ? <ActivationControl evidenceRefs={evidenceRefs} installationId={data.installation.id} mode="recommend" receipt={recommendApproval} /> : null}
               {data.installation.state === "paused" ? <OperationForm action="resume" installationId={data.installation.id} label="Resume app" primary /> : <OperationForm action="pause" installationId={data.installation.id} label="Pause app" />}
               <OperationForm
                 action="repair"
@@ -367,6 +434,7 @@ export default async function InstalledAppDetailPage({ params, searchParams }: {
 }
 
 function ScoreCard({ label, value, detail }: { label: string; value: string; detail: string }) { return <div className="rounded-xl border border-line bg-white p-4 shadow-sm"><div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/40">{label}</div><div className="mt-2 text-lg font-semibold capitalize">{value}</div><div className="mt-1 text-xs text-ink/45">{detail}</div></div>; }
+function formatUtcDate(value: string) { return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(value)); }
 function Definition({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) { return <div className="border-b border-line py-3 last:border-0"><div className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/40">{label}</div><div className={`mt-1 break-all text-xs text-ink/65 ${mono ? "font-mono" : ""}`}>{value}</div></div>; }
 function OperationForm({ action, installationId, label, primary = false, expectedArtifactDigest, expectedUpdatedAt }: { action: "test" | "pause" | "resume" | "repair"; installationId: string; label: string; primary?: boolean; expectedArtifactDigest?: string; expectedUpdatedAt?: string }) { return <form action={operateInstalledAppAction}><input name="installationId" type="hidden" value={installationId} /><input name="action" type="hidden" value={action} />{expectedArtifactDigest ? <input name="expectedArtifactDigest" type="hidden" value={expectedArtifactDigest} /> : null}{expectedUpdatedAt ? <input name="expectedUpdatedAt" type="hidden" value={expectedUpdatedAt} /> : null}<button className={`w-full rounded-md px-4 py-2.5 text-sm font-semibold ${primary ? "bg-ink text-white" : "border border-line bg-white hover:border-ink"}`} type="submit">{label}</button></form>; }
 function ActivationRecoveryControl({
