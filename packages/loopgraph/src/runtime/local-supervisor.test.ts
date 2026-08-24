@@ -76,10 +76,19 @@ describe("local Loopgraph supervisor", () => {
       "opportunities",
       "apps:status",
       "apps:diff:install_sales",
+      "apps:renewal-plan",
       "controller"
     ]);
     expect(status.components.find((component) => component.name === "app_updates")?.details)
-      .toEqual({ installedApps: 1, updatesAvailable: 1 });
+      .toMatchObject({
+        installedApps: 1,
+        updatesAvailable: 1,
+        proofCurrent: 1,
+        proofInvalid: 0,
+        proofExpired: 0,
+        proofRenewSoon: 0,
+        renewalPlanTruncated: false
+      });
     const persisted = await readLocalSupervisorStatus(projectRoot);
     expect(persisted).toEqual(status);
   });
@@ -121,6 +130,95 @@ describe("local Loopgraph supervisor", () => {
 
     await expect(runLocalLoopgraphSupervisor({ projectRoot, once: true }, healthyDependencies(projectRoot, [])))
       .rejects.toThrow(`already running on PID ${process.pid}`);
+  });
+
+  it.each([
+    ["invalid", "blocked", "repair invalid App evidence"],
+    ["expired", "degraded", "renew expired App proof"],
+    ["renew_soon", "degraded", "schedule the next bounded App proof renewal"],
+    ["incomplete", "healthy", undefined],
+    ["current", "healthy", undefined]
+  ] as const)("maps %s App proof to %s supervisor health without renewing it", async (proofStatus, expectedHealth, expectedAction) => {
+    const projectRoot = await temporaryProject();
+    const calls: string[] = [];
+    const dependencies = healthyDependencies(projectRoot, calls);
+    dependencies.callAppTool = vi.fn(async (name, input) => {
+      if (name === "loopgraph_app_install_status") {
+        calls.push("apps:status");
+        return { installations: [{ id: "install_sales" }] };
+      }
+      if (name === "loopgraph_app_diff") {
+        calls.push(`apps:diff:${String((input as { installationId?: string }).installationId)}`);
+        return {};
+      }
+      if (name === "loopgraph_apps_renewal_plan") {
+        calls.push("apps:renewal-plan");
+        return fleetRenewalPlan(proofStatus);
+      }
+      throw new Error(`Unexpected App tool: ${name}`);
+    }) as LocalSupervisorDependencies["callAppTool"];
+
+    const status = await runLocalSupervisorCycle({
+      projectRoot,
+      supervisorId: "test-supervisor",
+      components: ["app_updates"],
+      now: new Date("2026-08-17T13:00:00.000Z")
+    }, dependencies);
+
+    expect(status.health).toBe(expectedHealth);
+    expect(status.components).toHaveLength(1);
+    if (proofStatus === "current") {
+      expect(status.components[0]?.details).not.toHaveProperty("nextRenewalStatus");
+    } else {
+      expect(status.components[0]?.details).toMatchObject({
+        nextRenewalStatus: proofStatus,
+        nextRenewalActionKind: proofStatus === "invalid"
+          ? "repair_evidence"
+          : ["expired", "renew_soon"].includes(proofStatus)
+            ? "renew_proof"
+            : "complete_setup"
+      });
+    }
+    if (expectedAction) expect(status.recommendedActions.join(" ")).toContain(expectedAction);
+    else expect(status.recommendedActions.join(" ")).not.toMatch(/App proof|App evidence/);
+    expect(calls).toEqual(["apps:status", "apps:diff:install_sales", "apps:renewal-plan"]);
+  });
+
+  it("fails the App fleet component closed when the renewal contract is malformed", async () => {
+    const projectRoot = await temporaryProject();
+    const calls: string[] = [];
+    const dependencies = healthyDependencies(projectRoot, calls);
+    dependencies.callAppTool = vi.fn(async (name, input) => {
+      if (name === "loopgraph_app_install_status") {
+        calls.push("apps:status");
+        return { installations: [{ id: "install_sales" }] };
+      }
+      if (name === "loopgraph_app_diff") {
+        calls.push(`apps:diff:${String((input as { installationId?: string }).installationId)}`);
+        return {};
+      }
+      if (name === "loopgraph_apps_renewal_plan") {
+        calls.push("apps:renewal-plan");
+        return { schemaVersion: "untrusted-version", items: [] };
+      }
+      throw new Error(`Unexpected App tool: ${name}`);
+    }) as LocalSupervisorDependencies["callAppTool"];
+
+    const status = await runLocalSupervisorCycle({
+      projectRoot,
+      supervisorId: "test-supervisor",
+      components: ["app_updates"],
+      now: new Date("2026-08-17T13:00:00.000Z")
+    }, dependencies);
+
+    expect(status.health).toBe("blocked");
+    expect(status.components[0]).toMatchObject({
+      name: "app_updates",
+      health: "blocked",
+      summary: "App fleet check failed."
+    });
+    expect(status.components[0]?.error).toBeTruthy();
+    expect(calls).toEqual(["apps:status", "apps:diff:install_sales", "apps:renewal-plan"]);
   });
 });
 
@@ -255,6 +353,10 @@ function healthyDependencies(projectRoot: string, calls: string[]): Partial<Loca
         calls.push("apps:status");
         return { installations: [{ id: "install_sales" }] };
       }
+      if (name === "loopgraph_apps_renewal_plan") {
+        calls.push("apps:renewal-plan");
+        return fleetRenewalPlan("current");
+      }
       calls.push(`apps:diff:${String((input as { installationId?: string }).installationId)}`);
       return { updateAvailable: { version: "1.1.0", artifactDigest: "sha256:update" } };
     }) as LocalSupervisorDependencies["callAppTool"],
@@ -268,6 +370,57 @@ function healthyDependencies(projectRoot: string, calls: string[]): Partial<Loca
         items: []
       };
     }) as LocalSupervisorDependencies["runController"]
+  };
+}
+
+function fleetRenewalPlan(status: "invalid" | "expired" | "renew_soon" | "incomplete" | "current") {
+  const counts = {
+    notApplicable: 0,
+    incomplete: status === "incomplete" ? 1 : 0,
+    current: status === "current" ? 1 : 0,
+    renewSoon: status === "renew_soon" ? 1 : 0,
+    expired: status === "expired" ? 1 : 0,
+    invalid: status === "invalid" ? 1 : 0
+  };
+  const nextAction = status === "invalid"
+    ? { kind: "repair_evidence", summary: "Replace the invalid evidence references." }
+    : status === "expired" || status === "renew_soon"
+      ? { kind: "renew_proof", summary: "Run a bounded write-blocked replay and record current observed evidence." }
+      : status === "incomplete"
+        ? { kind: "complete_setup", summary: "Complete the remaining evidence-derived maturity gate." }
+        : { kind: "monitor", summary: "Monitor routing quality, review burden, outcomes, and value." };
+  const affectedEvidence = status === "current" || status === "incomplete"
+    ? []
+    : [{
+        id: "historical_replay",
+        status: status === "renew_soon" ? "renew_soon" : status === "expired" ? "expired" : "invalid",
+        summary: "Historical replay proof requires attention."
+      }];
+  return {
+    schemaVersion: "loopgraph-app-evidence-renewal-plan/v1alpha1",
+    workspaceId: "workspace",
+    companyId: "company",
+    generatedAt: "2026-08-17T13:00:00.000Z",
+    totalInstallations: 1,
+    totalMatched: 1,
+    counts,
+    items: [{
+      installationId: "install_sales",
+      appId: "qualify-route-inbound-leads",
+      artifactDigest: `sha256:${"a".repeat(64)}`,
+      maturity: status === "current" ? "production_proven" : "connected",
+      status,
+      priority: status === "invalid" || status === "expired"
+        ? "critical"
+        : status === "renew_soon"
+          ? "high"
+          : status === "incomplete"
+            ? "medium"
+            : "none",
+      ...(status === "renew_soon" || status === "current" ? { validUntil: "2026-08-24T13:00:00.000Z" } : {}),
+      affectedEvidence,
+      nextAction
+    }]
   };
 }
 
