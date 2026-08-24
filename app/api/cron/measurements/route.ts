@@ -3,7 +3,13 @@ import {
   reconcileConnectionsAndMeasurements,
   scheduleDueMeasurements
 } from "loopgraph/runtime";
-import { getActiveLoopgraphProjectRoot } from "../../../../lib/loopgraph-runtime/storage-resolver";
+import {
+  getActiveLoopgraphProjectRoot,
+  getHermesRouteActivationStore,
+  getMeasurementStore
+} from "../../../../lib/loopgraph-runtime/storage-resolver";
+import { isHostedAuthRequired } from "../../../../lib/auth/hosted-config";
+import { createHostedHermesRouteActivationAuthorityProvider } from "../../../../lib/loopgraph-runtime/hosted-hermes-route-authority";
 import { authorizeCronApiRequest } from "../../../../lib/loopgraph-runtime/worker-api-auth";
 
 export const runtime = "nodejs";
@@ -14,8 +20,17 @@ export async function GET(request: Request) {
   try {
     const projectRoot = getActiveLoopgraphProjectRoot();
     const now = new Date();
-    const schedule = await scheduleDueMeasurements({ projectRoot, now });
-    const reconciliation = await reconcileConnectionsAndMeasurements({ projectRoot, now });
+    const workspaceId = process.env.LOOPGRAPH_HOSTED_PROJECT_KEY?.trim() || "default";
+    const measurementStore = getMeasurementStore({ projectRoot });
+    const routeActivationStore = getHermesRouteActivationStore({ projectRoot, workspaceId });
+    const routeActivationAuthorityProvider = isHostedAuthRequired()
+      ? createHostedHermesRouteActivationAuthorityProvider({ projectRoot, workspaceId })
+      : undefined;
+    const schedule = await scheduleDueMeasurements({ projectRoot, now }, { store: measurementStore });
+    const reconciliation = await reconcileConnectionsAndMeasurements(
+      { projectRoot, now },
+      { store: measurementStore, routeActivationStore, routeActivationAuthorityProvider }
+    );
     return NextResponse.json({ schedule, reconciliation }, {
       status: 202,
       headers: { "cache-control": "no-store" }
