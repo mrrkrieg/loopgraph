@@ -14,9 +14,9 @@ import {
   validateProjectedWorkloadToken
 } from "./projected-workload-token";
 import {
-  readBoundedResponseJson,
-  readBoundedResponseText
-} from "./bounded-response";
+  findAuthorizedMachineRequestAuditEvidence,
+  readStagingAuditCheckpoint
+} from "./staging-machine-audit-proof";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -81,14 +81,15 @@ export async function validateHostedMarketplaceStaging(
   const checks: HostedMarketplaceStagingReceipt["checks"] = [];
   const allowedProvider = new FixedWorkloadTokenProvider(tokens.allowed);
   const client = marketplaceClient(config, allowedProvider, fetcher);
-  const auditAfter = await readAuditCheckpoint({
+  const auditAfter = await readStagingAuditCheckpoint({
     baseUrl,
     fetcher,
     token: tokens.observability,
     organizationId: config.organizationId,
     projectKey: config.projectKey,
     requestId: `marketplace_checkpoint_${requestId()}`,
-    timestamp: now().toISOString()
+    timestamp: now().toISOString(),
+    label: "Marketplace staging"
   });
 
   const unauthenticated = await fetcher(
@@ -210,16 +211,19 @@ export async function validateHostedMarketplaceStaging(
     detail: "Reusing the same workload request identity is rejected by the durable guard."
   });
 
-  const auditEvidence = await findAcceptedAuditEvidence({
+  const auditEvidence = await findAuthorizedMachineRequestAuditEvidence({
     baseUrl,
     fetcher,
     token: tokens.observability,
     organizationId: config.organizationId,
     projectKey: config.projectKey,
     targetRequestId: replayId,
-    after: auditAfter,
+    capability: "marketplace.consume",
+    afterSequence: auditAfter,
     requestId,
-    now
+    now,
+    requestIdPrefix: "marketplace_audit",
+    label: "Marketplace staging"
   });
   checks.push({
     name: "independent_audit_evidence",
@@ -241,7 +245,7 @@ export async function validateHostedMarketplaceStaging(
       artifactDigest: config.artifactDigest
     },
     auditEvidence: {
-      afterSequence: auditAfter,
+      afterSequence: auditEvidence.afterSequence,
       throughSequence: auditEvidence.throughSequence,
       headHash: auditEvidence.headHash,
       requestId: replayId
@@ -341,117 +345,10 @@ function machineHeaders(input: {
   };
 }
 
-async function findAcceptedAuditEvidence(input: {
-  baseUrl: URL;
-  fetcher: typeof fetch;
-  token: string;
-  organizationId: string;
-  projectKey: string;
-  targetRequestId: string;
-  after: number;
-  requestId: () => string;
-  now: () => Date;
-}) {
-  let after = input.after;
-  let through: number | undefined;
-  let checkpointHash: string | undefined;
-  for (let page = 0; page < 50; page += 1) {
-    const auditUrl = new URL("api/operations/audit-export", ensureTrailingSlash(input.baseUrl));
-    auditUrl.searchParams.set("after", String(after));
-    auditUrl.searchParams.set("limit", "500");
-    if (through !== undefined) auditUrl.searchParams.set("through", String(through));
-    const response = await input.fetcher(auditUrl, {
-      headers: machineHeaders({
-        token: input.token,
-        organizationId: input.organizationId,
-        projectKey: input.projectKey,
-        requestId: `marketplace_audit_${input.requestId()}`,
-        timestamp: input.now().toISOString()
-      }),
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000)
-    });
-    expectStatus(response.status, [200], "Verified audit export");
-    const audit = await readBoundedResponseJson(
-      response,
-      4 * 1024 * 1024,
-      "Marketplace audit export"
-    );
-    if (!isRecord(audit) || !isRecord(audit.integrity) || audit.integrity.valid !== true) {
-      throw new Error("Marketplace staging audit export did not verify its hash chain");
-    }
-    const pageThrough = Number(audit.throughSequence);
-    const pageHeadHash = audit.integrity.headHash;
-    if (
-      !Number.isSafeInteger(pageThrough) || pageThrough < 0 ||
-      typeof pageHeadHash !== "string" || !/^[a-f0-9]{64}$/.test(pageHeadHash) ||
-      (through !== undefined && pageThrough !== through) ||
-      (checkpointHash !== undefined && pageHeadHash !== checkpointHash)
-    ) {
-      throw new Error("Marketplace staging audit pagination changed its verified checkpoint");
-    }
-    through ??= pageThrough;
-    checkpointHash ??= pageHeadHash;
-    const events = Array.isArray(audit.events) ? audit.events : [];
-    if (events.some((event) =>
-      isRecord(event) &&
-      event.event_type === "machine.request.authorized" &&
-      event.capability === "marketplace.consume" &&
-      event.request_id === input.targetRequestId
-    )) return {
-      status: response.status,
-      throughSequence: through,
-      headHash: checkpointHash
-    };
-    if (audit.hasMore !== true) break;
-    const nextCursor = Number(audit.nextCursor);
-    if (!Number.isSafeInteger(nextCursor) || nextCursor <= after) {
-      throw new Error("Marketplace staging audit pagination did not advance");
-    }
-    after = nextCursor;
-  }
-  throw new Error("Verified audit export omitted the accepted marketplace staging request");
-}
-
-async function readAuditCheckpoint(input: {
-  baseUrl: URL;
-  fetcher: typeof fetch;
-  token: string;
-  organizationId: string;
-  projectKey: string;
-  requestId: string;
-  timestamp: string;
-}) {
-  const response = await input.fetcher(
-    new URL("api/operations/metrics", ensureTrailingSlash(input.baseUrl)),
-    {
-      headers: machineHeaders(input),
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000)
-    }
-  );
-  expectStatus(response.status, [200], "Marketplace audit checkpoint metrics");
-  const metrics = await readBoundedResponseText(
-    response,
-    4 * 1024 * 1024,
-    "Marketplace audit checkpoint metrics"
-  );
-  const match = /^loopgraph_security_audit_head_sequence\s+(\d+)$/m.exec(metrics);
-  const checkpoint = match ? Number(match[1]) : Number.NaN;
-  if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) {
-    throw new Error("Marketplace audit checkpoint metric is missing or invalid");
-  }
-  return checkpoint;
-}
-
 function ensureTrailingSlash(url: URL) {
   const result = new URL(url);
   if (!result.pathname.endsWith("/")) result.pathname += "/";
   return result;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 async function tokenFromFile(name: string) {

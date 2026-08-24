@@ -305,9 +305,9 @@ function effectiveActionStatus(
   events: AppOperationActionEvent[],
   now: Date
 ): InstalledAppOperationsView["actions"][number]["effectiveStatus"] {
-  if (Date.parse(action.expiresAt) <= now.getTime()) return "expired";
   if (events.some((event) => event.eventType === "commit_succeeded")) return "committed";
   if (events.some((event) => event.eventType === "revoked")) return "revoked";
+  if (Date.parse(action.expiresAt) <= now.getTime()) return "expired";
   const latestFailureAt = events
     .filter((event) => event.eventType === "commit_failed")
     .map((event) => event.occurredAt)

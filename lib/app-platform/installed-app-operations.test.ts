@@ -121,6 +121,36 @@ describe("installed App operations view", () => {
       expect.objectContaining({ label: "Approved", kind: "review" })
     ]));
   });
+
+  it("keeps terminal revocation visible after the prepared action expiry", () => {
+    const action = preparedAction();
+    const base = {
+      schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+      id: "appactevt_revoked-view",
+      workspaceId: action.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      eventType: "revoked" as const,
+      actor: { type: "user" as const, subject: "reviewer-1" },
+      revocation: { reasonDigest: canonicalAppDigest("withdrawn") },
+      occurredAt: "2026-08-20T12:08:00.000Z"
+    };
+    const result = buildInstalledAppOperationsView({
+      app: { installationId: action.installationId, id: action.appId, name: "Sales App", department: "Sales" },
+      loops: [{ id: action.loopId, name: "Lead Qualification" }],
+      activity: [],
+      evaluations: [],
+      actions: [action],
+      actionEvents: [{ ...base, eventDigest: canonicalAppDigest({ ...base, eventDigest: undefined }) }],
+      outcomes: [],
+      valueEntries: [],
+      now: new Date("2026-08-20T12:30:00.000Z")
+    });
+
+    expect(result.actions[0]).toMatchObject({ effectiveStatus: "revoked" });
+    expect(result.summary.expiredActions).toBe(0);
+  });
 });
 
 function approvalEvent(action: AppOperationAction): AppOperationActionEvent {

@@ -56,6 +56,20 @@ export async function approveAppOperationAction(input: {
     actionId: action.id,
     limit: 100
   });
+  if (lifecycleEvents.some((event) => event.eventType === "revoked")) {
+    throw new Error("Prepared App action has been revoked");
+  }
+  if (lifecycleEvents.some((event) => event.eventType === "commit_succeeded")) {
+    throw new Error("Prepared App action has already been committed");
+  }
+  const incompleteCommit = lifecycleEvents.find((event) =>
+    event.eventType === "commit_requested" && event.commit &&
+    !lifecycleEvents.some((candidate) =>
+      ["commit_succeeded", "commit_failed"].includes(candidate.eventType) &&
+      candidate.commit?.requestId === event.commit?.requestId
+    )
+  );
+  if (incompleteCommit) throw new Error("Prepared App action commit requires reconciliation before another approval");
   const priorApproval = lifecycleEvents.find((event) =>
     event.eventType === "approval_granted" &&
     event.approval &&

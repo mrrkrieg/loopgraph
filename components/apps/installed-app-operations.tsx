@@ -3,7 +3,7 @@ import Link from "next/link";
 import { InstalledAppTopologyGraph } from "@/components/apps/installed-app-topology-graph";
 import { SectionCard } from "@/components/section-card";
 import type { InstalledAppOperationsView } from "@/lib/app-platform/installed-app-operations";
-import { approveInstalledAppOperationAction } from "@/app/apps/actions";
+import { approveInstalledAppOperationAction, revokeInstalledAppOperationAction } from "@/app/apps/actions";
 
 export function InstalledAppTopologyPanel({ operations }: { operations: InstalledAppOperationsView }) {
   return (
@@ -124,6 +124,26 @@ export function InstalledAppActionsPanel({ operations, canApproveActions = false
                 <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-900">
                   Approval is bound to this exact action fingerprint and expires {formatActivityDate(action.lifecycleEvents.find((event) => event.eventType === "approval_granted")?.approval?.expiresAt ?? action.expiresAt)}. Only the assigned Hermes route may request the later commit.
                 </div>
+              ) : null}
+              {action.effectiveStatus === "committing" ? (
+                <div className="mt-4 rounded-md border border-orange-200 bg-orange-50 p-3 text-xs leading-5 text-orange-950">
+                  The provider outcome is not yet recorded in Loopgraph. Hermes must reconcile this action against the Connector Broker receipt before it retries or prepares replacement work. Reconciliation never repeats the provider write.
+                </div>
+              ) : null}
+              {["prepared", "approved", "failed"].includes(action.effectiveStatus) && canApproveActions ? (
+                <details className="mt-3 rounded-md border border-red-200 bg-red-50 p-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-red-950">Revoke this exact action</summary>
+                  <form action={revokeInstalledAppOperationAction} className="mt-3 space-y-2">
+                    <input name="installationId" type="hidden" value={action.installationId} />
+                    <input name="actionId" type="hidden" value={action.id} />
+                    <label className="block text-xs font-semibold text-red-950" htmlFor={`revocation-reason-${action.id}`}>Revocation reason</label>
+                    <textarea className="min-h-16 w-full rounded-md border border-red-200 bg-white px-3 py-2 text-sm" id={`revocation-reason-${action.id}`} maxLength={1000} minLength={3} name="reason" placeholder="Why must this prepared action no longer be executable?" required />
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs leading-5 text-red-900">Requires step-up authentication. This revokes the Broker action and every unused approval without disconnecting the provider.</p>
+                      <button className="rounded-md bg-red-700 px-3 py-2 text-xs font-semibold text-white hover:bg-red-800" type="submit">Revoke action</button>
+                    </div>
+                  </form>
+                </details>
               ) : null}
             </div>
           ))}

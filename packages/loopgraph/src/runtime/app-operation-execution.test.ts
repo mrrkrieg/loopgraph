@@ -16,6 +16,7 @@ import {
   routeJobSchema,
   type AppOperationResolution,
   type ConnectorActionCommitRequest,
+  type ConnectorActionReconcileRequest,
   type ConnectorActionPrepareRequest,
   type ConnectorBrokerRequest
 } from "../core";
@@ -237,6 +238,148 @@ describe("App operation execution", () => {
       now: NOW
     })).rejects.toThrow(/does not match the routed/i);
     expect(fixture.broker.commitAction).not.toHaveBeenCalled();
+  });
+
+  it("refuses every commit after an accountable operator revokes the App action", async () => {
+    const fixture = await createFixture("prepare_action", {
+      logicalCapability: "crm.lead.write",
+      brokerCapability: "provider.action.execute",
+      operation: "crm.contacts.update"
+    });
+    await fixture.service.invoke({
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.write",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-prepare-revoked-action",
+      input: { leadId: "lead-42", lifecycleStage: "qualified" },
+      now: NOW
+    });
+    const action = (await fixture.actionStore.list({ workspaceId: "workspace-sales" }))[0]!;
+    const revocationBase = {
+      schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+      id: "appactevt_revoked123",
+      workspaceId: action.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      eventType: "revoked" as const,
+      actor: { type: "user" as const, subject: "reviewer-1" },
+      revocation: { reasonDigest: canonicalAppDigest("No longer authorized") },
+      occurredAt: NOW.toISOString()
+    };
+    await fixture.actionStore.recordEvent({
+      ...revocationBase,
+      eventDigest: canonicalAppDigest({ ...revocationBase, eventDigest: undefined })
+    });
+
+    await expect(fixture.service.commitAction({
+      installationId: action.installationId,
+      actionId: action.id,
+      routeJobId: action.routeJobId,
+      agentInstanceId: action.agentInstanceId,
+      callId: "commit-revoked-action",
+      now: NOW
+    })).rejects.toThrow(/revoked by an accountable operator/i);
+    expect(fixture.broker.commitAction).not.toHaveBeenCalled();
+  });
+
+  it("reconciles an interrupted commit from the durable Broker response without repeating the provider write", async () => {
+    const fixture = await createFixture("prepare_action", {
+      logicalCapability: "crm.lead.write",
+      brokerCapability: "provider.action.execute",
+      operation: "crm.contacts.update"
+    });
+    await fixture.service.invoke({
+      installationId: "installed-sales-app",
+      loopId: "sales-inbound-lead-intake",
+      capability: "crm.lead.write",
+      routeJobId: "job-sales-read",
+      agentInstanceId: "hermes-sales",
+      callId: "task-prepare-interrupted-action",
+      input: { leadId: "lead-42", lifecycleStage: "qualified" },
+      now: NOW
+    });
+    const action = (await fixture.actionStore.list({ workspaceId: "workspace-sales" }))[0]!;
+    const requestedBase = {
+      schemaVersion: APP_OPERATION_ACTION_EVENT_SCHEMA_VERSION,
+      id: "appactevt_interrupted123",
+      workspaceId: action.workspaceId,
+      installationId: action.installationId,
+      actionId: action.id,
+      actionRecordDigest: action.recordDigest,
+      eventType: "commit_requested" as const,
+      actor: { type: "workload" as const, subject: action.agentInstanceId },
+      commit: {
+        requestId: "appcommit_original123",
+        idempotencyKey: "appcommit_original_idempotency123",
+        outcome: "requested" as const
+      },
+      occurredAt: NOW.toISOString()
+    };
+    await fixture.actionStore.recordEvent({
+      ...requestedBase,
+      eventDigest: canonicalAppDigest({ ...requestedBase, eventDigest: undefined })
+    });
+    vi.mocked(fixture.broker.reconcileAction).mockImplementationOnce(async (request) => {
+      const original = {
+        protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+        requestId: request.originalRequestId,
+        idempotencyKey: request.originalIdempotencyKey,
+        tenant: request.tenant,
+        actor: request.actor,
+        providerId: request.providerId,
+        installationId: request.installationId,
+        capability: request.capability,
+        operation: request.operation,
+        input: { never: "returned" },
+        context: request.context,
+        issuedAt: request.issuedAt,
+        expiresAt: request.expiresAt,
+        correlationId: "correlation-original-commit"
+      } satisfies ConnectorBrokerRequest;
+      return {
+        protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        originalRequestId: request.originalRequestId,
+        status: "resolved",
+        preparedActionStatus: "committed",
+        brokerResponse: {
+          protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+          requestId: request.originalRequestId,
+          status: "succeeded",
+          result: { leadId: "lead-42", lifecycleStage: "qualified" },
+          receipt: auditReceipt(original)
+        }
+      };
+    });
+
+    const result = await fixture.service.reconcileAction({
+      installationId: action.installationId,
+      actionId: action.id,
+      routeJobId: action.routeJobId,
+      agentInstanceId: action.agentInstanceId,
+      callId: "reconcile-interrupted-action-1",
+      now: NOW
+    });
+
+    expect(result).toMatchObject({
+      status: "resolved_succeeded",
+      originalRequestId: "appcommit_original123",
+      originalIdempotencyKey: "appcommit_original_idempotency123"
+    });
+    expect(fixture.broker.reconcileAction).toHaveBeenCalledWith(expect.objectContaining({
+      preparedActionId: action.brokerPreparedActionId,
+      preparedActionFingerprint: action.brokerPreparedActionFingerprint,
+      originalRequestId: "appcommit_original123",
+      originalIdempotencyKey: "appcommit_original_idempotency123"
+    }));
+    expect(fixture.broker.commitAction).not.toHaveBeenCalled();
+    const lifecycleEvents = await fixture.actionStore.listEvents({ workspaceId: action.workspaceId, actionId: action.id });
+    expect(lifecycleEvents.map((event) => event.eventType)).toContain("commit_succeeded");
+    expect(lifecycleEvents.find((event) => event.eventType === "commit_succeeded")?.occurredAt)
+      .toBe("2026-08-20T12:00:00.000Z");
   });
 
   it("executes an allowlisted Loopgraph runtime read through the same durable route authority", async () => {
@@ -513,6 +656,14 @@ async function createFixture(
       status: "succeeded" as const,
       result: { leadId: "lead-42", lifecycleStage: "qualified" },
       receipt: auditReceipt(request)
+    })),
+    reconcileAction: vi.fn(async (request: ConnectorActionReconcileRequest) => ({
+      protocolVersion: CONNECTOR_BROKER_PROTOCOL_VERSION,
+      requestId: request.requestId,
+      originalRequestId: request.originalRequestId,
+      status: "pending" as const,
+      preparedActionStatus: "committing" as const,
+      reasonCode: "connector_commit_in_progress"
     }))
   };
   const runtime: AppRuntimeOperationTransport = {

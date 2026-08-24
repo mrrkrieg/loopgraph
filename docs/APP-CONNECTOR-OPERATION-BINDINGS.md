@@ -149,13 +149,15 @@ The installed App operations page approves an action by its Loopgraph App action
 
 Approval requires the `integrations.manage` permission and hosted step-up authentication. Loopgraph appends a secret-free `approval_granted` lifecycle event containing the action-record digest, approval receipt identity, expiry, accountable actor, and a digest of the review reason. Review text remains in the authoritative Connector Broker control plane. An approval does not run the provider write; the later Hermes commit path must still revalidate the exact route and consume the receipt.
 
+The same operator can revoke one prepared or approved App action without disabling the provider connection. Revocation takes only the App installation/action identity and a human reason from the browser. The server re-derives the Broker connection, action, and fingerprint, atomically changes the Broker action and every unused approval to `revoked`, writes an audited reason digest, and appends a matching App lifecycle event. A commit already in progress must be reconciled instead of being guessed safe; committed actions are immutable evidence and cannot be retroactively revoked.
+
 This executor has no arbitrary HTTP fallback. Its separate
 `loopgraph_app_operation_action_commit` method and workload-authenticated
 `/api/hermes/apps/operations/commit` route accept only the App installation/action, original route
 job, assigned agent, and stable call identity. They reload the immutable action and unexpired
 approval event, re-resolve the pinned App operation, and revalidate the LoopSpec, company object,
 route, durable assignment, connection health/scopes/environment, Broker prepared-action identity,
-and fingerprint before deriving the commit request. Commit-requested and terminal Broker receipt
+fingerprint, and absence of a revocation event before deriving the commit request. Commit-requested and terminal Broker receipt
 facts are appended to the lifecycle ledger; canonical provider input remains only in Connector
 Broker storage. The workload-authenticated `/api/hermes/apps/operations/invoke` route also rejects provider IDs,
 operations, connection IDs, tenants, URLs, project roots, and workspace identities supplied by the
@@ -165,6 +167,24 @@ from the verified deployment binding rather than a browser cookie. The Connector
 independently rechecks tenant identity, scopes, connection health, kill switches, idempotency, and
 audit policy at the moment of use.
 
+If Loopgraph records `commit_requested` but the App process stops before it can append the terminal
+event, the action is treated as unknown—not safe to retry. The assigned Hermes route uses the
+separate `loopgraph_app_operation_action_reconcile` method or workload-authenticated
+`/api/hermes/apps/operations/reconcile` route. It supplies only the App action and original route
+identity. Loopgraph re-derives the Broker tenant, action, fingerprint, operation, actor, and company
+context, and the Broker looks up the original idempotency receipt. A matching durable response is
+copied into secret-free terminal App evidence; `pending` causes Hermes to wait, while `unresolved`
+requires operator investigation. Reconciliation never invokes a provider handler and never turns
+an unknown outcome into permission for replacement work.
+
+Hosted deployments also run `/api/cron/app-action-reconciliation` every five minutes under the
+dedicated `schedule.app_action_reconciliation` workload capability. The worker considers only
+`commit_requested` events older than one minute, excludes revoked or terminal actions, and sends at
+most 25 exact App action identities through the same receipt-only reconciliation boundary. Stable
+call identities and receipt-derived terminal timestamps make concurrent retries idempotent. The
+worker response contains only action/request identities, bounded status codes, and counts—never
+provider input, output, credentials, or raw errors.
+
 ## Rollout and graph state
 
 App rollout is not a display-only installation flag. Activating an App atomically rewrites the
@@ -172,6 +192,25 @@ routing mode of every active LoopSpec owned by that installation through the can
 registry. Shadow and recommend modes remain non-executing routes; execute-with-approval makes the
 owned loops eligible to produce governed route jobs. Pause returns all owned LoopSpecs to shadow,
 while resume restores the last approved App mode.
+
+Rollout eligibility is also not a display-only maturity label. Before approval, the shared App
+service derives a canonical activation gate from the exact artifact, current lifecycle state,
+connector/configuration readiness, replay review, completed runs, observed outcomes, net-value
+evidence, and permissions. Shadow requires connected maturity, recommend requires a passing and
+fully labeled replay recommendation, and execute-with-approval requires production-proven maturity.
+The replay source window, completed App work, observed outcome window, and observed value window
+are freshness checked rather than trusting when a receipt happened to be written. Recommendation
+and execution evidence is capped at 30 days, with only five minutes of future clock skew accepted.
+The same source timestamps cap the public operational-maturity assessment: an App cannot remain
+`production_proven` or `loopgraph_verified` after its replay, completed-run, outcome, or value proof
+expires. Timestamped proof must reference one of the exact App-owned evidence records returned by the
+tenant-scoped snapshot; an unrelated fresh timestamp cannot refresh an older record.
+The versioned maturity response includes the status and expiry of replay, completed-run, outcome,
+and value proof, plus the earliest `validUntil` and a seven-day `renewalRecommendedAt`. Hermes, CLI,
+and browser consumers therefore share one proactive renewal clock instead of learning about expired
+proof only after a blocked activation.
+The approval receipt embeds that gate; consumption recomputes it and fails closed if evidence is no
+longer sufficient. Human approval supplies accountability, not a bypass around missing evidence.
 
 The transition verifies that the installation still owns a complete active LoopSpec set. Missing
 specs or routing contracts block the change. Each synchronization is revision-bound and
