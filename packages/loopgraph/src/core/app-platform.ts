@@ -34,7 +34,8 @@ export const APP_ACTIVATION_GATE_SCHEMA_VERSION = "loopgraph-app-activation-gate
 export const APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha2" as const;
 export const LEGACY_APP_ACTIVATION_APPROVAL_SCHEMA_VERSION = "loopgraph-app-activation-approval/v1alpha1" as const;
 export const APP_MATURITY_EVIDENCE_SCHEMA_VERSION = "loopgraph-app-maturity-evidence/v1alpha1" as const;
-export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha1" as const;
+export const APP_OPERATIONAL_MATURITY_SCHEMA_VERSION = "loopgraph-app-operational-maturity/v1alpha2" as const;
+export const APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION = "loopgraph-app-evidence-renewal-plan/v1alpha1" as const;
 export const APP_INDEPENDENT_VERIFICATION_SCHEMA_VERSION = "loopgraph-app-independent-verification/v1alpha1" as const;
 export const APP_OPERATION_RESOLUTION_SCHEMA_VERSION = "loopgraph-app-operation-resolution/v1alpha1" as const;
 export const APP_OPERATION_EXECUTION_SCHEMA_VERSION = "loopgraph-app-operation-execution/v1alpha1" as const;
@@ -181,6 +182,31 @@ const appOperationalMaturityGateSchema = z.object({
   remediation: z.string().min(1).max(1000).optional()
 }).strict();
 
+const appOperationalEvidenceFreshnessRequirementSchema = z.object({
+  id: z.enum(["historical_replay", "completed_run", "observed_outcome", "observed_value"]),
+  status: z.enum(["current", "renew_soon", "expired", "missing", "invalid", "future"]),
+  summary: z.string().min(1).max(1000),
+  evidenceRef: z.string().min(1).max(1000).optional(),
+  observedAt: isoDateTimeSchema.optional(),
+  expiresAt: isoDateTimeSchema.optional()
+}).strict();
+
+const appOperationalEvidenceFreshnessSchema = z.object({
+  status: z.enum(["not_applicable", "incomplete", "current", "renew_soon", "expired", "invalid"]),
+  summary: z.string().min(1).max(1000),
+  validUntil: isoDateTimeSchema.optional(),
+  renewalRecommendedAt: isoDateTimeSchema.optional(),
+  requirements: z.array(appOperationalEvidenceFreshnessRequirementSchema).length(4)
+}).strict().superRefine((freshness, ctx) => {
+  const ids = ["historical_replay", "completed_run", "observed_outcome", "observed_value"] as const;
+  if (freshness.requirements.some((requirement, index) => requirement.id !== ids[index])) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["requirements"], message: "Operational evidence freshness requirements must be complete and ordered" });
+  }
+  if (freshness.validUntil && freshness.renewalRecommendedAt && Date.parse(freshness.renewalRecommendedAt) >= Date.parse(freshness.validUntil)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["renewalRecommendedAt"], message: "Evidence renewal must be recommended before proof expires" });
+  }
+});
+
 export const appOperationalMaturityAssessmentSchema = z.object({
   schemaVersion: z.literal(APP_OPERATIONAL_MATURITY_SCHEMA_VERSION),
   installationId: appIdSchema,
@@ -188,6 +214,7 @@ export const appOperationalMaturityAssessmentSchema = z.object({
   artifactDigest: artifactDigestSchema,
   maturity: appMaturitySchema,
   gates: z.array(appOperationalMaturityGateSchema).length(4),
+  freshness: appOperationalEvidenceFreshnessSchema,
   evaluatedAt: isoDateTimeSchema,
   evidenceDerived: z.literal(true)
 }).strict().superRefine((assessment, ctx) => {
@@ -203,6 +230,72 @@ export const appOperationalMaturityAssessmentSchema = z.object({
   }
   if (assessment.maturity !== expected) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maturity"], message: `Operational maturity must equal the highest consecutively achieved gate (${expected})` });
+  }
+});
+
+const appEvidenceRenewalStatusSchema = z.enum([
+  "not_applicable",
+  "incomplete",
+  "current",
+  "renew_soon",
+  "expired",
+  "invalid"
+]);
+
+export const appEvidenceRenewalCountsSchema = z.object({
+  notApplicable: z.number().int().nonnegative(),
+  incomplete: z.number().int().nonnegative(),
+  current: z.number().int().nonnegative(),
+  renewSoon: z.number().int().nonnegative(),
+  expired: z.number().int().nonnegative(),
+  invalid: z.number().int().nonnegative()
+}).strict();
+
+export function deriveAppEvidenceFleetHealth(
+  countsInput: z.input<typeof appEvidenceRenewalCountsSchema>
+): "healthy" | "degraded" | "blocked" {
+  const counts = appEvidenceRenewalCountsSchema.parse(countsInput);
+  return counts.invalid > 0
+    ? "blocked"
+    : counts.expired > 0 || counts.renewSoon > 0
+      ? "degraded"
+      : "healthy";
+}
+
+export const appEvidenceRenewalPlanSchema = z.object({
+  schemaVersion: z.literal(APP_EVIDENCE_RENEWAL_PLAN_SCHEMA_VERSION),
+  workspaceId: appIdSchema,
+  companyId: appIdSchema,
+  generatedAt: isoDateTimeSchema,
+  totalInstallations: z.number().int().nonnegative(),
+  totalMatched: z.number().int().nonnegative(),
+  counts: appEvidenceRenewalCountsSchema,
+  items: z.array(z.object({
+    installationId: appIdSchema,
+    appId: appIdSchema,
+    artifactDigest: artifactDigestSchema,
+    maturity: appMaturitySchema,
+    status: appEvidenceRenewalStatusSchema,
+    priority: z.enum(["critical", "high", "medium", "none"]),
+    validUntil: isoDateTimeSchema.optional(),
+    renewalRecommendedAt: isoDateTimeSchema.optional(),
+    affectedEvidence: z.array(z.object({
+      id: z.enum(["historical_replay", "completed_run", "observed_outcome", "observed_value"]),
+      status: z.enum(["renew_soon", "expired", "missing", "invalid", "future"]),
+      summary: z.string().min(1).max(1000)
+    }).strict()).max(4),
+    nextAction: z.object({
+      kind: z.enum(["complete_setup", "run_historical_replay", "record_operating_evidence", "repair_evidence", "renew_proof", "monitor"]),
+      summary: z.string().min(1).max(1000)
+    }).strict()
+  }).strict()).max(100)
+}).strict().superRefine((plan, ctx) => {
+  const countTotal = Object.values(plan.counts).reduce((total, count) => total + count, 0);
+  if (countTotal !== plan.totalInstallations) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["counts"], message: "Renewal-plan counts must equal the installation total" });
+  }
+  if (plan.totalMatched > plan.totalInstallations || plan.items.length > plan.totalMatched) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["totalMatched"], message: "Renewal-plan matches and returned items must remain within the installation total" });
   }
 });
 export const appRolloutModeSchema = z.enum([
@@ -1793,6 +1886,7 @@ export type AppMaturityEvidence = z.infer<typeof appMaturityEvidenceSchema>;
 export type AppIndependentVerificationReceipt = z.infer<typeof appIndependentVerificationReceiptSchema>;
 export type AppVerifierTrustKey = z.infer<typeof appVerifierTrustKeySchema>;
 export type AppOperationalMaturityAssessment = z.infer<typeof appOperationalMaturityAssessmentSchema>;
+export type AppEvidenceRenewalPlan = z.infer<typeof appEvidenceRenewalPlanSchema>;
 export type MarketplaceArtifactSource = z.infer<typeof marketplaceArtifactSourceSchema>;
 export type MarketplaceCatalogSource = z.infer<typeof marketplaceCatalogSourceSchema>;
 export type AppInstallPlan = z.infer<typeof appInstallPlanSchema>;
@@ -1848,6 +1942,7 @@ export function appPlatformJsonSchemas(): Record<string, Record<string, unknown>
     AppIndependentVerificationReceipt: zodToJsonSchema(appIndependentVerificationReceiptSchema, "AppIndependentVerificationReceipt") as Record<string, unknown>,
     AppVerifierTrustKey: zodToJsonSchema(appVerifierTrustKeySchema, "AppVerifierTrustKey") as Record<string, unknown>,
     AppOperationalMaturityAssessment: zodToJsonSchema(appOperationalMaturityAssessmentSchema, "AppOperationalMaturityAssessment") as Record<string, unknown>,
+    AppEvidenceRenewalPlan: zodToJsonSchema(appEvidenceRenewalPlanSchema, "AppEvidenceRenewalPlan") as Record<string, unknown>,
     MarketplaceApp: zodToJsonSchema(marketplaceAppSchema, "MarketplaceApp") as Record<string, unknown>,
     AppInstallPlan: zodToJsonSchema(appInstallPlanSchema, "AppInstallPlan") as Record<string, unknown>,
     AppConnectorOperationBinding: zodToJsonSchema(appConnectorOperationBindingSchema, "AppConnectorOperationBinding") as Record<string, unknown>,

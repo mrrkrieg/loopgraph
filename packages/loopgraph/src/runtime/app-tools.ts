@@ -91,6 +91,8 @@ import {
   searchOfficialCompanyBlueprints
 } from "./company-blueprint-catalog";
 import { assertSecretFree } from "./secret-redaction";
+import type { HermesRouteActivationStatus } from "./hermes-route-activation";
+import type { HermesWebhookDoctorResult } from "./hermes-webhooks";
 
 const REMOTE_HOSTED_ARTIFACT_TOOLS = new Set<LoopgraphAppToolName>([
   "loopgraph_app_get",
@@ -124,6 +126,7 @@ export const LOOPGRAPH_APP_TOOL_NAMES = [
   "loopgraph_app_operation_action_commit",
   "loopgraph_app_operation_action_reconcile",
   "loopgraph_app_maturity_get",
+  "loopgraph_apps_renewal_plan",
   "loopgraph_app_verification_registry_get",
   "loopgraph_app_verifier_trust_add",
   "loopgraph_app_verifier_trust_revoke",
@@ -360,6 +363,20 @@ export const appMaturityGetInputSchema = projectSchema.extend({
   installationId: z.string().min(1)
 }).strict();
 
+export const appsRenewalPlanInputSchema = projectSchema.extend({
+  workspaceId: z.string().min(1).optional(),
+  companyId: z.string().min(1).optional(),
+  statuses: z.array(z.enum([
+    "not_applicable",
+    "incomplete",
+    "current",
+    "renew_soon",
+    "expired",
+    "invalid"
+  ])).max(6).optional(),
+  limit: z.number().int().min(1).max(100).default(100)
+}).strict();
+
 export const appVerificationRegistryGetInputSchema = projectSchema.extend({
   workspaceId: z.string().min(1).optional(),
   companyId: z.string().min(1).optional()
@@ -578,6 +595,7 @@ export const loopgraphAppToolDefinitions = [
   { name: "loopgraph_app_operation_action_commit", description: "Ask the exact assigned Hermes route to commit one App-owned prepared action after Loopgraph revalidates its pinned artifact, LoopSpec, company object, connection, agent assignment, fingerprint, and approval receipt. Provider parameters are never caller-selectable.", readOnly: false, idempotent: true, destructive: true },
   { name: "loopgraph_app_operation_action_reconcile", description: "Recover an interrupted App action commit from the Connector Broker's durable receipt without repeating the provider write or guessing an unknown outcome.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_maturity_get", description: "Derive installed App maturity from exact-digest tests, current connection readiness, reviewed history, observed outcomes and value, and trusted independent verification.", readOnly: true, idempotent: true, destructive: false },
+  { name: "loopgraph_apps_renewal_plan", description: "Rank the tenant's installed Apps by missing, expiring, expired, or invalid operating evidence and return the exact read-only renewal action Hermes should recommend next.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verification_registry_get", description: "Inspect workspace verifier public-key trust, revocation state, and imported independent App verification receipts without exposing private key material.", readOnly: true, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_add", description: "Trust an independently approved Ed25519 verifier public key in the workspace registry; private verifier keys are never accepted.", readOnly: false, idempotent: true, destructive: false },
   { name: "loopgraph_app_verifier_trust_revoke", description: "Immediately revoke one trusted verifier public key with an accountable actor and revocation reference.", readOnly: false, idempotent: true, destructive: true },
@@ -643,6 +661,14 @@ export async function callLoopgraphAppTool(
     connectorFieldMappingStoreFactory?: (workspaceId: string) => ConnectorFieldMappingStore;
     providerSchemaSnapshotStoreFactory?: (workspaceId: string) => ProviderSchemaSnapshotStore;
     appVerificationStoreFactory?: (workspaceId: string) => AppVerificationStore;
+    routeActivationStatusProvider?: (input: {
+      projectRoot?: string;
+      now?: Date;
+    }) => Promise<HermesRouteActivationStatus>;
+    webhookDoctorProvider?: (input: {
+      projectRoot?: string;
+      now?: Date;
+    }) => Promise<HermesWebhookDoctorResult>;
     connectorBroker?: AppOperationTransport;
     connectorTenant?: ConnectorTenant;
     routingStore?: RoutingStore;
@@ -772,7 +798,9 @@ export async function callLoopgraphAppTool(
         snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId),
         outcomeStore: options.outcomeStore,
         operationsStore: options.hermesOperationsStore,
-        verificationStore: appVerificationStore(options, path.join(projectRoot, ".loopgraph", "apps"), identity.workspaceId)
+        verificationStore: appVerificationStore(options, path.join(projectRoot, ".loopgraph", "apps"), identity.workspaceId),
+        routeActivationStatusProvider: options.routeActivationStatusProvider,
+        webhookDoctorProvider: options.webhookDoctorProvider
       }
     );
     const orderedDefinitions = [...pack.apps].sort((left, right) => left.installOrder - right.installOrder);
@@ -1127,7 +1155,9 @@ export async function callLoopgraphAppTool(
       snapshotStore: appSnapshotStore(options, projectRoot, identity.workspaceId),
       outcomeStore: options.outcomeStore,
       operationsStore: options.hermesOperationsStore,
-      verificationStore: appVerificationStore(options, appsRoot, identity.workspaceId)
+      verificationStore: appVerificationStore(options, appsRoot, identity.workspaceId),
+      routeActivationStatusProvider: options.routeActivationStatusProvider,
+      webhookDoctorProvider: options.webhookDoctorProvider
     }
   );
   if (name === "loopgraph_app_onboarding_get") {
@@ -1599,6 +1629,10 @@ export async function callLoopgraphAppTool(
   if (name === "loopgraph_app_maturity_get") {
     const parsed = appMaturityGetInputSchema.parse({ ...raw, projectRoot, ...identity });
     return service.operationalMaturity(parsed.installationId, options.now);
+  }
+  if (name === "loopgraph_apps_renewal_plan") {
+    const parsed = appsRenewalPlanInputSchema.parse({ ...raw, projectRoot, ...identity });
+    return service.evidenceRenewalPlan({ statuses: parsed.statuses, limit: parsed.limit }, options.now);
   }
   if (name === "loopgraph_app_verification_registry_get") {
     const parsed = appVerificationRegistryGetInputSchema.parse({ ...raw, projectRoot, ...identity });

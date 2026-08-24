@@ -85,6 +85,9 @@ describe("installed App operational maturity", () => {
   it("requires every evidence gate in order and never treats activity as proof", () => {
     const none = assessAppOperationalMaturity({ installation, readiness, evaluations: [], operatingEvidence: emptyEvidence(), now: new Date(now) });
     expect(none.maturity).toBe("concept");
+    expect(none.freshness).toMatchObject({ status: "not_applicable", requirements: expect.arrayContaining([
+      expect.objectContaining({ id: "historical_replay", status: "missing" })
+    ]) });
 
     const synthetic = syntheticRun();
     const connected = assessAppOperationalMaturity({ installation, readiness, evaluations: [synthetic], operatingEvidence: emptyEvidence(), now: new Date(now) });
@@ -100,8 +103,27 @@ describe("installed App operational maturity", () => {
       now: new Date(now)
     });
     expect(production.maturity).toBe("production_proven");
+    expect(production.freshness).toMatchObject({
+      status: "current",
+      validUntil: "2026-09-07T00:00:00.000Z",
+      renewalRecommendedAt: "2026-08-31T00:00:00.000Z"
+    });
     expect(production.gates[2]).toMatchObject({ status: "achieved", evidenceRefs: expect.arrayContaining([replay.id, "outcome:qualified-pipeline"]) });
     expect(production.gates[3]).toMatchObject({ status: "blocked" });
+
+    const renewalDue = assessAppOperationalMaturity({
+      installation,
+      readiness,
+      evaluations: [synthetic, replay],
+      operatingEvidence: freshEvidence(),
+      now: new Date("2026-09-02T00:00:00.000Z")
+    });
+    expect(renewalDue.maturity).toBe("production_proven");
+    expect(renewalDue.freshness).toMatchObject({
+      status: "renew_soon",
+      validUntil: "2026-09-07T00:00:00.000Z",
+      renewalRecommendedAt: "2026-08-31T00:00:00.000Z"
+    });
   });
 
   it("downgrades production proof when replay or operating evidence is stale or unbound", () => {
@@ -113,6 +135,7 @@ describe("installed App operational maturity", () => {
       now: new Date("2026-09-09T00:00:01.000Z")
     });
     expect(stale.maturity).toBe("connected");
+    expect(stale.freshness).toMatchObject({ status: "expired", validUntil: "2026-09-07T00:00:00.000Z" });
     expect(stale.gates[2]).toMatchObject({
       status: "blocked",
       summary: expect.stringMatching(/expired.*older than 30 days/i)
@@ -129,6 +152,7 @@ describe("installed App operational maturity", () => {
       now: new Date(now)
     });
     expect(unbound.maturity).toBe("connected");
+    expect(unbound.freshness).toMatchObject({ status: "invalid" });
     expect(unbound.gates[2]).toMatchObject({
       status: "blocked",
       summary: expect.stringMatching(/observed value is missing/i)
@@ -145,6 +169,7 @@ describe("installed App operational maturity", () => {
       now: new Date(now)
     });
     expect(futureDated.maturity).toBe("connected");
+    expect(futureDated.freshness).toMatchObject({ status: "invalid" });
     expect(futureDated.gates[2]).toMatchObject({
       status: "blocked",
       summary: expect.stringMatching(/completed App run is dated too far in the future/i)
