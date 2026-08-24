@@ -6,7 +6,7 @@ export const HERMES_ROUTE_CONTROLLER_RECEIPT_SCHEMA_VERSION = "hermes-route-cont
 export const HERMES_ROUTE_ACTIVATION_RECORD_SCHEMA_VERSION = "hermes-route-activation-record/v1alpha1" as const;
 
 const digestSchema = z.string().regex(/^[a-f0-9]{16}$/);
-const routeKindSchema = z.enum(["provider_event", "loopgraph_lifecycle"]);
+const routeKindSchema = z.enum(["provider_event", "internal_business_event", "loopgraph_lifecycle"]);
 const routeProfileSchema = z.enum(["loopgraph_webhook_router", "loopgraph_lifecycle_router"]);
 
 export const hermesRouteActivationRouteSchema = z.object({
@@ -17,6 +17,7 @@ export const hermesRouteActivationRouteSchema = z.object({
   eventTypePatterns: z.array(z.string().min(1)).min(1),
   subjectTypes: z.array(z.string().min(1)),
   loopIds: z.array(z.string().min(1)),
+  requiredCapabilities: z.array(z.string().min(1)),
   profileId: routeProfileSchema,
   skills: z.array(z.string().min(1)).min(1),
   restrictedMcpTools: z.array(z.string().min(1)).min(1),
