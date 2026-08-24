@@ -22,12 +22,17 @@ import {
   listLoopOpportunities
 } from "./loop-opportunity-engine";
 import { FileRoutingStore, type RoutingStore } from "./routing-store";
+import {
+  compileRoutingLearningEffectiveness,
+  type RoutingLearningEffectiveness
+} from "./routing-learning-effectiveness";
 import { getLoopgraphRoot } from "./storage-resolver";
 
 export const LOOPGRAPH_ROUTING_OPS_TOOL_NAMES = [
   "loopgraph_events_get",
   "loopgraph_problems_get",
   "loopgraph_routing_decision_get",
+  "loopgraph_routing_learning_effectiveness_get",
   "loopgraph_route_jobs_get",
   "loopgraph_routing_evaluations_get",
   "loopgraph_lifecycle_events_get",
@@ -83,6 +88,10 @@ export const routingDecisionGetInputSchema = z.object({
   limit: limitSchema
 }).default({});
 
+export const routingLearningEffectivenessGetInputSchema = z.object({
+  projectRoot: z.string().optional()
+}).default({});
+
 export const routeJobsGetInputSchema = z.object({
   projectRoot: z.string().optional(),
   jobId: z.string().optional(),
@@ -125,6 +134,7 @@ export const graphGetInputSchema = z.object({
 export type EventsGetInput = z.input<typeof eventsGetInputSchema>;
 export type ProblemsGetInput = z.input<typeof problemsGetInputSchema>;
 export type RoutingDecisionGetInput = z.input<typeof routingDecisionGetInputSchema>;
+export type RoutingLearningEffectivenessGetInput = z.input<typeof routingLearningEffectivenessGetInputSchema>;
 export type RouteJobsGetInput = z.input<typeof routeJobsGetInputSchema>;
 export type RoutingEvaluationsGetInput = z.input<typeof routingEvaluationsGetInputSchema>;
 export type LifecycleEventsGetInput = z.input<typeof lifecycleEventsGetInputSchema>;
@@ -155,6 +165,11 @@ export type RoutingDecisionGetResult = {
     routeCommits?: RouteCommit[];
     routeJobs?: RouteJob[];
   }>;
+};
+
+export type RoutingLearningEffectivenessGetResult = {
+  projectRoot: string;
+  report: RoutingLearningEffectiveness;
 };
 
 export type RouteJobsGetResult = {
@@ -213,6 +228,12 @@ export const loopgraphRoutingOpsToolDefinitions = [
     idempotent: true
   },
   {
+    name: "loopgraph_routing_learning_effectiveness_get",
+    description: "Return bounded Hermes evidence-binding coverage, corrections, evaluations, and per-loop routing quality without provider payloads.",
+    readOnly: true,
+    idempotent: true
+  },
+  {
     name: "loopgraph_route_jobs_get",
     description: "Return durable route jobs, queue status, leases, retries, and dead-letter state for Hermes-routed work.",
     readOnly: true,
@@ -256,6 +277,9 @@ export async function callLoopgraphRoutingOpsTool(
   }
   if (name === "loopgraph_routing_decision_get") {
     return loopgraph_routing_decision_get(input as RoutingDecisionGetInput, options);
+  }
+  if (name === "loopgraph_routing_learning_effectiveness_get") {
+    return loopgraph_routing_learning_effectiveness_get(input as RoutingLearningEffectivenessGetInput, options);
   }
   if (name === "loopgraph_route_jobs_get") {
     return loopgraph_route_jobs_get(input as RouteJobsGetInput, options);
@@ -364,6 +388,18 @@ export async function loopgraph_routing_decision_get(
         ...(parsed.includeRouteJobs ? { routeJobs } : {})
       };
     })
+  };
+}
+
+export async function loopgraph_routing_learning_effectiveness_get(
+  input: RoutingLearningEffectivenessGetInput = {},
+  options: LoopgraphRoutingOpsToolRuntimeOptions = {}
+): Promise<RoutingLearningEffectivenessGetResult> {
+  const parsed = routingLearningEffectivenessGetInputSchema.parse(input);
+  const projectRoot = resolveProjectRoot(parsed.projectRoot, options.projectRoot);
+  return {
+    projectRoot,
+    report: await compileRoutingLearningEffectiveness(storeFor(projectRoot, options), { now: options.now })
   };
 }
 

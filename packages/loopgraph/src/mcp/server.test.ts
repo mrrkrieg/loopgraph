@@ -349,6 +349,7 @@ describe("Loopgraph MCP server", () => {
           expect.objectContaining({ name: "loopgraph_events_get" }),
           expect.objectContaining({ name: "loopgraph_problems_get" }),
           expect.objectContaining({ name: "loopgraph_routing_decision_get" }),
+          expect.objectContaining({ name: "loopgraph_routing_learning_effectiveness_get" }),
           expect.objectContaining({ name: "loopgraph_route_jobs_get" }),
           expect.objectContaining({ name: "loopgraph_routing_evaluations_get" }),
           expect.objectContaining({ name: "loopgraph_lifecycle_events_get" }),
@@ -365,7 +366,7 @@ describe("Loopgraph MCP server", () => {
         ])
       }
     });
-    expect(listLoopgraphMcpTools()).toHaveLength(154);
+    expect(listLoopgraphMcpTools()).toHaveLength(155);
     expect(listLoopgraphMcpTools().map((tool) => tool.name)).toEqual(expect.arrayContaining([
       "loopgraph_hermes_agent_register",
       "loopgraph_hermes_agent_heartbeat",
@@ -535,6 +536,7 @@ describe("Loopgraph MCP server", () => {
       "loopgraph_case_resolve",
       "loopgraph_events_replay",
       "loopgraph_routing_human_choice_submit",
+      "loopgraph_routing_learning_effectiveness_get",
       "loopgraph_route_commit_simulate",
       "loopgraph_routing_evaluation_run",
       "loopgraph_hermes_webhooks_plan",
@@ -553,6 +555,7 @@ describe("Loopgraph MCP server", () => {
     for (const toolName of [
       "loopgraph_routing_catalog_get",
       "loopgraph_routing_decision_submit",
+      "loopgraph_routing_learning_effectiveness_get",
       "loopgraph_problems_get",
       "loopgraph_routing_decision_get",
       "loopgraph_graph_change_decide",

@@ -27,6 +27,7 @@ import {
   loopgraph_problems_get,
   loopgraph_route_jobs_get,
   loopgraph_routing_evaluations_get,
+  loopgraph_routing_learning_effectiveness_get,
   loopgraph_routing_decision_get
 } from "./routing-ops-tools";
 
@@ -336,6 +337,30 @@ describe("Hermes routing operations tools", () => {
         expectedAction: "route",
         actualAction: "route",
         passed: true
+      })]
+    });
+    const learningEffectiveness = await loopgraph_routing_learning_effectiveness_get({ projectRoot }, {
+      store,
+      now: new Date("2026-07-21T12:01:01.000Z")
+    });
+    expect(learningEffectiveness.report).toMatchObject({
+      attempts: {
+        total: 1,
+        committed: 1,
+        evidenceAcknowledged: 1,
+        evidenceCoverageRate: 1
+      },
+      evaluations: {
+        total: 1,
+        passed: 1,
+        passRate: 1
+      },
+      loops: [expect.objectContaining({
+        loopId: "marketing_ads",
+        selected: 1,
+        expected: 1,
+        evaluated: 1,
+        passed: 1
       })]
     });
     const routeJob = routeJobs.jobs[0];

@@ -58,11 +58,28 @@ The Management routing receipt shows the acknowledgement state, digest, evidence
 
 The local shadow-route simulator follows the same evidence-bound path: it ingests the event, retains the returned digest, and submits that digest with the deterministic rehearsal decision. A passing local rehearsal therefore proves the binding contract rather than silently producing a legacy unacknowledged receipt.
 
+## Measuring whether Hermes improves
+
+`routing-learning-effectiveness/v1alpha1` aggregates the durable routing ledger without copying provider payloads or hidden reasoning. It keeps these signals separate:
+
+- committed and rejected decisions;
+- acknowledged, unacknowledged, and pre-binding historical attempts;
+- stale evidence packets rejected before work was created;
+- explicit abstentions and human-review requests;
+- accountable human corrections;
+- golden-event evaluation pass/fail results;
+- per-loop selections, expected selections, evaluation quality, and correction selections.
+
+The `/operate/learning` view presents that routing-quality report beside business outcome evidence. A loop being selected frequently is therefore never presented as proof that it is accurate or valuable. Operators can see whether Hermes used the current packet, whether the route matched evaluated expectations, whether a human corrected it, and separately whether the resulting loop improved a measured outcome.
+
 ## Interfaces
 
 - Event tool: `loopgraph_events_ingest`
 - Schema resource: `loopgraph://schemas/routing-learning-context`
 - Binding schema resource: `loopgraph://schemas/routing-learning-context-binding`
+- Trusted effectiveness tool: `loopgraph_routing_learning_effectiveness_get`
 - Native skill: `loopgraph:event-router`
 - Source-checkout skill: `loopgraph-event-router`
 - Compiler: `packages/loopgraph/src/runtime/routing-learning-context.ts`
+- Effectiveness compiler: `packages/loopgraph/src/runtime/routing-learning-effectiveness.ts`
+- Operator view: `/operate/learning`
